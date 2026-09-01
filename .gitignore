@@ -1,0 +1,12 @@
+# 依赖（本项目为纯静态 + UMD 引擎，无 node_modules，保留以防将来）
+node_modules/
+
+# Python 缓存（tools/compress_images.py）
+__pycache__/
+*.pyc
+*.pyo
+
+# 日志 / 临时
+*.log
+.DS_Store
+Thumbs.db
