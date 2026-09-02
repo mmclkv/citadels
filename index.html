@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>富饶之城 · 荣耀之城 Citadels</title>
+<link rel="stylesheet" href="./style.css?v=2">
+</head>
+<body>
+
+<!-- ============================ 主菜单 ============================ -->
+<section id="screen-home" class="screen active">
+  <div class="home-wrap">
+    <div class="home-title">
+      <div class="crown">♛</div>
+      <h1>富饶之城</h1>
+      <p class="sub">荣耀之城 · Citadels</p>
+    </div>
+    <p class="home-desc">
+      你是中世纪的一城之主。每轮秘密选择一名角色，运用其能力赚取金币、夺取资源、大兴土木。
+      当有人建起第 8 座城区时，城邦的价值将被清算，最高分者加冕为王。
+    </p>
+    <div class="home-modes">
+      <button class="mode-card" id="btn-single">
+        <div class="mode-icon">🏰</div>
+        <div class="mode-name">单人模式</div>
+        <div class="mode-tip">与电脑对手同场博弈，支持 2–8 人</div>
+      </button>
+      <button class="mode-card" id="btn-online">
+        <div class="mode-icon">🌐</div>
+        <div class="mode-name">联机模式</div>
+        <div class="mode-tip">创建房间或输入房号，与好友对战</div>
+      </button>
+      <button class="mode-card" id="btn-rules">
+        <div class="mode-icon">📜</div>
+        <div class="mode-name">规则速查</div>
+        <div class="mode-tip">角色能力、建筑效果与计分方式</div>
+      </button>
+    </div>
+    <footer class="home-foot">规则与卡牌资料参考 <a href="https://andyventure.com/boardgame-citadels/" target="_blank" rel="noopener">冒險安迪 · 榮耀之城</a></footer>
+  </div>
+</section>
+
+<!-- ============================ 单人设置 ============================ -->
+<section id="screen-setup" class="screen">
+  <div class="panel wide-panel">
+    <h2>单人模式设置</h2>
+    <div class="setup-grid">
+      <label class="field">
+        <span>玩家总数（含电脑）</span>
+        <select id="cfg-players">
+          <option value="2">2 人</option>
+          <option value="3">3 人</option>
+          <option value="4" selected>4 人</option>
+          <option value="5">5 人（最佳）</option>
+          <option value="6">6 人</option>
+          <option value="7">7 人</option>
+          <option value="8">8 人</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>电脑难度</span>
+        <select id="cfg-level">
+          <option value="easy">简单</option>
+          <option value="normal" selected>普通</option>
+          <option value="hard">困难</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>电脑节奏</span>
+        <select id="cfg-speed">
+          <option value="slow">慢速（看得最清楚）</option>
+          <option value="normal" selected>标准</option>
+          <option value="fast">快速（老手）</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>结束条件</span>
+        <select id="cfg-end">
+          <option value="8" selected>建成 8 栋（标准）</option>
+          <option value="7">建成 7 栋（加快）</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>角色组</span>
+        <select id="cfg-chars">
+          <option value="base" selected>基本版（8 角色）</option>
+          <option value="dark">黑暗城市扩充（9 角色）</option>
+          <option value="mixed">加强版混合（每号随机）</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>你的名字</span>
+        <input id="cfg-name" type="text" value="我" maxlength="10">
+      </label>
+    </div>
+    <div class="btn-row">
+      <button class="btn ghost" data-goto="home">返回</button>
+      <button class="btn primary" id="btn-start-single">开始游戏</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 联机大厅 ============================ -->
+<section id="screen-lobby" class="screen">
+  <div class="panel wide-panel">
+    <h2 id="lobby-title">联机大厅</h2>
+
+    <div id="lobby-pre">
+      <div class="lobby-cols">
+        <div class="lobby-box">
+          <h3>创建房间</h3>
+          <label class="field"><span>你的昵称</span><input id="net-name" type="text" value="玩家" maxlength="10"></label>
+          <label class="field"><span>房间人数</span>
+            <select id="net-players">
+              <option value="2">2 人</option><option value="3">3 人</option>
+              <option value="4" selected>4 人</option><option value="5">5 人</option>
+              <option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option>
+            </select>
+          </label>
+          <label class="field"><span>电脑补位</span>
+            <select id="net-bots"><option value="0">不补位</option><option value="1" selected>1 个电脑</option>
+              <option value="2">2 个电脑</option><option value="3">3 个电脑</option><option value="4">4 个电脑</option></select>
+          </label>
+          <label class="field"><span>结束条件</span>
+            <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
+          </label>
+          <label class="field"><span>角色组</span>
+            <select id="net-chars"><option value="base" selected>基本版</option><option value="dark">黑暗城市扩充</option><option value="mixed">加强版混合</option></select>
+          </label>
+          <button class="btn primary block" id="btn-create">创建房间</button>
+        </div>
+        <div class="lobby-box">
+          <h3>加入房间</h3>
+          <label class="field"><span>房间编号</span><input id="net-code" type="text" placeholder="4 位房号" maxlength="4" autocomplete="off"></label>
+          <button class="btn primary block" id="btn-join">加入</button>
+          <button class="btn ghost block" id="btn-refresh">刷新房间列表</button>
+          <div class="room-list" id="room-list"><div class="dim">加载中…</div></div>
+        </div>
+      </div>
+      <div class="btn-row"><button class="btn ghost" data-goto="home">返回</button></div>
+    </div>
+
+    <div id="lobby-room" hidden>
+      <div class="room-head">
+        <div class="room-code">房号 <b id="r-code">----</b></div>
+        <div class="room-cfg">
+          <label class="field inline"><span>人数</span>
+            <select id="r-players"><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option>
+              <option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
+          <label class="field inline"><span>结束</span>
+            <select id="r-end"><option value="8" selected>8 栋</option><option value="7">7 栋</option></select></label>
+          <label class="field inline"><span>角色</span>
+            <select id="r-chars"><option value="base" selected>基本版</option><option value="dark">黑暗扩充</option><option value="mixed">混合</option></select></label>
+        </div>
+      </div>
+      <div class="seat-grid" id="seat-grid"></div>
+      <p class="dim small">把房间号告诉朋友即可加入；空缺座位可用电脑补位。房主点击「开始游戏」开局。</p>
+      <div class="btn-row">
+        <button class="btn ghost" id="btn-leave">离开房间</button>
+        <button class="btn primary" id="btn-net-start">开始游戏</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 对局 ============================ -->
+<section id="screen-game" class="screen">
+  <header class="topbar">
+    <div class="tb-left">
+      <button class="btn tiny ghost" id="btn-back-home">菜单</button>
+      <button class="btn tiny" id="btn-speed" title="点击切换电脑行动速度">⏱ 标准</button>
+      <span class="tb-title" id="tb-room">富饶之城</span>
+    </div>
+    <div class="tb-mid">
+      <span class="chip">第 <b id="tb-round">1</b> 轮</span>
+      <span class="chip">结束条件 <b id="tb-target">8</b> 栋</span>
+      <span class="chip">牌堆 <b id="tb-deck">0</b></span>
+      <span class="chip" id="tb-crown">👑 —</span>
+      <span class="chip danger" id="tb-effects" hidden></span>
+    </div>
+    <div class="tb-right">
+      <button class="btn tiny" id="btn-chars">角色一览</button>
+      <button class="btn tiny" id="btn-buildings">建筑一览</button>
+      <button class="btn tiny" id="btn-rules-top">游戏规则</button>
+      <button class="btn tiny" id="btn-log-toggle">战报</button>
+    </div>
+  </header>
+
+  <main class="board">
+    <div class="board-main" id="board-main">
+      <!-- 选角阶段 -->
+      <div id="draft-area" class="draft-area" hidden>
+        <div class="draft-head">
+          <h3 id="draft-title">选择角色</h3>
+          <p class="dim small" id="draft-sub"></p>
+        </div>
+        <div class="draft-pool" id="draft-pool"></div>
+      </div>
+
+      <!-- 行动阶段 -->
+      <div id="play-area">
+        <div class="removed-strip" id="removed-strip" hidden>
+          <span class="rs-label">本轮出局角色</span>
+          <div class="rs-group">
+            <span class="rs-tag">明置移除</span>
+            <div class="rs-cards" id="rs-faceup"></div>
+          </div>
+          <div class="rs-group">
+            <span class="rs-tag rs-tag-secret">暗置移除（身份保密）</span>
+            <div class="rs-cards" id="rs-facedown"></div>
+          </div>
+        </div>
+        <div class="turn-banner" id="turn-banner"></div>
+        <div class="opponents" id="opponents"></div>
+        <div class="me-area" id="me-area">
+          <div class="zone-head"><h3>我的城市 <span class="dim small" id="my-city-count"></span></h3>
+            <button class="score-btn" id="btn-my-score" title="显示我的得分与计算过程">📊 分数</button>
+            <span class="gold-badge" id="my-gold">🪙 0</span></div>
+          <div class="me-char" id="my-char-status"></div>
+          <div class="city-row" id="my-city"></div>
+          <div class="zone-head"><h3>我的手牌 <span class="dim small" id="my-hand-count"></span></h3>
+            <span class="dim small" id="my-chars-tip"></span></div>
+          <div class="hand-row" id="my-hand"></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="side-panel" id="side-panel">
+      <h3>战报</h3>
+      <div class="log" id="log"></div>
+    </aside>
+  </main>
+
+  <footer class="actionbar">
+    <div class="prompt" id="prompt">等待开始…</div>
+    <div class="actions" id="actions"></div>
+  </footer>
+</section>
+
+<!-- ============================ 结算 ============================ -->
+<section id="screen-over" class="screen">
+  <div class="panel wide-panel">
+    <h2 id="over-title">游戏结束</h2>
+    <table class="score-table" id="score-table"></table>
+    <div class="btn-row">
+      <button class="btn ghost" data-goto="home">回主菜单</button>
+      <button class="btn primary" id="btn-again">再来一局</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 弹层 ============================ -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="modal-title">标题</h3><button class="btn tiny ghost" id="modal-close">关闭</button></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- 关键事件提示（被刺杀 / 被施咒 / 被摧毁…） -->
+<div class="event-overlay" id="event-overlay" hidden>
+  <div class="event-box" id="event-box">
+    <div class="event-icon" id="event-icon">🗡</div>
+    <h3 class="event-title" id="event-title">标题</h3>
+    <p class="event-text" id="event-text"></p>
+    <button class="btn primary block" id="event-ok">知道了，继续</button>
+    <div class="event-bar"><i id="event-bar-fill"></i></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- 角色卡悬浮放大浮窗（触屏：点击放大 + 确认/取消） -->
+<div class="char-zoom-bg" id="char-zoom-bg" hidden></div>
+<div class="char-zoom" id="char-zoom" hidden>
+  <img id="char-zoom-img" alt="角色卡放大">
+  <div id="char-zoom-back" class="char-zoom-back">🂠</div>
+  <div class="cz-actions" id="cz-actions" hidden>
+    <button class="btn cz-btn cz-cancel" id="cz-cancel" type="button">取消</button>
+    <button class="btn cz-btn cz-ok" id="cz-ok" type="button">确认选择</button>
+  </div>
+</div>
+
+<!-- 得分明细浮动窗口 -->
+<div class="score-popup" id="score-popup" hidden>
+  <div class="score-box">
+    <div class="score-head">
+      <span class="score-name" id="score-name">玩家</span>
+      <button class="btn tiny ghost" id="score-close" title="关闭">✕</button>
+    </div>
+    <div class="score-total"><span id="score-total">0</span> 分</div>
+    <div class="score-sub" id="score-sub"></div>
+    <ul class="score-detail" id="score-detail"></ul>
+    <div class="score-foot" id="score-foot"></div>
+  </div>
+</div>
+
+<script src="./src/cards.js?v=2"></script>
+<script src="./src/engine.js?v=2"></script>
+<script src="./src/ai.js?v=2"></script>
+<script src="./app.js?v=2"></script>
+</body>
+</html>
