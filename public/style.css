@@ -583,12 +583,12 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
   .draft-row{gap:7px}
   .facedown{width:54px;height:76px}
 
-  /* -------- 行动栏：固定底部、高度恒定，避免其高度变化导致棋盘滚动跳动 -------- */
+  /* -------- 行动栏：底部，最大高度限制，内容少则自动收缩，避免大片空白 -------- */
   .actionbar{padding:8px 10px calc(8px + env(safe-area-inset-bottom));
     flex:0 0 auto;display:flex;flex-direction:column;min-height:0;
-    height:42vh;max-height:42vh}
+    max-height:42vh}
   .prompt{font-size:12.5px;line-height:1.45;flex:0 0 auto;margin-bottom:6px}
-  .actions{flex:1 1 auto;min-height:0;overflow-y:auto;gap:7px;padding-right:2px;align-content:flex-start}
+  .actions{flex:0 1 auto;min-height:0;max-height:100%;overflow-y:auto;gap:7px;padding-right:2px;align-content:flex-start}
   .act{min-height:42px;padding:9px 13px;font-size:13px;border-radius:10px}
   .act .a-sub{font-size:10.5px}
 
@@ -632,7 +632,7 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 @media (max-width:1000px) and (min-width:821px) and (max-height:560px){
   .card{width:60px;height:84px}
   .hand-row,.city-row{min-height:96px}
-  .actionbar{flex:0 0 auto;display:flex;flex-direction:column;min-height:0;height:38vh;max-height:38vh}
+  .actionbar{flex:0 0 auto;display:flex;flex-direction:column;min-height:0;max-height:38vh}
   .prompt{flex:0 0 auto;margin-bottom:6px}
-  .actions{flex:1 1 auto;min-height:0;overflow-y:auto;gap:7px;padding-right:2px;align-content:flex-start}
+  .actions{flex:0 1 auto;min-height:0;max-height:100%;overflow-y:auto;gap:7px;padding-right:2px;align-content:flex-start}
 }
