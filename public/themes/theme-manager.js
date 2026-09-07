@@ -6,7 +6,7 @@
   const THEMES = {
     classic: { id: 'classic', label: '经典羊皮纸' },
     neon: (root.CitadelThemeManifests && root.CitadelThemeManifests.neon) ||
-      { id: 'neon', label: '暗黑赛博霓虹', cards: { roles: {}, districts: {} } }
+      { id: 'neon', label: '暗夜赛博霓虹-女性力量', cards: { roles: {}, districts: {} } }
   };
   const listeners = [];
   const manager = {

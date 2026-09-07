@@ -1,5 +1,5 @@
 /*
- * 暗黑赛博霓虹主题的资源清单。
+ * 暗夜赛博霓虹-女性力量主题的资源清单。
  * 路径相对于 public/index.html，角色使用稳定 id，建筑使用稳定 district_<英文 key>。
  */
 (function (root) {
@@ -35,7 +35,7 @@
   root.CitadelThemeManifests = root.CitadelThemeManifests || {};
   root.CitadelThemeManifests.neon = {
     id: 'neon',
-    label: '暗黑赛博霓虹',
+    label: '暗夜赛博霓虹-女性力量',
     cards: { roles: roles, districts: districts }
   };
 })(typeof self !== 'undefined' ? self : this);

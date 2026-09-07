@@ -1,4 +1,4 @@
-/* 暗黑赛博主题资源完整性检查：角色按 id、建筑按英文 key，full/thumb 均必须存在。 */
+/* 暗夜赛博霓虹-女性力量主题资源完整性检查：角色按 id、建筑按英文 key，full/thumb 均必须存在。 */
 'use strict';
 
 const fs = require('fs');
