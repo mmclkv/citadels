@@ -224,11 +224,12 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 }
 
 /* 角色卡悬浮放大浮窗 */
-.char-zoom{position:fixed;z-index:300;width:300px;pointer-events:none;
+.char-zoom{position:fixed;z-index:300;width:300px;pointer-events:auto;
   background:#fffdf6;border:2px solid var(--gold);border-radius:12px;
   box-shadow:0 12px 38px rgba(60,40,10,.4);padding:8px;overflow:hidden;
   animation:czoom-in .12s ease-out}
 .char-zoom[hidden]{display:none}
+.char-zoom.interactive{pointer-events:auto}
 /* 触屏模式：居中弹出、可交互（有确认/取消按钮），配半透明遮罩 */
 .char-zoom.touch{left:50%!important;top:50%!important;transform:translate(-50%,-50%);
   width:min(300px,84vw);max-height:88vh;overflow-y:auto;pointer-events:auto;z-index:360;
@@ -246,11 +247,57 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .cz-btn.cz-cancel{background:#f4f0e8}
 .cz-btn:active{transform:translateY(1px)}
 .char-zoom img{width:100%;height:auto;display:block;border-radius:7px}
+.cz-hd-btn{display:block;width:100%;margin-top:8px;padding:8px 10px;font-size:12px;
+  border:1px solid var(--gold-l);border-radius:8px;background:#fff7dc;color:#6a4f18}
+.cz-hd-btn:hover{filter:brightness(1.04);border-color:var(--gold)}
 .char-zoom-back{width:100%;aspect-ratio:3/4;border-radius:7px;display:flex;align-items:center;
   justify-content:center;font-size:64px;color:#ffe9bd;
   background:repeating-linear-gradient(45deg,#8a652f,#8a652f 10px,#a87d3c 10px,#a87d3c 20px);
   border:2px solid #4a3510}
 @keyframes czoom-in{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
+
+/* 高清卡图查看器：使用 full 资源并尽量占满可用视口 */
+.card-hd-overlay{position:fixed;inset:0;z-index:500;display:flex;align-items:center;
+  justify-content:center;padding:18px;background:rgba(30,22,12,.72);backdrop-filter:blur(5px)}
+.card-hd-overlay[hidden]{display:none}
+body.card-hd-open{overflow:hidden}
+.card-hd-box{width:min(680px,96vw);max-height:94vh;display:flex;flex-direction:column;
+  background:#fffdf6;border:2px solid var(--gold);border-radius:14px;
+  box-shadow:0 20px 70px rgba(35,20,4,.48);overflow:hidden;animation:hd-pop .16s ease-out}
+.card-hd-head{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:12px 16px;border-bottom:1px solid var(--line);background:rgba(255,253,246,.96)}
+.card-hd-kicker{font-size:10px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
+.card-hd-head h3{margin:2px 0 0;color:#6a4f18;font-size:17px}
+.card-hd-stage{min-height:0;flex:1;display:grid;place-items:center;overflow:hidden;padding:16px;
+  background:radial-gradient(circle at 50% 38%,#fffdf7 0,#f4ead8 68%,#e4d3b7 100%);
+  touch-action:none;overscroll-behavior:contain;cursor:default}
+.card-hd-stage.zoomed{cursor:grab}
+.card-hd-stage.is-dragging{cursor:grabbing}
+.card-hd-stage img{display:block;width:auto;height:auto;max-width:min(88vw,560px);max-height:78vh;
+  object-fit:contain;border-radius:7px;box-shadow:0 10px 30px rgba(50,30,8,.28);
+  transform-origin:center center;transition:transform .16s cubic-bezier(.2,.8,.2,1);
+  user-select:none;-webkit-user-drag:none}
+.card-hd-stage.is-dragging img{transition:none}
+.card-hd-controls{display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:8px 16px;border-top:1px solid var(--line);background:rgba(255,253,246,.96)}
+.card-hd-controls .btn{min-width:36px;line-height:1.1}
+.card-hd-controls span{min-width:52px;text-align:center;color:var(--ink);font-size:12px;
+  font-variant-numeric:tabular-nums}
+.card-hd-controls button:disabled{opacity:.35;cursor:not-allowed;filter:none}
+.card-hd-foot{padding:8px 16px;color:var(--dim);font-size:11px;text-align:center;
+  border-top:1px solid var(--line);background:rgba(255,253,246,.96)}
+.ref-hd-trigger{display:block;width:100%;margin:4px 0 9px;padding:6px 8px;border:1px solid var(--gold-l);
+  border-radius:7px;background:#fff7dc;color:#6a4f18;font-size:11px;cursor:pointer}
+.ref-hd-trigger:hover{border-color:var(--gold);filter:brightness(1.03)}
+@keyframes hd-pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+@media (max-width:600px){
+  .card-hd-overlay{padding:10px}
+  .card-hd-box{width:96vw;max-height:94vh;border-radius:10px}
+  .card-hd-stage{padding:10px}
+  .card-hd-stage img{max-width:90vw;max-height:78vh}
+  .card-hd-controls{padding:8px 10px}
+}
+@media (prefers-reduced-motion:reduce){.card-hd-box{animation:none}}
 
 /* 金币飞行（盗贼偷窃） */
 .fly-coin{position:fixed;z-index:400;font-size:22px;pointer-events:none;

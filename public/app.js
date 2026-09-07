@@ -5,6 +5,17 @@
 (function () {
   'use strict';
   const Cards = window.CitCards, Engine = window.CitEngine, AI = window.CitAI;
+  const Theme = window.CitadelThemeManager || {
+    current: 'classic',
+    is(id) { return id === 'classic'; },
+    label() { return '经典羊皮纸'; },
+    apply() {},
+    toggle() {},
+    updateControls() {},
+    roleAsset() { return null; },
+    districtAsset() { return null; },
+    onChange() { return function () {}; }
+  };
 
   /* ============================== 全局状态 ============================== */
   const App = {
@@ -31,11 +42,15 @@
    *   min    其它内部推进步骤
    * ------------------------------------------------------------------ */
   const PACE = {
-    slow:   { draft: 1700, big: 2100, act: 1300, min: 700, label: '🐢 慢速' },
-    normal: { draft: 1050, big: 1300, act: 820,  min: 430, label: '⏱ 标准' },
-    fast:   { draft: 420,  big: 480,  act: 330,  min: 190, label: '⚡ 快速' }
+    slow:   { draft: 1700, big: 2100, act: 1300, min: 700, label: '慢速' },
+    normal: { draft: 1050, big: 1300, act: 820,  min: 430, label: '标准' },
+    fast:   { draft: 420,  big: 480,  act: 330,  min: 190, label: '快速' }
   };
   const SPEED_ORDER = ['slow', 'normal', 'fast'];
+  // 主题界面使用纯文本标签，避免速度按钮被图标字体或系统表情影响布局。
+  PACE.slow.label = '慢速';
+  PACE.normal.label = '标准';
+  PACE.fast.label = '快速';
 
   function loadSpeed() {
     let v = null;
@@ -76,11 +91,17 @@
       ? '点击切换服务器上电脑的行动速度'
       : '点击切换电脑行动速度';
   }
+  function syncThemeBtn() {
+    const b = $('#btn-theme');
+    if (!b || !Theme.label) return;
+    b.textContent = '主题 · ' + Theme.label();
+    b.title = '当前：' + Theme.label() + '，点击切换';
+  }
   function cycleSpeed() {
     const i = SPEED_ORDER.indexOf(App.speed);
     App.speed = SPEED_ORDER[(i + 1) % SPEED_ORDER.length];
     saveSpeed(); syncSpeedBtn();
-    toast('电脑节奏：' + pace().label.replace(/^\S+\s*/, ''));
+    toast('电脑节奏：' + pace().label);
     if (App.mode === 'local') Local.reschedule();
     else if (App.mode === 'net') Net.send({ t: 'setPace', pace: pace().act });
   }
@@ -158,7 +179,7 @@
     if (!opt) { hideEvent(); return; }
     const ov = $('#event-overlay');
     $('#event-box').className = 'event-box tone-' + (opt.tone || 'info');
-    $('#event-icon').textContent = opt.icon || 'ℹ️';
+    $('#event-icon').textContent = opt.icon || 'i';
     $('#event-title').textContent = opt.title || '';
     $('#event-text').innerHTML = opt.text || '';
     $('#event-ok').textContent = evQueue.length ? '下一条（还有 ' + evQueue.length + '）' : '知道了，继续';
@@ -229,12 +250,12 @@
         if (holdsIt) {
           App.deathWarned = n.round;
           queueEvent({
-            tone: 'danger', icon: '🗡', title: '你被刺杀了！', hold: 6000,
+            tone: 'danger', icon: '!', title: '你被刺杀了！', hold: 6000,
             text: escapeHtml(n.byName) + ' 的【刺客】宣布刺杀 <b>' + n.num + ' 号角色</b>，' +
                   '正是你的『<b>' + escapeHtml(myCharName(s, n.num)) + '</b>』。<br>' +
                   '本轮叫到它时会<b>直接跳过</b>——不能领资源、不能建造、不能用能力。'
           });
-        } else toast('🗡 ' + n.byName + ' 宣布刺杀 ' + n.num + ' 号角色');
+        } else toast('! ' + n.byName + ' 宣布刺杀 ' + n.num + ' 号角色');
         return;
 
       case 'witch_declare':
@@ -242,24 +263,24 @@
         if (holdsIt) {
           App.deathWarned = n.round;
           queueEvent({
-            tone: 'magic', icon: '🔮', title: '你被施咒了！', hold: 6000,
+            tone: 'magic', icon: '*', title: '你被施咒了！', hold: 6000,
             text: escapeHtml(n.byName) + ' 的【女巫】对 <b>' + n.num + ' 号角色</b>施咒，' +
                   '正是你的『<b>' + escapeHtml(myCharName(s, n.num)) + '</b>』。<br>' +
                   '你这回合<b>只能领取资源</b>，随后由女巫接管该角色的剩余行动。'
           });
-        } else toast('🔮 ' + n.byName + ' 对 ' + n.num + ' 号角色施咒');
+        } else toast('* ' + n.byName + ' 对 ' + n.num + ' 号角色施咒');
         return;
 
       case 'thief_declare':
         if (byMe) return;
         if (holdsIt) {
           queueEvent({
-            tone: 'warn', icon: '💰', title: '盗贼盯上了你', hold: 5000,
+            tone: 'warn', icon: '$', title: '盗贼盯上了你', hold: 5000,
             text: escapeHtml(n.byName) + ' 的【盗贼】宣布偷窃 <b>' + n.num + ' 号角色</b>（你的『' +
                   escapeHtml(myCharName(s, n.num)) + '』）。<br>' +
                   '轮到你时手上的金币会被<b>全部拿走</b>，建议先想好怎么花。'
           });
-        } else toast('💰 ' + n.byName + ' 宣布偷窃 ' + n.num + ' 号角色');
+        } else toast('$ ' + n.byName + ' 宣布偷窃 ' + n.num + ' 号角色');
         return;
 
       case 'assassinated':
@@ -267,48 +288,48 @@
           // 极少数情况（中途接管 / 漏掉了宣告）没提前警告过，这里补一次弹层
           if (App.deathWarned !== n.round) {
             queueEvent({
-              tone: 'danger', icon: '🗡', title: '本回合被跳过', hold: 5000,
+              tone: 'danger', icon: '!', title: '本回合被跳过', hold: 5000,
               text: '你的『<b>' + escapeHtml(n.charName) + '</b>』（' + n.num + ' 号）已被刺杀，' +
                     '本回合直接跳过，无法行动。'
             });
-          } else toast('🗡 你的『' + n.charName + '』被刺杀，本回合已跳过');
-        } else toast('🗡 ' + n.playerName + ' 的『' + n.charName + '』被刺杀，跳过回合');
+          } else toast('! 你的『' + n.charName + '』被刺杀，本回合已跳过');
+        } else toast('! ' + n.playerName + ' 的『' + n.charName + '』被刺杀，跳过回合');
         return;
 
       case 'bewitched':
-        if (isMe) toast('🔮 你的『' + n.charName + '』被施咒，本回合只能领资源');
-        else toast('🔮 ' + n.playerName + ' 的『' + n.charName + '』被施咒');
+        if (isMe) toast('* 你的『' + n.charName + '』被施咒，本回合只能领资源');
+        else toast('* ' + n.playerName + ' 的『' + n.charName + '』被施咒');
         return;
 
       case 'thief_steal':
         flyCoins(n.playerIdx, n.byIdx, n.amount);
         if (isMe) {
           queueEvent({
-            tone: 'warn', icon: '💰', title: '金币被偷走了', hold: 4200,
+            tone: 'warn', icon: '$', title: '金币被偷走了', hold: 4200,
             text: '【盗贼】' + escapeHtml(n.byName) + ' 从你这里拿走了 <b>' + n.amount + ' 枚金币</b>。'
           });
-        } else toast('💰 ' + n.byName + ' 偷走了 ' + n.playerName + ' 的 ' + n.amount + ' 金');
+        } else toast('$ ' + n.byName + ' 偷走了 ' + n.playerName + ' 的 ' + n.amount + ' 金');
         return;
 
       case 'destroyed':
         destroyAnim(n.playerIdx, n.uid, n.cardName);
         if (isMe) {
           queueEvent({
-            tone: 'danger', icon: '🔥', title: '你的建筑被摧毁', hold: 4800,
+            tone: 'danger', icon: '!', title: '你的建筑被摧毁', hold: 4800,
             text: escapeHtml(n.byName) + ' 用【领主】支付 ' + n.cost + ' 金，' +
                   '摧毁了你的『<b>' + escapeHtml(n.cardName) + '</b>』。'
           });
-        } else toast('🔥 ' + n.byName + ' 摧毁了 ' + n.playerName + ' 的『' + n.cardName + '』');
+        } else toast('! ' + n.byName + ' 摧毁了 ' + n.playerName + ' 的『' + n.cardName + '』');
         return;
 
       case 'seized':
         if (isMe) {
           queueEvent({
-            tone: 'warn', icon: '⚔️', title: '你的建筑被抢走', hold: 4800,
+            tone: 'warn', icon: '!', title: '你的建筑被抢走', hold: 4800,
             text: escapeHtml(n.byName) + ' 用【元帅】支付 ' + n.cost + ' 金，' +
                   '抢走了你的『<b>' + escapeHtml(n.cardName) + '</b>』（金币已补偿给你）。'
           });
-        } else toast('⚔️ ' + n.byName + ' 抢走了 ' + n.playerName + ' 的『' + n.cardName + '』');
+        } else toast('! ' + n.byName + ' 抢走了 ' + n.playerName + ' 的『' + n.cardName + '』');
         return;
 
       case 'got_gold':
@@ -321,11 +342,11 @@
       case 'swapped':
         if (isMe) {
           queueEvent({
-            tone: 'warn', icon: '🤝', title: '建筑被外交官换走', hold: 4800,
+            tone: 'warn', icon: '<>', title: '建筑被外交官换走', hold: 4800,
             text: escapeHtml(n.byName) + ' 用『' + escapeHtml(n.gotName) + '』' +
                   '换走了你的『<b>' + escapeHtml(n.cardName) + '</b>』。'
           });
-        } else toast('🤝 ' + n.byName + ' 与 ' + n.playerName + ' 交换了建筑');
+        } else toast('<> ' + n.byName + ' 与 ' + n.playerName + ' 交换了建筑');
         return;
     }
   }
@@ -503,48 +524,288 @@
   /* ============================== 卡牌渲染 ============================== */
   function cardNode(c, opts) {
     opts = opts || {};
-    const d = el('div', 'card c-' + c.color + (opts.mini ? ' mini' : '') +
+    const neon = Theme.is && Theme.is('neon');
+    const d = el('div', 'card c-' + c.color + (neon ? ' neon-card' : '') + (opts.mini ? ' mini' : '') +
       (opts.clickable ? ' clickable' : '') + (opts.disabled ? ' disabled' : '') +
       (opts.selected ? ' selected' : '') + (opts.pickable ? ' pickable' : ''));
     d.dataset.uid = c.uid;
     d.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
       ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
-    d.appendChild(el('div', 'c-top'));
-    d.appendChild(el('div', 'c-cost', String(c.cost)));
-    d.appendChild(el('div', 'c-name', c.name));
-    d.appendChild(el('div', 'c-en', c.en || ''));
-    if (c.beautified) d.appendChild(el('div', 'c-badges', '💎'));
-    else if (c.museumCount) d.appendChild(el('div', 'c-badges', '🖼' + c.museumCount));
+    const art = neon && Theme.districtAsset ? Theme.districtAsset(c, 'thumb') : null;
+    const full = neon && Theme.districtAsset ? Theme.districtAsset(c, 'full') : null;
+    if (art) {
+      const img = el('img', 'card-art');
+      img.src = art;
+      img.alt = c.name;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      d.appendChild(img);
+      if (d.dataset) {
+        d.dataset.zoomSrc = full || art;
+        d.dataset.zoomTitle = c.name;
+      }
+    } else {
+      d.appendChild(el('div', 'c-top'));
+      d.appendChild(el('div', 'c-cost', String(c.cost)));
+      d.appendChild(el('div', 'c-name', c.name));
+      d.appendChild(el('div', 'c-en', c.en || ''));
+    }
+    if (c.beautified) d.appendChild(el('div', 'c-badges', '美'));
+    else if (c.museumCount) d.appendChild(el('div', 'c-badges', '博' + c.museumCount));
     return d;
   }
 
-  /* 角色卡牌插画（images/roles/ 下，按编号对应基础角色）。
-   * 9 号（皇后/艺术家）暂缺图，回退到 emoji。 */
+  /* 经典主题沿用旧插画；霓虹主题严格按角色 id 映射最终完整卡图。 */
   const ROLE_IMG = { 1: '刺客', 2: '小偷', 3: '魔术师', 4: '国王', 5: '住持', 6: '商人', 7: '建筑师', 8: '领主' };
-  const CHAR_EMOJI = { 1: '🗡', 2: '🥷', 3: '🎩', 4: '👑', 5: '⛪', 6: '💰', 7: '🔨', 8: '⚔️', 9: '🃏' };
   function roleImage(c) {
     if (!c || !ROLE_IMG[c.num]) return null;
     return 'images/roles/' + ROLE_IMG[c.num] + '.jpg';
   }
 
+  function roleThumb(c) {
+    if (Theme.is && Theme.is('neon') && Theme.roleAsset) return Theme.roleAsset(c, 'thumb');
+    return roleImage(c);
+  }
+  function roleFull(c) {
+    if (Theme.is && Theme.is('neon') && Theme.roleAsset) return Theme.roleAsset(c, 'full');
+    return roleImage(c);
+  }
+  function charMeta(id, num) {
+    if (id && Engine && Engine.CHAR_MAP && Engine.CHAR_MAP[id]) return Engine.CHAR_MAP[id];
+    if (Engine && Engine.CHAR_MAP) {
+      const values = Object.values(Engine.CHAR_MAP);
+      return values.find(c => c.num === num) || null;
+    }
+    return id ? { id: id, num: num, name: String(num || '') } : null;
+  }
+
   function charNode(c, opts) {
     opts = opts || {};
-    const d = el('div', 'char-card' + (opts.dim ? ' faceup-char' : '') + (opts.clickable ? ' clickable' : '') + (opts.mini ? ' mini' : ''));
-    const img = roleImage(c);
+    const neon = Theme.is && Theme.is('neon');
+    const d = el('div', 'char-card' + (neon ? ' neon-role-card' : '') + (opts.dim ? ' faceup-char' : '') +
+      (opts.clickable ? ' clickable' : '') + (opts.mini ? ' mini' : ''));
+    const img = roleThumb(c);
+    const full = roleFull(c);
     let art = '<div class="cc-art">';
-    if (img) art += '<img src="' + img + '" alt="' + escapeHtml(c.name) + '">';
-    else art += '<div class="cc-art-emoji">' + (CHAR_EMOJI[c.num] || '🃏') + '</div>';
+    if (img) art += '<img src="' + img + '" alt="' + escapeHtml(c.name) + '" loading="lazy" decoding="async">';
+    else art += '<div class="cc-art-emoji">' + escapeHtml(String(c.num || '?')) + '</div>';
     art += '</div>';
-    // 角色卡图本身已印有编号/名称/效果文字，故只保留整图与极简编号，删去冗余说明
-    d.innerHTML = art +
+    // 霓虹卡图本身已含编号、名称与规则；经典主题保留原来的简化卡牌排版。
+    d.innerHTML = neon ? art : art +
       '<div class="cc-num">' + c.num + '</div>' +
       '<div class="cc-name">' + c.name + '</div>';
-    if (img && d.dataset) d.dataset.zoomSrc = img; // 悬浮放大浮窗：整张角色卡图（dataset 在浏览器/测试桩均可用）
+    if (img && d.dataset) {
+      d.dataset.zoomSrc = full || img;
+      d.dataset.zoomTitle = c.name;
+    }
     return d;
   }
 
-  /* 角色卡悬浮放大：鼠标停在带 data-zoom-src / data-zoom-back 的元素上时用更大的浮窗展示整张卡图
-   * 适用于：选角池角色牌、出局角色条（明置/暗置）、每个玩家小框框里的角色状态卡。 */
+  let cardHdPreviousFocus = null;
+  const CARD_HD_ZOOM_MIN = 0.5;
+  const CARD_HD_ZOOM_MAX = 3;
+  const CARD_HD_ZOOM_STEP = 0.25;
+  let cardHdZoom = 1;
+  let cardHdPan = { x: 0, y: 0 };
+  let cardHdRenderView = function () {};
+  let cardHdPreviewCloser = null;
+  let closeCharZoomPreview = null;
+
+  function setCardHdZoom(value) {
+    const next = Math.max(CARD_HD_ZOOM_MIN, Math.min(CARD_HD_ZOOM_MAX, Number(value) || 1));
+    cardHdZoom = Math.round(next * 100) / 100;
+    cardHdRenderView();
+  }
+
+  function resetCardHdView() {
+    cardHdZoom = 1;
+    cardHdPan = { x: 0, y: 0 };
+    cardHdRenderView();
+  }
+
+  function openCardHd(src, title, previewCloser) {
+    const overlay = $('#card-hd-overlay');
+    const img = $('#card-hd-img');
+    const titleEl = $('#card-hd-title');
+    if (!overlay || !img || !src) return;
+    cardHdPreviewCloser = typeof previewCloser === 'function' ? previewCloser : null;
+    cardHdPreviousFocus = document.activeElement || null;
+    resetCardHdView();
+    img.src = src;
+    img.alt = (title || '卡牌') + '高清大图';
+    if (titleEl) titleEl.textContent = title || '卡牌高清大图';
+    overlay.hidden = false;
+    if (document.body && document.body.classList) document.body.classList.add('card-hd-open');
+    const close = $('#card-hd-close');
+    if (close && close.focus) close.focus();
+  }
+
+  function closeCardHd() {
+    const overlay = $('#card-hd-overlay');
+    if (!overlay) return;
+    overlay.hidden = true;
+    if (document.body && document.body.classList) document.body.classList.remove('card-hd-open');
+    const previous = cardHdPreviousFocus;
+    const previewCloser = cardHdPreviewCloser;
+    cardHdPreviousFocus = null;
+    cardHdPreviewCloser = null;
+    if (previewCloser) previewCloser();
+    // 高清图从悬浮预览打开时，原按钮会随预览一起隐藏，不再把焦点放回隐藏节点。
+    if (previous && previous.focus && !previous.hidden && previous.isConnected !== false) previous.focus();
+  }
+
+  function openCardHdFrom(trigger) {
+    if (!trigger || !trigger.getAttribute) return;
+    const fromPreview = trigger.closest && trigger.closest('#char-zoom');
+    openCardHd(
+      trigger.getAttribute('data-hd-src'),
+      trigger.getAttribute('data-hd-title') || trigger.getAttribute('aria-label') || '卡牌',
+      fromPreview ? closeCharZoomPreview : null
+    );
+  }
+
+  function initCardHd() {
+    const overlay = $('#card-hd-overlay');
+    if (!overlay) return;
+    const close = $('#card-hd-close');
+    const stage = document.querySelector('.card-hd-stage');
+    const img = $('#card-hd-img');
+    const zoomOut = $('#card-hd-zoom-out');
+    const zoomReset = $('#card-hd-zoom-reset');
+    const zoomIn = $('#card-hd-zoom-in');
+    const zoomValue = $('#card-hd-zoom-value');
+    if (close) close.onclick = closeCardHd;
+    overlay.onclick = e => { if (e.target === overlay) closeCardHd(); };
+
+    function clampPan() {
+      if (!stage || !img) return;
+      const width = Number(img.clientWidth) || 0;
+      const height = Number(img.clientHeight) || 0;
+      const stageWidth = Number(stage.clientWidth) || 0;
+      const stageHeight = Number(stage.clientHeight) || 0;
+      const maxX = Math.max(0, (width * cardHdZoom - stageWidth) / 2);
+      const maxY = Math.max(0, (height * cardHdZoom - stageHeight) / 2);
+      cardHdPan.x = Math.max(-maxX, Math.min(maxX, cardHdPan.x));
+      cardHdPan.y = Math.max(-maxY, Math.min(maxY, cardHdPan.y));
+    }
+
+    function renderView() {
+      clampPan();
+      if (img && img.style) {
+        img.style.transform = 'translate3d(' + cardHdPan.x + 'px,' + cardHdPan.y + 'px,0) scale(' + cardHdZoom + ')';
+        img.style.transformOrigin = 'center center';
+        img.style.cursor = cardHdZoom > 1 ? 'grab' : 'default';
+      }
+      if (zoomValue) {
+        zoomValue.textContent = Math.round(cardHdZoom * 100) + '%';
+        if (zoomValue.setAttribute) zoomValue.setAttribute('aria-valuenow', String(Math.round(cardHdZoom * 100)));
+      }
+      if (zoomOut) zoomOut.disabled = cardHdZoom <= CARD_HD_ZOOM_MIN;
+      if (zoomIn) zoomIn.disabled = cardHdZoom >= CARD_HD_ZOOM_MAX;
+      if (stage && stage.classList) {
+        if (cardHdZoom > 1) stage.classList.add('zoomed');
+        else stage.classList.remove('zoomed');
+      }
+    }
+    cardHdRenderView = renderView;
+    if (img && img.addEventListener) img.addEventListener('load', renderView);
+    if (zoomOut) zoomOut.onclick = () => setCardHdZoom(cardHdZoom - CARD_HD_ZOOM_STEP);
+    if (zoomReset) zoomReset.onclick = resetCardHdView;
+    if (zoomIn) zoomIn.onclick = () => setCardHdZoom(cardHdZoom + CARD_HD_ZOOM_STEP);
+
+    // 桌面拖拽：只在放大后接管鼠标，避免影响按钮和普通滚动。
+    let mouseDrag = null;
+    function stopMouseDrag() {
+      mouseDrag = null;
+      if (stage && stage.classList) stage.classList.remove('is-dragging');
+      if (img && img.style) img.style.cursor = cardHdZoom > 1 ? 'grab' : 'default';
+    }
+    if (stage && stage.addEventListener) {
+      stage.addEventListener('mousedown', e => {
+        if (e.button !== 0 || cardHdZoom <= 1) return;
+        mouseDrag = { x: e.clientX, y: e.clientY, panX: cardHdPan.x, panY: cardHdPan.y };
+        if (stage.classList) stage.classList.add('is-dragging');
+        if (e.preventDefault) e.preventDefault();
+      });
+      stage.addEventListener('wheel', e => {
+        if (!e.deltaY) return;
+        if (e.preventDefault) e.preventDefault();
+        setCardHdZoom(cardHdZoom + (e.deltaY < 0 ? CARD_HD_ZOOM_STEP : -CARD_HD_ZOOM_STEP));
+      }, { passive: false });
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('mousemove', e => {
+        if (!mouseDrag) return;
+        cardHdPan.x = mouseDrag.panX + e.clientX - mouseDrag.x;
+        cardHdPan.y = mouseDrag.panY + e.clientY - mouseDrag.y;
+        renderView();
+        if (e.preventDefault) e.preventDefault();
+      });
+      window.addEventListener('mouseup', stopMouseDrag);
+    }
+
+    // 手机拖拽与双指缩放；单指仅在已放大时移动卡图。
+    let touchDrag = null;
+    let pinch = null;
+    function touchDistance(a, b) {
+      const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    if (stage && stage.addEventListener) {
+      stage.addEventListener('touchstart', e => {
+        if (e.touches.length >= 2) {
+          pinch = { distance: touchDistance(e.touches[0], e.touches[1]), zoom: cardHdZoom };
+          touchDrag = null;
+          if (e.preventDefault) e.preventDefault();
+        } else if (e.touches.length === 1 && cardHdZoom > 1) {
+          const t = e.touches[0];
+          touchDrag = { x: t.clientX, y: t.clientY, panX: cardHdPan.x, panY: cardHdPan.y };
+        }
+      }, { passive: false });
+      stage.addEventListener('touchmove', e => {
+        if (pinch && e.touches.length >= 2) {
+          const distance = touchDistance(e.touches[0], e.touches[1]);
+          setCardHdZoom(pinch.zoom * distance / Math.max(1, pinch.distance));
+          if (e.preventDefault) e.preventDefault();
+        } else if (touchDrag && e.touches.length === 1) {
+          const t = e.touches[0];
+          cardHdPan.x = touchDrag.panX + t.clientX - touchDrag.x;
+          cardHdPan.y = touchDrag.panY + t.clientY - touchDrag.y;
+          renderView();
+          if (e.preventDefault) e.preventDefault();
+        }
+      }, { passive: false });
+      stage.addEventListener('touchend', e => {
+        if (e.touches.length < 2) pinch = null;
+        if (e.touches.length === 1 && cardHdZoom > 1) {
+          const t = e.touches[0];
+          touchDrag = { x: t.clientX, y: t.clientY, panX: cardHdPan.x, panY: cardHdPan.y };
+        } else if (!e.touches.length) {
+          touchDrag = null;
+        }
+      }, { passive: true });
+    }
+
+    document.addEventListener('click', e => {
+      const target = e.target && e.target.closest && e.target.closest('[data-hd-src]');
+      if (!target) return;
+      e.preventDefault();
+      openCardHdFrom(target);
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !overlay.hidden) { closeCardHd(); return; }
+      if (!overlay.hidden && (e.key === '+' || e.key === '=')) { e.preventDefault(); setCardHdZoom(cardHdZoom + CARD_HD_ZOOM_STEP); return; }
+      if (!overlay.hidden && (e.key === '-' || e.key === '_')) { e.preventDefault(); setCardHdZoom(cardHdZoom - CARD_HD_ZOOM_STEP); return; }
+      if (!overlay.hidden && e.key === '0') { e.preventDefault(); resetCardHdView(); return; }
+      const target = e.target && e.target.closest && e.target.closest('[data-hd-src]');
+      if (!target || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      openCardHdFrom(target);
+    });
+    renderView();
+  }
+
+  /* 统一卡牌预览：角色卡与建筑卡共用桌面悬浮、触屏确认与高清查看。 */
   function initCharZoom() {
     const zoom = $('#char-zoom');
     if (!zoom) return;
@@ -554,10 +815,37 @@
     const zact = $('#cz-actions');
     const zok = $('#cz-ok');
     const zcancel = $('#cz-cancel');
-    const W = 300; // 放大浮窗宽度
+    const hdBtn = $('#cz-hd-btn');
+    const W = 330; // 放大浮窗宽度
     const SEL = '[data-zoom-src],[data-zoom-back]';
+    const HIDE_DELAY = 1000;
     let active = null;
     let pending = null;   // 触屏下待确认的选角行动
+    let hideTimer = null;
+
+    function cancelHide() {
+      if (hideTimer !== null) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    }
+
+    function scheduleHide() {
+      cancelHide();
+      hideTimer = setTimeout(() => {
+        hideTimer = null;
+        hide();
+      }, HIDE_DELAY);
+    }
+
+    function isInsideZoom(e) {
+      if (zoom.hidden || !zoom.getBoundingClientRect || typeof e.clientX !== 'number' ||
+          typeof e.clientY !== 'number') return false;
+      const r = zoom.getBoundingClientRect();
+      if (!r) return false;
+      return e.clientX >= r.left && e.clientX <= r.right &&
+        e.clientY >= r.top && e.clientY <= r.bottom;
+    }
 
     function place(r) {
       // 优先放在卡片右侧，空间不足则放左侧
@@ -587,23 +875,44 @@
     }
 
     function hide() {
+      cancelHide();
       zoom.hidden = true; active = null; pending = null;
       if (zbg) zbg.hidden = true;
       if (zact) zact.hidden = true;
-      if (zoom.classList) zoom.classList.remove('touch');
+      if (hdBtn) hdBtn.hidden = true;
+      if (zoom.classList) {
+        zoom.classList.remove('touch');
+        zoom.classList.remove('interactive');
+      }
     }
+    closeCharZoomPreview = hide;
 
     function show(trigger) {
+      cancelHide();
       paint(trigger);
       active = trigger;
       zoom.hidden = false;
+      const src = trigger.getAttribute('data-zoom-src');
+      const zoomTitle = trigger.getAttribute('data-zoom-title') || trigger.getAttribute('aria-label') || '卡牌';
+      if (hdBtn) {
+        hdBtn.hidden = !src;
+        if (src) {
+          hdBtn.setAttribute('data-hd-src', src);
+          hdBtn.setAttribute('data-hd-title', zoomTitle);
+        } else {
+          hdBtn.removeAttribute('data-hd-src');
+          hdBtn.removeAttribute('data-hd-title');
+        }
+      }
+      if (zoom.classList) zoom.classList.toggle('interactive', !!src);
       if (touchMode) {
         zoom.classList.add('touch');
         if (zbg) zbg.hidden = false;
-        // 选角牌带 data-pick-*，放大后在卡片下方给出「确认 / 取消」
-        pending = (trigger.dataset && trigger.dataset.pickChar)
-          ? { type: trigger.dataset.pickType, charId: trigger.dataset.pickChar }
-          : null;
+        // 选角牌或可操作建筑牌，放大后在卡片下方给出「确认 / 取消」。
+        pending = typeof trigger.__cardAction === 'function' ? trigger.__cardAction :
+          ((trigger.dataset && trigger.dataset.pickChar)
+            ? { type: trigger.dataset.pickType, charId: trigger.dataset.pickChar }
+            : null);
         if (zact) zact.hidden = !pending;
         return;   // 触屏用 .touch 的居中定位（CSS），不再按卡片坐标摆放
       }
@@ -627,6 +936,7 @@
         if (Math.abs(t0.clientX - sx) > 12 || Math.abs(t0.clientY - sy) > 12) return;
         const hit = e.target && e.target.closest && e.target.closest(SEL);
         if (hit) {
+          if (hit.__noZoom) return;
           if (e.cancelable) e.preventDefault();  // 阻止合成的 mouseover/click
           show(hit);
           return;
@@ -639,7 +949,13 @@
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
         const p = pending; hide();
-        if (p) send(p);
+        if (typeof p === 'function') p();
+        else if (p) send(p);
+      }, { passive: false });
+      if (hdBtn) hdBtn.addEventListener('touchend', e => {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        openCardHdFrom(hdBtn);
       }, { passive: false });
       // 取消：收起放大，回到无放大状态
       if (zcancel) zcancel.addEventListener('touchend', e => {
@@ -660,11 +976,15 @@
 
     /* ---------------- 桌面：悬浮放大 ---------------- */
     document.addEventListener('mouseover', e => {
+      // 预览框可能覆盖另一张卡；覆盖区域内只操作预览框，不让底层卡抢焦点。
+      if (isInsideZoom(e)) { cancelHide(); return; }
       const t = e.target.closest && e.target.closest(SEL);
       if (t && t !== active) show(t);
+      else if (e.target.closest && e.target.closest('#char-zoom')) cancelHide();
     });
     document.addEventListener('mousemove', e => {
       if (zoom.hidden || !active) return;
+      if (isInsideZoom(e)) { cancelHide(); return; }
       // 卡片若已被移出 DOM（如选角后重渲染），立即收起
       if (!active.isConnected) { hide(); return; }
       const t = e.target.closest && e.target.closest(SEL);
@@ -675,7 +995,9 @@
       if (!active) return;
       const t = e.target.closest && e.target.closest(SEL);
       const to = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(SEL);
-      if (t === active && !to) hide();
+      const fromZoom = e.target.closest && e.target.closest('#char-zoom');
+      const toZoom = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('#char-zoom');
+      if ((t === active || fromZoom) && !to && !toZoom) scheduleHide();
     });
     // 点击角色卡（选角）后立即收起放大浮窗
     document.addEventListener('click', e => {
@@ -685,6 +1007,19 @@
     if (typeof window !== 'undefined' && window.addEventListener) {
       window.addEventListener('scroll', hide, true);
       window.addEventListener('resize', hide);
+    }
+  }
+
+  /**
+   * 给可操作卡牌绑定动作。移动端需要先看清完整卡图再确认；桌面端保留直接点击。
+   * multi/handpick 这类需要连续点选的手牌动作不走确认浮层。
+   */
+  function bindCardAction(node, fn, zoomOnTouch) {
+    if (!node) return;
+    if (isTouchDevice() && zoomOnTouch) node.__cardAction = fn;
+    else {
+      if (isTouchDevice()) node.__noZoom = true;
+      onTap(node, fn);
     }
   }
 
@@ -699,15 +1034,16 @@
     App._reveal[p.seat] = st;
     let front = '', nameSpan = '';
     if (st === 'up') {
-      const img = roleImage({ num: p.revealedCharNum });
+      const ch = charMeta(p.revealedCharId, p.revealedCharNum) ||
+        { id: p.revealedCharId, num: p.revealedCharNum, name: String(p.revealedCharNum || '') };
+      const img = roleThumb(ch);
+      const full = roleFull(ch);
       front = img
-        ? '<img src="' + img + '" alt="' + escapeHtml(String(p.revealedCharNum)) + '">'
-        : '<div class="cs-emoji">' + (CHAR_EMOJI[p.revealedCharNum] || '🃏') + '</div>';
-      const ch = (Engine && Engine.CHAR_MAP)
-        ? Object.values(Engine.CHAR_MAP).find(c => c.num === p.revealedCharNum) : null;
-      const nm = ch ? ch.name : (ROLE_IMG[p.revealedCharNum] || ('' + p.revealedCharNum));
+        ? '<img src="' + img + '" alt="' + escapeHtml(ch.name) + '" loading="lazy" decoding="async">'
+        : '<div class="cs-emoji">' + escapeHtml(String(p.revealedCharNum || '?')) + '</div>';
+      const nm = ch.name || ROLE_IMG[p.revealedCharNum] || ('' + p.revealedCharNum);
       nameSpan = '<span class="cs-name">' + escapeHtml(nm) + '</span>';
-      var zoomAttr = img ? ' data-zoom-src="' + img + '"' : ' data-zoom-back="1"';
+      var zoomAttr = img ? ' data-zoom-src="' + escapeHtml(full || img) + '" data-zoom-title="' + escapeHtml(ch.name) + '"' : ' data-zoom-back="1"';
     } else if (st === 'down') {
       nameSpan = '<span class="cs-label">已选 · 盖牌</span>';
       var zoomAttr = ' data-zoom-back="1"';
@@ -716,7 +1052,7 @@
     }
     return '<div class="cs-card ' + st + flip + '"' + zoomAttr + '>' +
       '<div class="cs-inner">' +
-        '<div class="cs-face cs-back">🂠</div>' +
+        '<div class="cs-face cs-back">▧</div>' +
         '<div class="cs-face cs-front">' + front + '</div>' +
       '</div></div>' + nameSpan;
   }
@@ -730,7 +1066,7 @@
     for (let k = 0; k < n; k++) {
       const c = document.createElement('div');
       c.className = 'fly-coin';
-      c.textContent = '🪙';
+      c.textContent = '金';
       document.body.appendChild(c);
       const sx = a.left + a.width / 2 + (Math.random() * 40 - 20);
       const sy = a.top + a.height / 2 + (Math.random() * 30 - 15);
@@ -829,7 +1165,7 @@
     document.body.appendChild(clone);
     // 碎片 / 火花向四周飞散
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-    const bits = ['💥', '🧱', '🔥', '💢'];
+    const bits = ['×', '+', '!', '·'];
     const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => fn();
     for (let i = 0; i < 7; i++) {
       const b = document.createElement('div');
@@ -862,18 +1198,19 @@
     $('#tb-target').textContent = s.endDistricts;
     $('#tb-deck').textContent = s.deckCount;
     const crownP = s.players.find(p => p.hasCrown);
-    $('#tb-crown').innerHTML = '👑 ' + (crownP ? escapeHtml(crownP.name) : '—');
+    $('#tb-crown').innerHTML = '冠 ' + (crownP ? escapeHtml(crownP.name) : '—');
     $('#tb-room').textContent = s.roomName || (App.mode === 'local' ? '单人模式' : '联机房间 ' + (s.roomId || ''));
     syncSpeedBtn();
+    syncThemeBtn();
 
     // 本轮生效的负面效果常驻显示，别让玩家忘了自己被刺杀/被盯上
     const fx = $('#tb-effects');
     if (fx) {
       const parts = [];
       const e = s.effects || {};
-      if (e.assassinated != null) parts.push('🗡 ' + e.assassinated + ' 号被刺杀');
-      if (e.bewitched != null) parts.push('🔮 ' + e.bewitched + ' 号被施咒');
-      if (e.thief != null) parts.push('💰 ' + e.thief + ' 号被盯上');
+      if (e.assassinated != null) parts.push('! ' + e.assassinated + ' 号被刺杀');
+      if (e.bewitched != null) parts.push('* ' + e.bewitched + ' 号被施咒');
+      if (e.thief != null) parts.push('$ ' + e.thief + ' 号被盯上');
       fx.textContent = parts.join(' · ');
       fx.hidden = parts.length === 0;
     }
@@ -889,7 +1226,7 @@
       renderDraft(s);
       // 选角阶段也展示全场局势（对手城市 / 我的城市与手牌），方便决策
       $('#turn-banner').innerHTML =
-        '<div class="tb-who">🃏 选角阶段</div>' +
+        '<div class="tb-who">选角阶段</div>' +
         '<div class="tb-sub">上方为当前选角者与牌池，下方为场上局势</div>';
       renderOpponents(s);
       renderMe(s);
@@ -942,10 +1279,10 @@
     const rows = s.players.map((p, i) => {
       const okd = !!rc.confirmed[i];
       return '<span class="rc-who' + (okd ? ' ok' : '') + '">' +
-        escapeHtml(p.name) + (okd ? ' ✓' : ' ⏳') + '</span>';
+        escapeHtml(p.name) + (okd ? ' ✓' : ' 等待') + '</span>';
     }).join('');
     left.innerHTML =
-      '<div class="tb-who">🏁 第 ' + rc.round + ' 轮结束 — 请确认本轮战果</div>' +
+      '<div class="tb-who">第 ' + rc.round + ' 轮结束 — 请确认本轮战果</div>' +
       '<div class="rc-list">' + rows + '</div>';
     box.appendChild(left);
 
@@ -955,7 +1292,7 @@
       btn.className = 'btn ghost rc-btn';
       btn.disabled = true;
     } else {
-      btn.textContent = '✅ 确认本轮战果（' + done + '/' + total + '）';
+      btn.textContent = '确认本轮战果（' + done + '/' + total + '）';
       btn.className = 'btn rc-btn';
       onTap(btn, () => send({ type: 'confirm_round' }));
     }
@@ -980,7 +1317,7 @@
     let phaseTip = '';
     if (t.phase === 'witch_resume') phaseTip = '<span class="tag magic">女巫接管</span>';
     if (t.phase === 'bewitched') phaseTip = '<span class="tag magic">仅可领资源</span>';
-    left.innerHTML = '<div class="tb-who">' + (who.id === App.myId ? '👉 你' : escapeHtml(who.name)) +
+    left.innerHTML = '<div class="tb-who">' + (who.id === App.myId ? '你' : escapeHtml(who.name)) +
       ' — ' + t.charNum + ' · ' + escapeHtml(t.charName) + mark + ' ' + phaseTip + '</div>' +
       '<div class="tb-sub">已建造 ' + t.builds + ' / ' + t.buildLimit + ' 栋' +
       (t.takenResources ? ' · 已领资源' : '') + '</div>';
@@ -988,10 +1325,10 @@
 
     const stats = el('div', 'tb-stats');
     stats.innerHTML =
-      '<span>🃏 牌堆 <b>' + s.deckCount + '</b></span>' +
-      '<span>🗑 弃牌 <b>' + s.discardCount + '</b></span>' +
-      (s.effects.thief != null ? '<span>🗡 盗贼锁定 <b>' + s.effects.thief + ' 号</b></span>' : '') +
-      (s.firstToFinish >= 0 ? '<span>★ <b>' + escapeHtml(s.players[s.firstToFinish].name) + '</b> 已达标</span>' : '');
+      '<span>牌堆 <b>' + s.deckCount + '</b></span>' +
+      '<span>弃牌 <b>' + s.discardCount + '</b></span>' +
+      (s.effects.thief != null ? '<span>盗贼锁定 <b>' + s.effects.thief + ' 号</b></span>' : '') +
+      (s.firstToFinish >= 0 ? '<span>* <b>' + escapeHtml(s.players[s.firstToFinish].name) + '</b> 已达标</span>' : '');
     box.appendChild(stats);
   }
 
@@ -1009,12 +1346,12 @@
       const head = el('div', 'opp-head');
       let tags = '';
       if (p.isBot) tags += '<span class="tag bot">电脑</span>';
-      if (p.hasCrown) tags += '<span class="tag crown">👑 皇冠</span>';
+      if (p.hasCrown) tags += '<span class="tag crown">皇冠</span>';
       head.innerHTML = '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
-        '<span class="opp-gold">🪙 ' + p.gold + '</span>';
+        '<span class="opp-gold">金 ' + p.gold + '</span>';
       const sb = el('button', 'score-btn');
       sb.title = '显示 ' + p.name + ' 的得分与计算过程';
-      sb.textContent = '📊';
+      sb.textContent = '分数';
       onTap(sb, () => openScore(i));
       head.appendChild(sb);
       d.appendChild(head);
@@ -1026,7 +1363,7 @@
         const sel = isSelectableDistrict(p, c);
         // 选择目标时放大对手的建筑牌，方便触屏点击
         const n = cardNode(c, { mini: !picking, clickable: sel, pickable: sel });
-        if (sel) onTap(n, () => pickDistrict(p.id, c.uid));
+        if (sel) bindCardAction(n, () => pickDistrict(p.id, c.uid), true);
         city.appendChild(n);
       });
       body.appendChild(city);
@@ -1065,7 +1402,7 @@
     li.innerHTML = '<span class="sd-label">合计</span><span class="sd-val">' + row.total + '</span>';
     ul.appendChild(li);
     $('#score-foot').textContent = s.phase === 'gameover'
-      ? (s.winner === idx ? '🏆 本局胜利者' : '游戏已结束') + '（最终得分）'
+      ? (s.winner === idx ? '本局胜利者' : '游戏已结束') + '（最终得分）'
       : '（当前实时计分，最终以结算为准）';
     const pop = $('#score-popup');
     pop.hidden = false;
@@ -1080,15 +1417,15 @@
     if (meArea) meArea.dataset.seat = App.myIdx;
     const ms = $('#my-char-status');
     if (ms) ms.innerHTML = charStatusHTML(me);
-    $('#my-gold').textContent = '🪙 ' + me.gold;
+    $('#my-gold').textContent = '金 ' + me.gold;
     $('#my-city-count').textContent = me.cityCount + ' / ' + s.endDistricts + ' 栋';
     $('#my-hand-count').textContent = me.hand.length + ' 张';
     const fx = s.effects || {};
     $('#my-chars-tip').innerHTML = me.chars.map(c => {
       let extra = '', cls = c.played ? '' : ' crown';
-      if (fx.assassinated === c.num) { extra = ' 🗡被刺杀'; cls = ' dead'; }
-      else if (fx.bewitched === c.num) { extra = ' 🔮被施咒'; cls = ' magic'; }
-      else if (fx.thief === c.num) { extra = ' 💰被盯上'; cls = ' magic'; }
+      if (fx.assassinated === c.num) { extra = ' 被刺杀'; cls = ' dead'; }
+      else if (fx.bewitched === c.num) { extra = ' 被施咒'; cls = ' magic'; }
+      else if (fx.thief === c.num) { extra = ' 被盯上'; cls = ' magic'; }
       return '<span class="tag' + cls + '">' + c.num + '·' + escapeHtml(c.name) +
         (c.played ? '（已用）' : '') + extra + '</span>';
     }).join(' ');
@@ -1100,7 +1437,7 @@
       const n = cardNode(c, { clickable: sel, pickable: sel,
         selected: App.sel && App.sel.items.indexOf(c.uid) >= 0 });
       n.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name;
-      if (sel) onTap(n, () => pickDistrict(me.id, c.uid));
+      if (sel) bindCardAction(n, () => pickDistrict(me.id, c.uid), true);
       city.appendChild(n);
     });
 
@@ -1114,7 +1451,7 @@
       else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) { clickable = c.canBuild; disabled = !c.canBuild; }
       const n = cardNode(c, { clickable: clickable, disabled: disabled, selected: inSel, pickable: pickable });
       n.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name + ' · 花费 ' + c.cost;
-      if (clickable) onTap(n, () => onHandClick(c));
+      if (clickable) bindCardAction(n, () => onHandClick(c), !(App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
       hand.appendChild(n);
     });
   }
@@ -1172,7 +1509,7 @@
     if (isPicker) {
       $('#prompt').textContent = $('#draft-title').textContent;
     } else {
-      $('#prompt').innerHTML = (cur && cur.isBot ? '🤖 ' : '⏳ ') +
+      $('#prompt').innerHTML = (cur && cur.isBot ? '电脑：' : '等待：') +
         escapeHtml(cur ? cur.name : '') + ' 正在选角' + thinkingDots();
     }
     $('#actions').innerHTML = '';
@@ -1207,7 +1544,7 @@
     // 墓地响应
     if (s.reaction) {
       if (s.reaction.playerId === App.myId) {
-        promptEl.innerHTML = '⚰️ ' + escapeHtml(s.reaction.prompt);
+        promptEl.innerHTML = '墓地：' + escapeHtml(s.reaction.prompt);
         (av.actions || []).forEach(a => actionsEl.appendChild(actionBtn(a, a.use ? 'main' : '')));
       } else {
         const who = s.players.find(p => p.id === s.reaction.playerId);
@@ -1220,13 +1557,13 @@
       const t = s.turn;
       if (t && t.playerId !== App.myId) {
         const who = s.players[t.playerIdx];
-        promptEl.innerHTML = (who.isBot ? '🤖 ' : '⏳ ') + escapeHtml(who.name) +
+        promptEl.innerHTML = (who.isBot ? '电脑：' : '等待：') + escapeHtml(who.name) +
           '（' + t.charNum + '·' + escapeHtml(t.charName) + '）正在行动' + thinkingDots();
       } else promptEl.textContent = '';
       return;
     }
 
-    promptEl.innerHTML = '👉 ' + escapeHtml(av.prompt || '请选择行动');
+    promptEl.innerHTML = escapeHtml(av.prompt || '请选择行动');
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     av.actions.forEach(a => {
@@ -1249,7 +1586,7 @@
     }
     // 从手牌选一张（实验室 / 博物馆）
     if (App.sel && App.sel.kind === 'handpick') {
-      promptEl.innerHTML = '👉 ' + escapeHtml(App.sel.label);
+      promptEl.innerHTML = escapeHtml(App.sel.label);
       const c = el('button', 'act', '取消');
       onTap(c, () => { App.sel = null; render(); });
       actionsEl.appendChild(c);
@@ -1257,7 +1594,7 @@
     // pending 卡牌选择弹窗（抽牌保留 / 学者 / 预言家归还）
     const tk = s.turn && s.turn.pending ? s.turn.pending.kind : null;
     if (tk === 'draw_keep' || tk === 'scholar_pick' || tk === 'prophet_give') {
-      const b = el('button', 'act main', '📜 打开卡牌选择');
+      const b = el('button', 'act main', '打开卡牌选择');
       onTap(b, openPickModal);
       actionsEl.appendChild(b);
     }
@@ -1344,17 +1681,17 @@
       const me = s.players.find(p => p.id === App.myId);
       me.hand.forEach(c => {
         const n = cardNode(c, { clickable: true });
-        onTap(n, () => { closeModal(); send({ type: 'prophet_give', uid: c.uid }); });
+        bindCardAction(n, () => { closeModal(); send({ type: 'prophet_give', uid: c.uid }); }, true);
         grid.appendChild(n);
       });
     } else {
       cards.forEach(c => {
         const n = cardNode(c, { clickable: true });
-        onTap(n, () => {
+        bindCardAction(n, () => {
           closeModal();
           if (kind === 'scholar_pick') send({ type: 'scholar_pick', uid: c.uid });
           else send({ type: 'draw_keep', uid: c.uid });
-        });
+        }, true);
         grid.appendChild(n);
       });
     }
@@ -1369,7 +1706,7 @@
     let best = -1;
     rows.forEach(r => { if (r.total > best) best = r.total; });
     $('#over-title').innerHTML = s.winner != null
-      ? '🏆 ' + escapeHtml(s.players[s.winner].name) + ' 获胜！'
+      ? escapeHtml(s.players[s.winner].name) + ' 获胜！'
       : '游戏结束（平局）';
     const tb = $('#score-table');
     tb.innerHTML = '<tr><th>玩家</th><th>城区</th><th>建筑分</th><th>奖励</th><th>总分</th><th class="score-detail">明细</th></tr>';
@@ -1400,10 +1737,12 @@
     const cg = el('div', 'char-grid');
     used.slice().sort((a, b) => a.num - b.num).forEach(c => {
       const d = el('div', 'ref-card');
-      const img = roleImage(c);
-      const art = img ? '<img class="rc-art" src="' + img + '" alt="' + escapeHtml(c.name) + '">' : '';
+      const img = roleThumb(c);
+      const full = roleFull(c);
+      const art = img ? '<img class="rc-art" src="' + img + '" alt="' + escapeHtml(c.name) + '" loading="lazy" decoding="async">' : '';
+      const hd = full ? '<button class="ref-hd-trigger" type="button" data-hd-src="' + escapeHtml(full) + '" data-hd-title="' + escapeHtml(c.name) + '">查看高清大图</button>' : '';
       // 角色卡图已含效果文字，顶部仅保留名称，不再重复说明
-      d.innerHTML = art + '<h4><span class="rc-num">' + c.num + '</span>' + c.name +
+      d.innerHTML = art + hd + '<h4><span class="rc-num">' + c.num + '</span>' + c.name +
         '<span class="rc-en">' + c.en + '</span></h4>';
       cg.appendChild(d);
     });
@@ -1433,8 +1772,14 @@
       body.appendChild(el('div', 'color-sub', col.name + '（' + col.en + '）'));
       const grp = el('div', 'char-grid');
       Cards.DISTRICTS.filter(d => d.color === k).sort((a, b) => a.cost - b.cost).forEach(d => {
-        const e = el('div', 'ref-card');
-        e.innerHTML = '<h4>' + d.name + '<span class="rc-en">' + d.en + ' · ' + d.cost + ' 金</span></h4>' +
+        const e = el('div', 'ref-card c-' + k);
+        const thumb = Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(d, 'thumb') : null;
+        const full = Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(d, 'full') : null;
+        const art = thumb
+          ? '<img class="rc-art district-ref-art" src="' + thumb + '" alt="' + escapeHtml(d.name) + '" loading="lazy" decoding="async">'
+          : '';
+        const hd = full ? '<button class="ref-hd-trigger" type="button" data-hd-src="' + escapeHtml(full) + '" data-hd-title="' + escapeHtml(d.name) + '">查看高清大图</button>' : '';
+        e.innerHTML = art + hd + '<h4>' + d.name + '<span class="rc-en">' + d.en + ' · ' + d.cost + ' 金</span></h4>' +
           (d.desc ? '<p>' + d.desc + '</p>' : '<p class="dim">— 无特殊效果，仅计入建筑分</p>');
         grp.appendChild(e);
       });
@@ -1520,6 +1865,15 @@
 
   /* ============================== 事件绑定 ============================== */
   function bind() {
+    if (Theme.onChange) Theme.onChange(() => {
+      syncThemeBtn();
+      if (App.state && App.state.phase !== 'lobby') render();
+    });
+    $$('[data-theme-choice]').forEach(b => b.onclick = () => Theme.apply(b.dataset.themeChoice));
+    const themeBtn = $('#btn-theme');
+    if (themeBtn) themeBtn.onclick = () => Theme.toggle();
+    if (Theme.updateControls) Theme.updateControls();
+    syncThemeBtn();
     $$('[data-goto]').forEach(b => b.onclick = () => showScreen('screen-' + b.dataset.goto));
 
     $('#btn-single').onclick = () => showScreen('screen-setup');
@@ -1543,6 +1897,7 @@
 
     // 选角卡图悬浮放大
     initCharZoom();
+    initCardHd();
 
     // 电脑节奏：设置页下拉 + 对局内一键切换
     loadSpeed();

@@ -27,6 +27,16 @@ function runGame(n, charSet, end, seed) {
   const MAX = 60000;
   while (state.phase !== 'gameover' && steps < MAX) {
     steps++;
+    // 当前引擎在每轮结束后等待所有玩家确认战果，再进入下一轮选角。
+    // 纯电脑模拟也要完成这个同步点，否则 currentActor() 没有可返回的行动者。
+    if (state.roundConfirm) {
+      state.players.forEach(p => {
+        if (!state.roundConfirm || state.phase === 'gameover') return;
+        const result = CitEngine.applyAction(state, p.id, { type: 'confirm_round' });
+        if (!result.ok) fallbacks++;
+      });
+      continue;
+    }
     const actor = currentActor(state);
     if (!actor) {
       // 没有行动者：可能处于轮次之间
