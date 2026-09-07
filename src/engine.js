@@ -473,7 +473,7 @@
       }
       return {
         prompt: '第 ' + state.roundConfirm.round + ' 轮结束（已确认 ' + done + '/' + state.players.length + '）',
-        actions: [{ type: 'confirm_round', label: '✅ 确认本轮战果' }]
+        actions: [{ type: 'confirm_round', label: '确认本轮战果' }]
       };
     }
 
@@ -948,7 +948,7 @@
         log(state, p.name + ' 建造了『' + card.name + '』（' + card.cost + ' 金）。', 'build');
         if (p.city.length >= state.config.endDistricts && state.firstToFinish < 0) {
           state.firstToFinish = idx;
-          log(state, '★ ' + p.name + ' 率先建成第 ' + state.config.endDistricts + ' 栋建筑，本轮结束后游戏结束！', 'sys');
+          log(state, '* ' + p.name + ' 率先建成第 ' + state.config.endDistricts + ' 栋建筑，本轮结束后游戏结束！', 'sys');
         }
         if (c.id === 'alchemist' && t.phase !== 'witch_resume') {
           // 炼金术士在回合结束时统一回收
@@ -1542,7 +1542,7 @@
     state.scores.forEach(r => {
       log(state, r.name + '：' + r.total + ' 分（建筑 ' + r.base + ' + 奖励 ' + r.bonus + '）', 'score');
     });
-    if (state.winner != null) log(state, '🏆 胜利者：' + state.players[state.winner].name + '！', 'score');
+    if (state.winner != null) log(state, '胜利者：' + state.players[state.winner].name + '！', 'score');
     else log(state, '平局！', 'score');
   }
 
@@ -1601,9 +1601,12 @@
           hasCrown: p.hasCrown,
           connected: p.connected,
           played: p.played.slice(),
-          // 选角状态：hasChosen=已选（盖牌），revealedCharNum=已公开（翻面）。
-          // 仅在该角色被叫到/已行动时暴露编号（公开信息），其余情况为 null，不泄露身份。
+          // 选角状态：hasChosen=已选（盖牌），revealedCharId/Num=已公开（翻面）。
+          // 仅在该角色被叫到/已行动时暴露身份，避免把尚未行动的暗牌泄露给客户端。
           hasChosen: p.chars.length > 0,
+          revealedCharId: (state.turn && state.turn.playerIdx === i)
+            ? state.turn.charId
+            : (p.played && p.played.length ? p.played[0] : null),
           revealedCharNum: (state.turn && state.turn.playerIdx === i)
             ? charOf(state.turn.charId).num
             : (p.played && p.played.length ? charOf(p.played[0]).num : null)
