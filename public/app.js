@@ -132,6 +132,11 @@
   function onTap(node, fn) {
     if (!node) return;
     if (typeof window === 'undefined' || !isTouchDevice()) { node.onclick = fn; return; }
+    // 触屏设备：把动作存到 __tapFn，绑定一次监听器即可。这样卡片节点被
+    // keyed reconciliation 复用时，只需更新 __tapFn 而不会重复 addEventListener。
+    node.__tapFn = fn;
+    if (node.__tapBound) return;
+    node.__tapBound = true;
     let sx = 0, sy = 0, moved = false;
     node.addEventListener('touchstart', e => {
       const t = e.touches && e.touches[0];
@@ -146,7 +151,7 @@
     node.addEventListener('touchend', e => {
       if (moved) return;                      // 判定为滑动（滚动页面），不当作点击
       if (e.cancelable) e.preventDefault();    // 阻止合成的 mouseover/click
-      fn();
+      const f = node.__tapFn; if (f) f();
     }, { passive: false });
   }
   let toastTimer = null;
@@ -522,12 +527,18 @@
   }
 
   /* ============================== 卡牌渲染 ============================== */
+  function cardClassOf(c, opts) {
+    opts = opts || {};
+    const neon = Theme.is && Theme.is('neon');
+    return 'card c-' + c.color + (neon ? ' neon-card' : '') + (opts.mini ? ' mini' : '') +
+      (opts.clickable ? ' clickable' : '') + (opts.disabled ? ' disabled' : '') +
+      (opts.selected ? ' selected' : '') + (opts.pickable ? ' pickable' : '');
+  }
+
   function cardNode(c, opts) {
     opts = opts || {};
     const neon = Theme.is && Theme.is('neon');
-    const d = el('div', 'card c-' + c.color + (neon ? ' neon-card' : '') + (opts.mini ? ' mini' : '') +
-      (opts.clickable ? ' clickable' : '') + (opts.disabled ? ' disabled' : '') +
-      (opts.selected ? ' selected' : '') + (opts.pickable ? ' pickable' : ''));
+    const d = el('div', cardClassOf(c, opts));
     d.dataset.uid = c.uid;
     d.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
       ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
@@ -537,7 +548,9 @@
       const img = el('img', 'card-art');
       img.src = art;
       img.alt = c.name;
-      img.loading = 'lazy';
+      // 不再用 loading="lazy"：每次 render 都会重建 DOM，懒加载图片在移动端会
+      // 出现「空白→加载」的闪烁。去掉后新节点立即（从缓存）解码，配合 keyed
+      // reconciliation（syncCards）复用节点，彻底消除每步行动的画面闪烁。
       img.decoding = 'async';
       d.appendChild(img);
       if (d.dataset) {
@@ -553,6 +566,43 @@
     if (c.beautified) d.appendChild(el('div', 'c-badges', '美'));
     else if (c.museumCount) d.appendChild(el('div', 'c-badges', '博' + c.museumCount));
     return d;
+  }
+
+  /* 复用已有卡片节点时，只更新外层动态属性（className / title / uid），
+   * 不重建内部 <img>，从而不触发图片重新解码与闪烁。 */
+  function refreshCardNode(node, c, opts) {
+    node.className = cardClassOf(c, opts);
+    if (node.dataset) node.dataset.uid = c.uid;
+    node.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
+      ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
+  }
+
+  /* 按 uid 复用卡片节点的列表渲染：不整盘 innerHTML 清空，已存在的卡片
+   * （含内部 <img>）保留不动，只增删变化项并微调顺序。这是消除霓虹主题
+   * 「每行动一次整盘重绘→图片闪烁」的根本手段。 */
+  function syncCards(container, cards, optsFor, onNode) {
+    if (!container) return;
+    const existing = {};
+    Array.prototype.forEach.call(container.children, ch => {
+      const k = ch.dataset && ch.dataset.uid;
+      if (k) existing[k] = ch;
+    });
+    const keep = {};
+    const frag = document.createDocumentFragment();
+    cards.forEach(c => {
+      let node = existing[c.uid];
+      if (node) refreshCardNode(node, c, optsFor(c));
+      else node = cardNode(c, optsFor(c));
+      keep[c.uid] = node;
+      if (onNode) onNode(node, c, optsFor(c));
+      frag.appendChild(node);
+    });
+    // 移除已不在列表中的旧节点
+    Array.prototype.forEach.call(container.children, ch => {
+      const k = ch.dataset && ch.dataset.uid;
+      if (k && !keep[k] && ch.parentNode) ch.parentNode.removeChild(ch);
+    });
+    container.appendChild(frag);
   }
 
   /* 经典主题沿用旧插画；霓虹主题严格按角色 id 映射最终完整卡图。 */
@@ -584,10 +634,11 @@
     const neon = Theme.is && Theme.is('neon');
     const d = el('div', 'char-card' + (neon ? ' neon-role-card' : '') + (opts.dim ? ' faceup-char' : '') +
       (opts.clickable ? ' clickable' : '') + (opts.mini ? ' mini' : ''));
+    if (d.dataset && c.id) d.dataset.uid = c.id;
     const img = roleThumb(c);
     const full = roleFull(c);
     let art = '<div class="cc-art">';
-    if (img) art += '<img src="' + img + '" alt="' + escapeHtml(c.name) + '" loading="lazy" decoding="async">';
+    if (img) art += '<img src="' + img + '" alt="' + escapeHtml(c.name) + '" decoding="async">';
     else art += '<div class="cc-art-emoji">' + escapeHtml(String(c.num || '?')) + '</div>';
     art += '</div>';
     // 霓虹卡图本身已含编号、名称与规则；经典主题保留原来的简化卡牌排版。
@@ -1334,19 +1385,30 @@
 
   function renderOpponents(s) {
     const wrap = $('#opponents');
-    wrap.innerHTML = '';
     const picking = districtSelectMode();
+    // 按 seat 复用对手区块，避免整盘重建导致城区卡图在移动端闪烁
+    const existing = {};
+    Array.prototype.forEach.call(wrap.children, ch => { if (ch.dataset && ch.dataset.seat != null) existing[ch.dataset.seat] = ch; });
+    const keep = {};
+    const frag = document.createDocumentFragment();
     s.players.forEach((p, i) => {
       if (p.id === App.myId) return;
-      const d = el('div', 'opp' + (s.turn && s.turn.playerIdx === p.seat ? ' active' : ''));
-      d.dataset.seat = p.seat;
-      const cs = el('div', 'opp-char');
-      cs.innerHTML = charStatusHTML(p);
-      d.appendChild(cs);
-      const head = el('div', 'opp-head');
-      let tags = '';
-      if (p.isBot) tags += '<span class="tag bot">电脑</span>';
-      if (p.hasCrown) tags += '<span class="tag crown">皇冠</span>';
+      let d = existing[p.seat];
+      if (!d) {
+        d = el('div', 'opp');
+        d.dataset.seat = p.seat;
+        d.appendChild(el('div', 'opp-char'));
+        const head = el('div', 'opp-head'); d.appendChild(head);
+        const body = el('div', 'opp-body');
+        body.appendChild(el('div', 'opp-city'));
+        body.appendChild(el('div', 'opp-meta'));
+        d.appendChild(body);
+      }
+      keep[p.seat] = d;
+      d.classList.toggle('active', !!(s.turn && s.turn.playerIdx === p.seat));
+      d.querySelector('.opp-char').innerHTML = charStatusHTML(p);
+      const tags = (p.isBot ? '<span class="tag bot">电脑</span>' : '') + (p.hasCrown ? '<span class="tag crown">皇冠</span>' : '');
+      const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
         '<span class="opp-gold">金 ' + p.gold + '</span>';
       const sb = el('button', 'score-btn');
@@ -1354,26 +1416,32 @@
       sb.textContent = '分数';
       onTap(sb, () => openScore(i));
       head.appendChild(sb);
-      d.appendChild(head);
 
-      const body = el('div', 'opp-body');
-      const city = el('div', 'opp-city');
-      if (!p.city.length) city.appendChild(el('div', 'empty-hint', '（尚无建筑）'));
-      p.city.forEach(c => {
-        const sel = isSelectableDistrict(p, c);
-        // 选择目标时放大对手的建筑牌，方便触屏点击
-        const n = cardNode(c, { mini: !picking, clickable: sel, pickable: sel });
-        if (sel) bindCardAction(n, () => pickDistrict(p.id, c.uid), true);
-        city.appendChild(n);
-      });
-      body.appendChild(city);
-      const meta = el('div', 'opp-meta');
-      meta.innerHTML = '城区 <b>' + p.cityCount + '</b>/' + s.endDistricts + '<br>手牌 ' + p.handCount + ' 张' +
+      const city = d.querySelector('.opp-city');
+      if (!p.city.length) {
+        Array.prototype.forEach.call(city.children, ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+        if (!city.querySelector('.empty-hint')) city.appendChild(el('div', 'empty-hint', '（尚无建筑）'));
+      } else {
+        const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
+        syncCards(city, p.city, c => {
+          const sel = isSelectableDistrict(p, c);
+          // 选择目标时放大对手的建筑牌，方便触屏点击
+          return { mini: !picking, clickable: sel, pickable: sel };
+        }, (node, c) => {
+          const sel = isSelectableDistrict(p, c);
+          if (sel) bindCardAction(node, () => pickDistrict(p.id, c.uid), true);
+          else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
+        });
+      }
+      d.querySelector('.opp-meta').innerHTML = '城区 <b>' + p.cityCount + '</b>/' + s.endDistricts + '<br>手牌 ' + p.handCount + ' 张' +
         (p.played && p.played.length ? '<br>已用：' + p.played.map(c => escapeHtml(Engine.charOf(c).name)).join('、') : '');
-      body.appendChild(meta);
-      d.appendChild(body);
-      wrap.appendChild(d);
+      frag.appendChild(d);
     });
+    // 移除已不存在的对手区块
+    Array.prototype.forEach.call(wrap.children, ch => {
+      if (ch.dataset && ch.dataset.seat != null && !keep[ch.dataset.seat] && ch.parentNode) ch.parentNode.removeChild(ch);
+    });
+    wrap.appendChild(frag);
   }
 
   /* 得分明细浮动窗口 */
@@ -1430,30 +1498,46 @@
         (c.played ? '（已用）' : '') + extra + '</span>';
     }).join(' ');
 
-    const city = $('#my-city'); city.innerHTML = '';
-    if (!me.city.length) city.appendChild(el('div', 'empty-hint', '（尚无建筑，快去建造吧）'));
-    me.city.forEach(c => {
-      const sel = isSelectableDistrict(me, c);
-      const n = cardNode(c, { clickable: sel, pickable: sel,
-        selected: App.sel && App.sel.items.indexOf(c.uid) >= 0 });
-      n.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name;
-      if (sel) bindCardAction(n, () => pickDistrict(me.id, c.uid), true);
-      city.appendChild(n);
-    });
+    const city = $('#my-city');
+    if (!me.city.length) {
+      // 按 uid 清掉残留卡片（如被摧毁后清空），再补空提示，避免整盘 innerHTML 重建导致图片闪烁
+      Array.prototype.forEach.call(city.children, ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+      if (!city.querySelector('.empty-hint')) city.appendChild(el('div', 'empty-hint', '（尚无建筑，快去建造吧）'));
+    } else {
+      const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
+      syncCards(city, me.city, c => {
+        const sel = isSelectableDistrict(me, c);
+        return { clickable: sel, pickable: sel, selected: App.sel && App.sel.items.indexOf(c.uid) >= 0 };
+      }, (node, c) => {
+        const sel = isSelectableDistrict(me, c);
+        if (sel) bindCardAction(node, () => pickDistrict(me.id, c.uid), true);
+        else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
+      });
+    }
 
-    const hand = $('#my-hand'); hand.innerHTML = '';
-    if (!me.hand.length) hand.appendChild(el('div', 'empty-hint', '（手牌为空）'));
-    me.hand.forEach(c => {
-      const inSel = App.sel && App.sel.items.indexOf(c.uid) >= 0;
-      let clickable = false, disabled = false, pickable = false;
-      if (App.sel && App.sel.kind === 'handpick') { clickable = true; pickable = true; }
-      else if (App.sel && App.sel.kind === 'multi') { clickable = true; }
-      else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) { clickable = c.canBuild; disabled = !c.canBuild; }
-      const n = cardNode(c, { clickable: clickable, disabled: disabled, selected: inSel, pickable: pickable });
-      n.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name + ' · 花费 ' + c.cost;
-      if (clickable) bindCardAction(n, () => onHandClick(c), !(App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
-      hand.appendChild(n);
-    });
+    const hand = $('#my-hand');
+    if (!me.hand.length) {
+      Array.prototype.forEach.call(hand.children, ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+      if (!hand.querySelector('.empty-hint')) hand.appendChild(el('div', 'empty-hint', '（手牌为空）'));
+    } else {
+      const eh = hand.querySelector('.empty-hint'); if (eh) eh.remove();
+      syncCards(hand, me.hand, c => {
+        const inSel = App.sel && App.sel.items.indexOf(c.uid) >= 0;
+        let clickable = false, disabled = false, pickable = false;
+        if (App.sel && App.sel.kind === 'handpick') { clickable = true; pickable = true; }
+        else if (App.sel && App.sel.kind === 'multi') { clickable = true; }
+        else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) { clickable = c.canBuild; disabled = !c.canBuild; }
+        return { clickable: clickable, disabled: disabled, selected: inSel, pickable: pickable };
+      }, (node, c) => {
+        const inSel = App.sel && App.sel.items.indexOf(c.uid) >= 0;
+        let clickable = false;
+        if (App.sel && App.sel.kind === 'handpick') clickable = true;
+        else if (App.sel && App.sel.kind === 'multi') clickable = true;
+        else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) clickable = c.canBuild;
+        if (clickable) bindCardAction(node, () => onHandClick(c), !(App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
+        else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
+      });
+    }
   }
 
   function renderLog(s) {
@@ -1523,7 +1607,25 @@
     const rem = (s && s.removed) || { faceUp: [], faceDownCount: 0 };
     const fu = $('#rs-faceup', strip);
     const fd = $('#rs-facedown', strip);
-    if (fu) { fu.innerHTML = ''; (rem.faceUp || []).forEach(c => fu.appendChild(charNode(c, { dim: true, mini: true }))); }
+    if (fu) {
+      const faceUp = rem.faceUp || [];
+      // 按角色 id 复用节点，避免每步行动整盘重建导致霓虹角色立绘在移动端闪烁
+      const existing = {};
+      Array.prototype.forEach.call(fu.children, ch => { const k = ch.dataset && ch.dataset.uid; if (k) existing[k] = ch; });
+      const keep = {};
+      const frag = document.createDocumentFragment();
+      faceUp.forEach(c => {
+        let node = existing[c.id];
+        if (!node) node = charNode(c, { dim: true, mini: true });
+        keep[c.id] = node;
+        frag.appendChild(node);
+      });
+      Array.prototype.forEach.call(fu.children, ch => {
+        const k = ch.dataset && ch.dataset.uid;
+        if (k && !keep[k] && ch.parentNode) ch.parentNode.removeChild(ch);
+      });
+      fu.appendChild(frag);
+    }
     if (fd) {
       fd.innerHTML = '';
       const n = rem.faceDownCount || 0;
@@ -1867,6 +1969,9 @@
   function bind() {
     if (Theme.onChange) Theme.onChange(() => {
       syncThemeBtn();
+      // 主题切换会改变卡片内部结构（neon 用 <img>、classic 用文本），复用旧节点会错乱，
+      // 因此先清空所有卡片容器，让本次 render 全量重建出正确结构。
+      ['#my-city', '#my-hand', '#opponents'].forEach(sel => { const e = $(sel); if (e) e.innerHTML = ''; });
       if (App.state && App.state.phase !== 'lobby') render();
     });
     $$('[data-theme-choice]').forEach(b => b.onclick = () => Theme.apply(b.dataset.themeChoice));
