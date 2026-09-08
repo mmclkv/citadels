@@ -1090,7 +1090,7 @@
       const img = roleThumb(ch);
       const full = roleFull(ch);
       front = img
-        ? '<img src="' + img + '" alt="' + escapeHtml(ch.name) + '" loading="lazy" decoding="async">'
+        ? '<img src="' + img + '" alt="' + escapeHtml(ch.name) + '" decoding="async">'
         : '<div class="cs-emoji">' + escapeHtml(String(p.revealedCharNum || '?')) + '</div>';
       const nm = ch.name || ROLE_IMG[p.revealedCharNum] || ('' + p.revealedCharNum);
       nameSpan = '<span class="cs-name">' + escapeHtml(nm) + '</span>';
@@ -1406,7 +1406,10 @@
       }
       keep[p.seat] = d;
       d.classList.toggle('active', !!(s.turn && s.turn.playerIdx === p.seat));
-      d.querySelector('.opp-char').innerHTML = charStatusHTML(p);
+      // 角色状态 HTML 未变（如每步行动但身份没翻面）时跳过重建，避免霓虹角色立绘闪烁
+      const cs = d.querySelector('.opp-char');
+      const csHtml = charStatusHTML(p);
+      if (cs._lastHTML !== csHtml) { cs.innerHTML = csHtml; cs._lastHTML = csHtml; }
       const tags = (p.isBot ? '<span class="tag bot">电脑</span>' : '') + (p.hasCrown ? '<span class="tag crown">皇冠</span>' : '');
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
