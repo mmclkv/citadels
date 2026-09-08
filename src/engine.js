@@ -636,8 +636,11 @@
         return { prompt: '【领主】选择要摧毁的建筑', actions: destroyChoices(state, t) };
       case 'marshal_seize':
         return { prompt: '【元帅】选择要抢夺的建筑（费用 ≤ 3）', actions: seizeChoices(state, t) };
-      case 'diplomat_mine':
-        return { prompt: '【外交官】选择你自己的一栋建筑用于交换', actions: ownDistrictChoices(state, t, false) };
+      case 'diplomat_mine': {
+        const acts = ownDistrictChoices(state, t, false);
+        if (acts.length === 0) acts.push({ type: 'ability_skip', label: '你还没有建筑，无法交换，放弃使用能力' });
+        return { prompt: '【外交官】选择你自己的一栋建筑用于交换', actions: acts };
+      }
       case 'diplomat_theirs':
         return { prompt: '【外交官】选择要换取的建筑', actions: diplomatTargets(state, t) };
       case 'artist': {
@@ -1696,10 +1699,10 @@
     switch (pd.kind) {
       case 'draw_keep':
         return { kind: pd.kind, prompt: pd.prompt, cards: (pd.cards || []).map(c => ({
-          uid: c.uid, name: c.name, color: c.color, cost: c.cost, desc: c.desc })) };
+          uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost, desc: c.desc })) };
       case 'scholar_pick':
         return { kind: pd.kind, prompt: pd.prompt, cards: (pd.cards || []).map(c => ({
-          uid: c.uid, name: c.name, color: c.color, cost: c.cost, desc: c.desc })) };
+          uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost, desc: c.desc })) };
       case 'artist':
         return { kind: pd.kind, selected: pd.selected || [] };
       default:
