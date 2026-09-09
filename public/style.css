@@ -304,6 +304,7 @@ body.card-hd-open{overflow:hidden}
   transform:translate(0,0);opacity:1;
   transition:transform .9s cubic-bezier(.4,.05,.35,1),opacity .9s ease;
   filter:drop-shadow(0 0 4px rgba(231,181,60,.6))}
+.fly-coin .coin-icon{width:22px;height:22px}
 
 /* 领主摧毁建筑：克隆卡播放抖动/红光/塌陷/淡出 */
 .card.destroying{pointer-events:none;z-index:402;animation:cardDestroy .72s ease forwards}
@@ -484,7 +485,8 @@ body.card-hd-open{overflow:hidden}
 /* 桌面端「抽 2 张建筑牌保留 1 张」：卡牌需要足够大，方便辨认卡面文字和插画。 */
 @media (min-width:821px){
   .pick-grid-draw_keep{gap:18px}
-  .pick-grid-draw_keep .card{width:112px;height:168px}
+  /* 与桌面端悬浮预览接近的阅读尺寸，方便直接比较两张建筑牌。 */
+  .pick-grid-draw_keep .card{width:300px;height:450px}
 }
 .section-title{font-size:13px;color:#7a5c22;margin:16px 0 8px;font-weight:700;
   border-bottom:1px solid var(--line);padding-bottom:5px}

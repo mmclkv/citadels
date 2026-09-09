@@ -99,7 +99,7 @@
   function beautifiedExtra(card) { return card.beautified ? 1 : 0; }
   function districtScoreValue(card) {
     if (card.purple && card.purple.effect === 'scoreAs') return card.purple.scoreAs;
-    return card.cost;
+    return card.scoreValue || card.cost;
   }
 
   /* ============================ 创建游戏 ============================ */
