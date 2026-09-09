@@ -266,6 +266,12 @@ html[data-theme="neon"] .card.neon-card .c-name,
 html[data-theme="neon"] .card.neon-card .c-en { display:none; }
 html[data-theme="neon"] .card.neon-card.clickable { border-color:var(--ui-cyan); }
 html[data-theme="neon"] .card.neon-card.clickable:hover { box-shadow:0 0 0 2px rgba(67,228,255,.35),0 9px 24px rgba(0,0,0,.45); }
+/* 选择保留建筑牌时，覆盖普通霓虹卡牌尺寸，匹配悬浮预览的大图。 */
+@media (min-width:821px){
+  html[data-theme="neon"] .pick-grid-draw_keep .card.neon-card {
+    width:300px; height:450px;
+  }
+}
 html[data-theme="neon"] .card.neon-card.selected { outline:2px solid var(--ui-magenta); }
 html[data-theme="neon"] .card.neon-card.pickable { border-color:var(--ui-cyan)!important; box-shadow:0 0 0 2px rgba(67,228,255,.45),0 0 22px rgba(67,228,255,.25)!important; }
 html[data-theme="neon"] .card.neon-card.pickable::after { color:var(--ui-cyan); }

@@ -53,7 +53,8 @@
     { name: '商栈',   en: 'Trading Post', color: 'green', cost: 2, count: 3 },
     { name: '船坞',   en: 'Docks',        color: 'green', cost: 3, count: 3 },
     { name: '港口',   en: 'Harbor',       color: 'green', cost: 4, count: 3 },
-    { name: '市政厅', en: 'Town Hall',    color: 'green', cost: 5, count: 2 },
+    { name: '市政厅', en: 'Town Hall',    color: 'green', cost: 5, scoreValue: 6, count: 2,
+      desc: '商业建筑。建造费用5金币，计分价值6分。' },
 
     /* ---------- 红色 · 军事建筑 11 张（8号角色收入） ---------- */
     { name: '了望塔', en: 'Watchtower',  color: 'red', cost: 1, count: 3 },
@@ -247,6 +248,7 @@
           en: def.en,
           color: def.color,
           cost: def.cost,
+          scoreValue: def.scoreValue || def.cost,
           purple: def.purple ? Object.assign({}, def.purple) : null,
           desc: def.desc || ''
         });

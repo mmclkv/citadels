@@ -1160,7 +1160,7 @@
     for (let k = 0; k < n; k++) {
       const c = document.createElement('div');
       c.className = 'fly-coin';
-      c.textContent = '金';
+      c.innerHTML = '<i class="coin-icon" aria-hidden="true"></i>';
       document.body.appendChild(c);
       const sx = a.left + a.width / 2 + (Math.random() * 40 - 20);
       const sy = a.top + a.height / 2 + (Math.random() * 30 - 15);
