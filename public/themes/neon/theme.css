@@ -357,6 +357,11 @@ html[data-theme="neon"] .seat.me { border-color:var(--ui-magenta); background:rg
   html[data-theme="neon"] .mode-card { min-height:0; }
   html[data-theme="neon"] .card.neon-card { width:72px; height:108px; }
   html[data-theme="neon"] .card.neon-card.mini { width:58px; height:87px; }
+  /* 选牌弹窗：移动端放大到接近半屏宽，卡图完整显示、便于点选 */
+  html[data-theme="neon"] .pick-grid .card.neon-card {
+    width:min(44vw, 200px); height:auto; aspect-ratio:2/3;
+  }
+  html[data-theme="neon"] .pick-grid .card.neon-card .card-art { object-fit:cover; }
   html[data-theme="neon"] .char-zoom { width:min(330px,84vw); }
 }
 @media (prefers-reduced-motion:reduce) {
