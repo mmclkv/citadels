@@ -178,6 +178,14 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .card .c-en{flex:0 0 auto;text-align:center;font-size:7.5px;color:var(--dim);
   padding:2px 3px;letter-spacing:.02em;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .card .c-badges{position:absolute;bottom:2px;right:3px;display:flex;gap:2px;font-size:10px}
+.museum-stack{position:absolute;left:5px;bottom:5px;width:40px;height:29px;z-index:4;pointer-events:none}
+.museum-stack-card{position:absolute;left:calc(var(--stack-index) * 4px);bottom:calc(var(--stack-index) * 3px);
+  width:17px;height:23px;border:1px solid #9b7a42;border-radius:3px;
+  background:repeating-linear-gradient(135deg,#e9d4a5 0 3px,#b89455 3px 5px);
+  box-shadow:0 1px 2px rgba(30,20,5,.4);transform:rotate(calc((var(--stack-index) - 1) * 8deg))}
+.museum-stack-count{position:absolute;right:0;top:0;min-width:17px;height:17px;padding:0 3px;
+  display:flex;align-items:center;justify-content:center;border-radius:9px;background:#6a4f18;color:#fff8df;
+  border:1px solid #f0d79a;font-size:10px;font-weight:800;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 .card.mini{width:60px;height:84px}
 .card.mini .c-name{font-size:12px;padding:18px 0 3px}
 .card.mini .c-cost{width:17px;height:17px;font-size:10px;top:6px;left:5px}
