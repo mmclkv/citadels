@@ -341,6 +341,19 @@
         flyGoldIn(n.playerIdx, n.amount);
         return;
 
+      case 'alchemist_refund':
+        // 炼金术士回合结束回收建造费：沿用金币飞行动画，并补充明确提示。
+        flyGoldIn(n.playerIdx, n.amount);
+        if (isMe) {
+          queueEvent({
+            tone: 'good', icon: '⚗', title: '炼金术士回收金币', hold: 4200,
+            text: '本回合建筑花费已返还：<b>' + n.amount + ' 枚金币</b>。'
+          });
+        } else {
+          toast('⚗ ' + n.playerName + ' 回收了 ' + n.amount + ' 枚建造金币');
+        }
+        return;
+
       case 'round_end':
         return;
 
@@ -869,10 +882,11 @@
     const hdBtn = $('#cz-hd-btn');
     const W = 330; // 放大浮窗宽度
     const SEL = '[data-zoom-src],[data-zoom-back]';
-    const HIDE_DELAY = 1000;
+    const HIDE_DELAY = 500;
     let active = null;
     let pending = null;   // 触屏下待确认的选角行动
     let hideTimer = null;
+    let overlapTarget = null; // 预览层覆盖的底层卡牌，优先把点击交给它
 
     function cancelHide() {
       if (hideTimer !== null) {
@@ -927,7 +941,7 @@
 
     function hide() {
       cancelHide();
-      zoom.hidden = true; active = null; pending = null;
+      zoom.hidden = true; active = null; pending = null; overlapTarget = null;
       if (zbg) zbg.hidden = true;
       if (zact) zact.hidden = true;
       if (hdBtn) hdBtn.hidden = true;
@@ -969,6 +983,19 @@
       }
       if (zact) zact.hidden = true;
       place(trigger.getBoundingClientRect());
+    }
+
+    // 预览浮层可能挡住另一张卡牌。elementFromPoint 只会返回最上层浮层，
+    // 因此使用 elementsFromPoint 找到它下面的卡牌，并排除当前正在预览的卡牌。
+    function underlyingCardAt(e) {
+      if (!document.elementsFromPoint || typeof e.clientX !== 'number' ||
+          typeof e.clientY !== 'number') return null;
+      const stack = document.elementsFromPoint(e.clientX, e.clientY);
+      for (const node of stack) {
+        const card = node && node.closest && node.closest(SEL);
+        if (card && card !== active) return card;
+      }
+      return null;
     }
 
     const touchMode = isTouchDevice();
@@ -1027,15 +1054,24 @@
 
     /* ---------------- 桌面：悬浮放大 ---------------- */
     document.addEventListener('mouseover', e => {
-      // 预览框可能覆盖另一张卡；覆盖区域内只操作预览框，不让底层卡抢焦点。
-      if (isInsideZoom(e)) { cancelHide(); return; }
+      // 预览框覆盖另一张卡时，优先切换到底层卡牌。
+      if (isInsideZoom(e)) {
+        const under = underlyingCardAt(e);
+        if (under) { overlapTarget = under; show(under); return; }
+        overlapTarget = null; cancelHide(); return;
+      }
       const t = e.target.closest && e.target.closest(SEL);
-      if (t && t !== active) show(t);
+      if (t && t !== active) { overlapTarget = null; show(t); }
       else if (e.target.closest && e.target.closest('#char-zoom')) cancelHide();
     });
     document.addEventListener('mousemove', e => {
       if (zoom.hidden || !active) return;
-      if (isInsideZoom(e)) { cancelHide(); return; }
+      if (isInsideZoom(e)) {
+        const under = underlyingCardAt(e);
+        if (under) { overlapTarget = under; if (under !== active) show(under); }
+        else { overlapTarget = null; cancelHide(); }
+        return;
+      }
       // 卡片若已被移出 DOM（如选角后重渲染），立即收起
       if (!active.isConnected) { hide(); return; }
       const t = e.target.closest && e.target.closest(SEL);
@@ -1052,6 +1088,13 @@
     });
     // 点击角色卡（选角）后立即收起放大浮窗
     document.addEventListener('click', e => {
+      // 若预览层覆盖了另一张卡，点击优先转发给底层卡牌。
+      if (e.target.closest && e.target.closest('#char-zoom') && overlapTarget) {
+        const target = overlapTarget;
+        hide();
+        if (target.isConnected && typeof target.click === 'function') target.click();
+        return;
+      }
       if (e.target.closest && e.target.closest(SEL)) hide();
     });
     // 滚动时位置会失真，直接隐藏
@@ -1413,7 +1456,7 @@
       const tags = (p.isBot ? '<span class="tag bot">电脑</span>' : '') + (p.hasCrown ? '<span class="tag crown">皇冠</span>' : '');
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
-        '<span class="opp-gold">金 ' + p.gold + '</span>';
+        '<span class="opp-gold"><i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>';
       const sb = el('button', 'score-btn');
       sb.title = '显示 ' + p.name + ' 的得分与计算过程';
       sb.textContent = '分数';
@@ -1488,7 +1531,7 @@
     if (meArea) meArea.dataset.seat = App.myIdx;
     const ms = $('#my-char-status');
     if (ms) ms.innerHTML = charStatusHTML(me);
-    $('#my-gold').textContent = '金 ' + me.gold;
+    $('#my-gold').innerHTML = '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
     $('#my-city-count').textContent = me.cityCount + ' / ' + s.endDistricts + ' 栋';
     $('#my-hand-count').textContent = me.hand.length + ' 张';
     const fx = s.effects || {};
@@ -1706,9 +1749,10 @@
   }
 
   function actionBtn(a, cls) {
-    const b = el('button', 'act ' + (cls || ''));
+    const b = el('button', 'act ' + (cls || '') + (a.disabled ? ' disabled' : ''));
     b.innerHTML = escapeHtml(a.label || a.type);
-    onTap(b, () => runAction(a));
+    b.disabled = !!a.disabled;
+    if (!a.disabled) onTap(b, () => runAction(a));
     return b;
   }
 
@@ -1781,7 +1825,7 @@
     $('#modal-title').textContent = title;
     const body = $('#modal-body');
     body.innerHTML = '';
-    const grid = el('div', 'pick-grid');
+    const grid = el('div', 'pick-grid pick-grid-' + kind);
     if (kind === 'prophet_give') {
       const me = s.players.find(p => p.id === App.myId);
       me.hand.forEach(c => {
