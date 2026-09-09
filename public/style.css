@@ -250,7 +250,7 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .cz-hd-btn{display:block;width:100%;margin-top:8px;padding:8px 10px;font-size:12px;
   border:1px solid var(--gold-l);border-radius:8px;background:#fff7dc;color:#6a4f18}
 .cz-hd-btn:hover{filter:brightness(1.04);border-color:var(--gold)}
-.char-zoom-back{width:100%;aspect-ratio:3/4;border-radius:7px;display:flex;align-items:center;
+.char-zoom-back{width:100%;aspect-ratio:2/3;border-radius:7px;display:flex;align-items:center;
   justify-content:center;font-size:64px;color:#ffe9bd;
   background:repeating-linear-gradient(45deg,#8a652f,#8a652f 10px,#a87d3c 10px,#a87d3c 20px);
   border:2px solid #4a3510}
@@ -354,7 +354,7 @@ body.card-hd-open{overflow:hidden}
 .tag.crown{background:linear-gradient(180deg,#f7e3b0,#e9c977);color:#7a5310;border-color:#d9b45f;font-weight:700}
 .tag.dead{background:#fbe9e7;color:#a53b30;border-color:#f0c9c3}
 .tag.magic{background:#f3ecfb;color:#653fa0;border-color:#ddd0f0}
-.opp-gold{font-size:13px;font-weight:700;color:#a97c15;margin-left:auto}
+.opp-gold{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;color:#a97c15;margin-left:auto}
 .opp-body{display:flex;gap:9px;align-items:flex-start}
 .opp-city{display:flex;flex-wrap:wrap;gap:5px;flex:1 1 auto;min-height:60px}
 .opp-meta{font-size:11px;color:var(--dim);flex:0 0 auto;text-align:right;line-height:1.7}
@@ -364,7 +364,7 @@ body.card-hd-open{overflow:hidden}
 /* 角色名（翻面后跟在卡牌右侧）/ 盖牌占位 */
 .cs-name{font-weight:800;font-size:15px;color:#6a4f18;line-height:1.1}
 .cs-label{font-size:11px;color:var(--dim)}
-.cs-card{position:relative;width:64px;height:90px;flex:0 0 auto}
+.cs-card{position:relative;width:64px;height:96px;flex:0 0 auto}
 .cs-inner{position:relative;width:100%;height:100%;transform-style:preserve-3d;transform:rotateY(0deg)}
 .cs-card.up .cs-inner{transform:rotateY(180deg)}
 .cs-face{position:absolute;inset:0;border-radius:7px;display:flex;align-items:center;
@@ -391,8 +391,14 @@ body.card-hd-open{overflow:hidden}
 .me-area{margin-top:6px}
 .zone-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 7px}
 .zone-head h3{font-size:14px;color:#6a4f18}
-.gold-badge{font-weight:800;color:#a97c15;background:linear-gradient(180deg,#fbf0d5,#f3e0b4);
+.gold-badge{display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#a97c15;background:linear-gradient(180deg,#fbf0d5,#f3e0b4);
   border:1px solid #e2c587;border-radius:16px;padding:2px 12px;font-size:13px}
+/* 通用金币图标：不用文字，适配经典与霓虹两套主题。 */
+.coin-icon{position:relative;display:inline-block;flex:0 0 auto;width:17px;height:17px;border-radius:50%;
+  background:radial-gradient(circle at 34% 28%,#fff3a8 0 12%,#f5c94b 30%,#d99318 72%,#8e5b0c 100%);
+  border:1px solid #8e5b0c;box-shadow:inset 0 0 0 2px rgba(255,245,170,.42),0 1px 3px rgba(100,60,0,.35)}
+.coin-icon::before{content:'';position:absolute;inset:3px;border:1px solid rgba(255,247,177,.72);border-radius:50%}
+.coin-icon::after{content:'✦';position:absolute;inset:0;display:grid;place-items:center;color:#fff1a0;font-size:8px;line-height:1;text-shadow:0 1px 1px #9b650e}
 .city-row,.hand-row{display:flex;flex-wrap:wrap;gap:7px;min-height:90px;
   padding:9px;border:1px dashed var(--line);border-radius:11px;background:#fffdf8}
 .hand-row{min-height:112px}
@@ -405,7 +411,7 @@ body.card-hd-open{overflow:hidden}
 .draft-row{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:12px}
 .draft-pool{display:flex;flex-wrap:wrap;gap:10px;padding:14px;border:1px dashed var(--line2);
   border-radius:12px;background:#fffdf8;min-height:80px}
-.facedown{width:60px;height:84px;border-radius:8px;background:
+.facedown{width:60px;height:90px;border-radius:8px;background:
   repeating-linear-gradient(45deg,#6a4f18 0 6px,#5a4013 6px 12px);
   border:2px solid #4a3510;color:var(--gold-l);display:flex;align-items:center;
   justify-content:center;font-size:22px;box-shadow:var(--shadow)}
@@ -422,7 +428,7 @@ body.card-hd-open{overflow:hidden}
   border:1px solid var(--line);flex:0 0 auto;white-space:nowrap}
 .rs-tag-secret{background:#efe3cf;color:#8a6a2a}
 .rs-cards{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.facedown.sm{width:54px;height:76px;font-size:18px;border-radius:7px}
+.facedown.sm{width:54px;height:81px;font-size:18px;border-radius:7px}
 
 /* ------------------------------ 行动栏 ------------------------------ */
 .actionbar{flex:0 0 auto;border-top:1px solid var(--line);background:linear-gradient(180deg,#fdf8ef,#f6eddd);
@@ -439,6 +445,8 @@ body.card-hd-open{overflow:hidden}
 .act.main:hover{filter:brightness(1.07)}
 .act.danger{border-color:#e3b0a8;color:#a53b30}
 .act.danger:hover{background:#fdeeeb;border-color:#d2584a}
+.act:disabled,.act.disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.45);transform:none!important}
+.act:disabled:hover,.act.disabled:hover{background:#fffdf8;border-color:var(--line2);filter:grayscale(.45)}
 .act .a-sub{display:block;font-size:11px;opacity:.72;font-weight:400;margin-top:1px}
 .waiting{color:var(--dim);font-size:13px;font-style:italic}
 
@@ -473,6 +481,11 @@ body.card-hd-open{overflow:hidden}
 /* margin:auto 安全居中：内容不超出时垂直居中，超出时退回顶部对齐、可正常滚动
    （避免 align-content:center 在溢出时把顶部裁掉且无法滚动的问题） */
 .pick-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center;margin:auto}
+/* 桌面端「抽 2 张建筑牌保留 1 张」：卡牌需要足够大，方便辨认卡面文字和插画。 */
+@media (min-width:821px){
+  .pick-grid-draw_keep{gap:18px}
+  .pick-grid-draw_keep .card{width:112px;height:168px}
+}
 .section-title{font-size:13px;color:#7a5c22;margin:16px 0 8px;font-weight:700;
   border-bottom:1px solid var(--line);padding-bottom:5px}
 .color-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;font-size:12px}
@@ -630,7 +643,7 @@ body.card-hd-open{overflow:hidden}
   .char-card{width:82px;padding:8px 6px}
   .char-card .cc-desc{font-size:9.5px;max-height:56px}
   .draft-row{gap:7px}
-  .facedown{width:54px;height:76px}
+  .facedown{width:54px;height:81px}
 
   /* -------- 行动栏：底部，最大高度限制，内容少则自动收缩，避免大片空白 -------- */
   .actionbar{padding:8px 10px calc(8px + env(safe-area-inset-bottom));

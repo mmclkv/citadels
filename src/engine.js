@@ -510,7 +510,12 @@
     // 角色能力
     if (!t.abilityUsed) {
       const label = abilityLabel(c.id);
-      if (label) acts.push({ type: 'ability', label: label });
+      if (label) acts.push({
+        type: 'ability',
+        label: label,
+        // 外交官必须先有一栋自己的建筑，才能进入交换流程。
+        disabled: c.id === 'diplomat' && p.city.length === 0
+      });
     }
 
     // 角色收入
@@ -1239,6 +1244,7 @@
   function startAbility(state, idx, t, p, c) {
     if (t.abilityUsed) return err('本回合已使用过能力');
     if (c.id === 'navigator' && t.bonusDone) return err('本回合已领取过航海家奖励');
+    if (c.id === 'diplomat' && p.city.length === 0) return err('你还没有建筑，无法使用外交官能力');
     switch (c.id) {
       case 'assassin': t.pending = { kind: 'assassin' }; break;
       case 'thief': t.pending = { kind: 'thief' }; break;
@@ -1434,6 +1440,12 @@
     if (c.id === 'alchemist' && t.phase !== 'witch_resume' && t.spentOnBuild > 0) {
       p.gold += t.spentOnBuild;
       log(state, '【炼金术士】' + p.name + ' 回收了本回合 ' + t.spentOnBuild + ' 枚建造花费。', 'good');
+      notify(state, 'alchemist_refund', {
+        playerIdx: t.playerIdx,
+        playerId: p.id,
+        playerName: p.name,
+        amount: t.spentOnBuild
+      });
     }
 
     p.played.push(t.charId);

@@ -232,6 +232,12 @@ html[data-theme="neon"] .opp-name { color:var(--ink); }
 html[data-theme="neon"] .opp-gold,
 html[data-theme="neon"] .gold-badge { color:var(--gold); }
 html[data-theme="neon"] .gold-badge { background:rgba(88,66,21,.28); border-color:#80682b; }
+html[data-theme="neon"] .coin-icon {
+  background:radial-gradient(circle at 32% 25%,#fff7b5 0 10%,#ffd75a 28%,#f0a52f 66%,#9b5f16 100%);
+  border-color:#ffca47; box-shadow:inset 0 0 0 2px rgba(255,246,174,.5),0 0 9px rgba(255,190,54,.52);
+}
+html[data-theme="neon"] .coin-icon::before { border-color:rgba(255,247,177,.82); }
+html[data-theme="neon"] .coin-icon::after { color:#fff8c8; text-shadow:0 0 5px rgba(255,214,85,.9); }
 html[data-theme="neon"] .tag { color:var(--ink2); background:rgba(14,35,49,.72); border-color:var(--line2); }
 html[data-theme="neon"] .tag.crown { color:#ffe39a; background:rgba(90,68,25,.42); border-color:#80682b; }
 html[data-theme="neon"] .tag.dead { color:var(--c-red-d); background:rgba(85,24,34,.38); border-color:rgba(255,94,103,.4); }
@@ -285,7 +291,95 @@ html[data-theme="neon"] .cs-front { background:#07111d; border-color:var(--line2
 html[data-theme="neon"] .cs-name { color:var(--ui-cyan); }
 html[data-theme="neon"] .cs-label { color:var(--dim); }
 html[data-theme="neon"] .cs-back,
-html[data-theme="neon"] .char-zoom-back { color:var(--ui-cyan); background:repeating-linear-gradient(135deg,#0b2431 0 8px,#09202b 8px 16px); border-color:var(--line2); }
+html[data-theme="neon"] .char-zoom-back,
+html[data-theme="neon"] .facedown {
+  position:relative; overflow:hidden; color:transparent;
+  background:
+    radial-gradient(circle at 50% 46%,rgba(255,79,199,.16),transparent 30%),
+    repeating-linear-gradient(135deg,rgba(67,228,255,.08) 0 2px,transparent 2px 10px),
+    linear-gradient(145deg,#102b3c,#07111d 58%,#170d2a);
+  border:1px solid var(--ui-cyan);
+  box-shadow:inset 0 0 0 2px rgba(67,228,255,.12),inset 0 0 20px rgba(67,228,255,.12),
+    0 0 12px rgba(67,228,255,.22);
+}
+html[data-theme="neon"] .cs-back::before,
+html[data-theme="neon"] .char-zoom-back::before,
+html[data-theme="neon"] .facedown::before {
+  content:'✦'; position:absolute; left:50%; top:50%; transform:translate(-50%,-54%);
+  width:42%; aspect-ratio:1; display:grid; place-items:center;
+  color:var(--ui-magenta); font-size:clamp(16px,3vw,30px); line-height:1;
+  border:1px solid var(--ui-cyan); border-radius:50%;
+  box-shadow:0 0 8px rgba(255,79,199,.72),inset 0 0 8px rgba(67,228,255,.35);
+  text-shadow:0 0 8px rgba(255,79,199,.9);
+}
+html[data-theme="neon"] .cs-back::after,
+html[data-theme="neon"] .char-zoom-back::after,
+html[data-theme="neon"] .facedown::after {
+  content:'CITADELS // NEON'; position:absolute; left:0; right:0; bottom:8%;
+  color:rgba(67,228,255,.72); font:700 7px/1 "Segoe UI",sans-serif;
+  letter-spacing:.16em; text-align:center; white-space:nowrap;
+  text-shadow:0 0 6px rgba(67,228,255,.7);
+}
+html[data-theme="neon"] .cs-back { border-color:var(--ui-cyan); }
+html[data-theme="neon"] .facedown { border-radius:6px; }
+html[data-theme="neon"] .char-zoom-back { border-radius:2px; }
+html[data-theme="neon"] .cs-back::after { font-size:5px; bottom:7%; }
+html[data-theme="neon"] .facedown.sm::before { font-size:15px; }
+html[data-theme="neon"] .facedown.sm::after { font-size:4px; letter-spacing:.1em; }
+/* 正式霓虹卡背素材：标准 2:3 比例，无文字、无额外徽记。 */
+html[data-theme="neon"] .cs-back,
+html[data-theme="neon"] .char-zoom-back,
+html[data-theme="neon"] .facedown {
+  background-image:url("../../assets/themes/neon/card-back.png");
+  background-size:cover; background-position:center; background-repeat:no-repeat;
+  border-color:rgba(217,104,255,.9);
+  box-shadow:0 0 0 1px rgba(91,72,255,.72),0 0 14px rgba(210,75,255,.34);
+  animation:none;
+}
+html[data-theme="neon"] .cs-back::before,
+html[data-theme="neon"] .cs-back::after,
+html[data-theme="neon"] .char-zoom-back::before,
+html[data-theme="neon"] .char-zoom-back::after,
+html[data-theme="neon"] .facedown::before,
+html[data-theme="neon"] .facedown::after { display:none; }
+
+/* 玩家信息框中的角色盖牌必须保持标准 2:3，避免被 flex 布局压扁。 */
+html[data-theme="neon"] .cs-card {
+  width:64px !important; height:96px !important;
+  min-width:64px; min-height:96px;
+  max-width:64px; max-height:96px;
+  flex:0 0 64px !important;
+  aspect-ratio:2 / 3;
+}
+html[data-theme="neon"] .cs-card .cs-inner,
+html[data-theme="neon"] .cs-card .cs-face {
+  width:64px; height:96px;
+  min-width:64px; min-height:96px;
+}
+html[data-theme="neon"] .facedown {
+  min-width:60px; min-height:90px;
+  max-width:60px; max-height:90px;
+  aspect-ratio:2 / 3;
+  flex:0 0 60px;
+}
+html[data-theme="neon"] .facedown.sm {
+  min-width:54px; min-height:81px;
+  max-width:54px; max-height:81px;
+  flex-basis:54px;
+}
+html[data-theme="neon"] .cs-back,
+html[data-theme="neon"] .char-zoom-back,
+html[data-theme="neon"] .facedown { isolation:isolate; }
+html[data-theme="neon"] .cs-back,
+html[data-theme="neon"] .char-zoom-back,
+html[data-theme="neon"] .facedown { animation:neonCardBackGlow 2.8s ease-in-out infinite; }
+html[data-theme="neon"] .cs-back > *,
+html[data-theme="neon"] .char-zoom-back > *,
+html[data-theme="neon"] .facedown > * { position:relative; z-index:1; }
+@keyframes neonCardBackGlow {
+  0%,100% { filter:brightness(.96); }
+  50% { filter:brightness(1.12); }
+}
 
 /* 统一卡牌放大 */
 html[data-theme="neon"] .char-zoom-bg { background:rgba(2,7,13,.78); backdrop-filter:blur(4px); }
