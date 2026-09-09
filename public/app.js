@@ -578,7 +578,26 @@
     }
     if (c.beautified) d.appendChild(el('div', 'c-badges', '美'));
     else if (c.museumCount) d.appendChild(el('div', 'c-badges', '博' + c.museumCount));
+    renderMuseumStack(d, c);
     return d;
+  }
+
+  function renderMuseumStack(node, c) {
+    if (!node || !node.querySelector) return;
+    const old = node.querySelector('.museum-stack');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    const count = Number(c && c.museumCount) || 0;
+    if (!count) return;
+    const stack = el('div', 'museum-stack');
+    stack.title = '博物馆下叠放 ' + count + ' 张牌';
+    stack.setAttribute('aria-label', stack.title);
+    for (let i = 0; i < Math.min(3, count); i++) {
+      const back = el('span', 'museum-stack-card');
+      back.style.setProperty('--stack-index', String(i));
+      stack.appendChild(back);
+    }
+    stack.appendChild(el('span', 'museum-stack-count', String(count)));
+    node.appendChild(stack);
   }
 
   /* 复用已有卡片节点时，只更新外层动态属性（className / title / uid），
@@ -588,6 +607,7 @@
     if (node.dataset) node.dataset.uid = c.uid;
     node.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
       ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
+    renderMuseumStack(node, c);
   }
 
   /* 按 uid 复用卡片节点的列表渲染：不整盘 innerHTML 清空，已存在的卡片

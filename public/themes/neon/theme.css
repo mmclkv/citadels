@@ -276,6 +276,8 @@ html[data-theme="neon"] .card.neon-card.selected { outline:2px solid var(--ui-ma
 html[data-theme="neon"] .card.neon-card.pickable { border-color:var(--ui-cyan)!important; box-shadow:0 0 0 2px rgba(67,228,255,.45),0 0 22px rgba(67,228,255,.25)!important; }
 html[data-theme="neon"] .card.neon-card.pickable::after { color:var(--ui-cyan); }
 html[data-theme="neon"] .card.neon-card .c-badges { display:flex; color:var(--ui-magenta); background:rgba(4,11,18,.78); border:1px solid rgba(255,79,199,.55); border-radius:3px; padding:1px 3px; }
+html[data-theme="neon"] .museum-stack-card { border-color:rgba(67,228,255,.9); background:linear-gradient(135deg,rgba(18,56,72,.96),rgba(72,24,94,.96)); box-shadow:0 0 6px rgba(67,228,255,.45); }
+html[data-theme="neon"] .museum-stack-count { background:rgba(11,24,43,.94); color:#ffe5ff; border-color:var(--ui-magenta); box-shadow:0 0 7px rgba(255,79,199,.55); }
 html[data-theme="neon"] .card.neon-card.disabled { opacity:.38; filter:grayscale(.7); }
 
 /* 角色牌池与状态牌直接使用最终完整卡图 */
