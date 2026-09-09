@@ -459,7 +459,7 @@ body.card-hd-open{overflow:hidden}
 .modal-head{display:flex;align-items:center;justify-content:space-between;
   padding:16px 20px;border-bottom:1px solid var(--line)}
 .modal-head h3{font-size:17px;color:#6a4f18}
-.modal-body{padding:18px 20px;overflow:auto}
+.modal-body{padding:18px 20px;overflow:auto;display:flex;flex-direction:column}
 .char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:11px}
 .ref-card{border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;
   padding:10px 12px;background:#fffdf8}
@@ -470,7 +470,9 @@ body.card-hd-open{overflow:hidden}
 .ref-card .rc-en{font-size:10px;color:var(--dim);font-weight:400}
 .ref-card .rc-art{width:100%;height:auto;display:block;border-radius:6px;
   margin-bottom:6px;background:#efe2c9}
-.pick-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+/* margin:auto 安全居中：内容不超出时垂直居中，超出时退回顶部对齐、可正常滚动
+   （避免 align-content:center 在溢出时把顶部裁掉且无法滚动的问题） */
+.pick-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center;margin:auto}
 .section-title{font-size:13px;color:#7a5c22;margin:16px 0 8px;font-weight:700;
   border-bottom:1px solid var(--line);padding-bottom:5px}
 .color-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;font-size:12px}
@@ -657,7 +659,11 @@ body.card-hd-open{overflow:hidden}
     display:flex;flex-direction:column}
   .modal-body{flex:1 1 auto;padding:14px 15px calc(20px + env(safe-area-inset-bottom))}
   .char-grid{grid-template-columns:1fr;gap:9px}
-  .pick-grid{gap:9px}
+  .pick-grid{gap:16px;padding:18px 0}
+  .pick-grid .card{width:min(44vw, 180px);height:auto;aspect-ratio:2/3}
+  .pick-grid .card .c-name{font-size:20px;padding:26px 0 6px}
+  .pick-grid .card .c-cost{width:26px;height:26px;font-size:14px;top:10px;left:8px}
+  .pick-grid .card .c-en{font-size:9px}
 
   /* -------- 结算 -------- */
   .score-table{font-size:12.5px}
