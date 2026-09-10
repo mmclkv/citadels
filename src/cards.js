@@ -51,7 +51,7 @@
     { name: '酒馆',   en: 'Tavern',       color: 'green', cost: 1, count: 5 },
     { name: '集市',   en: 'Market',       color: 'green', cost: 2, count: 4 },
     { name: '商栈',   en: 'Trading Post', color: 'green', cost: 2, count: 3 },
-    { name: '船坞',   en: 'Docks',        color: 'green', cost: 3, count: 3 },
+    { name: '船坞',   en: 'Docks',        color: 'green', cost: 4, count: 3 },
     { name: '港口',   en: 'Harbor',       color: 'green', cost: 4, count: 3 },
     { name: '市政厅', en: 'Town Hall',    color: 'green', cost: 5, scoreValue: 6, count: 2,
       desc: '商业建筑。建造费用5金币，计分价值6分。' },

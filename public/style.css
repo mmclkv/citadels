@@ -313,6 +313,37 @@ body.card-hd-open{overflow:hidden}
   transition:transform .9s cubic-bezier(.4,.05,.35,1),opacity .9s ease;
   filter:drop-shadow(0 0 4px rgba(231,181,60,.6))}
 .fly-coin .coin-icon{width:22px;height:22px}
+.hand-swap-flight{position:fixed;z-index:405;width:42px;height:58px;display:grid;place-items:center;
+  border:2px solid var(--ui-cyan,var(--gold));border-radius:6px;color:var(--ui-cyan,var(--gold));
+  background:repeating-linear-gradient(45deg,rgba(55,31,105,.96) 0 6px,rgba(23,17,57,.96) 6px 12px);
+  box-shadow:0 0 14px rgba(112,73,255,.65);font-size:22px;pointer-events:none;
+  animation:handSwapFlight .95s cubic-bezier(.22,.72,.28,1) forwards}
+@keyframes handSwapFlight{0%{opacity:.95;transform:rotate(var(--swap-rotate)) scale(.8)}45%{opacity:1;transform:translate(calc(var(--swap-dx) * .55),calc(var(--swap-dy) * .55)) rotate(0deg) scale(1.05)}100%{opacity:0;transform:translate(var(--swap-dx),var(--swap-dy)) rotate(calc(var(--swap-rotate) * -1)) scale(.72)}}
+.hand-swap-badge{position:fixed;z-index:406;padding:4px 9px;border:1px solid var(--ui-magenta,var(--gold));border-radius:12px;
+  color:var(--ui-magenta,var(--gold));background:rgba(7,17,29,.9);box-shadow:0 0 14px rgba(255,79,199,.35);
+  font-size:11px;font-weight:800;pointer-events:none;animation:handSwapBadge 1.2s ease forwards}
+@keyframes handSwapBadge{0%,65%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.9)}}
+.crown-flight{position:fixed;z-index:410;width:22px;height:22px;display:grid;place-items:center;
+  pointer-events:none;color:var(--gold);filter:drop-shadow(0 0 7px rgba(255,205,71,.9));
+  animation:crownTransferFlight 1.05s cubic-bezier(.2,.72,.25,1) forwards}
+.crown-flight .crown-icon{font-size:21px;color:var(--gold)}
+@keyframes crownTransferFlight{
+  0%{opacity:0;transform:translate(0,0) scale(.7) rotate(-15deg)}
+  12%{opacity:1;transform:translate(0,0) scale(1.15) rotate(0)}
+  72%{opacity:1;transform:translate(calc(var(--crown-dx) * .72),calc(var(--crown-dy) * .72)) scale(1.08) rotate(8deg)}
+  100%{opacity:0;transform:translate(var(--crown-dx),var(--crown-dy)) scale(.82) rotate(0)}
+}
+.hand-transfer-flight{animation-duration:1.05s}
+.building-swap-flight{position:fixed!important;z-index:407!important;width:63px!important;height:95px!important;
+  margin:0!important;pointer-events:none!important}
+.building-swap-flight.is-flying{animation:buildingSwapFlight .95s cubic-bezier(.22,.72,.28,1) forwards}
+@keyframes buildingSwapFlight{0%{opacity:.95;transform:rotate(var(--swap-rotate)) scale(1)}45%{opacity:1;transform:translate(calc(var(--swap-dx) * .55),calc(var(--swap-dy) * .55)) rotate(0deg) scale(1.06)}100%{opacity:0;transform:translate(var(--swap-dx),var(--swap-dy)) rotate(calc(var(--swap-rotate) * -1)) scale(var(--swap-scale-x),var(--swap-scale-y))}}
+.building-build-flight{position:fixed!important;z-index:408!important;margin:0!important;pointer-events:none!important;opacity:.98;box-shadow:0 0 0 3px rgba(200,149,43,.3),0 12px 34px rgba(80,60,30,.35)}
+.building-build-flight.is-flying{animation:buildingBuildFlight .63s cubic-bezier(.18,.76,.25,1) forwards}
+@keyframes buildingBuildFlight{0%{transform:translate(0,0) scale(1.08) rotate(-3deg);opacity:.98}55%{transform:translate(calc(var(--build-dx) * .55),calc(var(--build-dy) * .55)) scale(.72) rotate(2deg);opacity:1}100%{transform:translate(var(--build-dx),var(--build-dy)) scale(var(--build-scale-x),var(--build-scale-y)) rotate(0);opacity:.08}}
+body.building-animation-paused #screen-game .topbar,
+body.building-animation-paused #screen-game .board,
+body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 
 /* 领主摧毁建筑：克隆卡播放抖动/红光/塌陷/淡出 */
 .card.destroying{pointer-events:none;z-index:402;animation:cardDestroy .72s ease forwards}
@@ -338,6 +369,10 @@ body.card-hd-open{overflow:hidden}
 .turn-banner .tb-sub{font-size:12px;color:var(--dim)}
 .turn-banner .tb-stats{display:flex;gap:14px;font-size:12px;color:var(--ink2)}
 .turn-banner .tb-stats b{color:var(--ink)}
+.turn-banner > .turn-order-guide{display:flex!important;visibility:visible;opacity:1;width:100%;flex:0 0 100%;margin:4px 0 0;box-shadow:none;order:10;min-height:27px}
+.turn-order-guide.draft-guide{display:flex!important;visibility:visible;opacity:1;position:relative;z-index:2}
+.turn-order-guide[hidden]{display:none!important}
+.turn-banner{align-content:flex-start}
 /* 轮末战果确认：列出每位玩家的确认状态 + 确认按钮 */
 .rc-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
 .rc-who{font-size:11px;padding:2px 9px;border-radius:10px;background:#f1e5cd;color:#7a5c22;
@@ -352,21 +387,77 @@ body.card-hd-open{overflow:hidden}
 /* 轮末战果确认块较高，不钉死高度，允许内部滚动（仅轮末出现一次，非回合内抽动源） */
 .turn-banner.rc{min-height:auto;max-height:42vh;overflow-y:auto}
 
-.opponents{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:12px;margin-bottom:16px}
-.opp{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fffdf7;box-shadow:var(--shadow)}
+.table-arena{position:relative;min-height:840px;margin:0 -4px 16px;padding-top:0;border:1px solid var(--line);
+  border-radius:24px;background:rgba(255,253,246,.28);overflow:hidden}
+.table-core{position:absolute;z-index:1;left:50%;top:340px;width:min(30%,360px);height:190px;transform:translate(-50%,-50%);
+  border:2px solid rgba(200,149,43,.35);border-radius:50%;background:radial-gradient(ellipse,#fffaf0,#f1dfbf 72%,#e3c896);
+  box-shadow:0 0 0 10px rgba(255,255,255,.25),0 12px 32px rgba(92,61,22,.14),inset 0 0 30px rgba(200,149,43,.2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+.table-core::before{content:'';position:absolute;inset:12px;border:1px dashed rgba(122,92,34,.3);border-radius:50%}
+.table-core-title{position:relative;font-size:17px;font-weight:900;letter-spacing:.12em;color:#7a5c22}
+.table-core-hint{position:relative;margin-top:8px;font-size:11px;color:#9b8a74}
+.table-removed{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:7px;min-height:30px;z-index:1;pointer-events:auto}
+.table-removed[hidden]{display:none}
+.table-removed-label{font-size:9px;color:var(--dim);white-space:nowrap}
+.table-removed-cards{display:flex;align-items:center;gap:4px}
+.table-removed .char-card.mini{width:42px!important;padding:0;border-radius:4px}
+.table-removed .char-card.mini .cc-art{margin:0}
+.table-removed .facedown.sm{width:42px;height:56px;font-size:14px;border-radius:4px}
+.table-removed .char-card{pointer-events:auto;cursor:zoom-in}
+.table-core.has-removed .table-core-hint{margin-top:4px}
+.table-core.active{border-color:var(--gold);box-shadow:0 0 0 10px rgba(200,149,43,.08),0 0 32px rgba(200,149,43,.28),inset 0 0 30px rgba(200,149,43,.2)}
+.removed-corner{position:fixed;left:16px;bottom:76px;z-index:8;display:flex;align-items:flex-end;gap:6px;
+  padding:6px 8px;border:1px solid var(--line2);border-radius:9px;background:rgba(255,253,246,.94);box-shadow:var(--shadow2)}
+.removed-corner[hidden]{display:none}
+.removed-corner-label{font-size:10px;color:var(--dim);white-space:nowrap;writing-mode:vertical-rl;align-self:center}
+.removed-corner .rs-cards{display:flex;align-items:center;gap:5px}
+.removed-corner .char-card.mini,.removed-corner .facedown.sm{width:54px!important;height:81px!important;padding:0!important;margin:0;border-radius:6px;overflow:hidden}
+.removed-corner .char-card.mini .cc-art{width:100%;height:100%;margin:0;border-radius:5px}
+.removed-corner .char-card.mini .cc-art img{width:100%;height:100%;object-fit:cover}
+.removed-corner .char-card.mini .cc-num,.removed-corner .char-card.mini .cc-name{display:none}
+.removed-corner .char-card{pointer-events:auto;cursor:zoom-in}
+.turn-order-guide{position:relative;z-index:6;top:auto;left:auto;width:min(94%,720px);margin:10px auto 8px;transform:none;display:flex;align-items:center;justify-content:center;gap:5px;
+  min-height:27px;padding:4px 10px;border:1px solid var(--line2);border-radius:16px;background:rgba(255,253,246,.9);box-shadow:var(--shadow);font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden}
+.order-label{font-weight:800;color:#7a5c22;flex:0 0 auto;margin-right:3px}
+.order-note{color:var(--dim);flex:0 0 auto}
+.order-step{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:10px;color:var(--ink2);flex:0 0 auto}
+.order-step .order-seat{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:#e8dcc5;color:#7a5c22;font-size:9px;font-weight:900}
+.order-step.current{background:#fff0c8;color:#6a4f18;font-weight:800;box-shadow:0 0 0 1px var(--gold-l)}
+.order-step.current .order-seat{background:var(--gold);color:#fff}
+.order-arrow{color:#c2a66c;font-weight:900;flex:0 0 auto}
+.opponents{position:relative;display:block;height:600px;margin:0 0 14px;z-index:2}
+.opp{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fffdf7;box-shadow:var(--shadow);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
+.opponents .opp{position:absolute;left:calc(var(--seat-x) * 1%);top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px));width:min(272px,24%);transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)));margin:0}
+.opponents .opp[data-compact="1"]{padding:9px 10px;font-size:.94em}
+.opponents .opp[data-compact="2"]{padding:8px 9px;font-size:.88em}
+.opponents .opp[data-compact="3"]{padding:7px 8px;font-size:.82em}
+.opponents .opp[data-compact="2"] .cs-card{width:56px;height:84px}
+.opponents .opp[data-compact="3"] .cs-card{width:50px;height:75px}
+.opponents .opp[data-compact="2"] .opp-head,.opponents .opp[data-compact="3"] .opp-head{gap:5px;margin-bottom:5px}
 .opp.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.14);background:#fffcf2}
 .opp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+.opp-seat-no{font-size:10px;font-weight:800;color:var(--dim);padding:1px 5px;border:1px solid var(--line);border-radius:8px;flex:0 0 auto}
 .opp-name{font-weight:700;font-size:14px}
 .opp-me{color:var(--gold);font-size:12px}
 .tag{font-size:11px;padding:1px 7px;border-radius:10px;background:#f1e5cd;color:#7a5c22;border:1px solid var(--line)}
 .tag.bot{background:#eef3fb;color:#3a5f8a;border-color:#d3e0ee}
 .tag.crown{background:linear-gradient(180deg,#f7e3b0,#e9c977);color:#7a5310;border-color:#d9b45f;font-weight:700}
+.crown-icon{display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-family:"Segoe UI Symbol","Noto Sans Symbols 2",serif;font-size:16px;line-height:1;color:var(--gold);text-shadow:0 1px 2px rgba(80,50,0,.28)}
+.crown-chip{display:inline-flex;align-items:center;gap:5px}
+.crown-chip .crown-icon{font-size:15px}
+.crown-icon-tag{display:inline-flex!important;align-items:center;justify-content:center;background:transparent!important;border:0!important;padding:0 2px!important;box-shadow:none!important}
+.crown-icon-tag .crown-icon{font-size:17px}
 .tag.dead{background:#fbe9e7;color:#a53b30;border-color:#f0c9c3}
 .tag.magic{background:#f3ecfb;color:#653fa0;border-color:#ddd0f0}
 .opp-gold{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;color:#a97c15;margin-left:auto}
+.opp-role-row,.me-role-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:9px}
 .opp-body{display:flex;gap:9px;align-items:flex-start}
 .opp-city{display:flex;flex-wrap:wrap;gap:5px;flex:1 1 auto;min-height:60px}
-.opp-meta{font-size:11px;color:var(--dim);flex:0 0 auto;text-align:right;line-height:1.7}
+.table-arena[data-players="4"] .opp-city{flex-wrap:nowrap;overflow:visible}
+.table-arena[data-players="4"] .opp-city>.card{flex:0 0 auto}
+.table-arena[data-players="4"] .me-area .city-row{flex-wrap:nowrap;overflow:visible}
+.opp-char-stats,.me-char-stats{font-size:11px;color:var(--dim);line-height:1.7;padding-top:2px;min-width:74px}
+.opp-char-stats b,.me-char-stats b{color:var(--ink2)}
 /* 玩家小框框里的角色卡状态（盖牌 / 翻面） */
 .opp-char{display:flex;align-items:center;gap:8px;margin-bottom:9px}
 .me-char{display:flex;align-items:center;gap:8px;margin:2px 0 9px}
@@ -397,7 +488,10 @@ body.card-hd-open{overflow:hidden}
 .score-btn:active{transform:scale(.92)}
 .zone-head .score-btn{margin-left:auto}
 
-.me-area{margin-top:6px}
+.me-area{position:relative;z-index:3;width:min(860px,92%);margin:0 auto;padding:10px 14px 0;border:1px solid var(--gold-l);border-radius:16px;background:rgba(255,253,246,.96);box-shadow:0 8px 22px rgba(80,60,30,.12);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
+.building-arrival-expand{animation:buildingArrivalExpand .85s ease}
+@keyframes buildingArrivalExpand{0%,100%{box-shadow:var(--shadow),0 0 0 rgba(200,149,43,0)}35%{box-shadow:0 0 0 4px rgba(200,149,43,.28),0 0 28px rgba(200,149,43,.35)}}
+.me-area.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.16),0 10px 28px rgba(200,149,43,.18)}
 .zone-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 7px}
 .zone-head h3{font-size:14px;color:#6a4f18}
 .gold-badge{display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#a97c15;background:linear-gradient(180deg,#fbf0d5,#f3e0b4);
@@ -622,14 +716,18 @@ body.card-hd-open{overflow:hidden}
   .tb-sub,.turn-banner .tb-sub{font-size:11px}
   .turn-banner .tb-stats{width:100%;gap:10px;font-size:11px}
 
-  /* 对手：横向滑动卡片流，不占满屏高 */
+  /* 移动端保留顺序流，避免圆桌卡片过度缩小；桌面端才使用环形座位。 */
+  .table-arena{min-height:0;margin:0 0 11px;padding-top:0;border:0;border-radius:0;background:none;overflow:visible}
+  .table-core{display:none}
+  .removed-corner{left:10px;bottom:calc(68px + env(safe-area-inset-bottom));padding:5px 6px}
+  .turn-order-guide{position:relative;top:auto;left:auto;width:100%;transform:none;justify-content:flex-start;margin:0 0 8px;overflow-x:auto;border-radius:10px}
   .opponents{display:flex;gap:9px;overflow-x:auto;padding-bottom:5px;margin-bottom:11px;
-    -webkit-overflow-scrolling:touch}
-  .opp{flex:0 0 260px;min-width:260px;padding:9px 11px}
+    -webkit-overflow-scrolling:touch;height:auto}
+  .opponents .opp{position:relative;left:auto;top:auto;width:auto!important;transform:none;flex:0 0 260px;min-width:260px;padding:9px 11px}
+  .me-area{width:auto;margin:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
   .opp-body{flex-direction:column;gap:7px}
   .opp-city{overflow-x:auto;flex-wrap:nowrap;min-height:52px;padding-bottom:3px}
-  .opp-meta{text-align:left;border-top:1px dotted var(--line);padding-top:5px}
-  .opp-meta br{display:none}
+  .opp-char-stats,.me-char-stats{min-width:0;font-size:10px}
 
   /* 我的城市 / 手牌：横向滚动，保证行动栏始终可见 */
   .zone-head{margin:9px 0 5px}

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>富饶之城 · 荣耀之城 Citadels</title>
- <link rel="stylesheet" href="./style.css?v=8">
-<link rel="stylesheet" href="./themes/neon/theme.css?v=7">
+  <link rel="stylesheet" href="./style.css?v=30">
+<link rel="stylesheet" href="./themes/neon/theme.css?v=9">
 </head>
 <body>
 
@@ -184,7 +184,7 @@
       <span class="chip">第 <b id="tb-round">1</b> 轮</span>
       <span class="chip">结束条件 <b id="tb-target">8</b> 栋</span>
       <span class="chip">牌堆 <b id="tb-deck">0</b></span>
-      <span class="chip" id="tb-crown">冠 —</span>
+      <span class="chip crown-chip" id="tb-crown" title="当前皇冠持有者"><i class="crown-icon" aria-hidden="true">♛</i><span class="crown-owner">—</span></span>
       <span class="chip danger" id="tb-effects" hidden></span>
     </div>
     <div class="tb-right">
@@ -209,28 +209,28 @@
 
       <!-- 行动阶段 -->
       <div id="play-area">
-        <div class="removed-strip" id="removed-strip" hidden>
-          <span class="rs-label">本轮出局角色</span>
-          <div class="rs-group">
-            <span class="rs-tag">明置移除</span>
-            <div class="rs-cards" id="rs-faceup"></div>
-          </div>
-          <div class="rs-group">
-            <span class="rs-tag rs-tag-secret">暗置移除（身份保密）</span>
-            <div class="rs-cards" id="rs-facedown"></div>
-          </div>
-        </div>
         <div class="turn-banner" id="turn-banner"></div>
-        <div class="opponents" id="opponents"></div>
-        <div class="me-area" id="me-area">
+        <div class="table-arena" id="table-arena">
+          <div class="turn-order-guide" id="turn-order-guide" aria-label="行动顺序"></div>
+          <div class="removed-corner" id="removed-corner" aria-label="本轮出局角色" hidden>
+            <span class="removed-corner-label">本轮出局</span>
+            <div class="rs-cards" id="rs-faceup-corner"></div>
+            <div class="rs-cards" id="rs-facedown-corner"></div>
+          </div>
+          <div class="opponents" id="opponents"></div>
+          <div class="me-area" id="me-area">
           <div class="zone-head"><h3>我的城市 <span class="dim small" id="my-city-count"></span></h3>
             <button class="score-btn" id="btn-my-score" title="显示我的得分与计算过程">分数</button>
             <span class="gold-badge" id="my-gold"><i class="coin-icon" aria-hidden="true"></i><span>0</span></span></div>
-          <div class="me-char" id="my-char-status"></div>
+          <div class="me-role-row">
+            <div class="me-char" id="my-char-status"></div>
+            <div class="me-char-stats" id="my-char-stats"></div>
+          </div>
           <div class="city-row" id="my-city"></div>
           <div class="zone-head"><h3>我的手牌 <span class="dim small" id="my-hand-count"></span></h3>
             <span class="dim small" id="my-chars-tip"></span></div>
           <div class="hand-row" id="my-hand"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -332,8 +332,8 @@
 <script src="./themes/neon/manifest.js?v=3"></script>
 <script src="./themes/theme-manager.js?v=2"></script>
 <script src="./src/cards.js?v=3"></script>
-<script src="./src/engine.js?v=6"></script>
+<script src="./src/engine.js?v=9"></script>
 <script src="./src/ai.js?v=2"></script>
- <script src="./app.js?v=10"></script>
+<script src="./app.js?v=48"></script>
 </body>
 </html>

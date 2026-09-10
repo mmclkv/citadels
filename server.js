@@ -56,6 +56,9 @@ const clients = new Map();   // ws -> { id, name, roomId }
 function genId(pre) {
   return pre + Math.random().toString(36).slice(2, 8);
 }
+function genResumeToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
 function roomCode() {
   const s = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let c = '';
@@ -79,7 +82,7 @@ function createRoom(hostName, config) {
   const seats = [];
   const total = Math.max(2, Math.min(8, config.playerCount || 4));
   const bots = Math.max(0, Math.min(total - 1, config.bots || 0));
-  seats.push({ id: genId('p'), name: hostName, isBot: false, taken: true });
+  seats.push({ id: genId('p'), name: hostName, resumeToken: genResumeToken(), isBot: false, taken: true });
   for (let i = 0; i < bots; i++) {
     seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botLevel: config.botLevel || 'normal', taken: true });
   }
@@ -113,8 +116,25 @@ function joinRoom(roomId, name) {
   }
   const idx = r.seats.findIndex(s => !s.taken);
   if (idx < 0) return { error: '房间已满' };
-  r.seats[idx] = { id: genId('p'), name: name, isBot: false, taken: true };
+  r.seats[idx] = { id: genId('p'), name: name, resumeToken: genResumeToken(), isBot: false, taken: true };
   return { room: r, seat: r.seats[idx] };
+}
+
+function resumeRoom(token, roomId) {
+  if (!token) return null;
+  const list = roomId && rooms[roomId] ? [rooms[roomId]] : Object.values(rooms);
+  for (const r of list) {
+    const seat = r.seats.find(s => s.taken && s.resumeToken === token);
+    if (seat) return { room: r, seat: seat };
+  }
+  return null;
+}
+
+function restoreSeat(r, seat) {
+  seat.isBot = false;
+  if (!r.state) return;
+  const player = r.state.players.find(p => p.id === seat.id);
+  if (player) player.isBot = false;
 }
 
 function startRoom(r) {
@@ -155,8 +175,7 @@ function viewFor(r, playerId) {
   base.roomId = r.id;
   base.roomName = r.name;
   base.players.forEach(p => {
-    const s = r.seats.find(x => x.id === p.id);
-    p.connected = s ? true : false;
+    p.connected = Array.from(clients.values()).some(c => c.id === p.id && c.roomId === r.id);
   });
   base.available = playerId ? CitEngine.getAvailableActions(r.state, playerId) : null;
   return base;
@@ -164,6 +183,13 @@ function viewFor(r, playerId) {
 function sendPersonal(r) {
   r.seats.forEach(s => {
     if (!s.id) return;
+    const payload = JSON.stringify({ t: 'state', state: viewFor(r, s.id) });
+    sendTo(s.id, payload);
+  });
+}
+function sendPersonalExcept(r, excludedId) {
+  r.seats.forEach(s => {
+    if (!s.id || s.id === excludedId) return;
     const payload = JSON.stringify({ t: 'state', state: viewFor(r, s.id) });
     sendTo(s.id, payload);
   });
@@ -225,14 +251,19 @@ function botTick(r) {
     if (!actor || !actor.isBot) { r.ticking = false; sendPersonal(r); return; }
     let action = null;
     try { action = CitAI.decide(st, actor.id); } catch (e) { console.error('AI error', e); }
+    // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
+    if (!action) {
+      const opts = CitEngine.getAvailableActions(st, actor.id);
+      if (opts && opts.actions && opts.actions.length) action = opts.actions[0];
+    }
     if (!action) { r.ticking = false; sendPersonal(r); return; }
     let res = CitEngine.applyAction(st, actor.id, action);
     if (!res.ok) {
       if (st.phase === 'draft') {
         // 选角失败时从合法行动中挑第一个再试一次，避免空转卡死
         const opts = CitEngine.getAvailableActions(st, actor.id);
-        if (opts && opts.length) {
-          res = CitEngine.applyAction(st, actor.id, opts[0]);
+        if (opts && opts.actions && opts.actions.length) {
+          res = CitEngine.applyAction(st, actor.id, opts.actions[0]);
         }
       }
       if (!res.ok) {
@@ -316,8 +347,22 @@ function handle(ws, info, msg) {
     case 'hello':
       info.id = info.id || genId('p');
       info.name = msg.name || '玩家';
-      wsSend(ws, JSON.stringify({ t: 'hello', youId: info.id }));
-      wsSend(ws, JSON.stringify({ t: 'rooms', rooms: Object.values(rooms).map(publicRoom) }));
+      const resumed = resumeRoom(msg.resumeToken, msg.roomId);
+      if (resumed) {
+        restoreSeat(resumed.room, resumed.seat);
+        info.id = resumed.seat.id;
+        info.name = resumed.seat.name;
+        info.roomId = resumed.room.id;
+      }
+      wsSend(ws, JSON.stringify({ t: 'hello', youId: info.id, resumed: !!resumed }));
+      if (resumed) {
+        const state = resumed.room.state ? viewFor(resumed.room, info.id) : lobbyView(resumed.room);
+        wsSend(ws, JSON.stringify({ t: 'joined', roomId: resumed.room.id, youId: info.id,
+          resumeToken: resumed.seat.resumeToken, state: state }));
+        sendPersonal(resumed.room);
+      } else {
+        wsSend(ws, JSON.stringify({ t: 'rooms', rooms: Object.values(rooms).map(publicRoom) }));
+      }
       break;
 
     case 'listRooms':
@@ -329,7 +374,8 @@ function handle(ws, info, msg) {
       info.roomId = r.id;
       info.id = r.seats[0].id;
       info.name = r.seats[0].name;
-      wsSend(ws, JSON.stringify({ t: 'joined', roomId: r.id, youId: info.id, state: lobbyView(r) }));
+      wsSend(ws, JSON.stringify({ t: 'joined', roomId: r.id, youId: info.id,
+        resumeToken: r.seats[0].resumeToken, state: lobbyView(r) }));
       sendPersonal(r);
       break;
     }
@@ -341,7 +387,8 @@ function handle(ws, info, msg) {
       info.roomId = r.id;
       info.id = res.seat.id;
       info.name = res.seat.name;
-      wsSend(ws, JSON.stringify({ t: 'joined', roomId: r.id, youId: info.id, state: lobbyView(r) }));
+      wsSend(ws, JSON.stringify({ t: 'joined', roomId: r.id, youId: info.id,
+        resumeToken: res.seat.resumeToken, state: lobbyView(r) }));
       sendPersonal(r);
       break;
     }
@@ -351,7 +398,7 @@ function handle(ws, info, msg) {
       if (r) {
         const s = r.seats.find(x => x.id === info.id);
         if (s && !r.state) { s.taken = false; s.name = ''; s.id = null; }
-        sendPersonal(r);
+        sendPersonalExcept(r, info.id);
         if (r.seats.every(x => !x.taken) && !r.state) delete rooms[r.id];
       }
       info.roomId = null;
@@ -494,6 +541,9 @@ function onClose(socket, info) {
   if (info.roomId) {
     const r = rooms[info.roomId];
     if (r) {
+      // 刷新/重连时新连接可能已经接管同一座位，旧连接关闭不能把真人再次标成电脑。
+      const replacement = Array.from(clients.values()).some(c => c.id === info.id && c.roomId === info.roomId);
+      if (replacement) { sendPersonal(r); return; }
       const s = r.seats.find(x => x.id === info.id);
       if (s) {
         // 断线后自动由电脑托管
