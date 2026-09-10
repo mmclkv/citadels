@@ -445,7 +445,42 @@
     return same < maxSameName(p);
   }
 
+  // 状态同步/重连时，极少数情况下可能出现「已进入行动阶段，但 turn 为空」的
+  // 中间状态。只要本轮还有角色没有叫到，就可以安全地从行动队列恢复当前行动者。
+  // 这也兼容旧版本服务进程留下的房间状态，避免客户端永远停留在“等待开始”。
+  function ensureActionTurn(state) {
+    if (state.phase !== 'action' || state.turn || state.reaction || state.roundConfirm) return;
+    if (!Array.isArray(state.callQueue) || state.callIdx == null) {
+      buildCallQueue(state);
+      return;
+    }
+    if (state.callIdx < state.callQueue.length) beginNextCall(state);
+  }
+
+  // 兼容断线/旧版本房间留下的半成品选角状态。正常流程不会走到这里；
+  // 但如果 draft 数据在同步时丢失，而每位玩家已经拿到本轮所需角色，
+  // 可以根据玩家手上的角色安全重建行动阶段。
+  function repairState(state) {
+    if (state.phase === 'draft') {
+      const expected = state.players.length <= 3 ? 2 : 1;
+      const allChosen = state.players.length > 0 &&
+        state.players.every(p => Array.isArray(p.chars) && p.chars.length >= expected);
+      const step = state.draft && state.draft.steps
+        ? state.draft.steps[state.draft.stepIdx] : null;
+      if (allChosen && (!state.draft || !step)) {
+        if (state.draft && Array.isArray(state.draft.pool)) {
+          while (state.draft.pool.length) state.draft.faceDown.push(state.draft.pool.shift());
+        }
+        state.phase = 'action';
+        buildCallQueue(state);
+      }
+    }
+    if (state.phase === 'action') ensureActionTurn(state);
+    return state;
+  }
+
   function getAvailableActions(state, playerId) {
+    repairState(state);
     if (state.phase === 'gameover') return { phase: 'gameover', actions: [], prompt: '游戏结束' };
     if (state.phase === 'draft') return draftOptions(state, playerId);
     if (state.phase !== 'action') return { phase: state.phase, actions: [], prompt: '' };
@@ -819,6 +854,7 @@
 
   /* ============================ 应用行动 ============================ */
   function applyAction(state, playerId, action) {
+    repairState(state);
     const idx = playerIdx(state, playerId);
     if (idx < 0) return { ok: false, error: '玩家不存在' };
 
@@ -939,6 +975,10 @@
         state.players[r].gold -= 1; p.gold += 1;
         t.monkExtraTaken = true;
         log(state, '【修士】' + p.name + ' 从 ' + state.players[r].name + ' 处拿走 1 枚金币。', 'good');
+        notify(state, 'monk_take', {
+          fromIdx: r, fromId: state.players[r].id, fromName: state.players[r].name,
+          toIdx: idx, toId: p.id, toName: p.name, amount: 1
+        });
         return ok();
       }
 
@@ -954,6 +994,12 @@
         p.city.push(built);
         t.builds++;
         log(state, p.name + ' 建造了『' + card.name + '』（' + card.cost + ' 金）。', 'build');
+        notify(state, 'built', {
+          playerIdx: idx, playerId: p.id, playerName: p.name,
+          card: { uid: built.uid, name: built.name, en: built.en, desc: built.desc,
+            color: built.color, cost: built.cost, scoreValue: built.scoreValue,
+            purple: built.purple || null }
+        });
         if (p.city.length >= state.config.endDistricts && state.firstToFinish < 0) {
           state.firstToFinish = idx;
           log(state, '* ' + p.name + ' 率先建成第 ' + state.config.endDistricts + ' 栋建筑，本轮结束后游戏结束！', 'sys');
@@ -1055,6 +1101,10 @@
         p.hand = b; state.players[ti].hand = a;
         t.abilityUsed = true; t.pending = null;
         log(state, '【魔术师】' + p.name + ' 与 ' + state.players[ti].name + ' 交换了全部手牌。', 'magic');
+        notify(state, 'magician_swap', {
+          byIdx: idx, byId: p.id, byName: p.name,
+          playerIdx: ti, playerId: state.players[ti].id, playerName: state.players[ti].name
+        });
         return ok();
       }
       case 'choose_cards': {
@@ -1154,7 +1204,13 @@
         if (!pd || pd.kind !== 'emperor_crown') return err('当前无需选择');
         const ti = playerIdx(state, action.target);
         if (ti < 0 || ti === idx) return err('无效的目标玩家');
+        const fromIdx = crownIdx(state);
+        const fromPlayer = fromIdx >= 0 ? state.players[fromIdx] : null;
         setCrown(state, ti);
+        notify(state, 'crown_transfer', {
+          fromIdx: fromIdx, fromId: fromPlayer && fromPlayer.id, fromName: fromPlayer && fromPlayer.name,
+          toIdx: ti, toId: state.players[ti].id, toName: state.players[ti].name
+        });
         t.pending = { kind: 'emperor_take', targetIdx: ti };
         return ok();
       }
@@ -1166,12 +1222,20 @@
           const amt = Math.min(1, tp.gold);
           tp.gold -= amt; p.gold += amt;
           log(state, '【皇帝】' + p.name + ' 从 ' + tp.name + ' 处拿取 ' + amt + ' 枚金币。', 'good');
+          if (amt > 0) notify(state, 'emperor_gold', {
+            fromIdx: pd.targetIdx, fromId: tp.id, fromName: tp.name,
+            toIdx: idx, toId: p.id, toName: p.name, amount: amt
+          });
         } else {
           if (tp.hand.length > 0) {
             const i = randInt(state, tp.hand.length);
             const card = tp.hand.splice(i, 1)[0];
             p.hand.push(card);
             log(state, '【皇帝】' + p.name + ' 从 ' + tp.name + ' 处随机拿取 1 张手牌。', 'good');
+            notify(state, 'emperor_card', {
+              fromIdx: pd.targetIdx, fromId: tp.id, fromName: tp.name,
+              toIdx: idx, toId: p.id, toName: p.name, amount: 1
+            });
           } else {
             log(state, '【皇帝】' + tp.name + ' 没有手牌可拿。', 'info');
           }
@@ -1398,8 +1462,14 @@
     log(state, '【外交官】' + me.name + ' 用『' + mine.name + '』换来了 ' + tp.name +
       ' 的『' + theirs.name + '』' + (diff > 0 ? '，补差价 ' + diff + ' 金' : '') + '。', 'bad');
     notify(state, 'swapped', {
+      byIdx: idx, byId: me.id, byName: me.name,
       playerIdx: ti, playerId: tp.id, playerName: tp.name,
-      byName: me.name, cardName: theirs.name, gotName: mine.name, cost: diff
+      cardName: theirs.name, gotName: mine.name, cost: diff,
+      // 建筑本身是公开信息，带上卡牌资料用于客户端播放两张牌的交换动画。
+      mineCard: { uid: mine.uid, name: mine.name, en: mine.en, desc: mine.desc,
+        color: mine.color, cost: mine.cost, scoreValue: mine.scoreValue },
+      theirsCard: { uid: theirs.uid, name: theirs.name, en: theirs.en, desc: theirs.desc,
+        color: theirs.color, cost: theirs.cost, scoreValue: theirs.scoreValue }
     });
     return ok();
   }
@@ -1591,6 +1661,7 @@
 
   /* ---------------------------- 隐藏信息 ---------------------------- */
   function sanitize(state, playerId) {
+    repairState(state);
     const idx = playerIdx(state, playerId);
     const isSpectator = idx < 0;
     const out = {
@@ -1616,13 +1687,16 @@
           hasCrown: p.hasCrown,
           connected: p.connected,
           played: p.played.slice(),
-          // 选角状态：hasChosen=已选（盖牌），revealedCharId/Num=已公开（翻面）。
-          // 仅在该角色被叫到/已行动时暴露身份，避免把尚未行动的暗牌泄露给客户端。
+          // 选角状态：其他玩家只在角色被叫到/已行动后翻面；本人始终可以看到自己已选的角色。
           hasChosen: p.chars.length > 0,
-          revealedCharId: (state.turn && state.turn.playerIdx === i)
+          revealedCharId: (i === idx && p.chars.length)
+            ? p.chars[0]
+            : (state.turn && state.turn.playerIdx === i)
             ? state.turn.charId
             : (p.played && p.played.length ? p.played[0] : null),
-          revealedCharNum: (state.turn && state.turn.playerIdx === i)
+          revealedCharNum: (i === idx && p.chars.length)
+            ? charOf(p.chars[0]).num
+            : (state.turn && state.turn.playerIdx === i)
             ? charOf(state.turn.charId).num
             : (p.played && p.played.length ? charOf(p.played[0]).num : null)
         };
@@ -1738,6 +1812,7 @@
   return {
     createGame: createGame,
     startGame: startGame,
+    repairState: repairState,
     applyAction: applyAction,
     getAvailableActions: getAvailableActions,
     sanitize: sanitize,

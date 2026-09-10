@@ -28,10 +28,31 @@
     lastCfg: null,
     speed: 'normal',       // 电脑行动节奏：slow | normal | fast
     paused: false,         // 事件弹层展示期间暂停电脑行动
+    buildingAnimPaused: false,
     noticeSeen: null,      // 已展示到第几条关键事件（seq）
     _reveal: {},           // 每位玩家上一帧的角色卡状态，用于检测「盖牌→翻面」触发动画
-    myIdx: null
+    myIdx: null,
+    leavingNetGame: false
   };
+
+  const NET_SESSION_KEY = 'citadels.net.session';
+  function loadNetSession() {
+    try {
+      const raw = window.localStorage.getItem(NET_SESSION_KEY);
+      const data = raw ? JSON.parse(raw) : null;
+      return data && data.token && data.roomId ? data : null;
+    } catch (e) { return null; }
+  }
+  function saveNetSession(token, roomId, name) {
+    if (!token || !roomId) return;
+    try {
+      window.localStorage.setItem(NET_SESSION_KEY,
+        JSON.stringify({ token: token, roomId: roomId, name: name || '' }));
+    } catch (e) { /* 隐私模式或存储被禁用 */ }
+  }
+  function clearNetSession() {
+    try { window.localStorage.removeItem(NET_SESSION_KEY); } catch (e) { /* ignore */ }
+  }
 
   /* --------------------------- 电脑行动节奏 ---------------------------
    * 原先固定 330ms，真人根本来不及看清电脑做了什么。
@@ -341,6 +362,29 @@
         flyGoldIn(n.playerIdx, n.amount);
         return;
 
+      case 'monk_take':
+        flyCoins(n.fromIdx, n.toIdx, n.amount || 1);
+        return;
+
+      case 'crown_transfer':
+        crownTransferAnim(n.fromIdx, n.toIdx);
+        return;
+
+      case 'emperor_gold':
+        // 皇帝从目标玩家处取得金币：金币从目标玩家飞向皇帝。
+        flyCoins(n.fromIdx, n.toIdx, n.amount || 1);
+        return;
+
+      case 'emperor_card':
+        // 皇帝从目标玩家处取得手牌：只显示一张牌背，避免泄露具体牌面。
+        handTransferAnim(n.fromIdx, n.toIdx);
+        return;
+
+      case 'built':
+        beginBuildingAnimation();
+        buildingBuildAnim(n.playerIdx, n.card, endBuildingAnimation);
+        return;
+
       case 'alchemist_refund':
         // 炼金术士回合结束回收建造费：沿用金币飞行动画，并补充明确提示。
         flyGoldIn(n.playerIdx, n.amount);
@@ -354,10 +398,26 @@
         }
         return;
 
+      case 'magician_swap':
+        // 所有人都看到两端之间的背面手牌交换动画，不泄露具体牌面。
+        handSwapAnim(n.byIdx, n.playerIdx);
+        if (isMe) {
+          queueEvent({
+            tone: 'magic', icon: '↔', title: '你的手牌被交换了', hold: 5000,
+            text: '【魔术师】' + escapeHtml(n.byName) + ' 与你交换了<b>全部手牌</b>。'
+          });
+        } else if (byMe) {
+          toast('↔ 你与 ' + escapeHtml(n.playerName) + ' 交换了全部手牌');
+        } else {
+          toast('↔ ' + escapeHtml(n.byName) + ' 与 ' + escapeHtml(n.playerName) + ' 交换了全部手牌');
+        }
+        return;
+
       case 'round_end':
         return;
 
       case 'swapped':
+        buildingSwapAnim(n.byIdx, n.playerIdx, n.mineCard, n.theirsCard);
         if (isMe) {
           queueEvent({
             tone: 'warn', icon: '<>', title: '建筑被外交官换走', hold: 4800,
@@ -383,9 +443,13 @@
   /* ============================== 本地驱动 ============================== */
   function localActor(st) {
     if (st.phase === 'draft' && st.draft) {
-      const step = st.draft.steps[st.draft.stepIdx];
-      if (step) return st.players[step.player];
-      return null;
+      // sanitize() 只向客户端公开 currentPlayer；本地机器人使用原始引擎状态，
+      // 两种状态都要兼容。
+      if (st.draft.currentPlayer != null) {
+        return st.players.find(p => p.id === st.draft.currentPlayer) || null;
+      }
+      const step = st.draft.steps && st.draft.steps[st.draft.stepIdx];
+      return step ? st.players[step.player] : null;
     }
     if (st.reaction) return st.players[st.reaction.playerIdx];
     // 轮末确认：找第一个还没确认的玩家
@@ -457,6 +521,11 @@
       if (actor && actor.isBot) {
         let action = null;
         try { action = AI.decide(st, actor.id); } catch (e) { console.error(e); }
+        // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
+        if (!action) {
+          const opts = Engine.getAvailableActions(st, actor.id);
+          if (opts && opts.actions && opts.actions.length) action = opts.actions[0];
+        }
         if (action) {
           let res = Engine.applyAction(st, actor.id, action);
           if (!res.ok) {
@@ -464,8 +533,8 @@
             if (st.phase === 'draft') {
               // 选角失败时从合法行动中挑第一个再试一次，避免空转卡死
               const opts = Engine.getAvailableActions(st, actor.id);
-              if (opts && opts.length) {
-                res = Engine.applyAction(st, actor.id, opts[0]);
+              if (opts && opts.actions && opts.actions.length) {
+                res = Engine.applyAction(st, actor.id, opts.actions[0]);
               }
             }
             if (!res.ok) {
@@ -484,14 +553,20 @@
 
   /* ============================== 联机驱动 ============================== */
   const Net = {
-    ws: null, myId: null, roomId: null, name: '', onState: null,
+    ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
+    reconnectTimer: null, reconnectDelay: 1000,
     connect(cb) {
       if (this.ws && this.ws.readyState === 1) return cb && cb();
+      this.afterHello = cb || this.afterHello || null;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       this.ws = new WebSocket(proto + '://' + location.host);
       this.ws.onopen = () => {
-        this.send({ t: 'hello', name: this.name });
-        cb && cb();
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        this.reconnectDelay = 1000;
+        const saved = loadNetSession();
+        this.send({ t: 'hello', name: this.name,
+          resumeToken: saved && saved.token, roomId: saved && saved.roomId });
       };
       this.ws.onmessage = ev => {
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
@@ -500,16 +575,31 @@
       this.ws.onclose = () => {
         toast('与服务器的连接已断开');
         $$('#screen-lobby .dim').forEach(() => {});
+        // 联机游戏中刷新服务或短暂断网时，自动使用本地令牌回到原房间。
+        // 不清空 App.state，让画面在重连期间保留最后一个已知状态。
+        if (!loadNetSession() || this.reconnectTimer) return;
+        const delay = this.reconnectDelay;
+        this.reconnectDelay = Math.min(8000, Math.round(this.reconnectDelay * 1.6));
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          this.connect(() => this.send({ t: 'listRooms' }));
+        }, delay);
       };
       this.ws.onerror = () => toast('无法连接服务器');
     },
     send(o) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(o)); },
     handle(m) {
       switch (m.t) {
-        case 'hello': this.myId = m.youId; break;
+        case 'hello':
+          this.myId = m.youId;
+          if (!m.resumed && this.afterHello) {
+            const cb = this.afterHello; this.afterHello = null; cb();
+          } else if (m.resumed) this.afterHello = null;
+          break;
         case 'rooms': renderRoomList(m.rooms); break;
         case 'joined':
           this.myId = m.youId; this.roomId = m.roomId;
+          if (m.resumeToken) saveNetSession(m.resumeToken, m.roomId, this.name);
           App.myId = m.youId;
           // 大厅里加入 → 从 0 开始（后续事件全部提示）；中途加入 → 对齐进度，不回放历史
           App.noticeSeen = (m.state.notices && m.state.notices.length)
@@ -519,6 +609,7 @@
           else { App.state = m.state; showScreen('screen-game'); render(); }
           break;
         case 'state':
+          if (App.leavingNetGame) break;
           App.state = m.state;
           if (m.state.you) App.myId = m.state.you;
           if (m.state.phase === 'lobby') { renderLobbyRoom(m.state); showScreen('screen-lobby'); }
@@ -535,6 +626,20 @@
   };
 
   function send(action) {
+    if (App.buildingAnimPaused) return;
+    // 选角牌的点击可能在状态广播与 DOM 重绘之间落后一个瞬间。
+    // 如果选角已经结束，丢弃这次陈旧点击，避免把 draft_pick 发到行动阶段。
+    if (action && (action.type === 'draft_pick' || action.type === 'draft_discard')) {
+      const d = App.state && App.state.draft;
+      const viewerId = App.state && (App.state.you || App.myId);
+      if (!App.state || App.state.phase !== 'draft' || !d || d.currentPlayer !== viewerId) {
+        App.sel = null;
+        if (typeof closeCharZoomPreview === 'function') closeCharZoomPreview();
+        if (App.state) render();
+        toast('选角已结束或当前不是你的选角回合');
+        return;
+      }
+    }
     if (App.mode === 'local') Local.send(action);
     else Net.action(action);
   }
@@ -1199,6 +1304,170 @@
     }
   }
 
+  // 魔术师换手牌：用两张牌背沿相反方向飞行，保持信息隐藏但让交换关系清楚可见。
+  function handSwapAnim(fromSeat, toSeat) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat) return;
+    const from = rectOf(playerBox(fromSeat));
+    const to = rectOf(playerBox(toSeat));
+    if (!from || !to || typeof document === 'undefined' || !document.body) return;
+    const sx = from.left + from.width / 2, sy = from.top + from.height / 2;
+    const ex = to.left + to.width / 2, ey = to.top + to.height / 2;
+    const dx = ex - sx, dy = ey - sy;
+    [
+      { x: sx, y: sy, dx: dx, dy: dy, rotate: '-8deg' },
+      { x: ex, y: ey, dx: -dx, dy: -dy, rotate: '8deg' }
+    ].forEach((v, i) => {
+      const card = document.createElement('div');
+      card.className = 'hand-swap-flight';
+      card.textContent = '▧';
+      card.style.left = (v.x - 21) + 'px';
+      card.style.top = (v.y - 29) + 'px';
+      card.style.setProperty('--swap-dx', v.dx + 'px');
+      card.style.setProperty('--swap-dy', v.dy + 'px');
+      card.style.setProperty('--swap-rotate', v.rotate);
+      card.style.animationDelay = (i * 90) + 'ms';
+      document.body.appendChild(card);
+      setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 1150 + i * 90);
+    });
+    const badge = document.createElement('div');
+    badge.className = 'hand-swap-badge';
+    badge.textContent = '手牌交换';
+    badge.style.left = ((sx + ex) / 2 - 34) + 'px';
+    badge.style.top = ((sy + ey) / 2 - 12) + 'px';
+    document.body.appendChild(badge);
+    setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1250);
+  }
+
+  // 外交官交换建筑：从两张建筑牌当前 DOM 位置飞向交换后的真实 DOM 位置。
+  function buildingSwapAnim(fromSeat, toSeat, mineCard, theirsCard) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
+        typeof document === 'undefined' || !document.body) return;
+    const findCard = uid => {
+      if (!uid) return null;
+      return Array.prototype.find.call(document.querySelectorAll('[data-uid]'), node =>
+        node.dataset && node.dataset.uid === uid);
+    };
+    const entries = [
+      { data: mineCard, from: fromSeat, to: toSeat, rotate: '-7deg' },
+      { data: theirsCard, from: toSeat, to: fromSeat, rotate: '7deg' }
+    ];
+    const flights = entries.map((entry, i) => {
+      const data = entry.data || {};
+      const source = findCard(data.uid);
+      const start = rectOf(source);
+      if (!start) return null;
+      const card = source.cloneNode(true);
+      card.classList.remove('clickable', 'pickable', 'selected');
+      card.classList.add('building-swap-flight');
+      card.style.left = start.left + 'px';
+      card.style.top = start.top + 'px';
+      card.style.width = start.width + 'px';
+      card.style.height = start.height + 'px';
+      card.style.setProperty('--swap-rotate', entry.rotate);
+      card.style.animationDelay = (i * 90) + 'ms';
+      document.body.appendChild(card);
+      return { card: card, entry: entry, start: start };
+    }).filter(Boolean);
+    if (!flights.length) return;
+
+    // 当前通知在 render() 的前半段处理，等本轮 DOM reconciliation 完成后读取目标卡牌位置。
+    const nextFrame = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    nextFrame(() => {
+      flights.forEach((flight, i) => {
+        const uid = flight.entry.data && flight.entry.data.uid;
+        const targetCard = findCard(uid);
+        const target = rectOf(targetCard) || rectOf(playerCityBox(flight.entry.to));
+        if (!target) {
+          if (flight.card.parentNode) flight.card.parentNode.removeChild(flight.card);
+          return;
+        }
+        const dx = target.left - flight.start.left;
+        const dy = target.top - flight.start.top;
+        flight.card.style.setProperty('--swap-dx', dx + 'px');
+        flight.card.style.setProperty('--swap-dy', dy + 'px');
+        flight.card.style.setProperty('--swap-scale-x', (target.width / flight.start.width).toFixed(4));
+        flight.card.style.setProperty('--swap-scale-y', (target.height / flight.start.height).toFixed(4));
+        flight.card.classList.add('is-flying');
+        setTimeout(() => { if (flight.card.parentNode) flight.card.parentNode.removeChild(flight.card); }, 1150 + i * 90);
+      });
+    });
+  }
+
+  // 建造动画：建筑牌从屏幕中央缩小飞入建造者的城区，并提示玩家框完成扩张。
+  function buildingBuildAnim(seat, data, onDone) {
+    const finish = typeof onDone === 'function' ? onDone : function () {};
+    if (seat == null || !data || typeof document === 'undefined' || !document.body) {
+      finish();
+      return;
+    }
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    const BASE_BUILD_FLIGHT_MS = 1050;
+    // 在上一版基础上，中央展示时间减半，飞行时间缩短为五分之一。
+    const BUILD_HOLD_MS = Math.round(BASE_BUILD_FLIGHT_MS * 5 / 6);
+    const BUILD_FLIGHT_MS = Math.round(BASE_BUILD_FLIGHT_MS * 3 / 5);
+    const baseWidth = Math.min(148, Math.max(112, Math.round(window.innerWidth * .12)));
+    const width = baseWidth * 3;
+    const height = Math.round(width * 1.395);
+    const sx = window.innerWidth / 2 - width / 2;
+    const sy = window.innerHeight / 2 - height / 2;
+    const card = cardNode(data, {});
+    card.classList.add('building-build-flight');
+    card.style.width = width + 'px';
+    card.style.height = height + 'px';
+    card.style.left = sx + 'px';
+    card.style.top = sy + 'px';
+    card.style.transformOrigin = 'center center';
+    document.body.appendChild(card);
+
+    raf(() => {
+      const box = playerBox(seat);
+      const city = playerCityBox(seat);
+      const targetCard = data.uid
+        ? Array.prototype.find.call(document.querySelectorAll('.card[data-uid]'), node =>
+            node.dataset && node.dataset.uid === String(data.uid))
+        : null;
+      const target = rectOf(targetCard) || rectOf(city) || rectOf(box);
+      if (!target) {
+        if (card.parentNode) card.parentNode.removeChild(card);
+        finish();
+        return;
+      }
+      // render() 已经把新建筑放入城区；动画期间隐藏静态卡，避免出现“静态卡+飞行卡”两张。
+      if (targetCard) {
+        targetCard.style.visibility = 'hidden';
+        targetCard.dataset.buildArrivalHidden = 'true';
+      }
+      if (box) {
+        box.classList.add('building-arrival-expand');
+        setTimeout(() => box.classList.remove('building-arrival-expand'), 900);
+      }
+      // 以卡牌中心为基准计算位移，并将最终缩放设置为目标卡牌的实际尺寸，
+      // 确保飞行结束时准确落在城区中对应的卡位。
+      const tx = target.left + target.width / 2 - (sx + width / 2);
+      const ty = target.top + target.height / 2 - (sy + height / 2);
+      card.style.setProperty('--build-dx', tx + 'px');
+      card.style.setProperty('--build-dy', ty + 'px');
+      card.style.setProperty('--build-scale-x', (target.width / width).toFixed(4));
+      card.style.setProperty('--build-scale-y', (target.height / height).toFixed(4));
+      // 先在中央保持展示，再开始缩小飞行。
+      setTimeout(() => {
+        if (!card.parentNode) {
+          finish();
+          return;
+        }
+        card.classList.add('is-flying');
+        setTimeout(() => {
+          if (targetCard && targetCard.dataset.buildArrivalHidden === 'true') {
+            targetCard.style.visibility = '';
+            delete targetCard.dataset.buildArrivalHidden;
+          }
+          if (card.parentNode) card.parentNode.removeChild(card);
+          finish();
+        }, BUILD_FLIGHT_MS + 180);
+      }, BUILD_HOLD_MS);
+    });
+  }
+
   function rectOf(el) {
     return (el && el.getBoundingClientRect) ? el.getBoundingClientRect() : null;
   }
@@ -1214,6 +1483,91 @@
   function flyCoins(fromSeat, toSeat, amount) {
     if (fromSeat == null || toSeat == null || fromSeat === toSeat) return;
     coinFlight(rectOf(playerBox(fromSeat)), rectOf(playerBox(toSeat)), amount);
+  }
+
+  // 名称右侧是皇冠在界面中的视觉锚点；自己的玩家框没有对手同款名称节点，
+  // 因此退回到玩家框右上区域，保证皇冠动画在所有座位都能播放。
+  function playerNameAnchor(seat) {
+    const box = playerBox(seat);
+    if (!box) return null;
+    const name = box.querySelector('.opp-name');
+    const r = rectOf(name) || rectOf(box);
+    if (!r) return null;
+    return {
+      x: name ? r.right + 5 : r.right - Math.min(24, r.width * .12),
+      y: r.top + r.height / 2
+    };
+  }
+
+  function crownTransferAnim(fromSeat, toSeat) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
+        typeof document === 'undefined' || !document.body) return;
+    const from = playerNameAnchor(fromSeat), to = playerNameAnchor(toSeat);
+    if (!from || !to) return;
+    const crown = document.createElement('div');
+    crown.className = 'crown-flight';
+    crown.innerHTML = '<i class="crown-icon" aria-hidden="true">♛</i>';
+    crown.style.left = (from.x - 11) + 'px';
+    crown.style.top = (from.y - 11) + 'px';
+    crown.style.setProperty('--crown-dx', (to.x - from.x) + 'px');
+    crown.style.setProperty('--crown-dy', (to.y - from.y) + 'px');
+    document.body.appendChild(crown);
+    setTimeout(() => { if (crown.parentNode) crown.parentNode.removeChild(crown); }, 1250);
+  }
+
+  // 单张手牌从目标玩家飞向皇帝，使用牌背以保持信息隐藏。
+  function handTransferAnim(fromSeat, toSeat) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
+        typeof document === 'undefined' || !document.body) return;
+    const from = rectOf(playerBox(fromSeat)), to = rectOf(playerBox(toSeat));
+    if (!from || !to) return;
+    const sx = from.left + from.width / 2, sy = from.top + from.height / 2;
+    const ex = to.left + to.width / 2, ey = to.top + to.height / 2;
+    const card = document.createElement('div');
+    card.className = 'hand-swap-flight hand-transfer-flight';
+    card.textContent = '▧';
+    card.style.left = (sx - 21) + 'px';
+    card.style.top = (sy - 29) + 'px';
+    card.style.setProperty('--swap-dx', (ex - sx) + 'px');
+    card.style.setProperty('--swap-dy', (ey - sy) + 'px');
+    card.style.setProperty('--swap-rotate', '-7deg');
+    document.body.appendChild(card);
+    const badge = document.createElement('div');
+    badge.className = 'hand-swap-badge';
+    badge.textContent = '手牌转移';
+    badge.style.left = ((sx + ex) / 2 - 34) + 'px';
+    badge.style.top = ((sy + ey) / 2 - 12) + 'px';
+    document.body.appendChild(badge);
+    setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 1150);
+    setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1250);
+  }
+
+  // 建造动画期间锁住所有行动，避免下一步操作与建筑入场效果重叠。
+  let buildingAnimDepth = 0;
+  function beginBuildingAnimation() {
+    buildingAnimDepth++;
+    App.buildingAnimPaused = true;
+    App.paused = true;
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.add('building-animation-paused');
+    }
+    if (typeof Local !== 'undefined' && Local.timer) {
+      clearTimeout(Local.timer);
+      Local.timer = null;
+    }
+  }
+
+  function endBuildingAnimation() {
+    buildingAnimDepth = Math.max(0, buildingAnimDepth - 1);
+    if (buildingAnimDepth > 0) return;
+    App.buildingAnimPaused = false;
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.remove('building-animation-paused');
+    }
+    // 若同时有事件弹层，继续保持暂停；否则恢复本地电脑行动循环。
+    const eventVisible = $('#event-overlay') && !$('#event-overlay').hidden;
+    App.paused = !!eventVisible;
+    if (!eventVisible && App.mode === 'local' && typeof Local !== 'undefined') Local.resume();
   }
 
   /* 领取金币：金币从顶部"金库"（回合横幅/顶栏）飞进该玩家的小框框 */
@@ -1312,7 +1666,8 @@
     $('#tb-target').textContent = s.endDistricts;
     $('#tb-deck').textContent = s.deckCount;
     const crownP = s.players.find(p => p.hasCrown);
-    $('#tb-crown').innerHTML = '冠 ' + (crownP ? escapeHtml(crownP.name) : '—');
+    $('#tb-crown').innerHTML = '<i class="crown-icon" aria-hidden="true">♛</i>' +
+      '<span class="crown-owner">' + (crownP ? escapeHtml(crownP.name) : '—') + '</span>';
     $('#tb-room').textContent = s.roomName || (App.mode === 'local' ? '单人模式' : '联机房间 ' + (s.roomId || ''));
     syncSpeedBtn();
     syncThemeBtn();
@@ -1341,7 +1696,9 @@
       // 选角阶段也展示全场局势（对手城市 / 我的城市与手牌），方便决策
       $('#turn-banner').innerHTML =
         '<div class="tb-who">选角阶段</div>' +
-        '<div class="tb-sub">上方为当前选角者与牌池，下方为场上局势</div>';
+        '<div class="tb-sub">上方为当前选角者与牌池，下方为场上局势</div>' +
+        '<div class="turn-order-guide draft-guide" id="turn-order-guide-draft" aria-label="行动顺序"></div>';
+      renderTableGuide(s);
       renderOpponents(s);
       renderMe(s);
       renderLog(s);
@@ -1350,6 +1707,7 @@
     }
 
     renderTurnBanner(s);
+    renderTableGuide(s);
     renderOpponents(s);
     renderMe(s);
     renderLog(s);
@@ -1446,8 +1804,67 @@
     box.appendChild(stats);
   }
 
+  function playerCityBox(s) {
+    const box = playerBox(s);
+    if (!box) return null;
+    return box.id === 'me-area' ? $('#my-city') : box.querySelector('.opp-city');
+  }
+
+  function renderTableGuide(s) {
+    // 选角阶段使用横条内的独立槽位；行动阶段使用桌面顶部槽位。
+    // 两个节点不来回搬运，避免 render() 重建横条时把行动指引一起清掉。
+    const arenaGuide = $('#turn-order-guide');
+    const guide = s.phase === 'draft'
+      ? ($('#turn-order-guide-draft') || arenaGuide)
+      : arenaGuide;
+    if (!guide) return;
+    const banner = $('#turn-banner');
+    if (s.phase === 'draft') {
+      // 选角阶段：行动指引属于“选角阶段”横条的一部分，避免压住桌面玩家卡片。
+      if (arenaGuide && arenaGuide !== guide) {
+        arenaGuide.hidden = true;
+        arenaGuide.style.display = 'none';
+        arenaGuide.setAttribute('aria-hidden', 'true');
+      }
+      guide.hidden = false;
+      guide.style.display = 'flex';
+      guide.style.visibility = 'visible';
+      guide.setAttribute('aria-hidden', 'false');
+    } else if (banner && guide.parentNode !== banner) {
+      // 行动阶段也固定放在顶部横条，避免遮住圆桌上方的玩家卡片。
+      banner.appendChild(guide);
+      guide.hidden = false;
+      guide.style.display = 'flex';
+      guide.style.visibility = 'visible';
+      guide.setAttribute('aria-hidden', 'false');
+    }
+    const actor = localActor(s);
+    const actorIdx = actor ? s.players.findIndex(p => p.id === actor.id) : -1;
+    const roleHint = s.turn && s.turn.charNum != null ? ' · ' + s.turn.charNum + '号角色' : '';
+    guide.innerHTML = '<span class="order-label">行动指引</span>' +
+      '<span class="order-note">角色按编号顺序行动</span>' +
+      s.players.map((p, i) =>
+        (i ? '<span class="order-arrow">→</span>' : '') +
+        '<span class="order-step' + (i === actorIdx ? ' current' : '') + '"' +
+        (i === actorIdx ? ' aria-current="step"' : '') + '>' +
+        '<span class="order-seat">' + (p.seat + 1) + '</span>' + escapeHtml(p.name) +
+        (i === actorIdx ? ' · 当前' : '') + '</span>'
+      ).join('');
+  }
+
   function renderOpponents(s) {
     const wrap = $('#opponents');
+    const totalPlayers = s.players.length || 1;
+    const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
+    const radiusX = totalPlayers >= 7 ? 43 : totalPlayers >= 5 ? 40 : 36;
+    const radiusY = totalPlayers >= 7 ? 42 : totalPlayers >= 5 ? 40 : 38;
+    const cardWidth = totalPlayers >= 8 ? 17 : totalPlayers >= 7 ? 19 : totalPlayers >= 5 ? 21 : totalPlayers === 4 ? 30 : 24;
+    wrap.dataset.players = String(totalPlayers);
+    const arena = $('#table-arena');
+    if (arena) arena.dataset.players = String(totalPlayers);
+    // 多人时顶部玩家卡片更容易向下延伸，圆桌下移到环形座位的空白中心，避免相互覆盖。
+    const me = s.players.find(p => p.id === App.myId);
+    const meSeat = me ? me.seat : 0;
     const picking = districtSelectMode();
     // 按 seat 复用对手区块，避免整盘重建导致城区卡图在移动端闪烁
     const existing = {};
@@ -1460,22 +1877,51 @@
       if (!d) {
         d = el('div', 'opp');
         d.dataset.seat = p.seat;
-        d.appendChild(el('div', 'opp-char'));
+        const roleRow = el('div', 'opp-role-row');
+        roleRow.appendChild(el('div', 'opp-char'));
+        roleRow.appendChild(el('div', 'opp-char-stats'));
+        d.appendChild(roleRow);
         const head = el('div', 'opp-head'); d.appendChild(head);
         const body = el('div', 'opp-body');
         body.appendChild(el('div', 'opp-city'));
-        body.appendChild(el('div', 'opp-meta'));
         d.appendChild(body);
       }
       keep[p.seat] = d;
-      d.classList.toggle('active', !!(s.turn && s.turn.playerIdx === p.seat));
+      const relativeSeat = (p.seat - meSeat + totalPlayers) % totalPlayers;
+      const angle = Math.PI / 2 + relativeSeat / totalPlayers * Math.PI * 2;
+      d.style.setProperty('--seat-x', String(50 + Math.cos(angle) * radiusX));
+      d.style.setProperty('--seat-y', String(50 + Math.sin(angle) * radiusY));
+      // 行动提示条位于游戏区域上沿。4 人时正上方座位、5 人时上方两个座位
+      // 都需要额外下移，避免玩家卡片与提示条发生重叠。
+      const inPlayPhase = s.phase === 'action' || s.phase === 'draft';
+      const isTopSeat = totalPlayers === 4
+        ? relativeSeat === 2
+        : totalPlayers === 5 && (relativeSeat === 2 || relativeSeat === 3);
+      const topSeatShift = inPlayPhase && isTopSeat
+        ? (totalPlayers === 5 ? 110 : 58)
+        : 0;
+      d.style.setProperty('--seat-shift-y', (totalPlayers === 4 ? 42 + topSeatShift : topSeatShift) + 'px');
+      const cityWidth = totalPlayers === 4
+        ? Math.min(700, 340 + Math.max(0, p.city.length - 5) * 90) + 'px'
+        : 'min(340px, ' + cardWidth + '%)';
+      d.style.width = cityWidth;
+      d.dataset.widthBase = cityWidth;
+      d.dataset.cardWidth = String(cardWidth);
+      d.style.setProperty('--push-x', '0px');
+      d.style.setProperty('--push-y', '0px');
+      d.dataset.compact = String(compactLevel);
+      const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id);
+      const actionActive = !!(s.turn && s.turn.playerIdx === p.seat);
+      d.classList.toggle('active', draftActive || actionActive);
       // 角色状态 HTML 未变（如每步行动但身份没翻面）时跳过重建，避免霓虹角色立绘闪烁
       const cs = d.querySelector('.opp-char');
       const csHtml = charStatusHTML(p);
       if (cs._lastHTML !== csHtml) { cs.innerHTML = csHtml; cs._lastHTML = csHtml; }
-      const tags = (p.isBot ? '<span class="tag bot">电脑</span>' : '') + (p.hasCrown ? '<span class="tag crown">皇冠</span>' : '');
+      const tags = (p.isBot ? '<span class="tag bot">电脑</span>' : '') +
+        (p.hasCrown ? '<span class="tag crown crown-icon-tag" title="当前持有皇冠" aria-label="当前持有皇冠"><i class="crown-icon" aria-hidden="true">♛</i></span>' : '');
       const head = d.querySelector('.opp-head');
-      head.innerHTML = '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
+      head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
+        '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
         '<span class="opp-gold"><i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>';
       const sb = el('button', 'score-btn');
       sb.title = '显示 ' + p.name + ' 的得分与计算过程';
@@ -1499,7 +1945,7 @@
           else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
         });
       }
-      d.querySelector('.opp-meta').innerHTML = '城区 <b>' + p.cityCount + '</b>/' + s.endDistricts + '<br>手牌 ' + p.handCount + ' 张' +
+      d.querySelector('.opp-char-stats').innerHTML = '城区 <b>' + p.cityCount + '</b>/' + s.endDistricts + '<br>手牌 ' + p.handCount + ' 张' +
         (p.played && p.played.length ? '<br>已用：' + p.played.map(c => escapeHtml(Engine.charOf(c).name)).join('、') : '');
       frag.appendChild(d);
     });
@@ -1508,6 +1954,40 @@
       if (ch.dataset && ch.dataset.seat != null && !keep[ch.dataset.seat] && ch.parentNode) ch.parentNode.removeChild(ch);
     });
     wrap.appendChild(frag);
+    resolveOpponentTableCollisions();
+  }
+
+  // 用实际屏幕矩形检查玩家卡片与圆桌是否相交；相交时沿座位方向推开，
+  // 并横向增加少量宽度，让卡片之间的间距更稳定。
+  function resolveOpponentTableCollisions() {
+    const table = $('#table-core');
+    const wrap = $('#opponents');
+    if (!table || !wrap) return;
+    const tr = table.getBoundingClientRect();
+    if (!tr.width || !tr.height) return;
+    const tcx = tr.left + tr.width / 2;
+    const tcy = tr.top + tr.height / 2;
+    Array.prototype.forEach.call(wrap.querySelectorAll('.opp'), d => {
+      d.style.setProperty('--push-x', '0px');
+      d.style.setProperty('--push-y', '0px');
+      const baseWidth = d.dataset.widthBase || ('min(340px, ' + (d.dataset.cardWidth || 24) + '%)');
+      d.style.width = baseWidth;
+      const r = d.getBoundingClientRect();
+      const overlapX = Math.min(r.right, tr.right) - Math.max(r.left, tr.left);
+      const overlapY = Math.min(r.bottom, tr.bottom) - Math.max(r.top, tr.top);
+      if (overlapX <= 0 || overlapY <= 0) return;
+      const dx = r.left + r.width / 2 - tcx;
+      const dy = r.top + r.height / 2 - tcy;
+      let pushX = 0, pushY = 0;
+      if (Math.abs(dx) > Math.abs(dy)) pushX = (dx < 0 ? -1 : 1) * (overlapX + 12);
+      else pushY = (dy < 0 ? -1 : 1) * (overlapY + 12);
+      d.style.setProperty('--push-x', pushX + 'px');
+      d.style.setProperty('--push-y', pushY + 'px');
+      const expand = Math.min(26, Math.max(8, Math.round(overlapX * 0.12)));
+      d.style.width = baseWidth.indexOf('px') >= 0
+        ? 'min(720px, calc(' + baseWidth + ' + ' + expand + 'px))'
+        : 'min(340px, calc(' + baseWidth + ' + ' + expand + 'px))';
+    });
   }
 
   /* 得分明细浮动窗口 */
@@ -1549,20 +2029,29 @@
     App.myIdx = s.players.findIndex(p => p.id === App.myId);
     const meArea = $('#me-area');
     if (meArea) meArea.dataset.seat = App.myIdx;
+    if (meArea) {
+      const totalPlayers = s.players.length || 1;
+      if (totalPlayers === 4 && window.innerWidth > 1000) {
+        const desired = Math.min(1120, 860 + Math.max(0, me.city.length - 5) * 85);
+        const viewportLimit = Math.max(860, window.innerWidth - 120);
+        meArea.style.width = Math.min(desired, viewportLimit) + 'px';
+      } else {
+        meArea.style.width = '';
+      }
+    }
+    const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === me.id);
+    const actionActive = !!(s.turn && s.turn.playerIdx === App.myIdx);
+    if (meArea) meArea.classList.toggle('active', draftActive || actionActive);
     const ms = $('#my-char-status');
     if (ms) ms.innerHTML = charStatusHTML(me);
+    const myStats = $('#my-char-stats');
+    if (myStats) myStats.innerHTML = '城区 <b>' + me.cityCount + '</b>/' + s.endDistricts +
+      '<br>手牌 ' + me.hand.length + ' 张' +
+      (me.chars.some(c => c.played) ? '<br>已用：' + me.chars.filter(c => c.played).map(c => escapeHtml(c.name)).join('、') : '');
     $('#my-gold').innerHTML = '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
-    $('#my-city-count').textContent = me.cityCount + ' / ' + s.endDistricts + ' 栋';
-    $('#my-hand-count').textContent = me.hand.length + ' 张';
-    const fx = s.effects || {};
-    $('#my-chars-tip').innerHTML = me.chars.map(c => {
-      let extra = '', cls = c.played ? '' : ' crown';
-      if (fx.assassinated === c.num) { extra = ' 被刺杀'; cls = ' dead'; }
-      else if (fx.bewitched === c.num) { extra = ' 被施咒'; cls = ' magic'; }
-      else if (fx.thief === c.num) { extra = ' 被盯上'; cls = ' magic'; }
-      return '<span class="tag' + cls + '">' + c.num + '·' + escapeHtml(c.name) +
-        (c.played ? '（已用）' : '') + extra + '</span>';
-    }).join(' ');
+    $('#my-city-count').textContent = '';
+    $('#my-hand-count').textContent = '';
+    $('#my-chars-tip').innerHTML = '';
 
     const city = $('#my-city');
     if (!me.city.length) {
@@ -1619,7 +2108,11 @@
   function renderDraft(s) {
     const d = s.draft; if (!d) return;
     const me = s.players.find(p => p.id === App.myId);
-    const isPicker = d.currentPlayer === App.myId;
+    const viewerId = s.you || App.myId;
+    const hasDraftAction = !!(s.available && s.available.actions &&
+      s.available.actions.some(a => a.type === 'draft_pick' || a.type === 'draft_discard'));
+    // 以状态里的 you / available 为准，避免重连或本地状态切换时 App.myId 短暂滞后。
+    const isPicker = d.currentPlayer === viewerId || hasDraftAction;
     $('#draft-title').textContent = isPicker ? (d.sub === 'discard' ? '暗置弃掉一张角色牌' : '选择你的角色')
       : '等待其他玩家选角…';
     const cur = s.players.find(p => p.id === d.currentPlayer);
@@ -1668,13 +2161,14 @@
   /* ============================== 本轮出局角色 ============================== */
   /* 明置移除：画出整张角色卡（身份公开）；暗置移除：画出盖着的牌背（身份保密，仅显示数量） */
   function renderRemoved(s) {
-    const strip = $('#removed-strip');
-    if (!strip) return;
     const rem = (s && s.removed) || { faceUp: [], faceDownCount: 0 };
-    const fu = $('#rs-faceup', strip);
-    const fd = $('#rs-facedown', strip);
+    const corner = $('#removed-corner');
+    if (!corner) return;
+    const fu = $('#rs-faceup-corner');
+    const fd = $('#rs-facedown-corner');
+    const faceUp = rem.faceUp || [];
+    const faceDownCount = rem.faceDownCount || 0;
     if (fu) {
-      const faceUp = rem.faceUp || [];
       // 按角色 id 复用节点，避免每步行动整盘重建导致霓虹角色立绘在移动端闪烁
       const existing = {};
       Array.prototype.forEach.call(fu.children, ch => { const k = ch.dataset && ch.dataset.uid; if (k) existing[k] = ch; });
@@ -1694,11 +2188,10 @@
     }
     if (fd) {
       fd.innerHTML = '';
-      const n = rem.faceDownCount || 0;
-      for (let i = 0; i < n; i++) fd.appendChild(el('div', 'facedown sm', '？'));
+      for (let i = 0; i < faceDownCount; i++) fd.appendChild(el('div', 'facedown sm', '？'));
     }
-    const empty = (!rem.faceUp || !rem.faceUp.length) && !(rem.faceDownCount > 0);
-    strip.hidden = empty;
+    const empty = faceUp.length === 0 && faceDownCount === 0;
+    corner.hidden = empty;
   }
 
   /* ============================== 行动栏 ============================== */
@@ -1778,6 +2271,7 @@
 
   /* ============================== 行动分发 ============================== */
   function runAction(a) {
+    if (App.buildingAnimPaused) return;
     switch (a.type) {
       case 'lab':
         App.sel = { kind: 'handpick', items: [], label: '【实验室】点击一张手牌弃掉，换取 1 金',
@@ -1799,6 +2293,7 @@
   }
 
   function onHandClick(c) {
+    if (App.buildingAnimPaused) return;
     const s = App.state;
     if (App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')) {
       if (App.sel.kind === 'handpick') { App.sel.commit([c.uid]); return; }
@@ -1871,6 +2366,8 @@
 
   /* ============================== 结算 ============================== */
   function showOver(s) {
+    // 避免之前打开的计分详情浮层挡住结算页按钮，导致首击只关闭浮层。
+    closeScore();
     const rows = s.scores || [];
     let best = -1;
     rows.forEach(r => { if (r.total > best) best = r.total; });
@@ -2046,10 +2543,23 @@
     if (themeBtn) themeBtn.onclick = () => Theme.toggle();
     if (Theme.updateControls) Theme.updateControls();
     syncThemeBtn();
-    $$('[data-goto]').forEach(b => b.onclick = () => showScreen('screen-' + b.dataset.goto));
+    $$('[data-goto]').forEach(b => b.onclick = () => {
+      const target = b.dataset.goto;
+      if (target === 'home' && App.mode === 'net' && App.state && App.state.phase === 'gameover') {
+        // 结算页返回主菜单代表结束这次联机体验，不应在刷新后自动回到旧计分页。
+        App.leavingNetGame = true;
+        Net.send({ t: 'leaveRoom' });
+        clearNetSession();
+        Net.roomId = null;
+        App.state = null;
+        App.myId = null;
+      }
+      showScreen('screen-' + target);
+    });
 
     $('#btn-single').onclick = () => showScreen('screen-setup');
     $('#btn-online').onclick = () => {
+      App.leavingNetGame = false;
       showScreen('screen-lobby');
       Net.name = $('#net-name').value || '玩家';
       Net.connect(() => { Net.send({ t: 'listRooms' }); });
@@ -2118,6 +2628,7 @@
       App.mode = 'net';
     };
     $('#btn-join').onclick = () => {
+      App.leavingNetGame = false;
       const code = ($('#net-code').value || '').trim().toUpperCase();
       if (code.length !== 4) { toast('请输入 4 位房间号'); return; }
       Net.name = ($('#net-name').value || '玩家').trim();
@@ -2127,6 +2638,7 @@
     $('#btn-refresh').onclick = () => Net.send({ t: 'listRooms' });
     $('#btn-leave').onclick = () => {
       Net.send({ t: 'leaveRoom' });
+      clearNetSession();
       $('#lobby-pre').hidden = false; $('#lobby-room').hidden = true;
       $('#lobby-title').textContent = '联机大厅';
       Net.send({ t: 'listRooms' });
@@ -2176,6 +2688,13 @@
   }
 
   bind();
+  // 浏览器刷新或重启后，使用本地保存的令牌自动回到原来的座位/对局。
+  const savedNetSession = loadNetSession();
+  if (savedNetSession) {
+    App.mode = 'net';
+    Net.name = savedNetSession.name || '玩家';
+    Net.connect(() => Net.send({ t: 'listRooms' }));
+  }
   // 供自动化测试驱动使用
   App.__local = Local;
   App.__net = Net;
