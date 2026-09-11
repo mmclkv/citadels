@@ -1978,7 +1978,7 @@
     const gap = Math.max(6, Math.round(Math.min(14, width * .018)));
     const cardWidth = Math.max(104, Math.min(160, Math.floor(width * .25)));
     const minWidth = Math.max(94, Math.floor(cardWidth * .78));
-    const height = Math.max(390, Math.min(560, Math.round((window.innerHeight || 720) * .58)));
+    const height = Math.max(300, Math.min(400, Math.round((window.innerHeight || 720) * .44)));
     wrap.style.display = 'block';
     wrap.style.height = height + 'px';
     wrap.style.overflow = 'visible';
