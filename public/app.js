@@ -2123,16 +2123,27 @@
     const totalPlayers = Number(wrap.dataset.players || nodes.length + 1);
     const pwa = typeof window !== 'undefined' && window.matchMedia &&
       window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+    // iPad 级大屏（横屏、宽 ≥900 且高 ≥560）：屏幕远大于手机，玩家框与内部元素整体
+    // 放大一档，避免圆角矩形和卡牌在宽屏上显得过小、四周留大片空白。
+    // 判据与 style.css 中同名媒体查询保持一致，保证尺寸计算与样式同进同退。
+    const viewportH = (typeof window !== 'undefined' && window.innerHeight) || 720;
+    const spacious = width >= 900 && viewportH >= 560;
+    const boost = spacious ? 1.25 : 1;
     // 玩家框至少保持 1.5:1 的宽高比；有空间时先横向容纳更多建筑，
     // 空间不足时再切换到更紧凑的卡牌尺寸。
     const maxWidth = Math.max(126, Math.floor(width * (pwa && totalPlayers >= 5
       ? (totalPlayers >= 7 ? .34 : .38)
-      : (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58))));
-    const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * (pwa && totalPlayers >= 5 ? .18 : .25))));
+      : (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58)) * boost));
+    // 大屏时玩家框的基础宽度也提高一档（.18 → .24），让圆角矩形本身明显变大，
+    // 而不只是内部卡牌变大。
+    const baseRatio = pwa && totalPlayers >= 5 ? (spacious ? .24 : .18) : .25;
+    const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * baseRatio * boost)));
     const minWidth = Math.max(104, Math.floor(cardWidth * .78));
+    // 大屏时环形区更高（视口 72%），保证放大后的上下两排玩家框仍有足够垂直间距，
+    // 不会因为互相挤压被碰撞逻辑再次压回手机尺寸。
     const height = pwa && totalPlayers >= 5
-      ? Math.max(420, Math.min(620, Math.round((window.innerHeight || 720) * .62)))
-      : Math.max(300, Math.min(400, Math.round((window.innerHeight || 720) * .44)));
+      ? Math.max(420, Math.min(spacious ? 600 : 620, Math.round(viewportH * (spacious ? .72 : .62))))
+      : Math.max(300, Math.min(400, Math.round(viewportH * .44)));
     wrap.style.display = 'block';
     wrap.style.height = height + 'px';
     wrap.style.overflow = 'visible';
@@ -2152,8 +2163,8 @@
           const compact = Number(node.dataset.compact || 3);
           const cityCount = Number(node.dataset.cityCount || 0);
           const cityCardWidth = compact >= 4
-            ? Math.max(16, Math.min(31, Math.floor((maxWidth - 18 - Math.max(0, cityCount - 1) * 3) / Math.max(1, cityCount))))
-            : 40;
+            ? Math.max(16, Math.min(spacious ? 36 : 31, Math.floor((maxWidth - 18 - Math.max(0, cityCount - 1) * 3) / Math.max(1, cityCount))))
+            : (spacious ? 44 : 40);
           node.style.setProperty('--mobile-city-card-width', cityCardWidth + 'px');
           node.style.setProperty('--mobile-city-card-height', Math.round(cityCardWidth * 1.5) + 'px');
           const cityNeed = cityCount
@@ -2241,8 +2252,12 @@
     if (nodes.length < 2) return;
     wrap.classList.add('pwa-collision-layout');
     const gap = 8;
+    // 与 applyMobileRingLayout 同一判据：iPad 级大屏给更高的环形区与更宽松的
+    // 碰撞收缩下限，避免刚放大就被压回手机尺寸。
+    const viewportH = (window.innerHeight || 720);
+    const spacious = (wrap.clientWidth || window.innerWidth || 0) >= 900 && viewportH >= 560;
     const currentHeight = parseFloat(wrap.style.height) || wrap.clientHeight || 0;
-    const targetHeight = Math.max(currentHeight, Math.min(620, Math.max(420, Math.round((window.innerHeight || 720) * .62))));
+    const targetHeight = Math.max(currentHeight, Math.min(spacious ? 600 : 620, Math.max(420, Math.round(viewportH * (spacious ? .72 : .62)))));
     wrap.style.height = targetHeight + 'px';
 
     const addPush = (node, dx, dy) => {
@@ -2280,8 +2295,9 @@
 
           const aw = parseFloat(getComputedStyle(nodes[i]).width) || 0;
           const bw = parseFloat(getComputedStyle(nodes[j]).width) || 0;
-          if (Math.min(aw, bw) > 84) {
-            const next = Math.max(84, Math.floor(Math.min(aw, bw) * .94));
+          if (Math.min(aw, bw) > (spacious ? 132 : 84)) {
+            const floor = spacious ? 132 : 84;
+            const next = Math.max(floor, Math.floor(Math.min(aw, bw) * .94));
             nodes[i].style.setProperty('--mobile-opp-width', next + 'px');
             nodes[j].style.setProperty('--mobile-opp-width', next + 'px');
             nodes[i].dataset.compact = '4';
