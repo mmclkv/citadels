@@ -946,7 +946,9 @@
         p.hand.push(card);
         const rest = pd.cards.filter(x => x.uid !== action.uid);
         if (pd.toBottom) toBottom(state, rest);
-        log(state, p.name + ' 抽取建筑牌，保留了『' + card.name + '』。', 'info');
+        // 抽到的牌属于隐藏信息：战报只公开「抽了几张、留了几张」，不暴露具体牌面。
+        log(state, p.name + ' 抽取 ' + pd.cards.length + ' 张建筑牌，保留了 1 张' +
+          (pd.toBottom ? '（其余放回牌库底）' : '') + '。', 'info');
         t.pending = null;
         if (t.phase === 'bewitched') return finishBewitchedTurn(state);
         afterResources(state, t, p, c);
@@ -1183,7 +1185,8 @@
         rest.forEach(r => state.deck.push(r));
         state.deck = CitCards.shuffle(state.deck, () => nextRand(state));
         t.abilityUsed = true; t.pending = null;
-        log(state, '【学者】' + p.name + ' 从 7 张中选择了『' + card.name + '』，其余洗回牌堆。', 'good');
+        // 同上：学者选牌也是隐藏信息，不公开具体牌面。
+        log(state, '【学者】' + p.name + ' 从 ' + pd.cards.length + ' 张建筑牌中选择了 1 张，其余洗回牌堆。', 'good');
         return ok();
       }
       case 'monk_resource': {
@@ -1778,7 +1781,8 @@
         takenResources: t.takenResources,
         buildLimit: buildLimitFor(state, t),
         builds: t.builds,
-        pending: t.pending ? pendingPublic(t.pending) : null
+        // 只有当前行动者本人能拿到 pending 的具体牌面（抽牌/学者选牌属隐藏信息）
+        pending: t.pending ? pendingPublic(t.pending, t.playerIdx === idx) : null
       };
     }
     if (state.reaction) {
@@ -1789,14 +1793,14 @@
     return out;
   }
 
-  function pendingPublic(pd) {
+  function pendingPublic(pd, isActor) {
     switch (pd.kind) {
       case 'draw_keep':
-        return { kind: pd.kind, prompt: pd.prompt, cards: (pd.cards || []).map(c => ({
-          uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost, desc: c.desc })) };
       case 'scholar_pick':
-        return { kind: pd.kind, prompt: pd.prompt, cards: (pd.cards || []).map(c => ({
-          uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost, desc: c.desc })) };
+        // 具体牌面只给正在选择的玩家；其他人只知道「正在选牌」和牌的数量。
+        return { kind: pd.kind, prompt: pd.prompt, count: (pd.cards || []).length,
+          cards: isActor ? (pd.cards || []).map(c => ({
+            uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost, desc: c.desc })) : [] };
       case 'artist':
         return { kind: pd.kind, selected: pd.selected || [] };
       default:
