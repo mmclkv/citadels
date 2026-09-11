@@ -1294,6 +1294,16 @@
     return '<div class="cs-card ' + st + flip + '"' + zoomAttr + '>' + cardBody + '</div>' + nameSpan;
   }
 
+  /* 角色牌右侧只显示手牌数量：牌背 × 数字，牌背会复用当前主题的牌背样式。 */
+  function handCountHTML(count) {
+    const total = Math.max(0, Number(count) || 0);
+    return '<div class="hand-count-indicator" role="img" aria-label="手牌 ' + total + ' 张" title="手牌 ' + total + ' 张">' +
+      '<span class="facedown hand-count-back" aria-hidden="true"></span>' +
+      '<span class="hand-count-multiply" aria-hidden="true">×</span>' +
+      '<span class="hand-count-number" aria-hidden="true">' + total + '</span>' +
+      '</div>';
+  }
+
   /* 通用金币飞行动画：从 a 矩形飞向 b 矩形，错峰起飞、弧线、淡出 */
   function coinFlight(a, b, amount) {
     if (!a || !b) return;
@@ -2013,8 +2023,7 @@
           else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
         });
       }
-      d.querySelector('.opp-char-stats').innerHTML = '城区 <b>' + p.cityCount + '</b>/' + s.endDistricts + '<br>手牌 ' + p.handCount + ' 张' +
-        (p.played && p.played.length ? '<br>已用：' + p.played.map(c => escapeHtml(Engine.charOf(c).name)).join('、') : '');
+      d.querySelector('.opp-char-stats').innerHTML = handCountHTML(p.handCount);
       frag.appendChild(d);
     });
     // 移除已不存在的对手区块
@@ -2300,9 +2309,7 @@
     const ms = $('#my-char-status');
     if (ms) ms.innerHTML = charStatusHTML(me);
     const myStats = $('#my-char-stats');
-    if (myStats) myStats.innerHTML = '城区 <b>' + me.cityCount + '</b>/' + s.endDistricts +
-      '<br>手牌 ' + me.hand.length + ' 张' +
-      (me.chars.some(c => c.played) ? '<br>已用：' + me.chars.filter(c => c.played).map(c => escapeHtml(c.name)).join('、') : '');
+    if (myStats) myStats.innerHTML = handCountHTML(me.hand.length);
     $('#my-gold').innerHTML = '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
     $('#my-city-count').textContent = '';
     $('#my-hand-count').textContent = '';
