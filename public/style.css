@@ -936,6 +936,33 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold)}
 }
 
+/* PWA 动画性能：为频繁变化的元素提示独立合成层，减少主界面重绘。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .mobile-fit-root,
+  #screen-game .card,
+  #screen-game .char-card,
+  #screen-game .cs-inner,
+  #screen-game .table-core,
+  #screen-game .opp,
+  #screen-game .me-area,
+  #screen-game .fly-coin,
+  #screen-game .hand-swap-flight,
+  #screen-game .building-swap-flight,
+  #screen-game .building-build-flight,
+  #screen-game .crown-flight,
+  #char-zoom,
+  .card-hd-box{will-change:transform,opacity;backface-visibility:hidden}
+  #screen-game .table-core,
+  #screen-game .opp,
+  #screen-game .me-area{contain:paint}
+  #screen-game .fly-coin,
+  #screen-game .crown-flight,
+  #screen-game .building-swap-flight,
+  #screen-game .building-build-flight{contain:layout paint;pointer-events:none}
+  #char-zoom,
+  #card-hd-overlay{contain:layout paint}
+}
+
 /* 移动端“我的城市”始终采用两排，建筑数量增加时只向右扩展，不把区域继续向下撑高。 */
 @media (max-width:820px){
   #my-city.city-row{display:grid!important;grid-auto-flow:column;grid-template-rows:repeat(2,minmax(0,1fr));
