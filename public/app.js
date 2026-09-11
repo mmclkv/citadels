@@ -3009,4 +3009,19 @@
       window.location.reload();
     });
   }
+
+  // PWA 游戏页不允许浏览器接管双指缩放，避免 viewport 变化触发页面重载；
+  // 高清卡图查看器由自身逻辑处理双指缩放，因此保留该区域的手势。
+  if (typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches) {
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport) viewport.setAttribute('content',
+      'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
+    const blockPagePinch = e => {
+      if (e.touches && e.touches.length > 1 &&
+          !(e.target && e.target.closest && e.target.closest('.card-hd-stage'))) e.preventDefault();
+    };
+    document.addEventListener('touchstart', blockPagePinch, { passive: false });
+    document.addEventListener('touchmove', blockPagePinch, { passive: false });
+  }
 })();
