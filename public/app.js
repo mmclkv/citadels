@@ -2037,6 +2037,7 @@
       applyMobileRingLayout(wrap);
       const pwa = typeof window !== 'undefined' && window.matchMedia &&
         window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+      wrap.classList.toggle('pwa-many-players', !!pwa && totalPlayers >= 5);
       if (pwa && totalPlayers >= 5) stabilizePwaRingCollisions(wrap);
     } else resolveOpponentTableCollisions();
   }
@@ -2057,12 +2058,18 @@
     const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
     const gap = Math.max(6, Math.round(Math.min(14, width * .018)));
     const totalPlayers = Number(wrap.dataset.players || nodes.length + 1);
+    const pwa = typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
     // 玩家框至少保持 1.5:1 的宽高比；有空间时先横向容纳更多建筑，
     // 空间不足时再切换到更紧凑的卡牌尺寸。
-    const maxWidth = Math.max(126, Math.floor(width * (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58)));
-    const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * .25)));
+    const maxWidth = Math.max(126, Math.floor(width * (pwa && totalPlayers >= 5
+      ? (totalPlayers >= 7 ? .34 : .38)
+      : (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58))));
+    const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * (pwa && totalPlayers >= 5 ? .18 : .25))));
     const minWidth = Math.max(104, Math.floor(cardWidth * .78));
-    const height = Math.max(300, Math.min(400, Math.round((window.innerHeight || 720) * .44)));
+    const height = pwa && totalPlayers >= 5
+      ? Math.max(420, Math.min(620, Math.round((window.innerHeight || 720) * .62)))
+      : Math.max(300, Math.min(400, Math.round((window.innerHeight || 720) * .44)));
     wrap.style.display = 'block';
     wrap.style.height = height + 'px';
     wrap.style.overflow = 'visible';
@@ -2169,6 +2176,7 @@
     if (!wrap) return;
     const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
     if (nodes.length < 2) return;
+    wrap.classList.add('pwa-collision-layout');
     const gap = 8;
     const currentHeight = parseFloat(wrap.style.height) || wrap.clientHeight || 0;
     const targetHeight = Math.max(currentHeight, Math.min(620, Math.max(420, Math.round((window.innerHeight || 720) * .62))));
@@ -2209,8 +2217,8 @@
 
           const aw = parseFloat(getComputedStyle(nodes[i]).width) || 0;
           const bw = parseFloat(getComputedStyle(nodes[j]).width) || 0;
-          if (Math.min(aw, bw) > 92) {
-            const next = Math.max(92, Math.floor(Math.min(aw, bw) * .94));
+          if (Math.min(aw, bw) > 84) {
+            const next = Math.max(84, Math.floor(Math.min(aw, bw) * .94));
             nodes[i].style.setProperty('--mobile-opp-width', next + 'px');
             nodes[j].style.setProperty('--mobile-opp-width', next + 'px');
             nodes[i].dataset.compact = '4';

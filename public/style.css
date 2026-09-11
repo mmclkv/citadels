@@ -1033,7 +1033,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 /* PWA 5 人以上：玩家区压缩为两排，角色栏并入第一排，建筑牌横向滚动。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
   #screen-game .me-area.many-players{
-    width:calc(100% - 24px)!important;
+    width:min(820px,calc(100% - 24px))!important;
     margin:6px auto 0!important;
     padding:6px 8px!important;
     display:grid;
@@ -1042,7 +1042,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     grid-template-areas:"role city" "hand-title hand";
     gap:4px 8px;
     min-height:0!important;
-    max-height:180px;
+    min-height:210px;
+    max-height:240px;
     overflow:hidden;
   }
   #screen-game .me-area.many-players>.zone-head:first-child{
@@ -1088,6 +1089,31 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game .me-area.many-players .hand-row>.card{width:38px!important;height:54px!important}
   #screen-game .me-area.many-players .city-row>.card.mini,
   #screen-game .me-area.many-players .hand-row>.card.mini{width:34px!important;height:48px!important}
+}
+
+/* PWA 5 人以上环形玩家框：关闭测量期间的宽度过渡，并强制建筑牌保持 2:3。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .opponents.pwa-many-players .opp{transition:none!important}
+  #screen-game .opponents.pwa-many-players .opp-city>.card{
+    width:32px!important;
+    height:48px!important;
+    min-width:32px!important;
+    min-height:48px!important;
+    max-width:32px!important;
+    max-height:48px!important;
+    aspect-ratio:2 / 3;
+    flex:0 0 32px!important;
+  }
+  #screen-game .opponents.pwa-many-players .opp .cs-card{
+    width:36px!important;
+    height:54px!important;
+    min-width:36px!important;
+    min-height:54px!important;
+    max-width:36px!important;
+    max-height:54px!important;
+    aspect-ratio:2 / 3;
+    flex:0 0 36px!important;
+  }
 }
 
 /* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */
