@@ -39,6 +39,7 @@ a{color:var(--gold-d, #a97c15)}
 /* ------------------------------ 屏幕切换 ------------------------------ */
 .screen{display:none;height:100vh;height:100dvh;overflow:hidden}
 .screen.active{display:flex;flex-direction:column}
+.mobile-fit-root{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;transform-origin:top left}
 #screen-home.active,#screen-setup.active,#screen-lobby.active,#screen-over.active{
   align-items:center;justify-content:center;overflow:auto;padding:24px;
 }
@@ -855,6 +856,12 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   .actionbar{flex:0 0 auto;display:flex;flex-direction:column;min-height:0;max-height:38vh}
   .prompt{flex:0 0 auto;margin-bottom:6px}
   .actions{flex:0 1 auto;min-height:0;max-height:100%;overflow-y:auto;gap:7px;padding-right:2px;align-content:flex-start}
+}
+
+@media (max-width:820px){
+  /* 运行时自适应缩放的根容器：扩大布局空间后再缩放，避免制造横向滚动条。 */
+  .mobile-fit-root.mobile-fit-scaled{width:calc(100% / var(--mobile-fit-scale));height:calc(100% / var(--mobile-fit-scale));
+    flex:0 0 auto;transform:scale(var(--mobile-fit-scale));overflow:hidden}
 }
 
 /* 移动端统一卡牌缩放：普通卡与角色卡均缩为原来的约一半，桌面端不变。 */
