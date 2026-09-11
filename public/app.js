@@ -4,7 +4,7 @@
  * ========================================================================= */
 (function () {
   'use strict';
-  const Cards = window.CitCards, Engine = window.CitEngine, AI = window.CitAI;
+  const Cards = window.CitCards, Engine = window.CitEngine, AI = window.CitAI, Agent = window.CitAgent;
   const Theme = window.CitadelThemeManager || {
     current: 'classic',
     is(id) { return id === 'classic'; },
@@ -472,7 +472,7 @@
     start(cfg) {
       const seats = [{ id: 'me', name: cfg.name, isBot: false }];
       for (let i = 1; i < cfg.players; i++) {
-        seats.push({ id: 'bot' + i, name: '电脑 ' + i, isBot: true, botLevel: cfg.level });
+        seats.push({ id: 'bot' + i, name: '电脑 ' + i, isBot: true, botType: cfg.botType, botLevel: cfg.level });
       }
       this.myId = 'me';
       App.myId = 'me';
@@ -526,7 +526,7 @@
       const actor = localActor(st);
       if (actor && actor.isBot) {
         let action = null;
-        try { action = AI.decide(st, actor.id); } catch (e) { console.error(e); }
+        try { action = actor.botType === 'agent' ? Agent.decide(st, actor.id) : AI.decide(st, actor.id); } catch (e) { console.error(e); }
         // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
         if (!action) {
           const opts = Engine.getAvailableActions(st, actor.id);
@@ -2874,10 +2874,11 @@
     const amHost = seats.length && seats[0].id === App.myId;
     seats.forEach((s, i) => {
       const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
+      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : '普通电脑') : (s.taken ? '真人玩家' : '可加入');
       d.innerHTML = '<div class="seat-no">座位 ' + (i + 1) + (i === 0 ? ' · 房主' : '') + '</div>' +
         '<div class="seat-name">' + (s.taken ? escapeHtml(s.name) : '空缺') + '</div>' +
         '<div class="seat-tag">' + (s.disconnected ? '已断连' : s.left ? '已离开' :
-          (s.isBot ? '电脑' : (s.taken ? '真人玩家' : '可加入'))) + '</div>';
+          botLabel) + '</div>';
       if (amHost && i > 0) {
         const ops = el('div', 'seat-ops');
         const b1 = el('button', 'btn tiny', s.isBot ? '换人' : '设为电脑');
@@ -2977,6 +2978,7 @@
       const cfg = {
         players: Number($('#cfg-players').value),
         level: $('#cfg-level').value,
+        botType: $('#cfg-bot-type').value,
         end: Number($('#cfg-end').value),
         chars: $('#cfg-chars').value,
         name: ($('#cfg-name').value || '我').trim()
@@ -3000,6 +3002,7 @@
             endDistricts: Number($('#net-end').value),
             charSetMode: $('#net-chars').value,
             botLevel: 'normal',
+            botType: $('#net-bot-type').value,
             // 房主的节奏偏好决定服务器上机器人的行动间隔
             botPace: pace().act
           }
