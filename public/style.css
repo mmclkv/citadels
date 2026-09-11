@@ -439,14 +439,17 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opponents[data-layout="mobile-ring"]{position:relative!important;display:block!important;height:clamp(420px,62vh,620px)!important;overflow:visible!important;min-height:0}
 .opponents[data-layout="mobile-ring"] .opp{position:absolute!important;left:calc(var(--seat-x) * 1%)!important;top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px))!important;width:var(--mobile-opp-width)!important;min-width:0!important;transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)))!important;margin:0!important;flex:none!important}
 .opponents[data-layout="mobile-ring"] .opp-role-row{gap:6px;margin-bottom:5px}
-.opponents[data-layout="mobile-ring"] .opp-char{gap:5px;margin-bottom:5px}
-.opponents[data-layout="mobile-ring"] .opp-char-stats{min-width:58px;font-size:9px;line-height:1.45}
-.opponents[data-layout="mobile-ring"] .opp-head{gap:4px;margin-bottom:4px}
-.opponents[data-layout="mobile-ring"] .opp-name{font-size:12px}
-.opponents[data-layout="mobile-ring"] .opp-gold{font-size:11px;gap:2px}
+.opponents[data-layout="mobile-ring"] .opp{padding:5px 6px!important}
+.opponents[data-layout="mobile-ring"] .opp-char{gap:4px;margin-bottom:4px}
+.opponents[data-layout="mobile-ring"] .opp-char-stats{min-width:48px;font-size:8px;line-height:1.35}
+.opponents[data-layout="mobile-ring"] .opp-head{gap:3px;margin-bottom:3px}
+.opponents[data-layout="mobile-ring"] .opp-seat-no{font-size:8px;padding:1px 3px}
+.opponents[data-layout="mobile-ring"] .opp-name{font-size:10px}
+.opponents[data-layout="mobile-ring"] .opp-gold{font-size:9px;gap:2px}
+.opponents[data-layout="mobile-ring"] .opp .score-btn{width:22px;height:22px;font-size:10px}
 .opponents[data-layout="mobile-ring"] .opp-body{gap:4px}
-.opponents[data-layout="mobile-ring"] .opp-city{gap:3px;min-height:42px}
-.opponents[data-layout="mobile-ring"] .opp-city>.card{width:48px;height:72px}
+.opponents[data-layout="mobile-ring"] .opp-city{gap:2px;min-height:34px}
+.opponents[data-layout="mobile-ring"] .opp-city>.card{width:40px;height:60px}
 .opp.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.14);background:#fffcf2}
 .opp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
 .opp-seat-no{font-size:10px;font-weight:800;color:var(--dim);padding:1px 5px;border:1px solid var(--line);border-radius:8px;flex:0 0 auto}
