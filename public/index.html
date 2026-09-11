@@ -84,7 +84,7 @@
         <span>电脑类型</span>
         <select id="cfg-bot-type">
           <option value="npc" selected>普通电脑（启发式）</option>
-          <option value="agent">AI Agent 电脑（目标导向）</option>
+          <option value="agent">AI Agent 电脑（大模型决策，需要联网）</option>
         </select>
       </label>
       <label class="field">
@@ -115,6 +115,9 @@
         <input id="cfg-name" type="text" value="我" maxlength="10">
       </label>
     </div>
+    <label class="field"><span>游戏服务器地址（AI Agent 需要；留空使用当前站点）</span>
+      <input id="cfg-server" type="url" placeholder="https://你的游戏服务器"></label>
+    <p class="dim small" id="cfg-agent-status" role="status">普通电脑可以离线玩；AI Agent 通过游戏服务器调用模型。GitHub Pages 本身不提供模型后端。</p>
     <div class="btn-row">
       <button class="btn ghost" data-goto="home">返回</button>
       <button class="btn primary" id="btn-start-single">开始游戏</button>
@@ -128,6 +131,9 @@
     <h2 id="lobby-title">联机大厅</h2>
 
     <div id="lobby-pre">
+      <label class="field"><span>游戏服务器地址（留空使用当前站点）</span>
+        <input id="net-server" type="url" placeholder="https://你的游戏服务器"></label>
+      <p class="dim small" id="net-agent-status" role="status">AI Agent 需要服务器配置模型连接；模型决策失败时会暂停，由房主选择重试或切换普通电脑。</p>
       <div class="lobby-cols">
         <div class="lobby-box">
           <h3>创建房间</h3>
@@ -144,7 +150,7 @@
               <option value="2">2 个电脑</option><option value="3">3 个电脑</option><option value="4">4 个电脑</option></select>
           </label>
           <label class="field"><span>电脑类型</span>
-            <select id="net-bot-type"><option value="npc" selected>普通电脑（启发式）</option><option value="agent">AI Agent 电脑（目标导向）</option></select>
+            <select id="net-bot-type"><option value="npc" selected>普通电脑（启发式）</option><option value="agent">AI Agent 电脑（大模型决策）</option></select>
           </label>
           <label class="field"><span>结束条件</span>
             <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
@@ -361,7 +367,6 @@
 <script src="./src/cards.js?v=3"></script>
 <script src="./src/engine.js?v=10"></script>
 <script src="./src/ai.js?v=2"></script>
-<script src="./src/agent.js?v=1"></script>
-<script src="./app.js?v=57"></script>
+<script src="./app.js?v=58"></script>
 </body>
 </html>
