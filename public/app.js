@@ -1627,6 +1627,46 @@
     });
   }
 
+  let mobileFitRaf = null;
+  function scheduleMobileFitScale() {
+    if (mobileFitRaf != null || typeof requestAnimationFrame !== 'function') return;
+    mobileFitRaf = requestAnimationFrame(() => {
+      mobileFitRaf = null;
+      updateMobileFitScale();
+    });
+  }
+  function updateMobileFitScale() {
+    const root = $('#mobile-fit-root');
+    const screen = $('#screen-game');
+    if (!root || !screen) return;
+    const mobile = typeof window !== 'undefined' && window.innerWidth <= 820;
+    if (!mobile || !screen.classList.contains('active')) {
+      root.classList.remove('mobile-fit-scaled');
+      root.style.removeProperty('--mobile-fit-scale');
+      return;
+    }
+    // 先恢复原始布局再测量，避免上一次缩放结果影响下一次计算。
+    root.classList.remove('mobile-fit-scaled');
+    root.style.setProperty('--mobile-fit-scale', '1');
+    const topbar = root.querySelector('.topbar');
+    const board = root.querySelector('.board');
+    const boardMain = root.querySelector('.board-main');
+    const actionbar = root.querySelector('.actionbar');
+    const naturalHeight = (topbar ? topbar.offsetHeight : 0) +
+      Math.max(board ? board.offsetHeight : 0, boardMain ? boardMain.scrollHeight : 0) +
+      (actionbar ? actionbar.offsetHeight : 0);
+    const naturalWidth = Math.max(root.scrollWidth || 0, boardMain ? boardMain.scrollWidth : 0, 1);
+    const viewportHeight = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    // 留出少量安全边距；下限避免极端小屏变得完全不可操作。
+    const scale = Math.max(.45, Math.min(1, (viewportHeight - 6) / Math.max(1, naturalHeight),
+      (viewportWidth - 6) / Math.max(1, naturalWidth)));
+    if (scale < .999) {
+      root.style.setProperty('--mobile-fit-scale', scale.toFixed(4));
+      root.classList.add('mobile-fit-scaled');
+    }
+  }
+
   /* 领主摧毁建筑：克隆被毁建筑卡到 body 上播放摧毁动画（不受后续整局重渲染影响），并撒出碎片粒子 */
   function destroyAnim(seat, uid, name) {
     if (typeof document === 'undefined' || !document.querySelector) return;
@@ -1721,6 +1761,7 @@
       renderMe(s);
       renderLog(s);
       restoreScroll(_scrollSnap);
+      scheduleMobileFitScale();
       return;
     }
 
@@ -1732,6 +1773,7 @@
     renderActions(s);
     autoOpenPick(s);
     restoreScroll(_scrollSnap);
+    scheduleMobileFitScale();
   }
 
   /** 抽牌保留 / 学者选牌 / 预言家归还：自动弹出卡牌选择窗 */
@@ -2904,6 +2946,8 @@
         showScreen('screen-lobby');
       }
     };
+    window.addEventListener('resize', scheduleMobileFitScale);
+    window.addEventListener('orientationchange', scheduleMobileFitScale);
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') closeModal();
     });
