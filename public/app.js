@@ -2033,8 +2033,12 @@
       if (ch.dataset && ch.dataset.seat != null && !keep[ch.dataset.seat] && ch.parentNode) ch.parentNode.removeChild(ch);
     });
     wrap.appendChild(frag);
-    if (mobileRingLayout) applyMobileRingLayout(wrap);
-    else resolveOpponentTableCollisions();
+    if (mobileRingLayout) {
+      applyMobileRingLayout(wrap);
+      const pwa = typeof window !== 'undefined' && window.matchMedia &&
+        window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+      if (pwa && totalPlayers >= 5) stabilizePwaRingCollisions(wrap);
+    } else resolveOpponentTableCollisions();
   }
 
   function isMobileOpponentLayout() {
@@ -2158,6 +2162,79 @@
       clampInsideRing();
       if (!changed) break;
     }
+  }
+
+  // PWA 多人环形布局的最终稳定 pass：移动后再次测量，保证玩家框不会互相盖住。
+  function stabilizePwaRingCollisions(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (nodes.length < 2) return;
+    const gap = 8;
+    const currentHeight = parseFloat(wrap.style.height) || wrap.clientHeight || 0;
+    const targetHeight = Math.max(currentHeight, Math.min(620, Math.max(420, Math.round((window.innerHeight || 720) * .62))));
+    wrap.style.height = targetHeight + 'px';
+
+    const addPush = (node, dx, dy) => {
+      const x = (parseFloat(node.dataset.pushX || '0') || 0) + dx;
+      const y = (parseFloat(node.dataset.pushY || '0') || 0) + dy;
+      node.dataset.pushX = String(x);
+      node.dataset.pushY = String(y);
+      node.style.setProperty('--push-x', x + 'px');
+      node.style.setProperty('--push-y', y + 'px');
+    };
+    const clamp = () => {
+      const wr = wrap.getBoundingClientRect();
+      nodes.forEach(node => {
+        const r = node.getBoundingClientRect();
+        let dx = 0, dy = 0;
+        if (r.left < wr.left + gap) dx = wr.left + gap - r.left;
+        if (r.right > wr.right - gap) dx = wr.right - gap - r.right;
+        if (r.top < wr.top + gap) dy = wr.top + gap - r.top;
+        if (r.bottom > wr.bottom - gap) dy = wr.bottom - gap - r.bottom;
+        if (dx || dy) addPush(node, dx, dy);
+      });
+    };
+
+    for (let pass = 0; pass < 36; pass++) {
+      clamp();
+      let collided = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          collided = true;
+
+          const aw = parseFloat(getComputedStyle(nodes[i]).width) || 0;
+          const bw = parseFloat(getComputedStyle(nodes[j]).width) || 0;
+          if (Math.min(aw, bw) > 92) {
+            const next = Math.max(92, Math.floor(Math.min(aw, bw) * .94));
+            nodes[i].style.setProperty('--mobile-opp-width', next + 'px');
+            nodes[j].style.setProperty('--mobile-opp-width', next + 'px');
+            nodes[i].dataset.compact = '4';
+            nodes[j].dataset.compact = '4';
+            continue;
+          }
+
+          // 到达紧凑尺寸后，沿重叠较小的轴把两个矩形向相反方向各推一半。
+          const acx = a.left + a.width / 2, bcx = b.left + b.width / 2;
+          const acy = a.top + a.height / 2, bcy = b.top + b.height / 2;
+          if (overlapX <= overlapY) {
+            const dir = acx <= bcx ? -1 : 1;
+            addPush(nodes[i], dir * (overlapX + gap) / 2, 0);
+            addPush(nodes[j], -dir * (overlapX + gap) / 2, 0);
+          } else {
+            const dir = acy <= bcy ? -1 : 1;
+            addPush(nodes[i], 0, dir * (overlapY + gap) / 2);
+            addPush(nodes[j], 0, -dir * (overlapY + gap) / 2);
+          }
+        }
+      }
+      if (!collided) break;
+    }
+    clamp();
   }
 
   // 兼容旧调用名，保留旧实现，实际移动端使用上面的圆桌布局。
