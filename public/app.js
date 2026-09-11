@@ -2401,6 +2401,8 @@
       for (let i = 0; i < faceDownCount; i++) fd.appendChild(el('div', 'facedown sm', '？'));
     }
     const empty = faceUp.length === 0 && faceDownCount === 0;
+    const count = $('#removed-widget-count');
+    if (count) count.textContent = String(faceUp.length + faceDownCount);
     corner.hidden = empty;
   }
 
@@ -2791,6 +2793,15 @@
     // 选角卡图悬浮放大
     initCharZoom();
     initCardHd();
+    const removedWidget = $('#removed-corner');
+    const removedToggle = $('#removed-widget-toggle');
+    if (removedWidget && removedToggle) {
+      removedToggle.onclick = () => {
+        const collapsed = removedWidget.classList.toggle('collapsed');
+        removedToggle.setAttribute('aria-expanded', String(!collapsed));
+      };
+      removedWidget.classList.add('collapsed');
+    }
 
     // 电脑节奏：设置页下拉 + 对局内一键切换
     loadSpeed();
