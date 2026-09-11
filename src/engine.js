@@ -1005,9 +1005,7 @@
           state.firstToFinish = idx;
           log(state, '* ' + p.name + ' 率先建成第 ' + state.config.endDistricts + ' 栋建筑，本轮结束后游戏结束！', 'sys');
         }
-        if (c.id === 'alchemist' && t.phase !== 'witch_resume') {
-          // 炼金术士在回合结束时统一回收
-        }
+        // 炼金术士的建造花费统一在 endTurn 回收（含女巫接管的情况）
         return ok();
       }
 
@@ -1507,15 +1505,22 @@
     const p = state.players[t.playerIdx];
     const c = charOf(t.charId);
 
-    // 炼金术士回收建造花费
-    if (c.id === 'alchemist' && t.phase !== 'witch_resume' && t.spentOnBuild > 0) {
+    // 炼金术士回收建造花费。
+    // 女巫接管被施咒的炼金术士时，是以炼金术士的身份继续该回合：用女巫自己的金币
+    // 建造、建筑进入女巫的城区，因此回合末的建造花费返还同样归女巫所有
+    // （官方规则：女巫 resume 该玩家回合，视同自己扮演被施咒角色，享有其能力的收益）。
+    // 被施咒者本人此时只能领资源、无法建造（spentOnBuild 恒为 0），自然拿不到退款。
+    if (c.id === 'alchemist' && t.spentOnBuild > 0) {
+      const viaWitch = t.phase === 'witch_resume';
       p.gold += t.spentOnBuild;
-      log(state, '【炼金术士】' + p.name + ' 回收了本回合 ' + t.spentOnBuild + ' 枚建造花费。', 'good');
+      log(state, '【炼金术士】' + p.name + (viaWitch ? '（女巫接管）' : '') +
+        ' 回收了本回合 ' + t.spentOnBuild + ' 枚建造花费。', 'good');
       notify(state, 'alchemist_refund', {
         playerIdx: t.playerIdx,
         playerId: p.id,
         playerName: p.name,
-        amount: t.spentOnBuild
+        amount: t.spentOnBuild,
+        viaWitch: viaWitch
       });
     }
 
