@@ -1245,7 +1245,9 @@
   /* 玩家小框框里的角色卡状态：未选 / 盖牌 / 翻面；翻面后立即在右侧显示角色名 */
   function charStatusHTML(p) {
     let st = 'none';
-    if (p.hasChosen) st = (p.revealedCharNum != null) ? 'up' : 'down';
+    if (p.hasChosen && p.draftComplete !== false) {
+      st = (p.revealedCharNum != null) ? 'up' : 'down';
+    }
     // 检测本帧是否从「盖牌」变为「翻面」，是则播放翻牌动画
     const prev = App._reveal[p.seat];
     let flip = '';
@@ -1264,7 +1266,6 @@
       nameSpan = '<span class="cs-name">' + escapeHtml(nm) + '</span>';
       var zoomAttr = img ? ' data-zoom-src="' + escapeHtml(full || img) + '" data-zoom-title="' + escapeHtml(ch.name) + '"' : ' data-zoom-back="1"';
     } else if (st === 'down') {
-      nameSpan = '<span class="cs-label">已选 · 盖牌</span>';
       var zoomAttr = ' data-zoom-back="1"';
     } else {
       var zoomAttr = '';

@@ -1687,8 +1687,10 @@
           hasCrown: p.hasCrown,
           connected: p.connected,
           played: p.played.slice(),
-          // 选角状态：其他玩家只在角色被叫到/已行动后翻面；本人始终可以看到自己已选的角色。
+          // 选角状态：未完成选角时不显示角色牌背；2~3 人局需要完成两次选取。
           hasChosen: p.chars.length > 0,
+          draftComplete: state.phase !== 'draft' ||
+            p.chars.length >= (state.players.length <= 3 ? 2 : 1),
           revealedCharId: (i === idx && p.chars.length)
             ? p.chars[0]
             : (state.turn && state.turn.playerIdx === i)
