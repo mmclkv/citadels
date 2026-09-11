@@ -18,6 +18,8 @@ const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const HEARTBEAT_INTERVAL_MS = 5000;
+const HEARTBEAT_TIMEOUT_MS = 20000;
 
 /* ------------------------------ 静态资源 ------------------------------ */
 const MIME = {
@@ -51,7 +53,7 @@ function serveStatic(req, res) {
 
 /* ------------------------------ 房间管理 ------------------------------ */
 const rooms = {};
-const clients = new Map();   // ws -> { id, name, roomId }
+const clients = new Map();   // ws -> { id, name, roomId, lastSeenAt }
 
 function genId(pre) {
   return pre + Math.random().toString(36).slice(2, 8);
@@ -71,7 +73,8 @@ function publicRoom(r) {
     id: r.id,
     name: r.name,
     phase: r.state ? r.state.phase : 'lobby',
-    seats: r.seats.map(s => ({ name: s.name, isBot: !!s.isBot, botLevel: s.botLevel, taken: !!s.taken, id: s.id })),
+    seats: r.seats.map(s => ({ name: s.name, isBot: !!s.isBot, botLevel: s.botLevel, taken: !!s.taken,
+      id: s.id, connected: !!s.isBot || !s.disconnected && !s.left, disconnected: !!s.disconnected, left: !!s.left })),
     config: r.config,
     playerCount: r.seats.length
   };
@@ -82,11 +85,13 @@ function createRoom(hostName, config) {
   const seats = [];
   const total = Math.max(2, Math.min(8, config.playerCount || 4));
   const bots = Math.max(0, Math.min(total - 1, config.bots || 0));
-  seats.push({ id: genId('p'), name: hostName, resumeToken: genResumeToken(), isBot: false, taken: true });
+  seats.push({ id: genId('p'), name: hostName, resumeToken: genResumeToken(), isBot: false, taken: true,
+    disconnected: false, left: false });
   for (let i = 0; i < bots; i++) {
     seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botLevel: config.botLevel || 'normal', taken: true });
   }
-  for (let i = seats.length; i < total; i++) seats.push({ id: null, name: '', isBot: false, taken: false });
+  for (let i = seats.length; i < total; i++) seats.push({ id: null, name: '', isBot: false, taken: false,
+    disconnected: false, left: false });
 
   const room = {
     id, name: (hostName || '房主') + ' 的房间',
@@ -100,7 +105,8 @@ function createRoom(hostName, config) {
     },
     state: null,
     createdAt: Date.now(),
-    ticking: false
+    ticking: false,
+    closed: false
   };
   rooms[id] = room;
   return room;
@@ -110,13 +116,14 @@ function joinRoom(roomId, name) {
   const r = rooms[roomId];
   if (!r) return { error: '房间不存在' };
   if (r.state && r.state.phase !== 'gameover') {
-    const seat = r.seats.find(s => s.name === name && !s.isBot);
+    const seat = r.seats.find(s => s.name === name && !s.isBot && !s.left);
     if (seat) return { room: r, seat, rejoined: true };
     return { error: '该房间已开局' };
   }
   const idx = r.seats.findIndex(s => !s.taken);
   if (idx < 0) return { error: '房间已满' };
-  r.seats[idx] = { id: genId('p'), name: name, resumeToken: genResumeToken(), isBot: false, taken: true };
+  r.seats[idx] = { id: genId('p'), name: name, resumeToken: genResumeToken(), isBot: false, taken: true,
+    disconnected: false, left: false };
   return { room: r, seat: r.seats[idx] };
 }
 
@@ -132,6 +139,8 @@ function resumeRoom(token, roomId) {
 
 function restoreSeat(r, seat) {
   seat.isBot = false;
+  seat.disconnected = false;
+  seat.left = false;
   if (!r.state) return;
   const player = r.state.players.find(p => p.id === seat.id);
   if (player) player.isBot = false;
@@ -175,7 +184,14 @@ function viewFor(r, playerId) {
   base.roomId = r.id;
   base.roomName = r.name;
   base.players.forEach(p => {
-    p.connected = Array.from(clients.values()).some(c => c.id === p.id && c.roomId === r.id);
+    const seat = r.seats.find(s => s.id === p.id);
+    const client = Array.from(clients.values()).find(c => c.id === p.id && c.roomId === r.id);
+    const connected = !!client && Date.now() - client.lastSeenAt <= HEARTBEAT_TIMEOUT_MS;
+    p.connected = connected || !!(seat && seat.isBot);
+    p.disconnected = !!(seat && seat.disconnected);
+    p.left = !!(seat && seat.left);
+    // 断连/离开的真人仍由服务端托管，但界面应显示“已断连/已离开”，而不是误显示为电脑。
+    if (p.disconnected || p.left) p.isBot = false;
   });
   base.available = playerId ? CitEngine.getAvailableActions(r.state, playerId) : null;
   return base;
@@ -193,6 +209,22 @@ function sendPersonalExcept(r, excludedId) {
     const payload = JSON.stringify({ t: 'state', state: viewFor(r, s.id) });
     sendTo(s.id, payload);
   });
+}
+
+function sendRoomNotice(r, notice, excludedId) {
+  const msg = JSON.stringify({ t: 'roomNotice', notice });
+  r.seats.forEach(s => { if (s.id && s.id !== excludedId) sendTo(s.id, msg); });
+}
+
+function hasRemainingHuman(r) {
+  return r.seats.some(s => s.taken && !s.isBot && !s.left);
+}
+
+function closeRoomIfEmpty(r) {
+  if (!r || hasRemainingHuman(r)) return false;
+  r.closed = true;
+  if (rooms[r.id] === r) delete rooms[r.id];
+  return true;
 }
 
 /* ------------------------------ 电脑驱动 ------------------------------ */
@@ -246,6 +278,7 @@ function botTick(r) {
   r.ticking = true;
   const step = () => {
     const st = r.state;
+    if (r.closed) { r.ticking = false; return; }
     if (!st || st.phase === 'gameover') { r.ticking = false; sendPersonal(r); return; }
     const actor = currentActor(st);
     if (!actor || !actor.isBot) { r.ticking = false; sendPersonal(r); return; }
@@ -365,6 +398,10 @@ function handle(ws, info, msg) {
       }
       break;
 
+    case 'heartbeat':
+      wsSend(ws, JSON.stringify({ t: 'heartbeat', ts: msg.ts || Date.now() }));
+      break;
+
     case 'listRooms':
       wsSend(ws, JSON.stringify({ t: 'rooms', rooms: Object.values(rooms).map(publicRoom) }));
       break;
@@ -397,9 +434,22 @@ function handle(ws, info, msg) {
       const r = rooms[info.roomId];
       if (r) {
         const s = r.seats.find(x => x.id === info.id);
-        if (s && !r.state) { s.taken = false; s.name = ''; s.id = null; }
-        sendPersonalExcept(r, info.id);
-        if (r.seats.every(x => !x.taken) && !r.state) delete rooms[r.id];
+        if (s && !r.state) {
+          const leavingName = s.name;
+          s.taken = false; s.name = ''; s.id = null; s.disconnected = false; s.left = false;
+          sendRoomNotice(r, { kind: 'player_left', playerName: leavingName }, info.id);
+          sendPersonalExcept(r, info.id);
+          if (r.seats.every(x => !x.taken)) closeRoomIfEmpty(r);
+        } else if (s && r.state) {
+          s.left = true;
+          s.disconnected = false;
+          const ps = r.state.players.find(p => p.id === s.id);
+          if (ps && r.state.phase !== 'gameover') ps.isBot = true;
+          if (r.state.phase !== 'gameover') CitEngine.log(r.state, s.name + ' 已离开对局，由电脑托管。', 'sys');
+          sendRoomNotice(r, { kind: 'player_left', playerId: s.id, playerName: s.name }, info.id);
+          sendPersonalExcept(r, info.id);
+          if (!closeRoomIfEmpty(r)) botTick(r);
+        }
       }
       info.roomId = null;
       wsSend(ws, JSON.stringify({ t: 'rooms', rooms: Object.values(rooms).map(publicRoom) }));
@@ -417,7 +467,8 @@ function handle(ws, info, msg) {
         if (msg.config.playerCount) {
           const t = Math.max(2, Math.min(8, msg.config.playerCount));
           r.config.playerCount = t;
-          while (r.seats.length < t) r.seats.push({ id: null, name: '', isBot: false, taken: false });
+          while (r.seats.length < t) r.seats.push({ id: null, name: '', isBot: false, taken: false,
+            disconnected: false, left: false });
           while (r.seats.length > t && r.seats[r.seats.length - 1].taken === false) r.seats.pop();
         }
       }
@@ -433,7 +484,8 @@ function handle(ws, info, msg) {
       if (i === 0) break;
       const s = r.seats[i];
       if (msg.kind === 'bot') {
-        r.seats[i] = { id: genId('b'), name: '电脑 ' + i, isBot: true, botLevel: r.config.botLevel || 'normal', taken: true };
+        r.seats[i] = { id: genId('b'), name: '电脑 ' + i, isBot: true, botLevel: r.config.botLevel || 'normal', taken: true,
+          disconnected: false, left: false };
       } else if (msg.kind === 'open') {
         r.seats[i] = { id: null, name: '', isBot: false, taken: false };
       }
@@ -490,7 +542,8 @@ function lobbyView(r) {
   return {
     roomId: r.id, roomName: r.name, phase: 'lobby',
     you: null,
-    seats: r.seats.map((s, i) => ({ index: i, id: s.id, name: s.name, isBot: !!s.isBot, taken: !!s.taken })),
+    seats: r.seats.map((s, i) => ({ index: i, id: s.id, name: s.name, isBot: !!s.isBot, taken: !!s.taken,
+      connected: !!s.isBot || !s.disconnected && !s.left, disconnected: !!s.disconnected, left: !!s.left })),
     config: r.config
   };
 }
@@ -515,7 +568,7 @@ server.on('upgrade', (req, socket) => {
     'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n'
   );
   socket.setNoDelay(true);
-  const info = { id: null, name: '玩家', roomId: null };
+  const info = { id: null, name: '玩家', roomId: null, lastSeenAt: Date.now() };
   clients.set(socket, info);
   let buf = Buffer.alloc(0);
   socket.on('data', chunk => {
@@ -525,6 +578,7 @@ server.on('upgrade', (req, socket) => {
     r.messages.forEach(str => {
       let msg;
       try { msg = JSON.parse(str); } catch (e) { return; }
+      info.lastSeenAt = Date.now();
       try { handle(socket, info, msg); } catch (e) { console.error('handle error', e); }
     });
     if (r.close) {
@@ -546,20 +600,30 @@ function onClose(socket, info) {
       if (replacement) { sendPersonal(r); return; }
       const s = r.seats.find(x => x.id === info.id);
       if (s) {
-        // 断线后自动由电脑托管
-        s.isBot = true;
-        s.botLevel = 'normal';
+        // 断线后自动由电脑托管，但保留真人座位，允许原玩家凭令牌重连。
+        s.disconnected = true;
+        s.left = false;
         if (r.state && r.state.phase !== 'gameover') {
           const ps = r.state.players.find(p => p.id === s.id);
           if (ps) ps.isBot = true;
-          CitEngine.log(r.state, s.name + ' 已断线，由电脑托管。', 'sys');
+          CitEngine.log(r.state, s.name + ' 已断连，由电脑托管。', 'sys');
+          sendRoomNotice(r, { kind: 'player_disconnected', playerId: s.id, playerName: s.name }, info.id);
           botTick(r);
-        }
+        } else sendRoomNotice(r, { kind: 'player_disconnected', playerId: s.id, playerName: s.name }, info.id);
       }
       sendPersonal(r);
     }
   }
 }
+
+setInterval(() => {
+  const now = Date.now();
+  clients.forEach((info, socket) => {
+    if (info.roomId && now - info.lastSeenAt > HEARTBEAT_TIMEOUT_MS) {
+      try { socket.destroy(); } catch (e) { /* ignore */ }
+    }
+  });
+}, HEARTBEAT_INTERVAL_MS);
 
 server.listen(PORT, () => {
   console.log('');

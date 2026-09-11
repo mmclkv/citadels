@@ -181,6 +181,12 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
   }
+  function handleRoomNotice(n) {
+    if (!n) return;
+    const name = n.playerName || '玩家';
+    if (n.kind === 'player_disconnected') toast('⚠ ' + name + ' 已断连（超过 20 秒未响应）');
+    else if (n.kind === 'player_left') toast('↩ ' + name + ' 已离开房间');
+  }
   function showScreen(id) {
     $$('.screen').forEach(s => s.classList.remove('active'));
     $('#' + id).classList.add('active');
@@ -554,7 +560,14 @@
   /* ============================== 联机驱动 ============================== */
   const Net = {
     ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
-    reconnectTimer: null, reconnectDelay: 1000,
+    reconnectTimer: null, reconnectDelay: 1000, heartbeatTimer: null,
+    startHeartbeat() {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = setInterval(() => {
+        if (this.ws && this.ws.readyState === 1) this.send({ t: 'heartbeat', ts: Date.now() });
+      }, 5000);
+    },
+    stopHeartbeat() { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; },
     connect(cb) {
       if (this.ws && this.ws.readyState === 1) return cb && cb();
       this.afterHello = cb || this.afterHello || null;
@@ -564,6 +577,7 @@
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
         this.reconnectDelay = 1000;
+        this.startHeartbeat();
         const saved = loadNetSession();
         this.send({ t: 'hello', name: this.name,
           resumeToken: saved && saved.token, roomId: saved && saved.roomId });
@@ -573,6 +587,7 @@
         this.handle(m);
       };
       this.ws.onclose = () => {
+        this.stopHeartbeat();
         toast('与服务器的连接已断开');
         $$('#screen-lobby .dim').forEach(() => {});
         // 联机游戏中刷新服务或短暂断网时，自动使用本地令牌回到原房间。
@@ -620,6 +635,7 @@
           break;
         case 'error': toast('✗ ' + m.error); break;
         case 'chat': toast(m.from + '：' + m.text); break;
+        case 'roomNotice': handleRoomNotice(m.notice); break;
       }
     },
     action(a) { this.send({ t: 'action', action: a }); }
@@ -1921,7 +1937,9 @@
       const cs = d.querySelector('.opp-char');
       const csHtml = charStatusHTML(p);
       if (cs._lastHTML !== csHtml) { cs.innerHTML = csHtml; cs._lastHTML = csHtml; }
-      const tags = (p.isBot ? '<span class="tag bot">电脑</span>' : '') +
+      const tags = (p.disconnected ? '<span class="tag disconnected">已断连</span>' : '') +
+        (p.left ? '<span class="tag left">已离开</span>' : '') +
+        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">电脑</span>' : '') +
         (p.hasCrown ? '<span class="tag crown crown-icon-tag" title="当前持有皇冠" aria-label="当前持有皇冠"><i class="crown-icon" aria-hidden="true">♛</i></span>' : '');
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
@@ -2669,7 +2687,8 @@
       const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
       d.innerHTML = '<div class="seat-no">座位 ' + (i + 1) + (i === 0 ? ' · 房主' : '') + '</div>' +
         '<div class="seat-name">' + (s.taken ? escapeHtml(s.name) : '空缺') + '</div>' +
-        '<div class="seat-tag">' + (s.isBot ? '电脑' : (s.taken ? '真人玩家' : '可加入')) + '</div>';
+        '<div class="seat-tag">' + (s.disconnected ? '已断连' : s.left ? '已离开' :
+          (s.isBot ? '电脑' : (s.taken ? '真人玩家' : '可加入'))) + '</div>';
       if (amHost && i > 0) {
         const ops = el('div', 'seat-ops');
         const b1 = el('button', 'btn tiny', s.isBot ? '换人' : '设为电脑');

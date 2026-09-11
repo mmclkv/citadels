@@ -471,6 +471,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opp-me{color:var(--gold);font-size:12px}
 .tag{font-size:11px;padding:1px 7px;border-radius:10px;background:#f1e5cd;color:#7a5c22;border:1px solid var(--line)}
 .tag.bot{background:#eef3fb;color:#3a5f8a;border-color:#d3e0ee}
+.tag.disconnected{background:#fff0e8;color:#b44b28;border-color:#efb49b}
+.tag.left{background:#f4e9e9;color:#9a4b4b;border-color:#dfbebe}
 .tag.crown{background:linear-gradient(180deg,#f7e3b0,#e9c977);color:#7a5310;border-color:#d9b45f;font-weight:700}
 .crown-icon{display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-family:"Segoe UI Symbol","Noto Sans Symbols 2",serif;font-size:16px;line-height:1;color:var(--gold);text-shadow:0 1px 2px rgba(80,50,0,.28)}
 .crown-chip{display:inline-flex;align-items:center;gap:5px}
