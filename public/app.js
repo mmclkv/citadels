@@ -1976,9 +1976,9 @@
     if (!nodes.length) { wrap.style.height = ''; return; }
     const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
     const gap = Math.max(6, Math.round(Math.min(14, width * .018)));
-    const cardWidth = Math.max(112, Math.min(190, Math.floor(width * .29)));
-    const minWidth = Math.max(102, Math.floor(cardWidth * .78));
-    const height = Math.max(420, Math.min(620, Math.round((window.innerHeight || 720) * .62)));
+    const cardWidth = Math.max(104, Math.min(160, Math.floor(width * .25)));
+    const minWidth = Math.max(94, Math.floor(cardWidth * .78));
+    const height = Math.max(390, Math.min(560, Math.round((window.innerHeight || 720) * .58)));
     wrap.style.display = 'block';
     wrap.style.height = height + 'px';
     wrap.style.overflow = 'visible';
@@ -1991,6 +1991,24 @@
       node.dataset.compact = '3';
     });
 
+    const clampInsideRing = () => {
+      const wr = wrap.getBoundingClientRect();
+      nodes.forEach(node => {
+        const r = node.getBoundingClientRect();
+        let pushX = parseFloat(node.dataset.pushX || '0');
+        let pushY = parseFloat(node.dataset.pushY || '0');
+        if (r.left < wr.left + gap) pushX += wr.left + gap - r.left;
+        if (r.right > wr.right - gap) pushX -= r.right - (wr.right - gap);
+        if (r.top < wr.top + gap) pushY += wr.top + gap - r.top;
+        if (r.bottom > wr.bottom - gap) pushY -= r.bottom - (wr.bottom - gap);
+        node.dataset.pushX = String(pushX);
+        node.dataset.pushY = String(pushY);
+        node.style.setProperty('--push-x', pushX + 'px');
+        node.style.setProperty('--push-y', pushY + 'px');
+      });
+    };
+    clampInsideRing();
+
     for (let pass = 0; pass < 8; pass++) {
       let changed = false;
       for (let i = 0; i < nodes.length; i++) {
@@ -2001,7 +2019,7 @@
           const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
           if (overlapX <= 0 || overlapY <= 0) continue;
           changed = true;
-          const currentWidth = parseFloat(nodes[j].style.width || cardWidth);
+          const currentWidth = parseFloat(getComputedStyle(nodes[j]).width || cardWidth);
           if (currentWidth > minWidth) {
             const nextWidth = Math.max(minWidth, Math.floor(currentWidth * .9));
             nodes[i].style.setProperty('--mobile-opp-width', nextWidth + 'px');
@@ -2023,6 +2041,7 @@
           nodes[j].style.setProperty('--push-y', pushY + 'px');
         }
       }
+      clampInsideRing();
       if (!changed) break;
     }
   }
