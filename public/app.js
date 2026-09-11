@@ -1927,6 +1927,7 @@
       d.style.width = cityWidth;
       d.dataset.widthBase = cityWidth;
       d.dataset.cardWidth = String(cardWidth);
+      d.dataset.cityCount = String(p.city.length);
       d.style.setProperty('--push-x', '0px');
       d.style.setProperty('--push-y', '0px');
       d.dataset.compact = String(mobileRingLayout ? 3 : compactLevel);
@@ -1995,8 +1996,12 @@
     if (!nodes.length) { wrap.style.height = ''; return; }
     const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
     const gap = Math.max(6, Math.round(Math.min(14, width * .018)));
-    const cardWidth = Math.max(104, Math.min(160, Math.floor(width * .25)));
-    const minWidth = Math.max(94, Math.floor(cardWidth * .78));
+    const totalPlayers = Number(wrap.dataset.players || nodes.length + 1);
+    // 玩家框至少保持 1.5:1 的宽高比；有空间时先横向容纳更多建筑，
+    // 空间不足时再切换到更紧凑的卡牌尺寸。
+    const maxWidth = Math.max(126, Math.floor(width * (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58)));
+    const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * .25)));
+    const minWidth = Math.max(104, Math.floor(cardWidth * .78));
     const height = Math.max(300, Math.min(400, Math.round((window.innerHeight || 720) * .44)));
     wrap.style.display = 'block';
     wrap.style.height = height + 'px';
@@ -2009,6 +2014,40 @@
       node.dataset.pushY = '0';
       node.dataset.compact = '3';
     });
+
+    const fitPanelRatioAndBuildings = () => {
+      for (let pass = 0; pass < 5; pass++) {
+        let changed = false;
+        nodes.forEach(node => {
+          const compact = Number(node.dataset.compact || 3);
+          const cityCount = Number(node.dataset.cityCount || 0);
+          const cityCardWidth = compact >= 4
+            ? Math.max(16, Math.min(31, Math.floor((maxWidth - 18 - Math.max(0, cityCount - 1) * 3) / Math.max(1, cityCount))))
+            : 40;
+          node.style.setProperty('--mobile-city-card-width', cityCardWidth + 'px');
+          node.style.setProperty('--mobile-city-card-height', Math.round(cityCardWidth * 1.5) + 'px');
+          const cityNeed = cityCount
+            ? 18 + Math.min(cityCount, 7) * (cityCardWidth + 3)
+            : 0;
+          const rect = node.getBoundingClientRect();
+          const ratioNeed = Math.ceil(rect.height * 1.5);
+          const current = parseFloat(getComputedStyle(node).width || cardWidth);
+          const desired = Math.min(maxWidth, Math.max(cardWidth, minWidth, cityNeed, ratioNeed));
+          if (desired > current + 1) {
+            node.style.setProperty('--mobile-opp-width', desired + 'px');
+            changed = true;
+          }
+          // 达到屏幕允许的最大宽度仍放不下时，缩小角色牌和建筑牌，
+          // 保留横向布局，避免建筑牌优先换行导致玩家框变高。
+          if (desired >= maxWidth && (rect.height * 1.5 > maxWidth || cityNeed > maxWidth) && compact < 4) {
+            node.dataset.compact = '4';
+            changed = true;
+          }
+        });
+        if (!changed) break;
+      }
+    };
+    fitPanelRatioAndBuildings();
 
     const clampInsideRing = () => {
       const wr = wrap.getBoundingClientRect();
