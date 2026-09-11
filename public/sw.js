@@ -1,4 +1,4 @@
-const CACHE_NAME = 'citadels-shell-v1';
+const CACHE_NAME = 'citadels-shell-v2';
 const APP_SHELL = [
   './', './index.html', './manifest.json', './style.css',
   './themes/neon/theme.css', './themes/neon/manifest.js', './themes/theme-manager.js',
@@ -16,6 +16,10 @@ self.addEventListener('activate', event => {
     keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
   )));
   self.clients.claim();
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', event => {
