@@ -2294,7 +2294,10 @@
     if (!me) return;
     App.myIdx = s.players.findIndex(p => p.id === App.myId);
     const meArea = $('#me-area');
-    if (meArea) meArea.dataset.seat = App.myIdx;
+    if (meArea) {
+      meArea.dataset.seat = App.myIdx;
+      meArea.classList.toggle('many-players', s.players.length >= 5);
+    }
     if (meArea) {
       const totalPlayers = s.players.length || 1;
       if (totalPlayers === 4 && window.innerWidth > 1000) {
