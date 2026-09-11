@@ -2845,6 +2845,16 @@
       };
       removedWidget.classList.add('collapsed');
     }
+    const mobileMenuToggle = $('#mobile-menu-toggle');
+    const gameScreen = $('#screen-game');
+    if (mobileMenuToggle && gameScreen) {
+      mobileMenuToggle.onclick = () => {
+        const open = gameScreen.classList.toggle('mobile-menu-open');
+        mobileMenuToggle.setAttribute('aria-expanded', String(open));
+        mobileMenuToggle.title = open ? '收起游戏菜单' : '展开游戏菜单';
+        scheduleMobileFitScale();
+      };
+    }
 
     // 电脑节奏：设置页下拉 + 对局内一键切换
     loadSpeed();

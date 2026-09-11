@@ -175,7 +175,7 @@
 <!-- ============================ 对局 ============================ -->
 <section id="screen-game" class="screen">
   <div class="mobile-fit-root" id="mobile-fit-root">
-  <header class="topbar">
+  <header class="topbar" id="topbar">
     <div class="tb-left">
       <button class="btn tiny ghost" id="btn-back-home">菜单</button>
       <button class="btn tiny" id="btn-speed" title="点击切换电脑行动速度">标准</button>
@@ -253,6 +253,9 @@
     <div class="actions" id="actions"></div>
   </footer>
   </div>
+  <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
+    <span aria-hidden="true">☰</span><span>菜单</span>
+  </button>
 </section>
 
 <!-- ============================ 结算 ============================ -->
