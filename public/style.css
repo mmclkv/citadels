@@ -434,6 +434,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opponents .opp[data-compact="2"] .cs-card{width:56px;height:84px}
 .opponents .opp[data-compact="3"] .cs-card{width:50px;height:75px}
 .opponents .opp[data-compact="2"] .opp-head,.opponents .opp[data-compact="3"] .opp-head{gap:5px;margin-bottom:5px}
+.opponents[data-layout="mobile-collision"]{position:relative;display:block;overflow:visible;height:auto;min-height:0}
+.opponents[data-layout="mobile-collision"] .opp{position:absolute!important;left:0;top:0;width:var(--mobile-opp-width)!important;min-width:0!important;transform:none!important;margin:0!important;flex:none!important}
 .opp.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.14);background:#fffcf2}
 .opp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
 .opp-seat-no{font-size:10px;font-weight:800;color:var(--dim);padding:1px 5px;border:1px solid var(--line);border-radius:8px;flex:0 0 auto}

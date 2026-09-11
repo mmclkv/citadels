@@ -1856,11 +1856,13 @@
   function renderOpponents(s) {
     const wrap = $('#opponents');
     const totalPlayers = s.players.length || 1;
+    const mobileCollisionLayout = isMobileOpponentLayout() && totalPlayers >= 5;
     const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
     const radiusX = totalPlayers >= 7 ? 43 : totalPlayers >= 5 ? 40 : 36;
     const radiusY = totalPlayers >= 7 ? 42 : totalPlayers >= 5 ? 40 : 38;
     const cardWidth = totalPlayers >= 8 ? 17 : totalPlayers >= 7 ? 19 : totalPlayers >= 5 ? 21 : totalPlayers === 4 ? 30 : 24;
     wrap.dataset.players = String(totalPlayers);
+    wrap.dataset.layout = mobileCollisionLayout ? 'mobile-collision' : 'ring';
     const arena = $('#table-arena');
     if (arena) arena.dataset.players = String(totalPlayers);
     // 多人时顶部玩家卡片更容易向下延伸，圆桌下移到环形座位的空白中心，避免相互覆盖。
@@ -1910,7 +1912,7 @@
       d.dataset.cardWidth = String(cardWidth);
       d.style.setProperty('--push-x', '0px');
       d.style.setProperty('--push-y', '0px');
-      d.dataset.compact = String(compactLevel);
+      d.dataset.compact = String(mobileCollisionLayout ? Math.max(2, compactLevel) : compactLevel);
       const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id);
       const actionActive = !!(s.turn && s.turn.playerIdx === p.seat);
       d.classList.toggle('active', draftActive || actionActive);
@@ -1955,7 +1957,76 @@
       if (ch.dataset && ch.dataset.seat != null && !keep[ch.dataset.seat] && ch.parentNode) ch.parentNode.removeChild(ch);
     });
     wrap.appendChild(frag);
-    resolveOpponentTableCollisions();
+    if (mobileCollisionLayout) applyMobileOpponentLayout(wrap);
+    else resolveOpponentTableCollisions();
+  }
+
+  function isMobileOpponentLayout() {
+    if (typeof window === 'undefined') return false;
+    const touch = (typeof navigator !== 'undefined' &&
+      (navigator.maxTouchPoints > 0 || 'ontouchstart' in window));
+    return window.innerWidth <= 1000 || (touch && window.innerWidth <= 1400);
+  }
+
+  // 移动端多人布局：先放入两列网格，再用真实 DOM 矩形做碰撞检测。
+  // 如果内容仍然挤压，就逐步缩小玩家框；data-compact 会同步缩小内部角色牌和文字。
+  function applyMobileOpponentLayout(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (!nodes.length) { wrap.style.height = ''; return; }
+    const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
+    const gap = Math.max(8, Math.round(Math.min(18, width * .025)));
+    const cols = 2;
+    const cardWidth = Math.max(132, Math.min(300, Math.floor((width - gap * 3) / cols)));
+    const minWidth = Math.max(118, Math.floor(cardWidth * .72));
+    wrap.style.display = 'block';
+    wrap.style.overflow = 'visible';
+    nodes.forEach((node, i) => {
+      node.style.setProperty('--mobile-opp-width', cardWidth + 'px');
+      node.style.left = (gap + (i % cols) * (cardWidth + gap)) + 'px';
+      node.style.top = (gap + Math.floor(i / cols) * 220) + 'px';
+      node.style.setProperty('--push-x', '0px');
+      node.style.setProperty('--push-y', '0px');
+    });
+    const updateHeight = () => {
+      let bottom = 0;
+      const wr = wrap.getBoundingClientRect();
+      nodes.forEach(node => { bottom = Math.max(bottom, node.getBoundingClientRect().bottom - wr.top); });
+      wrap.style.height = Math.ceil(bottom + gap) + 'px';
+    };
+    updateHeight();
+
+    for (let pass = 0; pass < 10; pass++) {
+      let changed = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          changed = true;
+          const currentTop = parseFloat(nodes[j].style.top) || 0;
+          const nextTop = currentTop + overlapY + gap;
+          const wrapHeight = Math.max(wrap.clientHeight, 1);
+          if (nextTop + b.height <= wrapHeight + 24) {
+            nodes[j].style.top = nextTop + 'px';
+          } else {
+            const currentWidth = parseFloat(nodes[j].style.width || cardWidth);
+            const nextWidth = Math.max(minWidth, Math.floor(currentWidth * .9));
+            nodes[i].style.width = nextWidth + 'px';
+            nodes[j].style.width = nextWidth + 'px';
+            nodes[i].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            nodes[j].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            nodes[i].dataset.compact = '3';
+            nodes[j].dataset.compact = '3';
+          }
+        }
+      }
+      updateHeight();
+      if (!changed) break;
+    }
+    updateHeight();
   }
 
   // 用实际屏幕矩形检查玩家卡片与圆桌是否相交；相交时沿座位方向推开，
