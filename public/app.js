@@ -1912,7 +1912,7 @@
       d.dataset.cardWidth = String(cardWidth);
       d.style.setProperty('--push-x', '0px');
       d.style.setProperty('--push-y', '0px');
-      d.dataset.compact = String(mobileCollisionLayout ? Math.max(2, compactLevel) : compactLevel);
+      d.dataset.compact = String(mobileCollisionLayout ? 3 : compactLevel);
       const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id);
       const actionActive = !!(s.turn && s.turn.playerIdx === p.seat);
       d.classList.toggle('active', draftActive || actionActive);
@@ -1977,14 +1977,15 @@
     const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
     const gap = Math.max(8, Math.round(Math.min(18, width * .025)));
     const cols = 2;
-    const cardWidth = Math.max(132, Math.min(300, Math.floor((width - gap * 3) / cols)));
+    // 5 人以上时给左右和中间留出安全间距，避免玩家框贴边或被横向滚动截断。
+    const cardWidth = Math.max(112, Math.min(220, Math.floor((width - gap * 3) * .44)));
     const minWidth = Math.max(118, Math.floor(cardWidth * .72));
     wrap.style.display = 'block';
     wrap.style.overflow = 'visible';
     nodes.forEach((node, i) => {
       node.style.setProperty('--mobile-opp-width', cardWidth + 'px');
       node.style.left = (gap + (i % cols) * (cardWidth + gap)) + 'px';
-      node.style.top = (gap + Math.floor(i / cols) * 220) + 'px';
+      node.style.top = (gap + Math.floor(i / cols) * 190) + 'px';
       node.style.setProperty('--push-x', '0px');
       node.style.setProperty('--push-y', '0px');
     });
