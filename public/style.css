@@ -973,6 +973,22 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 /* PWA 横屏：菜单浮窗放大并抬高，和右下角菜单按钮之间留出明确间距；隐藏顶部行动顺序条。 */
 @media (display-mode:standalone) and (orientation:landscape),
        (display-mode:fullscreen) and (orientation:landscape){
+  #screen-game .mobile-fit-root{position:relative}
+  #screen-game .turn-banner{display:none!important}
+  #screen-game .actionbar{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    min-height:54px;
+    max-height:30vh;
+    padding:8px 12px;
+    border-top:0;
+    border-bottom:1px solid var(--line);
+    z-index:7;
+  }
+  #screen-game .board-main{padding-top:70px}
+
   #screen-game.mobile-menu-open .topbar{
     right:16px;
     bottom:76px;
@@ -985,6 +1001,16 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game.mobile-menu-open .topbar::after{bottom:-8px}
   #screen-game .mobile-menu-toggle{right:16px;bottom:16px;padding:8px 12px}
   #screen-game .turn-order-guide{display:none!important}
+}
+
+/* PWA 横屏选建筑：抽二选一弹窗中的两张建筑牌按可用高度自适应，确保完整显示。 */
+@media (display-mode:standalone) and (orientation:landscape),
+       (display-mode:fullscreen) and (orientation:landscape){
+  .pick-grid-draw_keep .card{
+    width:min(180px,24vw,calc((100dvh - 150px) * .6667))!important;
+    height:auto!important;
+    aspect-ratio:2 / 3;
+  }
 }
 
 /* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */
