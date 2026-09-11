@@ -2976,4 +2976,8 @@
   App.__local = Local;
   App.__net = Net;
   window.__CitadelsApp = App;
+  // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
+  if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+  }
 })();
