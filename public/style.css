@@ -1122,6 +1122,56 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   }
 }
 
+/* iPad 级大屏 PWA（宽 ≥900 且高 ≥560）：手机档的环形玩家框在 iPad 上明显偏小，
+   四周留大片空白。这里把圆角矩形、角色牌、建筑牌与文字整体放大一档；
+   建筑牌宽度仍用 --mobile-city-card-width 变量，由 app.js 按建筑数量自适应
+   （applyMobileRingLayout 的 spacious 分支给出更大基数），避免牌多时溢出。
+   媒体查询条件必须与 app.js 中 spacious 判据保持一致。 */
+@media (display-mode:standalone) and (min-width:900px) and (min-height:560px),
+       (display-mode:fullscreen) and (min-width:900px) and (min-height:560px){
+  #screen-game .opponents[data-layout="mobile-ring"] .opp{
+    padding:10px 12px!important;
+    border-radius:14px;
+  }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-role-row{gap:8px;margin-bottom:7px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char{gap:7px;margin-bottom:7px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-head{gap:6px;margin-bottom:6px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-seat-no{font-size:11px;padding:2px 7px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-name{font-size:15px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-gold{font-size:13px;gap:4px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .score-btn{width:32px;height:32px;font-size:13px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char-stats{font-size:12px;min-width:66px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-body{gap:7px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-city{gap:4px;min-height:44px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-name{font-size:13px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-card{
+    width:48px!important;height:72px!important;
+    min-width:48px!important;min-height:72px!important;
+    max-width:48px!important;max-height:72px!important;
+    flex:0 0 48px!important;
+  }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .facedown.hand-count-back{
+    width:30px!important;height:45px!important;
+    min-width:30px!important;min-height:45px!important;
+    max-width:30px!important;max-height:45px!important;
+    flex:0 0 30px!important;
+  }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-multiply{font-size:21px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-number{width:28px;height:28px;font-size:16px}
+  /* 解除手机档固定 32×48 的限制，改由引擎按建筑数量算出的变量决定尺寸。 */
+  #screen-game .opponents.pwa-many-players .opp-city>.card,
+  #screen-game .opponents[data-layout="mobile-ring"] .opp-city>.card{
+    width:var(--mobile-city-card-width,44px)!important;
+    height:var(--mobile-city-card-height,66px)!important;
+    min-width:0!important;
+    min-height:0!important;
+    max-width:none!important;
+    max-height:none!important;
+    flex:0 0 auto!important;
+    aspect-ratio:2 / 3;
+  }
+}
+
 /* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */
 @media (display-mode:standalone) and (orientation:landscape),
        (display-mode:fullscreen) and (orientation:landscape){
