@@ -406,9 +406,13 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .table-removed .char-card{pointer-events:auto;cursor:zoom-in}
 .table-core.has-removed .table-core-hint{margin-top:4px}
 .table-core.active{border-color:var(--gold);box-shadow:0 0 0 10px rgba(200,149,43,.08),0 0 32px rgba(200,149,43,.28),inset 0 0 30px rgba(200,149,43,.2)}
-.removed-corner{position:fixed;left:16px;bottom:76px;z-index:8;display:flex;align-items:flex-end;gap:6px;
-  padding:6px 8px;border:1px solid var(--line2);border-radius:9px;background:rgba(255,253,246,.94);box-shadow:var(--shadow2)}
+.removed-corner{position:fixed;left:16px;bottom:76px;z-index:8;display:flex;flex-direction:column;align-items:flex-start;gap:5px;
+  padding:4px;border:1px solid var(--line2);border-radius:9px;background:rgba(255,253,246,.94);box-shadow:var(--shadow2)}
 .removed-corner[hidden]{display:none}
+.removed-widget-toggle{border:1px solid var(--line2);border-radius:7px;background:rgba(255,253,246,.96);color:var(--ink2);font-size:10px;font-weight:700;padding:4px 7px;cursor:pointer;white-space:nowrap}
+.removed-widget-toggle:hover{background:var(--panel2)}
+.removed-widget-content{display:flex;align-items:flex-end;gap:6px}
+.removed-corner.collapsed .removed-widget-content{display:none}
 .removed-corner-label{font-size:10px;color:var(--dim);white-space:nowrap;writing-mode:vertical-rl;align-self:center}
 .removed-corner .rs-cards{display:flex;align-items:center;gap:5px}
 .removed-corner .char-card.mini,.removed-corner .facedown.sm{width:54px!important;height:81px!important;padding:0!important;margin:0;border-radius:6px;overflow:hidden}
@@ -761,7 +765,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   /* 移动端保留顺序流，避免圆桌卡片过度缩小；桌面端才使用环形座位。 */
   .table-arena{min-height:0;margin:0 0 11px;padding-top:0;border:0;border-radius:0;background:none;overflow:visible}
   .table-core{display:none}
-  .removed-corner{left:10px;bottom:calc(68px + env(safe-area-inset-bottom));padding:5px 6px}
+  .removed-corner{left:10px;bottom:calc(68px + env(safe-area-inset-bottom));padding:3px}
   .turn-order-guide{position:relative;top:auto;left:auto;width:100%;transform:none;justify-content:flex-start;margin:0 0 8px;overflow-x:auto;border-radius:10px}
   .opponents{display:flex;gap:9px;overflow-x:auto;padding-bottom:5px;margin-bottom:11px;
     -webkit-overflow-scrolling:touch;height:auto}

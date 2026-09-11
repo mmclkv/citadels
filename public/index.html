@@ -213,9 +213,14 @@
         <div class="table-arena" id="table-arena">
           <div class="turn-order-guide" id="turn-order-guide" aria-label="行动顺序"></div>
           <div class="removed-corner" id="removed-corner" aria-label="本轮出局角色" hidden>
-            <span class="removed-corner-label">本轮出局</span>
-            <div class="rs-cards" id="rs-faceup-corner"></div>
-            <div class="rs-cards" id="rs-facedown-corner"></div>
+            <button class="removed-widget-toggle" id="removed-widget-toggle" type="button" aria-expanded="false">
+              出局 <span id="removed-widget-count">0</span>
+            </button>
+            <div class="removed-widget-content">
+              <span class="removed-corner-label">本轮出局</span>
+              <div class="rs-cards" id="rs-faceup-corner"></div>
+              <div class="rs-cards" id="rs-facedown-corner"></div>
+            </div>
           </div>
           <div class="opponents" id="opponents"></div>
           <div class="me-area" id="me-area">
