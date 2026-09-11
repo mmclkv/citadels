@@ -1641,7 +1641,9 @@
     const screen = $('#screen-game');
     if (!root || !screen) return;
     const mobile = typeof window !== 'undefined' && window.innerWidth <= 820;
-    if (!mobile || !screen.classList.contains('active')) {
+    const standalone = typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+    if ((!mobile && !standalone) || !screen.classList.contains('active')) {
       root.classList.remove('mobile-fit-scaled');
       root.style.removeProperty('--mobile-fit-scale');
       return;
