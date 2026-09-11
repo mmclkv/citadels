@@ -791,6 +791,16 @@
   /* 按 uid 复用卡片节点的列表渲染：不整盘 innerHTML 清空，已存在的卡片
    * （含内部 <img>）保留不动，只增删变化项并微调顺序。这是消除霓虹主题
    * 「每行动一次整盘重绘→图片闪烁」的根本手段。 */
+  /**
+   * container.children 是 **live** HTMLCollection：边遍历边 removeChild 会让集合实时缩短，
+   * forEach 的索引随之错位，紧随其后的节点会被跳过、永远删不掉，残留成「幽灵卡片」
+   * （典型表现：跨轮次时「本轮出局角色」多显示一张上一轮的角色）。
+   * 凡是要在遍历中删除节点，必须先取静态快照。
+   */
+  function childrenSnapshot(container) {
+    return Array.prototype.slice.call(container.children);
+  }
+
   function syncCards(container, cards, optsFor, onNode) {
     if (!container) return;
     const existing = {};
@@ -808,8 +818,8 @@
       if (onNode) onNode(node, c, optsFor(c));
       frag.appendChild(node);
     });
-    // 移除已不在列表中的旧节点
-    Array.prototype.forEach.call(container.children, ch => {
+    // 移除已不在列表中的旧节点（必须用快照遍历：live HTMLCollection 边删边遍历会漏删）
+    childrenSnapshot(container).forEach(ch => {
       const k = ch.dataset && ch.dataset.uid;
       if (k && !keep[k] && ch.parentNode) ch.parentNode.removeChild(ch);
     });
@@ -2074,7 +2084,7 @@
 
       const city = d.querySelector('.opp-city');
       if (!p.city.length) {
-        Array.prototype.forEach.call(city.children, ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+        childrenSnapshot(city).forEach(ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
         if (!city.querySelector('.empty-hint')) city.appendChild(el('div', 'empty-hint', '（尚无建筑）'));
       } else {
         const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
@@ -2487,7 +2497,7 @@
     const city = $('#my-city');
     if (!me.city.length) {
       // 按 uid 清掉残留卡片（如被摧毁后清空），再补空提示，避免整盘 innerHTML 重建导致图片闪烁
-      Array.prototype.forEach.call(city.children, ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+      childrenSnapshot(city).forEach(ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
       if (!city.querySelector('.empty-hint')) city.appendChild(el('div', 'empty-hint', '（尚无建筑，快去建造吧）'));
     } else {
       const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
@@ -2503,7 +2513,7 @@
 
     const hand = $('#my-hand');
     if (!me.hand.length) {
-      Array.prototype.forEach.call(hand.children, ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+      childrenSnapshot(hand).forEach(ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
       if (!hand.querySelector('.empty-hint')) hand.appendChild(el('div', 'empty-hint', '（手牌为空）'));
     } else {
       const eh = hand.querySelector('.empty-hint'); if (eh) eh.remove();
@@ -2612,7 +2622,8 @@
         keep[c.id] = node;
         frag.appendChild(node);
       });
-      Array.prototype.forEach.call(fu.children, ch => {
+      // 快照遍历：跨轮次时 faceUp 全换、需删除多个旧节点，live 集合会漏删导致多显示一张
+      childrenSnapshot(fu).forEach(ch => {
         const k = ch.dataset && ch.dataset.uid;
         if (k && !keep[k] && ch.parentNode) ch.parentNode.removeChild(ch);
       });
