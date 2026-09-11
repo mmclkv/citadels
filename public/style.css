@@ -963,6 +963,29 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #card-hd-overlay{contain:layout paint}
 }
 
+/* PWA 选角预览：整张角色卡必须在视口内可见，避免弹窗自身产生纵向滚动。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #char-zoom.touch{
+    width:min(240px,72vw)!important;
+    max-height:calc(100vh - 20px)!important;
+    max-height:calc(100dvh - 20px)!important;
+    overflow:hidden!important;
+    padding:6px!important;
+  }
+  #char-zoom.touch img,
+  #char-zoom.touch .char-zoom-back{
+    width:100%!important;
+    max-width:100%!important;
+    height:auto!important;
+    max-height:calc(100vh - 150px)!important;
+    max-height:calc(100dvh - 150px)!important;
+    object-fit:contain;
+  }
+  #char-zoom.touch .cz-actions{gap:6px;margin-top:6px}
+  #char-zoom.touch .cz-btn{padding:7px 6px;font-size:12px}
+  #char-zoom.touch .cz-hd-btn{margin-top:6px;padding:6px 8px;font-size:11px}
+}
+
 /* 移动端“我的城市”始终采用两排，建筑数量增加时只向右扩展，不把区域继续向下撑高。 */
 @media (max-width:820px){
   #my-city.city-row{display:grid!important;grid-auto-flow:column;grid-template-rows:repeat(2,minmax(0,1fr));
