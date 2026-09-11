@@ -81,6 +81,13 @@
         </select>
       </label>
       <label class="field">
+        <span>电脑类型</span>
+        <select id="cfg-bot-type">
+          <option value="npc" selected>普通电脑（启发式）</option>
+          <option value="agent">AI Agent 电脑（目标导向）</option>
+        </select>
+      </label>
+      <label class="field">
         <span>电脑节奏</span>
         <select id="cfg-speed">
           <option value="slow">慢速（看得最清楚）</option>
@@ -135,6 +142,9 @@
           <label class="field"><span>电脑补位</span>
             <select id="net-bots"><option value="0">不补位</option><option value="1" selected>1 个电脑</option>
               <option value="2">2 个电脑</option><option value="3">3 个电脑</option><option value="4">4 个电脑</option></select>
+          </label>
+          <label class="field"><span>电脑类型</span>
+            <select id="net-bot-type"><option value="npc" selected>普通电脑（启发式）</option><option value="agent">AI Agent 电脑（目标导向）</option></select>
           </label>
           <label class="field"><span>结束条件</span>
             <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
@@ -349,8 +359,9 @@
 <script src="./themes/neon/manifest.js?v=3"></script>
 <script src="./themes/theme-manager.js?v=2"></script>
 <script src="./src/cards.js?v=3"></script>
-<script src="./src/engine.js?v=9"></script>
+<script src="./src/engine.js?v=10"></script>
 <script src="./src/ai.js?v=2"></script>
-<script src="./app.js?v=56"></script>
+<script src="./src/agent.js?v=1"></script>
+<script src="./app.js?v=57"></script>
 </body>
 </html>

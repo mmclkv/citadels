@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const CitCards = require('./src/cards.js');
 const CitEngine = require('./src/engine.js');
 const CitAI = require('./src/ai.js');
+const CitAgent = require('./src/agent.js');
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -73,7 +74,7 @@ function publicRoom(r) {
     id: r.id,
     name: r.name,
     phase: r.state ? r.state.phase : 'lobby',
-    seats: r.seats.map(s => ({ name: s.name, isBot: !!s.isBot, botLevel: s.botLevel, taken: !!s.taken,
+    seats: r.seats.map(s => ({ name: s.name, isBot: !!s.isBot, botType: s.botType || 'npc', botLevel: s.botLevel, taken: !!s.taken,
       id: s.id, connected: !!s.isBot || !s.disconnected && !s.left, disconnected: !!s.disconnected, left: !!s.left })),
     config: r.config,
     playerCount: r.seats.length
@@ -88,7 +89,7 @@ function createRoom(hostName, config) {
   seats.push({ id: genId('p'), name: hostName, resumeToken: genResumeToken(), isBot: false, taken: true,
     disconnected: false, left: false });
   for (let i = 0; i < bots; i++) {
-    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botLevel: config.botLevel || 'normal', taken: true });
+    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botType: config.botType || 'npc', botLevel: config.botLevel || 'normal', taken: true });
   }
   for (let i = seats.length; i < total; i++) seats.push({ id: null, name: '', isBot: false, taken: false,
     disconnected: false, left: false });
@@ -100,6 +101,7 @@ function createRoom(hostName, config) {
       endDistricts: config.endDistricts || 8,
       charSetMode: config.charSetMode || 'base',
       botLevel: config.botLevel || 'normal',
+      botType: config.botType === 'agent' ? 'agent' : 'npc',
       // 房主在开局设置里选的节奏（= 普通动作的间隔毫秒），服务器上的机器人按它减速
       botPace: Number(config.botPace) || 430
     },
@@ -153,7 +155,7 @@ function startRoom(r) {
   const filled = seats.slice();
   let bi = 1;
   while (filled.length < Math.max(2, r.config.playerCount)) {
-    filled.push({ id: genId('b'), name: '电脑 ' + (bi++), isBot: true, botLevel: r.config.botLevel || 'normal' });
+    filled.push({ id: genId('b'), name: '电脑 ' + (bi++), isBot: true, botType: r.config.botType || 'npc', botLevel: r.config.botLevel || 'normal' });
   }
   r.seats = filled.concat(r.seats.filter(s => !s.taken));
   const state = CitEngine.createGame({
@@ -161,7 +163,7 @@ function startRoom(r) {
     endDistricts: r.config.endDistricts,
     charSetMode: r.config.charSetMode,
     seats: r.seats.filter(s => s.taken).map(s => ({
-      id: s.id, name: s.name, isBot: !!s.isBot, botLevel: s.botLevel
+      id: s.id, name: s.name, isBot: !!s.isBot, botType: s.botType || 'npc', botLevel: s.botLevel
     }))
   });
   r.state = state;
@@ -283,7 +285,9 @@ function botTick(r) {
     const actor = currentActor(st);
     if (!actor || !actor.isBot) { r.ticking = false; sendPersonal(r); return; }
     let action = null;
-    try { action = CitAI.decide(st, actor.id); } catch (e) { console.error('AI error', e); }
+    try {
+      action = actor.botType === 'agent' ? CitAgent.decide(st, actor.id) : CitAI.decide(st, actor.id);
+    } catch (e) { console.error('AI error', e); }
     // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
     if (!action) {
       const opts = CitEngine.getAvailableActions(st, actor.id);
@@ -484,7 +488,7 @@ function handle(ws, info, msg) {
       if (i === 0) break;
       const s = r.seats[i];
       if (msg.kind === 'bot') {
-        r.seats[i] = { id: genId('b'), name: '电脑 ' + i, isBot: true, botLevel: r.config.botLevel || 'normal', taken: true,
+        r.seats[i] = { id: genId('b'), name: '电脑 ' + i, isBot: true, botType: msg.botType === 'agent' ? 'agent' : (r.config.botType || 'npc'), botLevel: r.config.botLevel || 'normal', taken: true,
           disconnected: false, left: false };
       } else if (msg.kind === 'open') {
         r.seats[i] = { id: null, name: '', isBot: false, taken: false };
@@ -542,7 +546,8 @@ function lobbyView(r) {
   return {
     roomId: r.id, roomName: r.name, phase: 'lobby',
     you: null,
-    seats: r.seats.map((s, i) => ({ index: i, id: s.id, name: s.name, isBot: !!s.isBot, taken: !!s.taken,
+    seats: r.seats.map((s, i) => ({ index: i, id: s.id, name: s.name, isBot: !!s.isBot,
+      botType: s.botType || 'npc', taken: !!s.taken,
       connected: !!s.isBot || !s.disconnected && !s.left, disconnected: !!s.disconnected, left: !!s.left })),
     config: r.config
   };

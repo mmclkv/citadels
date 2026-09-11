@@ -146,6 +146,7 @@
         name: s.name,
         isBot: !!s.isBot,
         botLevel: s.botLevel || 'normal',
+        botType: s.botType || 'npc',
         seat: i,
         gold: 0,
         hand: [],
@@ -1673,7 +1674,7 @@
       endDistricts: state.config.endDistricts,
       players: state.players.map((p, i) => {
         const o = {
-          id: p.id, name: p.name, seat: p.seat, isBot: p.isBot,
+          id: p.id, name: p.name, seat: p.seat, isBot: p.isBot, botType: p.botType,
           gold: p.gold,
           city: p.city.map(c => ({
             uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost,
