@@ -1030,6 +1030,66 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   }
 }
 
+/* PWA 5 人以上：玩家区压缩为两排，角色栏并入第一排，建筑牌横向滚动。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .me-area.many-players{
+    width:calc(100% - 24px)!important;
+    margin:6px auto 0!important;
+    padding:6px 8px!important;
+    display:grid;
+    grid-template-columns:minmax(86px,auto) minmax(0,1fr);
+    grid-template-rows:minmax(58px,auto) minmax(54px,auto);
+    grid-template-areas:"role city" "hand-title hand";
+    gap:4px 8px;
+    min-height:0!important;
+    max-height:180px;
+    overflow:hidden;
+  }
+  #screen-game .me-area.many-players>.zone-head:first-child{
+    position:absolute;
+    top:3px;
+    right:8px;
+    margin:0;
+    z-index:2;
+  }
+  #screen-game .me-area.many-players>.zone-head:first-child h3{display:none}
+  #screen-game .me-area.many-players>.me-role-row{grid-area:role;align-self:center;margin:0;min-width:0}
+  #screen-game .me-area.many-players>.city-row{
+    grid-area:city;
+    min-width:0;
+    min-height:0!important;
+    height:58px;
+    padding:3px;
+    gap:4px;
+    flex-wrap:nowrap!important;
+    overflow-x:auto;
+    overflow-y:hidden;
+  }
+  #screen-game .me-area.many-players>.zone-head:nth-child(4){
+    grid-area:hand-title;
+    align-self:center;
+    min-width:0;
+    margin:0;
+  }
+  #screen-game .me-area.many-players>.zone-head:nth-child(4) h3{font-size:11px;white-space:nowrap}
+  #screen-game .me-area.many-players>.hand-row{
+    grid-area:hand;
+    min-width:0;
+    min-height:0!important;
+    height:54px;
+    padding:3px;
+    gap:4px;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    overflow-y:hidden;
+  }
+  #screen-game .me-area.many-players .me-char .cs-card{width:36px!important;height:54px!important}
+  #screen-game .me-area.many-players .city-row>.card,
+  #screen-game .me-area.many-players .hand-row>.card{width:38px!important;height:54px!important}
+  #screen-game .me-area.many-players .city-row>.card.mini,
+  #screen-game .me-area.many-players .hand-row>.card.mini{width:34px!important;height:48px!important}
+}
+
 /* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */
 @media (display-mode:standalone) and (orientation:landscape),
        (display-mode:fullscreen) and (orientation:landscape){
