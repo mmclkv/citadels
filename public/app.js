@@ -1407,7 +1407,8 @@
     const BUILD_FLIGHT_MS = Math.round(BASE_BUILD_FLIGHT_MS * 3 / 5);
     const baseWidth = Math.min(148, Math.max(112, Math.round(window.innerWidth * .12)));
     const width = baseWidth * 3;
-    const height = Math.round(width * 1.395);
+    // 霓虹建筑卡图比例为 1:1.5；保持原图比例，避免 object-fit:cover 裁掉上下内容。
+    const height = Math.round(width * 1.5);
     const sx = window.innerWidth / 2 - width / 2;
     const sy = window.innerHeight / 2 - height / 2;
     const card = cardNode(data, {});
