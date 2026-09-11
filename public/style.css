@@ -864,6 +864,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 }
 
 @media (max-width:820px){
+  /* 手机屏幕空间有限：选角阶段横条与行动指引在移动端收起，信息由进度栏/底部提示承接。 */
+  #screen-game .turn-banner,
+  #screen-game .turn-order-guide{display:none!important}
   /* 运行时自适应缩放的根容器：扩大布局空间后再缩放，避免制造横向滚动条。 */
   .mobile-fit-root.mobile-fit-scaled{width:calc(100% / var(--mobile-fit-scale));height:calc(100% / var(--mobile-fit-scale));
     flex:0 0 auto;transform:scale(var(--mobile-fit-scale));overflow:hidden}

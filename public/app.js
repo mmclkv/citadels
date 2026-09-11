@@ -2403,9 +2403,9 @@
     }
 
     if (isPicker) {
-      $('#prompt').textContent = $('#draft-title').textContent;
+      $('#prompt').textContent = '选角阶段 · 轮到你选择角色';
     } else {
-      $('#prompt').innerHTML = (cur && cur.isBot ? '电脑：' : '等待：') +
+      $('#prompt').innerHTML = '选角阶段 · ' + (cur && cur.isBot ? '电脑：' : '等待：') +
         escapeHtml(cur ? cur.name : '') + ' 正在选角' + thinkingDots();
     }
     $('#actions').innerHTML = '';
