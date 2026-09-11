@@ -2112,7 +2112,11 @@
         window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
       wrap.classList.toggle('pwa-many-players', !!pwa && totalPlayers >= 5);
       if (pwa && totalPlayers >= 5) stabilizePwaRingCollisions(wrap);
-    } else resolveOpponentTableCollisions();
+    } else {
+      resolveOpponentTableCollisions();
+      // 圆桌半径保证不了玩家框互不相交（5 人局左右两侧各排两张），再跑一遍互斥分离。
+      separateOpponentPanels(wrap);
+    }
   }
 
   function isMobileOpponentLayout() {
@@ -2428,6 +2432,109 @@
         ? 'min(720px, calc(' + baseWidth + ' + ' + expand + 'px))'
         : 'min(340px, calc(' + baseWidth + ' + ' + expand + 'px))';
     });
+  }
+
+  // 桌面圆桌布局下玩家框之间的互斥分离。
+  // 5 人局时 4 名对手占据相对座位 1~4：座位 1/2 同在左侧、座位 3/4 同在右侧，
+  // 两者的横向中心距只有座位半径差的 0.363 倍（半径 40 → 14.5% 圆桌宽），
+  // 而玩家框宽度是 min(340px, 21%)，比间距还宽，圆角矩形必然互相压住
+  // （2560 宽的屏幕上约压 14px，1920 宽的屏幕上要压 100px 以上）。
+  // 这里对每一对重叠的玩家框：先沿重叠更小的那条轴把两张框推向相反方向
+  // （尽量对称分摊，一侧空间不够时由另一侧补足），这条轴推不动就换另一条，
+  // 两条轴都推不动才收缩宽度兜底。全程不越出圆桌区、不压到中央圆桌。
+  function separateOpponentPanels(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (nodes.length < 2) return;
+    const gap = 10;
+    const floorWidth = 148;
+    const table = $('#table-core');
+    // .opp 带 width .55s 过渡，不关掉会量到过渡中的中间宽度，导致分离结果来回抖。
+    wrap.classList.add('separating');
+
+    const addPush = (node, dx, dy) => {
+      const x = (parseFloat(node.dataset.pushX || '0') || 0) + dx;
+      const y = (parseFloat(node.dataset.pushY || '0') || 0) + dy;
+      node.dataset.pushX = String(x);
+      node.dataset.pushY = String(y);
+      node.style.setProperty('--push-x', x + 'px');
+      node.style.setProperty('--push-y', y + 'px');
+    };
+
+    // 单张玩家框沿某条轴向 sign 方向还能挪多远：不越出圆桌区，也不压到中央圆桌。
+    const roomOf = (rect, axis, sign, wr, tr) => {
+      let limit = sign > 0
+        ? (axis === 'x' ? wr.right - gap - rect.right : wr.bottom - gap - rect.bottom)
+        : (axis === 'x' ? rect.left - wr.left - gap : rect.top - wr.top - gap);
+      // 横向移动时若与圆桌在纵向仍有交集，则不允许挪进圆桌的横向范围。
+      if (tr && axis === 'x' && Math.min(rect.bottom, tr.bottom) - Math.max(rect.top, tr.top) > 0) {
+        const t = sign > 0 ? tr.left - rect.right : rect.left - tr.right;
+        if (t >= 0) limit = Math.min(limit, t);
+      }
+      return Math.max(0, limit);
+    };
+
+    const clampInside = (wr, moved) => {
+      nodes.forEach(node => {
+        const r = node.getBoundingClientRect();
+        let dx = 0, dy = 0;
+        if (r.left < wr.left + gap) dx = wr.left + gap - r.left;
+        else if (r.right > wr.right - gap) dx = wr.right - gap - r.right;
+        if (r.top < wr.top + gap) dy = wr.top + gap - r.top;
+        else if (r.bottom > wr.bottom - gap) dy = wr.bottom - gap - r.bottom;
+        if (dx || dy) { addPush(node, dx, dy); moved.changed = true; }
+      });
+    };
+
+    for (let pass = 0; pass < 12; pass++) {
+      const wr = wrap.getBoundingClientRect();
+      if (!wr.width) break;
+      const tr = table && table.getBoundingClientRect();
+      const moved = { changed: false };
+      // 先把越出圆桌区的玩家框拉回来，再做两两分离，两个动作互相兜底。
+      clampInside(wr, moved);
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          moved.changed = true;
+          // 优先沿重叠更小的轴分离（这里通常很小），推不开再换轴。
+          const axes = overlapX <= overlapY ? ['x', 'y'] : ['y', 'x'];
+          let done = false;
+          for (let k = 0; k < axes.length && !done; k++) {
+            const axis = axes[k];
+            const need = (axis === 'x' ? overlapX : overlapY) + gap;
+            const ca = axis === 'x' ? a.left + a.width / 2 : a.top + a.height / 2;
+            const cb = axis === 'x' ? b.left + b.width / 2 : b.top + b.height / 2;
+            const dir = ca <= cb ? 1 : -1;
+            const roomA = roomOf(a, axis, -dir, wr, tr);
+            const roomB = roomOf(b, axis, dir, wr, tr);
+            if (roomA + roomB < need) continue;
+            // 尽量对称分摊；一侧空间不足时由另一侧补足剩余量。
+            let shareA = Math.min(roomA, need / 2);
+            let shareB = need - shareA;
+            if (shareB > roomB) { shareB = roomB; shareA = need - shareB; }
+            if (axis === 'x') { addPush(nodes[i], -dir * shareA, 0); addPush(nodes[j], dir * shareB, 0); }
+            else { addPush(nodes[i], 0, -dir * shareA); addPush(nodes[j], 0, dir * shareB); }
+            done = true;
+          }
+          // 两条轴都推不开（四周已被占满）：退化为收缩宽度，让玩家框装得下横向间距。
+          if (!done) {
+            const dx = Math.abs((a.left + a.width / 2) - (b.left + b.width / 2));
+            const target = Math.max(floorWidth, Math.floor(dx - gap));
+            if (target < Math.min(a.width, b.width) - 1) {
+              nodes[i].style.width = target + 'px';
+              nodes[j].style.width = target + 'px';
+            }
+          }
+        }
+      }
+      if (!moved.changed) break;
+    }
+    wrap.classList.remove('separating');
   }
 
   /* 得分明细浮动窗口 */
