@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>富饶之城 · 荣耀之城 Citadels</title>
   <link rel="stylesheet" href="./style.css?v=33">
-<link rel="stylesheet" href="./themes/neon/theme.css?v=9">
+<link rel="stylesheet" href="./themes/neon/theme.css?v=10">
 </head>
 <body>
 
@@ -214,8 +214,9 @@
         <div class="table-arena" id="table-arena">
           <div class="turn-order-guide" id="turn-order-guide" aria-label="行动顺序"></div>
           <div class="removed-corner" id="removed-corner" aria-label="本轮出局角色" hidden>
-            <button class="removed-widget-toggle" id="removed-widget-toggle" type="button" aria-expanded="false">
-              出局 <span id="removed-widget-count">0</span>
+            <button class="removed-widget-toggle" id="removed-widget-toggle" type="button" aria-expanded="false" title="展开查看本轮被移除的角色">
+              <span class="removed-widget-icon" aria-hidden="true">◈</span>
+              <span>本轮出局角色</span><span class="removed-widget-count" id="removed-widget-count">0</span>
             </button>
             <div class="removed-widget-content">
               <span class="removed-corner-label">本轮出局</span>
