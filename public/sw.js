@@ -1,8 +1,8 @@
-const CACHE_NAME = 'citadels-shell-v3';
+const CACHE_NAME = 'citadels-shell-v4';
 const APP_SHELL = [
   './', './index.html', './manifest.json', './style.css',
   './themes/neon/theme.css', './themes/neon/manifest.js', './themes/theme-manager.js',
-  './src/cards.js', './src/engine.js', './src/ai.js', './src/agent.js', './app.js',
+  './src/cards.js', './src/engine.js', './src/ai.js', './app.js',
   './icons/citadels.svg'
 ];
 

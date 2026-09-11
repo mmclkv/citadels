@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const CitCards = require('./src/cards.js');
 const CitEngine = require('./src/engine.js');
 const CitAI = require('./src/ai.js');
-const CitAgent = require('./src/agent.js');
+const CitAgent = require('./src/agent.js').createAgent();
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -38,13 +38,19 @@ const MIME = {
 };
 
 function serveStatic(req, res) {
-  let urlPath = decodeURIComponent(req.url.split('?')[0]);
+  let urlPath;
+  try { urlPath = decodeURIComponent(req.url.split('?')[0]); }
+  catch (_) { res.writeHead(400); return res.end('bad path'); }
   if (urlPath === '/') urlPath = '/index.html';
-  let file;
-  if (urlPath.indexOf('/src/') === 0) file = path.join(SRC, urlPath.slice(5));
-  else if (urlPath.indexOf('/images/') === 0) file = path.join(ROOT, urlPath.replace(/^\/+/, ''));
-  else file = path.join(PUBLIC, urlPath.replace(/^\/+/, ''));
-  if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end('forbidden'); }
+  let base = PUBLIC, relative = urlPath.replace(/^\/+/, '');
+  if (urlPath.indexOf('/src/') === 0) { base = SRC; relative = urlPath.slice(5); }
+  else if (urlPath.indexOf('/images/') === 0) { base = path.join(ROOT, 'images'); relative = urlPath.slice(8); }
+  const file = path.resolve(base, relative);
+  const check = path.relative(base, file);
+  // Keep server code, environment files and Git data outside every static mount.
+  if (check.startsWith('..') || path.isAbsolute(check) || relative.split(/[\\/]/).some(p => p.startsWith('.'))) {
+    res.writeHead(403); return res.end('forbidden');
+  }
   fs.readFile(file, (e, data) => {
     if (e) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('404'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
@@ -89,7 +95,7 @@ function createRoom(hostName, config) {
   seats.push({ id: genId('p'), name: hostName, resumeToken: genResumeToken(), isBot: false, taken: true,
     disconnected: false, left: false });
   for (let i = 0; i < bots; i++) {
-    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botType: config.botType || 'npc', botLevel: config.botLevel || 'normal', taken: true });
+    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botType: config.botType === 'agent' ? 'agent' : 'npc', botLevel: config.botLevel || 'normal', taken: true });
   }
   for (let i = seats.length; i < total; i++) seats.push({ id: null, name: '', isBot: false, taken: false,
     disconnected: false, left: false });
@@ -107,7 +113,7 @@ function createRoom(hostName, config) {
     },
     state: null,
     createdAt: Date.now(),
-    ticking: false,
+    botJob: null,
     closed: false
   };
   rooms[id] = room;
@@ -149,15 +155,19 @@ function restoreSeat(r, seat) {
 }
 
 function startRoom(r) {
+  if (r.state) return { error: '该房间已开局' };
   const seats = r.seats.filter(s => s.taken);
-  if (seats.length < 2) return { error: '至少需要 2 位玩家（含电脑）' };
+  if (!seats.length) return { error: '房间没有玩家' };
+  const usesAgent = seats.some(s => s.isBot && s.botType === 'agent') ||
+    (seats.length < r.config.playerCount && r.config.botType === 'agent');
+  if (usesAgent && !CitAgent.status().configured) return { error: CitAgent.status().message };
   // 空缺座位自动补电脑
   const filled = seats.slice();
   let bi = 1;
   while (filled.length < Math.max(2, r.config.playerCount)) {
-    filled.push({ id: genId('b'), name: '电脑 ' + (bi++), isBot: true, botType: r.config.botType || 'npc', botLevel: r.config.botLevel || 'normal' });
+    filled.push({ id: genId('b'), name: '电脑 ' + (bi++), taken: true, isBot: true, botType: r.config.botType || 'npc', botLevel: r.config.botLevel || 'normal' });
   }
-  r.seats = filled.concat(r.seats.filter(s => !s.taken));
+  r.seats = filled;
   const state = CitEngine.createGame({
     roomId: r.id,
     endDistricts: r.config.endDistricts,
@@ -185,6 +195,8 @@ function viewFor(r, playerId) {
   const base = CitEngine.sanitize(r.state, playerId);
   base.roomId = r.id;
   base.roomName = r.name;
+  base.hostId = r.seats[0] && r.seats[0].id;
+  base.agentStatus = r.agentStatus || null;
   base.players.forEach(p => {
     const seat = r.seats.find(s => s.id === p.id);
     const client = Array.from(clients.values()).find(c => c.id === p.id && c.roomId === r.id);
@@ -225,6 +237,7 @@ function hasRemainingHuman(r) {
 function closeRoomIfEmpty(r) {
   if (!r || hasRemainingHuman(r)) return false;
   r.closed = true;
+  botDriver.cancel(r);
   if (rooms[r.id] === r) delete rooms[r.id];
   return true;
 }
@@ -275,46 +288,11 @@ function currentActor(state) {
   return null;
 }
 
-function botTick(r) {
-  if (r.ticking) return;
-  r.ticking = true;
-  const step = () => {
-    const st = r.state;
-    if (r.closed) { r.ticking = false; return; }
-    if (!st || st.phase === 'gameover') { r.ticking = false; sendPersonal(r); return; }
-    const actor = currentActor(st);
-    if (!actor || !actor.isBot) { r.ticking = false; sendPersonal(r); return; }
-    let action = null;
-    try {
-      action = actor.botType === 'agent' ? CitAgent.decide(st, actor.id) : CitAI.decide(st, actor.id);
-    } catch (e) { console.error('AI error', e); }
-    // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
-    if (!action) {
-      const opts = CitEngine.getAvailableActions(st, actor.id);
-      if (opts && opts.actions && opts.actions.length) action = opts.actions[0];
-    }
-    if (!action) { r.ticking = false; sendPersonal(r); return; }
-    let res = CitEngine.applyAction(st, actor.id, action);
-    if (!res.ok) {
-      if (st.phase === 'draft') {
-        // 选角失败时从合法行动中挑第一个再试一次，避免空转卡死
-        const opts = CitEngine.getAvailableActions(st, actor.id);
-        if (opts && opts.actions && opts.actions.length) {
-          res = CitEngine.applyAction(st, actor.id, opts.actions[0]);
-        }
-      }
-      if (!res.ok) {
-        // 兜底：跳过能力 / 结束回合
-        if (st.turn && st.turn.pending) CitEngine.applyAction(st, actor.id, { type: 'ability_skip' });
-        else if (st.turn) CitEngine.applyAction(st, actor.id, { type: 'end_turn' });
-        console.warn('bot fallback:', res.error);
-      }
-    }
-    sendPersonal(r);
-    setTimeout(step, botDelayFor(r, action));
-  };
-  setTimeout(step, (r.config && r.config.botPace) || 430);
-}
+const botDriver = require('./lib/bot-driver.js').createBotDriver({
+  Engine: CitEngine, AI: CitAI, agent: CitAgent, currentActor,
+  send: sendPersonal, delay: botDelayFor
+});
+function botTick(r) { botDriver.tick(r); }
 
 function afterChange(r) {
   sendPersonal(r);
@@ -411,6 +389,9 @@ function handle(ws, info, msg) {
       break;
 
     case 'createRoom': {
+      if (msg.config && msg.config.botType === 'agent' && !CitAgent.status().configured) {
+        wsSend(ws, JSON.stringify({ t: 'error', error: CitAgent.status().message })); break;
+      }
       const r = createRoom(msg.name || info.name || '房主', msg.config || {});
       info.roomId = r.id;
       info.id = r.seats[0].id;
@@ -463,6 +444,7 @@ function handle(ws, info, msg) {
     case 'config': {
       const r = rooms[info.roomId];
       if (!r || r.state) { wsSend(ws, JSON.stringify({ t: 'error', error: '无法修改' })); break; }
+      if (r.seats[0].id !== info.id) { wsSend(ws, JSON.stringify({ t: 'error', error: '仅房主可修改配置' })); break; }
       if (msg.config) {
         if (msg.config.endDistricts) r.config.endDistricts = msg.config.endDistricts;
         if (msg.config.charSetMode) r.config.charSetMode = msg.config.charSetMode;
@@ -483,12 +465,17 @@ function handle(ws, info, msg) {
     case 'setSeat': {
       const r = rooms[info.roomId];
       if (!r || r.state) { wsSend(ws, JSON.stringify({ t: 'error', error: '无法修改' })); break; }
+      if (r.seats[0].id !== info.id) { wsSend(ws, JSON.stringify({ t: 'error', error: '仅房主可修改座位' })); break; }
       const i = msg.index;
       if (i == null || i < 0 || i >= r.seats.length) break;
       if (i === 0) break;
       const s = r.seats[i];
       if (msg.kind === 'bot') {
-        r.seats[i] = { id: genId('b'), name: '电脑 ' + i, isBot: true, botType: msg.botType === 'agent' ? 'agent' : (r.config.botType || 'npc'), botLevel: r.config.botLevel || 'normal', taken: true,
+        const botType = msg.botType === 'npc' ? 'npc' : msg.botType === 'agent' ? 'agent' : r.config.botType;
+        if (botType === 'agent' && !CitAgent.status().configured) {
+          wsSend(ws, JSON.stringify({ t: 'error', error: CitAgent.status().message })); break;
+        }
+        r.seats[i] = { id: s.isBot ? s.id : genId('b'), name: '电脑 ' + i, isBot: true, botType, botLevel: r.config.botLevel || 'normal', taken: true,
           disconnected: false, left: false };
       } else if (msg.kind === 'open') {
         r.seats[i] = { id: null, name: '', isBot: false, taken: false };
@@ -500,8 +487,29 @@ function handle(ws, info, msg) {
     case 'startGame': {
       const r = rooms[info.roomId];
       if (!r) break;
+      if (r.seats[0].id !== info.id) { wsSend(ws, JSON.stringify({ t: 'error', error: '仅房主可开始游戏' })); break; }
       const res = startRoom(r);
       if (res.error) { wsSend(ws, JSON.stringify({ t: 'error', error: res.error })); break; }
+      afterChange(r);
+      break;
+    }
+
+    case 'agentControl': {
+      const r = rooms[info.roomId];
+      if (!r || !r.state || r.seats[0].id !== info.id) {
+        wsSend(ws, JSON.stringify({ t: 'error', error: '仅房主可控制 Agent' })); break;
+      }
+      if (!r.agentStatus || r.agentStatus.state !== 'error') break;
+      const actor = currentActor(r.state);
+      if (!actor || actor.id !== r.agentStatus.playerId || !actor.isBot) break;
+      if (!['retry', 'npc'].includes(msg.mode)) break;
+      botDriver.cancel(r);
+      if (msg.mode === 'npc') {
+        actor.botType = 'npc';
+        const seat = r.seats.find(s => s.id === actor.id);
+        if (seat) seat.botType = 'npc';
+        CitEngine.log(r.state, actor.name + ' 已由房主切换为普通电脑。', 'sys');
+      }
       afterChange(r);
       break;
     }
@@ -527,6 +535,8 @@ function handle(ws, info, msg) {
     case 'restart': {
       const r = rooms[info.roomId];
       if (!r) break;
+      if (r.seats[0].id !== info.id) { wsSend(ws, JSON.stringify({ t: 'error', error: '仅房主可重开游戏' })); break; }
+      botDriver.cancel(r);
       r.state = null;
       sendPersonal(r);
       break;
@@ -555,6 +565,10 @@ function lobbyView(r) {
 
 /* ------------------------------ HTTP 服务 ------------------------------ */
 const server = http.createServer((req, res) => {
+  if (req.url === '/api/agent/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify(CitAgent.status()));
+  }
   if (req.url === '/api/rooms') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ rooms: Object.values(rooms).map(publicRoom) }));
@@ -631,6 +645,7 @@ setInterval(() => {
 }, HEARTBEAT_INTERVAL_MS);
 
 server.listen(PORT, () => {
+  if (process.send) process.send({ type: 'listening', port: server.address().port });
   console.log('');
   console.log('  富饶之城 / 荣耀之城 (Citadels) 联机服务器已启动');
   console.log('  ─────────────────────────────────────────────');

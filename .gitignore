@@ -8,5 +8,7 @@ __pycache__/
 
 # 日志 / 临时
 *.log
+.env
+.env.*
 .DS_Store
 Thumbs.db

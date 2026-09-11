@@ -56,6 +56,51 @@ iPhone 底部安全区、横屏小高度设备也都处理了。
 - 空缺座位可一键设为电脑；房主可随时调整人数 / 结束条件 / 角色组。
 - 玩家中途断线会自动由电脑托管，不会卡住牌局。
 
+### AI Agent 电脑（大模型决策）
+
+普通电脑使用浏览器或服务器内的启发式规则。AI Agent 则由游戏服务器向模型发送
+该玩家可见的局面、角色说明及合法动作，模型选择一个动作，服务器校验并执行，
+再把更新后的局面交给模型继续决策。每个选角、资源选择、建筑和能力操作都经过
+模型请求；游戏速度设置控制动作之间的间隔，不会跳过模型等待。
+
+旧版 `f64238e` 的 Agent 只是启发式规则包装，不调用模型；本实现替换了该行为。
+模型调用采用 [Chat Completions 接口](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)，
+支持提供该接口与 JSON 输出的兼容服务。配置只放在**运行游戏服务器的机器上**：
+
+| 环境变量 | 用途 |
+|---|---|
+| `CITADELS_AGENT_BASE_URL` | 模型 API 基础地址（例如 `https://api.openai.com/v1`，默认也是此地址） |
+| `CITADELS_AGENT_MODEL` | 服务商提供的模型名，必填 |
+| `CITADELS_AGENT_API_KEY` | 模型 API 密钥；本机 loopback 模型服务可不填 |
+| `CITADELS_AGENT_TIMEOUT_MS` | 单次请求超时，默认 30000 毫秒，允许 1000–120000 |
+
+可以设置上述环境变量后运行 `node server.js`。支持 `--env-file` 的 Node 也可以在
+仓库根目录创建本机专用 `.env`，写入以上变量，再运行 `node --env-file=.env server.js`。
+`.env` 已被 Git 忽略；不要把真实密钥放进 `public/`、浏览器存储或 GitHub Pages。
+修改模型配置后重启游戏服务器。
+
+使用方式：
+
+- 单人设置或联机创建房间时选择「AI Agent 电脑」。单人 Agent 对局也运行在服务器，
+  可沿用联机的刷新重连机制；普通电脑的单人模式仍可离线使用。
+- 房间内，房主可以逐个切换电脑类型，混合普通电脑和 Agent。
+- GitHub Pages 仅托管前端。在设置中的「游戏服务器地址」填入已部署的 HTTPS 游戏服务器
+  地址（不是模型 API 地址），游戏服务器负责保管密钥并调用模型。留空使用当前站点。
+- `/api/agent/status` 仅报告是否配置及模型名，不返回密钥。配置存在不等于模型可达，
+  首次决策会验证实际连接。
+- 界面显示「正在请求模型决策」。超时、HTTP 错误或非法模型输出会暂停，房主可以
+  「重试模型」或明确选择「改用普通电脑」，不会偷偷退回启发式策略。
+- 模型思考期间若对局重开、关闭或状态变化，旧答案会被取消或丢弃。
+
+验证（均使用本地模拟模型，无付费 API 请求；验证协议和行为，不代表真实模型棋力）：
+
+```bash
+node --test test/agent.test.js test/agent-net.test.js
+# 已安装 Playwright + Chromium 时，可选运行真实浏览器验证：
+node test/agent-browser.js
+# 使用系统 Edge 时设置 BROWSER_CHANNEL=msedge
+```
+
 ## 已实现的规则
 
 ### 卡牌

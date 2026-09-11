@@ -4,7 +4,7 @@
  * ========================================================================= */
 (function () {
   'use strict';
-  const Cards = window.CitCards, Engine = window.CitEngine, AI = window.CitAI, Agent = window.CitAgent;
+  const Cards = window.CitCards, Engine = window.CitEngine, AI = window.CitAI;
   const Theme = window.CitadelThemeManager || {
     current: 'classic',
     is(id) { return id === 'classic'; },
@@ -36,10 +36,13 @@
   };
 
   const NET_SESSION_KEY = 'citadels.net.session';
+  let selectedGameServer = '';
+  try { selectedGameServer = localStorage.getItem('citadels.gameServer') || ''; } catch (_) { /* storage unavailable */ }
   function loadNetSession() {
     try {
       const raw = window.localStorage.getItem(NET_SESSION_KEY);
       const data = raw ? JSON.parse(raw) : null;
+      if (data && data.server && data.server !== gameServerBase()) return null;
       return data && data.token && data.roomId ? data : null;
     } catch (e) { return null; }
   }
@@ -47,7 +50,7 @@
     if (!token || !roomId) return;
     try {
       window.localStorage.setItem(NET_SESSION_KEY,
-        JSON.stringify({ token: token, roomId: roomId, name: name || '' }));
+        JSON.stringify({ token: token, roomId: roomId, name: name || '', server: gameServerBase() }));
     } catch (e) { /* 隐私模式或存储被禁用 */ }
   }
   function clearNetSession() {
@@ -186,6 +189,48 @@
     const name = n.playerName || '玩家';
     if (n.kind === 'player_disconnected') toast('⚠ ' + name + ' 已断连（超过 20 秒未响应）');
     else if (n.kind === 'player_left') toast('↩ ' + name + ' 已离开房间');
+  }
+  function gameServerBase() {
+    const url = new URL(selectedGameServer || location.origin);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+      throw new Error('请输入有效的游戏服务器地址');
+    }
+    if (location.protocol === 'https:' && url.protocol !== 'https:') {
+      throw new Error('当前网页使用 HTTPS，游戏服务器也需要 HTTPS');
+    }
+    return url.href.replace(/\/$/, '');
+  }
+  async function checkAgentServer() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(gameServerBase() + '/api/agent/status', { cache: 'no-store', signal: controller.signal });
+      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/json')) {
+        throw new Error('当前地址没有 Agent 后端。GitHub Pages 用户请填写已部署的游戏服务器地址');
+      }
+      const status = await response.json();
+      if (!status.configured) throw new Error(status.message || '游戏服务器尚未配置 AI 模型');
+      return true;
+    } catch (e) {
+      const message = e.name === 'AbortError' || e instanceof TypeError
+        ? '无法连接 Agent 后端，请检查游戏服务器地址和网络连接' : e.message;
+      ['#cfg-agent-status', '#net-agent-status'].forEach(sel => { const node = $(sel); if (node) node.textContent = message; });
+      toast(message);
+      return false;
+    } finally { clearTimeout(timer); }
+  }
+  async function startAgentSingle(cfg) {
+    if (!await checkAgentServer()) return;
+    clearTimeout(Local.timer);
+    App.mode = 'net'; App.leavingNetGame = false;
+    Net.name = cfg.name;
+    Net.connect(() => {
+      Net.autoStart = true;
+      Net.send({ t: 'createRoom', name: cfg.name, config: {
+        playerCount: cfg.players, bots: cfg.players - 1, botType: 'agent', botLevel: cfg.level,
+        endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act
+      } });
+    });
   }
   function showScreen(id) {
     $$('.screen').forEach(s => s.classList.remove('active'));
@@ -470,6 +515,7 @@
   const Local = {
     state: null, myId: null, timer: null, pendingMs: null,
     start(cfg) {
+      if (cfg.botType === 'agent') return startAgentSingle(cfg);
       const seats = [{ id: 'me', name: cfg.name, isBot: false }];
       for (let i = 1; i < cfg.players; i++) {
         seats.push({ id: 'bot' + i, name: '电脑 ' + i, isBot: true, botType: cfg.botType, botLevel: cfg.level });
@@ -526,7 +572,7 @@
       const actor = localActor(st);
       if (actor && actor.isBot) {
         let action = null;
-        try { action = actor.botType === 'agent' ? Agent.decide(st, actor.id) : AI.decide(st, actor.id); } catch (e) { console.error(e); }
+        try { action = AI.decide(st, actor.id); } catch (e) { console.error(e); }
         // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
         if (!action) {
           const opts = Engine.getAvailableActions(st, actor.id);
@@ -559,6 +605,7 @@
 
   /* ============================== 联机驱动 ============================== */
   const Net = {
+    autoStart: false,
     ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
     reconnectTimer: null, reconnectDelay: 1000, heartbeatTimer: null,
     startHeartbeat() {
@@ -569,10 +616,16 @@
     },
     stopHeartbeat() { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; },
     connect(cb) {
-      if (this.ws && this.ws.readyState === 1) return cb && cb();
+      let endpoint;
+      try { endpoint = gameServerBase().replace(/^http/, 'ws'); }
+      catch (e) { this.afterHello = null; toast(e.message); return; }
+      if (this.ws && this.ws.readyState === 1 && this.ws.url.replace(/\/$/, '') === endpoint) return cb && cb();
+      if (this.ws) {
+        this.ws.onclose = null; this.ws.onmessage = null;
+        this.stopHeartbeat(); this.ws.close();
+      }
       this.afterHello = cb || this.afterHello || null;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      this.ws = new WebSocket(proto + '://' + location.host);
+      this.ws = new WebSocket(endpoint);
       this.ws.onopen = () => {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
@@ -622,6 +675,10 @@
           App.paused = false; hideEvent(true);
           if (m.state.phase === 'lobby') { renderLobbyRoom(m.state); showScreen('screen-lobby'); }
           else { App.state = m.state; showScreen('screen-game'); render(); }
+          if (this.autoStart) {
+            this.autoStart = false;
+            if (m.state.phase === 'lobby') this.send({ t: 'startGame' });
+          }
           break;
         case 'state':
           if (App.leavingNetGame) break;
@@ -633,7 +690,7 @@
             if (m.state.phase === 'gameover') showOver(m.state);
           }
           break;
-        case 'error': toast('✗ ' + m.error); break;
+        case 'error': this.autoStart = false; toast('✗ ' + m.error); break;
         case 'chat': toast(m.from + '：' + m.text); break;
         case 'roomNotice': handleRoomNotice(m.notice); break;
       }
@@ -2003,7 +2060,7 @@
       if (cs._lastHTML !== csHtml) { cs.innerHTML = csHtml; cs._lastHTML = csHtml; }
       const tags = (p.disconnected ? '<span class="tag disconnected">已断连</span>' : '') +
         (p.left ? '<span class="tag left">已离开</span>' : '') +
-        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">电脑</span>' : '') +
+        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">' + (p.botType === 'agent' ? 'AI Agent' : '电脑') + '</span>' : '') +
         (p.hasCrown ? '<span class="tag crown crown-icon-tag" title="当前持有皇冠" aria-label="当前持有皇冠"><i class="crown-icon" aria-hidden="true">♛</i></span>' : '');
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
@@ -2514,6 +2571,7 @@
         escapeHtml(cur ? cur.name : '') + ' 正在选角' + thinkingDots();
     }
     $('#actions').innerHTML = '';
+    renderAgentStatus(s);
   }
 
   /* ============================== 本轮出局角色 ============================== */
@@ -2555,11 +2613,29 @@
   }
 
   /* ============================== 行动栏 ============================== */
+  function renderAgentStatus(s) {
+    const status = s.agentStatus;
+    if (!status || !['thinking', 'error'].includes(status.state)) return false;
+    if (s.available && s.available.actions && s.available.actions.length) return false;
+    const player = s.players.find(p => p.id === status.playerId);
+    const text = (player ? player.name : 'AI Agent') + ' · ' + (status.model || 'AI Agent');
+    $('#prompt').textContent = text + (status.state === 'thinking' ? ' 正在请求模型决策…' : '：' + status.message);
+    $('#actions').innerHTML = '';
+    if (status.state === 'error' && s.hostId === App.myId) {
+      [['retry', '重试模型'], ['npc', '改用普通电脑']].forEach(([mode, label]) => {
+        const button = el('button', 'btn', label);
+        button.onclick = () => Net.send({ t: 'agentControl', mode });
+        $('#actions').appendChild(button);
+      });
+    }
+    return true;
+  }
   function renderActions(s) {
     const av = s.available;
     const promptEl = $('#prompt');
     const actionsEl = $('#actions');
     actionsEl.innerHTML = '';
+    if (renderAgentStatus(s)) return;
     if (!av) { promptEl.textContent = ''; return; }
 
     // 墓地响应
@@ -2884,6 +2960,14 @@
         const b1 = el('button', 'btn tiny', s.isBot ? '换人' : '设为电脑');
         b1.onclick = () => Net.send({ t: 'setSeat', index: i, kind: s.isBot ? 'open' : 'bot' });
         ops.appendChild(b1);
+        if (s.isBot) {
+          const type = el('select');
+          type.setAttribute('aria-label', s.name + '的电脑类型');
+          type.innerHTML = '<option value="npc">普通电脑</option><option value="agent">AI Agent（模型）</option>';
+          type.value = s.botType || 'npc';
+          type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
+          ops.appendChild(type);
+        }
         d.appendChild(ops);
       }
       grid.appendChild(d);
@@ -2893,6 +2977,15 @@
 
   /* ============================== 事件绑定 ============================== */
   function bind() {
+    ['#cfg-server', '#net-server'].forEach(sel => {
+      const input = $(sel);
+      input.value = selectedGameServer;
+      input.onchange = () => {
+        selectedGameServer = input.value.trim();
+        try { localStorage.setItem('citadels.gameServer', selectedGameServer); } catch (_) { /* storage unavailable */ }
+        ['#cfg-server', '#net-server'].forEach(other => { $(other).value = selectedGameServer; });
+      };
+    });
     if (Theme.onChange) Theme.onChange(() => {
       syncThemeBtn();
       // 主题切换会改变卡片内部结构（neon 用 <img>、classic 用文本），复用旧节点会错乱，
@@ -2987,12 +3080,14 @@
         App.speed = $('#cfg-speed').value; saveSpeed();
       }
       App.lastCfg = cfg; App.mode = 'local'; App.name = cfg.name;
+      if (cfg.botType === 'agent') { startAgentSingle(cfg); return; }
       Local.start(cfg);
       showScreen('screen-game');
     };
 
     // 联机
-    $('#btn-create').onclick = () => {
+    $('#btn-create').onclick = async () => {
+      if ($('#net-bot-type').value === 'agent' && !await checkAgentServer()) return;
       Net.name = ($('#net-name').value || '玩家').trim();
       Net.connect(() => {
         Net.send({
@@ -3086,7 +3181,7 @@
   window.__CitadelsApp = App;
   // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
   if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=2', { scope: './' }).then(registration => {
+    navigator.serviceWorker.register('./sw.js?v=4', { scope: './' }).then(registration => {
       // GitHub Pages 上的 PWA 可能长时间保持旧 worker，启动时主动检查一次新版本。
       registration.update().catch(() => {});
       registration.addEventListener('updatefound', () => {
