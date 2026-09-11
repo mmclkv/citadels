@@ -987,6 +987,28 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game .turn-order-guide{display:none!important}
 }
 
+/* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */
+@media (display-mode:standalone) and (orientation:landscape),
+       (display-mode:fullscreen) and (orientation:landscape){
+  #screen-game .table-arena[data-players="4"] .opp .cs-card,
+  #screen-game .table-arena[data-players="4"] .me-area .me-char .cs-card{
+    width:77px!important;
+    height:115px!important;
+  }
+  #screen-game .table-arena[data-players="4"] .opp-city>.card,
+  #screen-game .table-arena[data-players="4"] .me-area .city-row>.card,
+  #screen-game .table-arena[data-players="4"] .me-area .hand-row>.card{
+    width:91px!important;
+    height:127px!important;
+  }
+  #screen-game .table-arena[data-players="4"] .opp-city>.card.mini,
+  #screen-game .table-arena[data-players="4"] .me-area .city-row>.card.mini,
+  #screen-game .table-arena[data-players="4"] .me-area .hand-row>.card.mini{
+    width:72px!important;
+    height:101px!important;
+  }
+}
+
 /* PWA 选角预览：整张角色卡必须在视口内可见，避免弹窗自身产生纵向滚动。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
   #char-zoom.touch{
