@@ -259,6 +259,22 @@ html[data-theme="neon"] .tag.crown { color:#ffe39a; background:rgba(90,68,25,.42
 html[data-theme="neon"] .tag.dead { color:var(--c-red-d); background:rgba(85,24,34,.38); border-color:rgba(255,94,103,.4); }
 html[data-theme="neon"] .tag.magic { color:var(--c-purple-d); background:rgba(64,27,96,.4); border-color:rgba(191,113,255,.45); }
 html[data-theme="neon"] .score-btn { color:var(--ui-cyan); background:rgba(9,27,41,.8); border-color:var(--line2); }
+html[data-theme="neon"] .removed-corner {
+  background:var(--ui-panel-strong); border-color:rgba(67,228,255,.62);
+  box-shadow:0 0 0 1px rgba(255,79,199,.16),0 0 18px rgba(67,228,255,.2),var(--shadow2);
+  color:var(--ink);
+}
+html[data-theme="neon"] .removed-widget-toggle {
+  color:var(--ui-cyan); border-color:rgba(67,228,255,.5); background:rgba(8,28,43,.82);
+  text-shadow:0 0 7px rgba(67,228,255,.4);
+}
+html[data-theme="neon"] .removed-widget-toggle:hover { color:#fff; border-color:var(--ui-magenta); background:rgba(55,18,65,.72); }
+html[data-theme="neon"] .removed-widget-icon { color:var(--ui-magenta); text-shadow:0 0 8px rgba(255,79,199,.65); }
+html[data-theme="neon"] .removed-widget-count { color:#061018; background:var(--ui-cyan); box-shadow:0 0 8px rgba(67,228,255,.5); }
+html[data-theme="neon"] .removed-widget-content { border-top-color:rgba(67,228,255,.28); }
+html[data-theme="neon"] .removed-corner-label { color:var(--dim); }
+html[data-theme="neon"] .removed-corner .char-card.mini,
+html[data-theme="neon"] .removed-corner .facedown.sm { border-color:rgba(67,228,255,.7); box-shadow:0 0 9px rgba(67,228,255,.18); }
 
 /* 完整卡图渲染器的承载尺寸；颜色仍来自卡图本身。 */
 html[data-theme="neon"] .card.neon-card {
