@@ -1286,11 +1286,12 @@
     } else {
       var zoomAttr = '';
     }
-    return '<div class="cs-card ' + st + flip + '"' + zoomAttr + '>' +
+    const cardBody = st === 'none' ? '' :
       '<div class="cs-inner">' +
         '<div class="cs-face cs-back">▧</div>' +
         '<div class="cs-face cs-front">' + front + '</div>' +
-      '</div></div>' + nameSpan;
+      '</div>';
+    return '<div class="cs-card ' + st + flip + '"' + zoomAttr + '>' + cardBody + '</div>' + nameSpan;
   }
 
   /* 通用金币飞行动画：从 a 矩形飞向 b 矩形，错峰起飞、弧线、淡出 */
