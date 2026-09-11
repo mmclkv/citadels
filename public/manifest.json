@@ -1,0 +1,15 @@
+{
+  "name": "富饶之城 · 荣耀之城 Citadels",
+  "short_name": "富饶之城",
+  "description": "富饶之城联机桌游",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#050a12",
+  "theme_color": "#050a12",
+  "icons": [
+    { "src": "./icons/citadels.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
