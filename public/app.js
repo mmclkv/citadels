@@ -1856,13 +1856,13 @@
   function renderOpponents(s) {
     const wrap = $('#opponents');
     const totalPlayers = s.players.length || 1;
-    const mobileCollisionLayout = isMobileOpponentLayout() && totalPlayers >= 5;
+    const mobileRingLayout = isMobileOpponentLayout() && totalPlayers >= 5;
     const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
     const radiusX = totalPlayers >= 7 ? 43 : totalPlayers >= 5 ? 40 : 36;
     const radiusY = totalPlayers >= 7 ? 42 : totalPlayers >= 5 ? 40 : 38;
     const cardWidth = totalPlayers >= 8 ? 17 : totalPlayers >= 7 ? 19 : totalPlayers >= 5 ? 21 : totalPlayers === 4 ? 30 : 24;
     wrap.dataset.players = String(totalPlayers);
-    wrap.dataset.layout = mobileCollisionLayout ? 'mobile-collision' : 'ring';
+    wrap.dataset.layout = mobileRingLayout ? 'mobile-ring' : 'ring';
     const arena = $('#table-arena');
     if (arena) arena.dataset.players = String(totalPlayers);
     // 多人时顶部玩家卡片更容易向下延伸，圆桌下移到环形座位的空白中心，避免相互覆盖。
@@ -1900,7 +1900,7 @@
       const isTopSeat = totalPlayers === 4
         ? relativeSeat === 2
         : totalPlayers === 5 && (relativeSeat === 2 || relativeSeat === 3);
-      const topSeatShift = inPlayPhase && isTopSeat
+      const topSeatShift = !mobileRingLayout && inPlayPhase && isTopSeat
         ? (totalPlayers === 5 ? 110 : 58)
         : 0;
       d.style.setProperty('--seat-shift-y', (totalPlayers === 4 ? 42 + topSeatShift : topSeatShift) + 'px');
@@ -1912,7 +1912,7 @@
       d.dataset.cardWidth = String(cardWidth);
       d.style.setProperty('--push-x', '0px');
       d.style.setProperty('--push-y', '0px');
-      d.dataset.compact = String(mobileCollisionLayout ? 3 : compactLevel);
+      d.dataset.compact = String(mobileRingLayout ? 3 : compactLevel);
       const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id);
       const actionActive = !!(s.turn && s.turn.playerIdx === p.seat);
       d.classList.toggle('active', draftActive || actionActive);
@@ -1957,7 +1957,7 @@
       if (ch.dataset && ch.dataset.seat != null && !keep[ch.dataset.seat] && ch.parentNode) ch.parentNode.removeChild(ch);
     });
     wrap.appendChild(frag);
-    if (mobileCollisionLayout) applyMobileOpponentLayout(wrap);
+    if (mobileRingLayout) applyMobileRingLayout(wrap);
     else resolveOpponentTableCollisions();
   }
 
@@ -1968,6 +1968,66 @@
     return window.innerWidth <= 1000 || (touch && window.innerWidth <= 1400);
   }
 
+  // 移动端多人布局：保留圆桌座位角度，只缩小玩家框和内部元素，
+  // 再用真实 DOM 矩形做碰撞检测，必要时沿环形方向微调位置。
+  function applyMobileRingLayout(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (!nodes.length) { wrap.style.height = ''; return; }
+    const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
+    const gap = Math.max(6, Math.round(Math.min(14, width * .018)));
+    const cardWidth = Math.max(112, Math.min(190, Math.floor(width * .29)));
+    const minWidth = Math.max(102, Math.floor(cardWidth * .78));
+    const height = Math.max(420, Math.min(620, Math.round((window.innerHeight || 720) * .62)));
+    wrap.style.display = 'block';
+    wrap.style.height = height + 'px';
+    wrap.style.overflow = 'visible';
+    nodes.forEach(node => {
+      node.style.setProperty('--mobile-opp-width', cardWidth + 'px');
+      node.style.setProperty('--push-x', '0px');
+      node.style.setProperty('--push-y', '0px');
+      node.dataset.pushX = '0';
+      node.dataset.pushY = '0';
+      node.dataset.compact = '3';
+    });
+
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          changed = true;
+          const currentWidth = parseFloat(nodes[j].style.width || cardWidth);
+          if (currentWidth > minWidth) {
+            const nextWidth = Math.max(minWidth, Math.floor(currentWidth * .9));
+            nodes[i].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            nodes[j].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            continue;
+          }
+          // 到达安全最小宽度后，沿玩家相对圆心的方向轻推后一个玩家框。
+          const wr = wrap.getBoundingClientRect();
+          const cx = wr.left + wr.width / 2, cy = wr.top + wr.height / 2;
+          const dx = (b.left + b.width / 2) - cx;
+          const dy = (b.top + b.height / 2) - cy;
+          const pushX = (parseFloat(nodes[j].dataset.pushX || '0')) +
+            (Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? -1 : 1) * (overlapX + gap) : 0);
+          const pushY = (parseFloat(nodes[j].dataset.pushY || '0')) +
+            (Math.abs(dx) < Math.abs(dy) ? (dy < 0 ? -1 : 1) * (overlapY + gap) : 0);
+          nodes[j].dataset.pushX = String(pushX);
+          nodes[j].dataset.pushY = String(pushY);
+          nodes[j].style.setProperty('--push-x', pushX + 'px');
+          nodes[j].style.setProperty('--push-y', pushY + 'px');
+        }
+      }
+      if (!changed) break;
+    }
+  }
+
+  // 兼容旧调用名，保留旧实现，实际移动端使用上面的圆桌布局。
   // 移动端多人布局：先放入两列网格，再用真实 DOM 矩形做碰撞检测。
   // 如果内容仍然挤压，就逐步缩小玩家框；data-compact 会同步缩小内部角色牌和文字。
   function applyMobileOpponentLayout(wrap) {
