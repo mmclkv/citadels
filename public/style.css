@@ -915,6 +915,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 
 /* PWA 独立窗口：无浏览器地址栏时也收起顶部菜单，改用右下角浮动菜单。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
+  .mobile-fit-root.mobile-fit-scaled{width:calc(100% / var(--mobile-fit-scale));height:calc(100% / var(--mobile-fit-scale));
+    flex:0 0 auto;transform:scale(var(--mobile-fit-scale));overflow:hidden}
   #screen-game:not(.mobile-menu-open) .topbar{display:none}
   #screen-game.mobile-menu-open .topbar{position:fixed;right:16px;bottom:76px;z-index:44;
     display:flex;flex-direction:column;align-items:stretch;gap:8px;width:min(92vw,340px);padding:9px;
