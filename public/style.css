@@ -40,6 +40,7 @@ a{color:var(--gold-d, #a97c15)}
 .screen{display:none;height:100vh;height:100dvh;overflow:hidden}
 .screen.active{display:flex;flex-direction:column}
 .mobile-fit-root{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;transform-origin:top left}
+.mobile-menu-toggle{display:none}
 #screen-home.active,#screen-setup.active,#screen-lobby.active,#screen-over.active{
   align-items:center;justify-content:center;overflow:auto;padding:24px;
 }
@@ -866,6 +867,37 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   /* 运行时自适应缩放的根容器：扩大布局空间后再缩放，避免制造横向滚动条。 */
   .mobile-fit-root.mobile-fit-scaled{width:calc(100% / var(--mobile-fit-scale));height:calc(100% / var(--mobile-fit-scale));
     flex:0 0 auto;transform:scale(var(--mobile-fit-scale));overflow:hidden}
+  #screen-game:not(.mobile-menu-open) .topbar{display:none}
+  #screen-game.mobile-menu-open .topbar{display:flex}
+  .mobile-menu-toggle{position:fixed;right:12px;bottom:calc(68px + env(safe-area-inset-bottom));z-index:45;
+    display:inline-flex;align-items:center;gap:5px;padding:8px 11px;border:1px solid var(--line2);border-radius:10px;
+    background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:11px;font-weight:700;cursor:pointer}
+  .mobile-menu-toggle:hover{border-color:var(--gold);background:var(--bg2)}
+  #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold)}
+
+  /* 菜单栏收起后释放出的空间用于放大卡牌，提升移动端可读性。 */
+  .card{width:40px!important;height:56px!important}
+  .card.mini{width:34px!important;height:48px!important}
+  .char-card{width:52px!important;padding:5px 4px!important}
+  .char-card.mini{width:66px!important;padding:4px!important}
+  .char-card .cc-num{width:15px;height:15px;font-size:8px}
+  .char-card .cc-name{font-size:8px}
+  .char-card .cc-desc{font-size:6px;max-height:34px}
+  .facedown{width:34px!important;height:51px!important;font-size:13px}
+  .cs-card{width:40px!important;height:60px!important}
+  .table-removed .char-card.mini,.table-removed .facedown.sm{width:26px!important;height:39px!important}
+  .removed-corner .char-card.mini,.removed-corner .facedown.sm{width:34px!important;height:51px!important}
+  .opponents[data-layout="mobile-ring"] .opp .cs-card{width:28px!important;height:42px!important}
+  .opponents[data-layout="mobile-ring"] .opp-city>.card{width:28px!important;height:42px!important}
+  .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .cs-card{width:22px!important;height:33px!important}
+  .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city>.card{width:22px!important;height:33px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char .cs-card{width:30px!important;height:45px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .city-row>.card,
+  #opponents[data-layout="mobile-ring"] ~ .me-area .hand-row>.card{width:30px!important;height:45px!important}
+  .pick-grid .card{width:110px!important;height:165px!important}
+  .pick-grid-draw_keep .card{width:180px!important;height:270px!important}
+  .char-zoom{width:180px!important}
+  .card-hd-stage img{max-width:60vw!important;max-height:55vh!important}
 }
 
 /* 移动端统一卡牌缩放：普通卡与角色卡均缩为原来的约一半，桌面端不变。 */
