@@ -970,6 +970,23 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game .actionbar .actions{width:100%;justify-content:center}
 }
 
+/* PWA 横屏：菜单浮窗放大并抬高，和右下角菜单按钮之间留出明确间距；隐藏顶部行动顺序条。 */
+@media (display-mode:standalone) and (orientation:landscape),
+       (display-mode:fullscreen) and (orientation:landscape){
+  #screen-game.mobile-menu-open .topbar{
+    right:16px;
+    bottom:76px;
+    width:min(92vw,520px);
+    max-height:calc(100dvh - 112px);
+    padding:14px;
+    gap:12px;
+    overflow-y:auto;
+  }
+  #screen-game.mobile-menu-open .topbar::after{bottom:-8px}
+  #screen-game .mobile-menu-toggle{right:16px;bottom:16px;padding:8px 12px}
+  #screen-game .turn-order-guide{display:none!important}
+}
+
 /* PWA 选角预览：整张角色卡必须在视口内可见，避免弹窗自身产生纵向滚动。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
   #char-zoom.touch{
