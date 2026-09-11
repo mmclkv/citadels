@@ -988,6 +988,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     z-index:7;
   }
   #screen-game .board-main{padding-top:70px}
+  #screen-game.draft-phase .actionbar{display:none!important}
+  #screen-game.draft-phase .board-main{padding-top:0}
 
   #screen-game.mobile-menu-open .topbar{
     right:16px;
