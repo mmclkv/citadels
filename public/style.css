@@ -991,12 +991,21 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 
   #screen-game.mobile-menu-open .topbar{
     right:16px;
-    bottom:76px;
-    width:min(92vw,520px);
-    max-height:calc(100dvh - 112px);
-    padding:14px;
-    gap:12px;
+    bottom:96px;
+    width:min(94vw,620px);
+    max-height:calc(100dvh - 132px);
+    padding:18px;
+    gap:14px;
     overflow-y:auto;
+  }
+  #screen-game.mobile-menu-open .topbar .btn.tiny{
+    min-height:42px;
+    padding:10px 15px;
+    font-size:14px;
+  }
+  #screen-game.mobile-menu-open .topbar .chip{
+    padding:5px 10px;
+    font-size:13px;
   }
   #screen-game.mobile-menu-open .topbar::after{bottom:-8px}
   #screen-game .mobile-menu-toggle{right:16px;bottom:16px;padding:8px 12px}
