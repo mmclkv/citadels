@@ -435,6 +435,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .order-step.current .order-seat{background:var(--gold);color:#fff}
 .order-arrow{color:#c2a66c;font-weight:900;flex:0 0 auto}
 .opponents{position:relative;display:block;height:600px;margin:0 0 14px;z-index:2}
+/* 玩家框互斥分离期间关闭宽度过渡：否则测量会拿到过渡中的中间宽度，分离结果来回抖动 */
+.opponents.separating .opp{transition:none!important}
 .opp{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fffdf7;box-shadow:var(--shadow);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
 .opponents .opp{position:absolute;left:calc(var(--seat-x) * 1%);top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px));width:min(272px,24%);transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)));margin:0}
 .opponents .opp[data-compact="1"]{padding:9px 10px;font-size:.94em}
