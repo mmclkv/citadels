@@ -1759,6 +1759,8 @@
     processNotices(s);
 
     const isDraft = s.phase === 'draft';
+    const gameScreen = $('#screen-game');
+    if (gameScreen) gameScreen.classList.toggle('draft-phase', isDraft);
     $('#draft-area').hidden = !isDraft;
     $('#play-area').hidden = false;
     renderRemoved(s);
