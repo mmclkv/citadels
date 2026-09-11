@@ -963,6 +963,13 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #card-hd-overlay{contain:layout paint}
 }
 
+/* PWA 底部行动栏：提示文字与操作按钮在栏内水平居中。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .actionbar{align-items:center}
+  #screen-game .actionbar .prompt{width:100%;text-align:center}
+  #screen-game .actionbar .actions{width:100%;justify-content:center}
+}
+
 /* PWA 选角预览：整张角色卡必须在视口内可见，避免弹窗自身产生纵向滚动。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
   #char-zoom.touch{
