@@ -25,6 +25,9 @@ html[data-theme="neon"] {
   --ui-magenta:#ff4fc7;
   --ui-panel:rgba(7,14,25,.88);
   --ui-panel-strong:rgba(5,11,20,.96);
+  /* 角色卡图的统一显示比例。卡图源文件比例不齐（多数 280×420，刺客 280×469 最高、
+     贵族 280×459、商人 280×396 最矮），全部按最高的一张定框才不会「有的长有的短」。 */
+  --role-card-ratio:280 / 469;
 }
 
 html[data-theme="neon"],
@@ -321,8 +324,21 @@ html[data-theme="neon"] .char-card.neon-role-card {
   border-radius:5px;
 }
 html[data-theme="neon"] .char-card.neon-role-card.mini { width:108px; }
-html[data-theme="neon"] .char-card.neon-role-card .cc-art { margin:0; background:#07111d; border-radius:3px; }
-html[data-theme="neon"] .char-card.neon-role-card .cc-art img { width:100%; display:block; }
+html[data-theme="neon"] .char-card.neon-role-card .cc-art {
+  margin:0; background:#07111d; border-radius:3px;
+  aspect-ratio:var(--role-card-ratio);
+}
+/* 卡图比例不齐时按原比例自适应高度，同一排里每张牌长度都不一样（选角牌池里除刺客外
+   都短一截，因为刺客卡图最高）。这里统一按最高的一张定高，图片 cover 填满：出框的只是
+   卡图外缘的一圈留白，编号、名称、规则文字与底部按钮栏都完整保留。
+   底部「本轮出局角色」小卡自带固定宽高，此时 aspect-ratio 自动失效，不受影响。 */
+html[data-theme="neon"] .char-card.neon-role-card .cc-art img {
+  width:100%; height:100%; display:block; object-fit:cover;
+}
+/* 角色一览里同一张角色卡图也要对齐长度（建筑卡图比例本来就齐，排除在外）。 */
+html[data-theme="neon"] .ref-card .rc-art:not(.district-ref-art) {
+  aspect-ratio:var(--role-card-ratio); object-fit:cover;
+}
 html[data-theme="neon"] .char-card.neon-role-card .cc-num,
 html[data-theme="neon"] .char-card.neon-role-card .cc-name,
 html[data-theme="neon"] .char-card.neon-role-card .cc-art-emoji { display:none; }
