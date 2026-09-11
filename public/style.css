@@ -1018,6 +1018,12 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 @media (display-mode:standalone), (display-mode:fullscreen){
   #screen-game .mobile-fit-root{touch-action:pan-x pan-y}
   #screen-game .card-hd-stage{touch-action:none}
+  /* 行动阶段保留可读性下限后，超出的内容在各自区域内滚动，不再缩小整页。 */
+  #screen-game.pwa-readable-mode .board-main{overflow:auto}
+  #screen-game.pwa-readable-mode .opponents{overflow:visible}
+  #screen-game.pwa-readable-mode .opp-city,
+  #screen-game.pwa-readable-mode .city-row,
+  #screen-game.pwa-readable-mode .hand-row{overflow-x:auto}
 }
 
 /* PWA 横屏选建筑：抽二选一弹窗中的两张建筑牌按可用高度自适应，确保完整显示。 */

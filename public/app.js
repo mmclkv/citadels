@@ -1672,8 +1672,11 @@
     const viewportHeight = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
     const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
     // 留出少量安全边距；下限避免极端小屏变得完全不可操作。
-    const scale = Math.max(.45, Math.min(1, (viewportHeight - 6) / Math.max(1, naturalHeight),
-      (viewportWidth - 6) / Math.max(1, naturalWidth)));
+    const readableAction = standalone && screen.classList.contains('pwa-action-phase');
+    const fitScale = Math.min(1, (viewportHeight - 6) / Math.max(1, naturalHeight),
+      (viewportWidth - 6) / Math.max(1, naturalWidth));
+    const scale = Math.max(readableAction ? .72 : .45, fitScale);
+    screen.classList.toggle('pwa-readable-mode', readableAction && fitScale < .72);
     if (scale < .999) {
       root.style.setProperty('--mobile-fit-scale', scale.toFixed(4));
       root.classList.add('mobile-fit-scaled');
@@ -1760,7 +1763,10 @@
 
     const isDraft = s.phase === 'draft';
     const gameScreen = $('#screen-game');
-    if (gameScreen) gameScreen.classList.toggle('draft-phase', isDraft);
+    if (gameScreen) {
+      gameScreen.classList.toggle('draft-phase', isDraft);
+      gameScreen.classList.toggle('pwa-action-phase', s.phase === 'action');
+    }
     $('#draft-area').hidden = !isDraft;
     $('#play-area').hidden = false;
     renderRemoved(s);
