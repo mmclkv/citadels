@@ -964,6 +964,55 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game.mobile-menu-open .topbar .chip{font-size:12px}
   /* 行动栏右侧留出浮动按钮的位置，避免按钮压住行动选项。 */
   #screen-game .actionbar{padding-right:118px}
+
+  /* === 选角阶段 PC 大屏布局：隐藏标题/状态条，压缩角色卡，下方战斗区放大，
+        使角色牌池与“我的城市”在同一屏内同时可见（无滚动）。 === */
+  #screen-game.draft-phase .draft-head{display:none}
+  #screen-game.draft-phase .turn-banner:not(.rc){display:none!important}
+  #screen-game.draft-phase .board-main{
+    display:flex;flex-direction:column;overflow:hidden;padding-top:8px;padding-bottom:8px}
+  #screen-game.draft-phase .draft-area{flex:0 0 auto;margin-bottom:8px}
+  #screen-game.draft-phase .draft-pool{
+    display:flex;flex-wrap:wrap;gap:8px;justify-content:center;
+    max-height:240px;overflow-y:auto;padding:8px 10px}
+  #screen-game.draft-phase .draft-pool .char-card{
+    width:96px;padding:5px 4px;cursor:pointer}
+  #screen-game.draft-phase .draft-pool .char-card .cc-art{margin-bottom:3px;border-radius:5px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-art img{height:auto;max-height:120px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-num{width:18px;height:18px;font-size:10px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-name{font-size:11px;margin-bottom:1px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-desc{font-size:8px;max-height:34px;line-height:1.35}
+
+  #screen-game.draft-phase .play-area{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  #screen-game.draft-phase .table-arena{
+    flex:1 1 auto;min-height:0!important;display:flex;flex-direction:column;
+    margin:0 0 0;padding-top:0}
+  /* 选角阶段把对手环形布局改为水平紧凑条，释放高度给下方我的城市 */
+  #screen-game.draft-phase .opponents[data-layout="ring"]{
+    display:flex!important;flex-wrap:nowrap;gap:10px;justify-content:center;
+    height:auto!important;min-height:0!important;margin:0 auto 8px!important;
+    overflow-x:auto;overflow-y:hidden;padding:0 4px;max-width:100%}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp{
+    position:relative!important;left:auto!important;top:auto!important;
+    transform:none!important;margin:0!important;
+    width:min(260px,30vw)!important;min-width:220px!important;flex:0 0 auto}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-city{
+    min-height:34px;gap:4px;flex-wrap:wrap!important}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-city>.card{
+    width:34px!important;height:51px!important}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp .cs-card{
+    width:40px!important;height:60px!important}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-name{font-size:12px}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-gold{font-size:11px}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .score-badge{font-size:11px}
+
+  #screen-game.draft-phase .me-area{
+    flex:1 1 auto;min-height:0;width:min(860px,96%);margin:0 auto;
+    display:flex;flex-direction:column;padding-bottom:8px;overflow:hidden}
+  #screen-game.draft-phase .me-area .zone-head{flex:0 0 auto;margin:6px 0 4px}
+  #screen-game.draft-phase .me-area .me-role-row{flex:0 0 auto;margin-bottom:6px}
+  #screen-game.draft-phase .me-area .city-row{flex:1 1 auto;min-height:90px;max-height:190px;overflow:hidden}
+  #screen-game.draft-phase .me-area .hand-row{flex:0 0 auto;max-height:110px;min-height:0;overflow:hidden}
 }
 
 /* PWA 独立窗口：无浏览器地址栏时也收起顶部菜单，改用右下角浮动菜单。 */
