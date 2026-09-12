@@ -986,17 +986,19 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 
   #screen-game.draft-phase .play-area{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
   #screen-game.draft-phase .table-arena{
-    flex:1 1 auto;min-height:0!important;display:flex;flex-direction:column;
-    margin:0 0 0;padding-top:0}
-  /* 选角阶段把对手环形布局改为水平紧凑条，释放高度给下方我的城市 */
+    flex:1 1 auto;min-height:520px!important;display:block;position:relative;
+    margin:0;padding-top:0;overflow:hidden}
+  /* 使用完整棋盘高度恢复圆桌座位分布；当前玩家留在下方，其他玩家沿上方和两侧展开。 */
   #screen-game.draft-phase .opponents[data-layout="ring"]{
-    display:flex!important;flex-wrap:nowrap;gap:10px;justify-content:center;
-    height:auto!important;min-height:0!important;margin:0 auto 8px!important;
-    overflow-x:auto;overflow-y:hidden;padding:0 4px;max-width:100%}
+    position:absolute!important;inset:0!important;display:block!important;
+    width:100%;height:100%!important;min-height:0!important;margin:0!important;
+    overflow:visible;padding:0}
   #screen-game.draft-phase .opponents[data-layout="ring"] .opp{
-    position:relative!important;left:auto!important;top:auto!important;
-    transform:none!important;margin:0!important;
-    width:min(260px,30vw)!important;min-width:220px!important;flex:0 0 auto}
+    position:absolute!important;
+    left:calc(var(--seat-x) * 1%)!important;
+    top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px))!important;
+    transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)))!important;
+    margin:0!important;width:min(300px,24%)!important;min-width:220px!important}
   #screen-game.draft-phase .opponents[data-layout="ring"] .opp-city{
     min-height:34px;gap:4px;flex-wrap:wrap!important}
   #screen-game.draft-phase .opponents[data-layout="ring"] .opp-city>.card{
@@ -1008,7 +1010,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game.draft-phase .opponents[data-layout="ring"] .score-badge{font-size:11px}
 
   #screen-game.draft-phase .me-area{
-    flex:1 1 auto;min-height:0;width:min(860px,96%);margin:0 auto;
+    position:absolute;left:50%;bottom:10px;transform:translateX(-50%);
+    width:min(860px,52%);height:clamp(390px,46%,440px);min-height:0;margin:0;
     display:flex;flex-direction:column;padding-bottom:8px;overflow:hidden}
   #screen-game.draft-phase .me-area .zone-head{flex:0 0 auto;margin:6px 0 4px}
   #screen-game.draft-phase .me-area .me-role-row{flex:0 0 auto;margin-bottom:6px}
