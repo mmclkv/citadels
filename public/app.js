@@ -3194,13 +3194,27 @@
     }
     const mobileMenuToggle = $('#mobile-menu-toggle');
     const gameScreen = $('#screen-game');
-    if (mobileMenuToggle && gameScreen) {
-      mobileMenuToggle.onclick = () => {
-        const open = gameScreen.classList.toggle('mobile-menu-open');
-        mobileMenuToggle.setAttribute('aria-expanded', String(open));
+    // 顶栏菜单（PC 与移动端共用）：默认收起，点右下角浮动按钮弹出。
+    function setMenuOpen(open) {
+      if (!gameScreen) return;
+      gameScreen.classList.toggle('mobile-menu-open', !!open);
+      if (mobileMenuToggle) {
+        mobileMenuToggle.setAttribute('aria-expanded', String(!!open));
         mobileMenuToggle.title = open ? '收起游戏菜单' : '展开游戏菜单';
-        scheduleMobileFitScale();
-      };
+      }
+      scheduleMobileFitScale();
+    }
+    if (mobileMenuToggle && gameScreen) {
+      mobileMenuToggle.onclick = () => setMenuOpen(!gameScreen.classList.contains('mobile-menu-open'));
+    }
+    // 选中菜单里的任一项后自动收起（「电脑节奏」要连点切换，保持展开）。
+    const topbarEl = $('#topbar');
+    if (topbarEl && gameScreen) {
+      topbarEl.addEventListener('click', e => {
+        const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+        if (!btn || btn.id === 'btn-speed') return;
+        setMenuOpen(false);
+      });
     }
 
     // 电脑节奏：设置页下拉 + 对局内一键切换
@@ -3311,7 +3325,10 @@
     window.addEventListener('resize', scheduleMobileFitScale);
     window.addEventListener('orientationchange', scheduleMobileFitScale);
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') closeModal();
+      if (e.key !== 'Escape') return;
+      // 展开的菜单优先级高于弹层：Esc 先收起菜单，再关弹层。
+      if (gameScreen && gameScreen.classList.contains('mobile-menu-open')) { setMenuOpen(false); return; }
+      closeModal();
     });
   }
 

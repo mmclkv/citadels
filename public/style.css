@@ -915,6 +915,40 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   .card-hd-stage img{max-width:60vw!important;max-height:55vh!important}
 }
 
+/* PC / 大屏（>=821px）：顶栏整条收起，只保留右下角一个浮动「菜单」按钮，
+   点开后在按钮上方弹出原来的菜单项与对局状态。 */
+@media (min-width:821px){
+  /* 选角阶段的说明横条（选角阶段 + 行动指引）纯占位，PC 端整块收起。
+     :not(.rc) 保护轮末「确认本轮战果」块——它复用同一个容器。 */
+  #screen-game.draft-phase .turn-banner:not(.rc){display:none!important}
+  /* 行动指引与横条里的「轮到谁」重复，PC 端不再单列一行。 */
+  #screen-game .turn-order-guide{display:none!important}
+
+  .mobile-menu-toggle{position:fixed;right:18px;bottom:18px;z-index:46;
+    display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border:1px solid var(--line2);border-radius:11px;
+    background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:13px;font-weight:700;cursor:pointer}
+  .mobile-menu-toggle:hover{border-color:var(--gold);background:var(--bg2)}
+  #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold);border-color:var(--gold)}
+
+  #screen-game:not(.mobile-menu-open) .topbar{display:none}
+  #screen-game.mobile-menu-open .topbar{position:fixed;right:18px;bottom:68px;z-index:45;
+    display:flex;flex-direction:column;align-items:stretch;gap:10px;width:min(92vw,392px);padding:12px;
+    border:1px solid var(--line2);border-radius:14px;background:var(--paper);box-shadow:var(--shadow2);
+    max-height:calc(100dvh - 106px);overflow-y:auto}
+  #screen-game.mobile-menu-open .topbar::after{content:'';position:absolute;right:20px;bottom:-7px;width:12px;height:12px;
+    background:var(--paper);border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);transform:rotate(45deg)}
+  #screen-game.mobile-menu-open .topbar .tb-left,
+  #screen-game.mobile-menu-open .topbar .tb-mid,
+  #screen-game.mobile-menu-open .topbar .tb-right{width:100%;display:flex;flex-wrap:wrap;justify-content:flex-start;gap:7px}
+  #screen-game.mobile-menu-open .topbar .tb-left{order:1}
+  #screen-game.mobile-menu-open .topbar .tb-mid{order:2}
+  #screen-game.mobile-menu-open .topbar .tb-right{order:3}
+  #screen-game.mobile-menu-open .topbar .tb-mid{padding-top:2px;border-top:1px solid var(--line)}
+  #screen-game.mobile-menu-open .topbar .chip{font-size:12px}
+  /* 行动栏右侧留出浮动按钮的位置，避免按钮压住行动选项。 */
+  #screen-game .actionbar{padding-right:118px}
+}
+
 /* PWA 独立窗口：无浏览器地址栏时也收起顶部菜单，改用右下角浮动菜单。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
   .mobile-fit-root.mobile-fit-scaled{width:calc(100% / var(--mobile-fit-scale));height:calc(100% / var(--mobile-fit-scale));
