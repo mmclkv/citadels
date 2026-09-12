@@ -503,6 +503,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .tag.dead{background:#fbe9e7;color:#a53b30;border-color:#f0c9c3}
 .tag.magic{background:#f3ecfb;color:#653fa0;border-color:#ddd0f0}
 .opp-gold{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;color:#a97c15;margin-left:auto}
+/* 皇冠图标紧贴金币左侧（对手框与“我的城市”共用 .opp-gold） */
+.opp-gold .crown-icon{font-size:1.1em;line-height:1}
 .opp-role-row,.me-role-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:9px}
 .opp-body{display:flex;gap:9px;align-items:flex-start}
 .opp-city{display:flex;flex-wrap:wrap;gap:5px;flex:1 1 auto;min-height:60px}
