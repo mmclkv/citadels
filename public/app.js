@@ -2079,12 +2079,12 @@
       if (cs._lastHTML !== csHtml) { cs.innerHTML = csHtml; cs._lastHTML = csHtml; }
       const tags = (p.disconnected ? '<span class="tag disconnected">已断连</span>' : '') +
         (p.left ? '<span class="tag left">已离开</span>' : '') +
-        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">' + (p.botType === 'agent' ? 'AI Agent' : '电脑') + '</span>' : '') +
-        (p.hasCrown ? '<span class="tag crown crown-icon-tag" title="当前持有皇冠" aria-label="当前持有皇冠"><i class="crown-icon" aria-hidden="true">♛</i></span>' : '');
+        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">' + (p.botType === 'agent' ? 'AI Agent' : '电脑') + '</span>' : '');
+      const crownIcon = p.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '';
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
         '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
-        '<span class="opp-gold"><i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
+        '<span class="opp-gold">' + crownIcon + '<i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
         scoreBadgeHTML(i, p.name);
       bindScoreBadge(head.querySelector('.score-badge'), i);
 
@@ -2655,7 +2655,8 @@
     if (ms) ms.innerHTML = charStatusHTML(me);
     const myStats = $('#my-char-stats');
     if (myStats) myStats.innerHTML = handCountHTML(me.hand.length);
-    $('#my-gold').innerHTML = '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
+    $('#my-gold').innerHTML = (me.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '') +
+      '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
     const myScoreVal = $('#my-score-val');
     if (myScoreVal) {
       const srow = s.scores && s.scores[App.myIdx];
