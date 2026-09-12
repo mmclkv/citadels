@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "actionIndex": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cardUids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": ["actionIndex"],
+  "additionalProperties": false
+}
