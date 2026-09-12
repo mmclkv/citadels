@@ -2089,12 +2089,12 @@
       } else {
         const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
         syncCards(city, p.city, c => {
-          const sel = isSelectableDistrict(p, c);
+          const act = districtActionFor(p, c);
           // 选择目标时放大对手的建筑牌，方便触屏点击
-          return { mini: !picking, clickable: sel, pickable: sel };
+          return { mini: !picking, clickable: !!act, pickable: !!act };
         }, (node, c) => {
-          const sel = isSelectableDistrict(p, c);
-          if (sel) bindCardAction(node, () => pickDistrict(p.id, c.uid), true);
+          const act = districtActionFor(p, c);
+          if (act) bindCardAction(node, () => pickDistrict(p.id, c.uid, act), true);
           else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
         });
       }
@@ -2609,11 +2609,11 @@
     } else {
       const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
       syncCards(city, me.city, c => {
-        const sel = isSelectableDistrict(me, c);
-        return { clickable: sel, pickable: sel, selected: App.sel && App.sel.items.indexOf(c.uid) >= 0 };
+        const act = districtActionFor(me, c);
+        return { clickable: !!act, pickable: !!act, selected: App.sel && App.sel.items.indexOf(c.uid) >= 0 };
       }, (node, c) => {
-        const sel = isSelectableDistrict(me, c);
-        if (sel) bindCardAction(node, () => pickDistrict(me.id, c.uid), true);
+        const act = districtActionFor(me, c);
+        if (act) bindCardAction(node, () => pickDistrict(me.id, c.uid, act), true);
         else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
       });
     }
@@ -2798,6 +2798,9 @@
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     av.actions.forEach(a => {
+      // 多选已开始（魔术师弃牌重抽）时，引擎还会给一个「确定（可点选手牌后再确定）」，
+      // 与下面追加的「✓ 确定（N）」重复，两个都叫确定容易误点 —— 这里只保留带计数的那个。
+      if (a.type === 'choose_cards' && App.sel && App.sel.kind === 'multi') return;
       let cls = '';
       if (a.type === 'end_turn') cls = 'main';
       if (a.type === 'build') cls = 'main';
@@ -2886,16 +2889,27 @@
     return s.turn.playerId === App.myId &&
       ['warlord_destroy', 'marshal_seize', 'diplomat_mine', 'diplomat_theirs', 'artist'].indexOf(s.turn.pending.kind) >= 0;
   }
-  function isSelectableDistrict(player, card) {
-    if (!districtSelectMode()) return false;
+  /** 返回这栋建筑对应的 choose_district 动作；没有则返回 null */
+  function districtActionFor(player, card) {
+    if (!districtSelectMode()) return null;
     const av = App.state.available;
-    if (!av || !av.actions) return false;
-    return av.actions.some(a => a.type === 'choose_district' && a.target === player.id && a.uid === card.uid);
+    if (!av || !av.actions) return null;
+    return av.actions.find(a => a.type === 'choose_district' && a.target === player.id && a.uid === card.uid) || null;
   }
-  function pickDistrict(playerId, uid) {
+  function isSelectableDistrict(player, card) {
+    return !!districtActionFor(player, card);
+  }
+  /* 点击高亮建筑。
+   * 必须优先使用渲染时绑定的动作对象：早期版本只按 (playerId, uid) 现查
+   * App.state.available，一旦状态与 DOM 有一帧不同步（广播到达、动画期间
+   * 的延迟重绘），回查就会落空，点击变成「毫无反应的死点」，而面板上同名
+   * 按钮因为自带动作对象始终有效 —— 同一动作两条入口表现不一致。 */
+  function pickDistrict(playerId, uid, boundAction) {
+    if (boundAction) { runAction(boundAction); return; }
     const av = App.state.available;
-    const a = (av.actions || []).find(x => x.type === 'choose_district' && x.target === playerId && x.uid === uid);
-    if (a) send(a);
+    const a = (av && av.actions || []).find(x => x.type === 'choose_district' && x.target === playerId && x.uid === uid);
+    if (a) runAction(a);
+    else render();     // 状态已变：重绘同步高亮，别留在「点了没反应」的状态
   }
 
   /* ============================== 卡牌选择弹窗 ============================== */

@@ -686,8 +686,17 @@
         return { prompt: '【外交官】选择要换取的建筑', actions: diplomatTargets(state, t) };
       case 'artist': {
         const chosen = pd.selected || [];
-        return { prompt: '【艺术家】选择要美化的建筑（最多 2 栋，每栋 1 金）', actions:
-          ownDistrictChoices(state, t, true, chosen).concat(
+        // 已达 2 栋上限或金币不足时，不要再给出建筑选项：
+        // 这些选项发出去必被引擎拒绝（最多美化 2 栋 / 金币不足），
+        // 而前端会把它们渲染成高亮可点的建筑，玩家点了只会得到一句报错。
+        const full = chosen.length >= 2;
+        const broke = p.gold <= chosen.length;   // 每栋 1 金，已选 N 栋再选就要 N+1 金
+        const choices = (full || broke) ? [] : ownDistrictChoices(state, t, true, chosen);
+        const prompt = full ? '【艺术家】已选满 2 栋，确认或跳过'
+          : broke ? '【艺术家】金币不足，无法继续美化，确认或跳过'
+          : '【艺术家】选择要美化的建筑（最多 2 栋，每栋 1 金）';
+        return { prompt: prompt, actions:
+          choices.concat(
             [{ type: 'artist_done', uids: chosen,
                label: chosen.length ? '确定美化（' + chosen.length + ' 栋）' : '不美化，跳过' }]
           ), selectable: 'city', multi: true, max: 2 };
@@ -1143,7 +1152,8 @@
           pd.selected = pd.selected || [];
           if (pd.selected.indexOf(action.uid) >= 0) return err('该建筑已被选择');
           if (pd.selected.length >= 2) return err('最多美化 2 栋');
-          if (p.gold < 1) return err('金币不足');
+          // 每栋 1 金：已选 N 栋就要 N 金，选第 N+1 栋前必须还剩 1 金
+          if (p.gold <= pd.selected.length) return err('金币不足');
           pd.selected.push(action.uid);
           return ok();
         }
