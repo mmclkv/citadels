@@ -64,8 +64,32 @@ iPhone 底部安全区、横屏小高度设备也都处理了。
 模型请求；游戏速度设置控制动作之间的间隔，不会跳过模型等待。
 
 旧版 `f64238e` 的 Agent 只是启发式规则包装，不调用模型；本实现替换了该行为。
-模型调用采用 [Chat Completions 接口](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)，
-支持提供该接口与 JSON 输出的兼容服务。配置只放在**运行游戏服务器的机器上**：
+
+**默认无需配置模型 API。** 运行 `node server.js` 或双击 `start-server.bat` 时，服务器会
+检测本机 `codex` 命令，并通过一个内置的 loopback-only HTTP 网关调用当前 Windows
+用户已经登录的 Codex。该网关的兼容接口是
+`POST http://127.0.0.1:8787/api/codex/v1/chat/completions`，仅允许本机请求，账户令牌
+不会发给浏览器或局域网玩家。首次使用前需要在这台电脑上安装并登录 Codex；可用
+`codex --version` 和 `codex login` 检查。
+
+本机网关使用官方支持的 `codex exec` 非交互模式、只读沙盒、临时会话和 JSON Schema
+结构化输出。游戏状态只通过 stdin 发送，Codex 子进程不会继承游戏服务器的模型密钥等
+环境变量。每一步仍由游戏引擎校验，非法答案不会执行。
+
+如需指定本机 Codex 的行为，可设置：
+
+| 环境变量 | 用途 |
+|---|---|
+| `CITADELS_CODEX_COMMAND` | Codex CLI 可执行文件，默认 `codex` |
+| `CITADELS_CODEX_MODEL` | 可选，指定 Codex 使用的模型；留空沿用 CLI 默认模型 |
+| `CITADELS_CODEX_REASONING_EFFORT` | 推理强度，默认 `low` |
+| `CITADELS_CODEX_TIMEOUT_MS` | 单次 Codex 运行超时，默认 120000 毫秒 |
+| `CITADELS_DISABLE_LOCAL_CODEX` | 设为 `1` 可禁用内置本机网关 |
+
+也可以继续使用外部模型服务。模型调用采用
+[Chat Completions 接口](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)，
+支持提供该接口与 JSON 输出的兼容服务。一旦设置下列任一模型连接参数，服务器会优先
+使用外部服务而不是本机 Codex。配置只放在**运行游戏服务器的机器上**：
 
 | 环境变量 | 用途 |
 |---|---|
@@ -77,7 +101,8 @@ iPhone 底部安全区、横屏小高度设备也都处理了。
 可以设置上述环境变量后运行 `node server.js`。支持 `--env-file` 的 Node 也可以在
 仓库根目录创建本机专用 `.env`，写入以上变量，再运行 `node --env-file=.env server.js`。
 `.env` 已被 Git 忽略；不要把真实密钥放进 `public/`、浏览器存储或 GitHub Pages。
-修改模型配置后重启游戏服务器。
+修改模型配置后重启游戏服务器。GitHub Pages 仍然只负责静态前端；本机 Codex 网关
+必须随游戏服务器运行，不能部署到 GitHub Pages。
 
 使用方式：
 
@@ -96,6 +121,7 @@ iPhone 底部安全区、横屏小高度设备也都处理了。
 
 ```bash
 node --test test/agent.test.js test/agent-net.test.js
+node --test test/codex-agent-gateway.test.js
 # 已安装 Playwright + Chromium 时，可选运行真实浏览器验证：
 node test/agent-browser.js
 # 使用系统 Edge 时设置 BROWSER_CHANNEL=msedge

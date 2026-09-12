@@ -12,7 +12,8 @@ const crypto = require('crypto');
 const CitCards = require('./src/cards.js');
 const CitEngine = require('./src/engine.js');
 const CitAI = require('./src/ai.js');
-const CitAgent = require('./src/agent.js').createAgent();
+const AgentModule = require('./src/agent.js');
+const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -21,6 +22,48 @@ const SRC = path.join(ROOT, 'src');
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 20000;
+
+// With no external model configuration, use the Codex account already signed in
+// on this computer. The compatibility endpoint is loopback-only and lives on the
+// same HTTP server, so no account token is exposed to browser clients.
+const externalAgentRequested = !!(
+  process.env.CITADELS_AGENT_BASE_URL ||
+  process.env.CITADELS_AGENT_MODEL ||
+  process.env.CITADELS_AGENT_API_KEY
+);
+const localCodex = CodexGatewayModule.detectCodex();
+const useLocalCodex = !externalAgentRequested &&
+  process.env.CITADELS_DISABLE_LOCAL_CODEX !== '1' && localCodex.available;
+const localCodexGateway = useLocalCodex ? CodexGatewayModule.createCodexAgentGateway() : null;
+const agentEnv = useLocalCodex ? {
+  ...process.env,
+  CITADELS_AGENT_BASE_URL: 'http://127.0.0.1:' + PORT + '/api/codex/v1',
+  CITADELS_AGENT_MODEL: localCodexGateway.modelName,
+  CITADELS_AGENT_API_KEY: '',
+  CITADELS_AGENT_TIMEOUT_MS: process.env.CITADELS_AGENT_TIMEOUT_MS || '150000'
+} : process.env;
+const CitAgent = AgentModule.createAgent({ config: AgentModule.configFromEnv(agentEnv) });
+
+function agentStatus() {
+  const status = CitAgent.status();
+  if (useLocalCodex) return {
+    ...status,
+    provider: 'local-codex',
+    version: localCodex.version,
+    message: '已连接本机 Codex（复用当前电脑保存的登录）'
+  };
+  if (!externalAgentRequested && !localCodex.available) return {
+    ...status,
+    provider: 'none',
+    message: '未找到 Codex CLI；请先安装并登录 Codex，或配置外部模型服务'
+  };
+  return { ...status, provider: 'external' };
+}
+
+const AgentBackend = {
+  status: agentStatus,
+  decide: (...args) => CitAgent.decide(...args)
+};
 
 /* ------------------------------ 静态资源 ------------------------------ */
 const MIME = {
@@ -160,7 +203,7 @@ function startRoom(r) {
   if (!seats.length) return { error: '房间没有玩家' };
   const usesAgent = seats.some(s => s.isBot && s.botType === 'agent') ||
     (seats.length < r.config.playerCount && r.config.botType === 'agent');
-  if (usesAgent && !CitAgent.status().configured) return { error: CitAgent.status().message };
+  if (usesAgent && !agentStatus().configured) return { error: agentStatus().message };
   // 空缺座位自动补电脑
   const filled = seats.slice();
   let bi = 1;
@@ -289,7 +332,7 @@ function currentActor(state) {
 }
 
 const botDriver = require('./lib/bot-driver.js').createBotDriver({
-  Engine: CitEngine, AI: CitAI, agent: CitAgent, currentActor,
+  Engine: CitEngine, AI: CitAI, agent: AgentBackend, currentActor,
   send: sendPersonal, delay: botDelayFor
 });
 function botTick(r) { botDriver.tick(r); }
@@ -389,8 +432,8 @@ function handle(ws, info, msg) {
       break;
 
     case 'createRoom': {
-      if (msg.config && msg.config.botType === 'agent' && !CitAgent.status().configured) {
-        wsSend(ws, JSON.stringify({ t: 'error', error: CitAgent.status().message })); break;
+      if (msg.config && msg.config.botType === 'agent' && !agentStatus().configured) {
+        wsSend(ws, JSON.stringify({ t: 'error', error: agentStatus().message })); break;
       }
       const r = createRoom(msg.name || info.name || '房主', msg.config || {});
       info.roomId = r.id;
@@ -472,8 +515,8 @@ function handle(ws, info, msg) {
       const s = r.seats[i];
       if (msg.kind === 'bot') {
         const botType = msg.botType === 'npc' ? 'npc' : msg.botType === 'agent' ? 'agent' : r.config.botType;
-        if (botType === 'agent' && !CitAgent.status().configured) {
-          wsSend(ws, JSON.stringify({ t: 'error', error: CitAgent.status().message })); break;
+        if (botType === 'agent' && !agentStatus().configured) {
+          wsSend(ws, JSON.stringify({ t: 'error', error: agentStatus().message })); break;
         }
         r.seats[i] = { id: s.isBot ? s.id : genId('b'), name: '电脑 ' + i, isBot: true, botType, botLevel: r.config.botLevel || 'normal', taken: true,
           disconnected: false, left: false };
@@ -564,10 +607,11 @@ function lobbyView(r) {
 }
 
 /* ------------------------------ HTTP 服务 ------------------------------ */
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
+  if (localCodexGateway && await localCodexGateway.handle(req, res)) return;
   if (req.url === '/api/agent/status') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
-    return res.end(JSON.stringify(CitAgent.status()));
+    return res.end(JSON.stringify(agentStatus()));
   }
   if (req.url === '/api/rooms') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -657,5 +701,7 @@ server.listen(PORT, () => {
     if (i.family === 'IPv4' && !i.internal) nets.push(i.address);
   }));
   nets.forEach(a => console.log('  局域网访问：http://' + a + ':' + PORT));
+  if (useLocalCodex) console.log('  AI Agent：  本机 ' + localCodex.version + '（无需另配 API）');
+  else console.log('  AI Agent：  ' + agentStatus().message);
   console.log('');
 });
