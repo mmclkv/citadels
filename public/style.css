@@ -969,8 +969,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
         使角色牌池与“我的城市”在同一屏内同时可见（无滚动）。 === */
   #screen-game.draft-phase .draft-head{display:none}
   #screen-game.draft-phase .turn-banner:not(.rc){display:none!important}
+  #screen-game.draft-phase .actionbar{display:none!important}
   #screen-game.draft-phase .board-main{
-    display:flex;flex-direction:column;overflow:hidden;padding-top:8px;padding-bottom:8px}
+    display:flex;flex-direction:column;overflow:hidden;padding-top:8px;padding-bottom:8px;height:100%}
   #screen-game.draft-phase .draft-area{flex:0 0 auto;margin-bottom:8px}
   #screen-game.draft-phase .draft-pool{
     display:flex;flex-wrap:wrap;gap:8px;justify-content:center;
@@ -1011,8 +1012,10 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     display:flex;flex-direction:column;padding-bottom:8px;overflow:hidden}
   #screen-game.draft-phase .me-area .zone-head{flex:0 0 auto;margin:6px 0 4px}
   #screen-game.draft-phase .me-area .me-role-row{flex:0 0 auto;margin-bottom:6px}
-  #screen-game.draft-phase .me-area .city-row{flex:1 1 auto;min-height:90px;max-height:190px;overflow:hidden}
-  #screen-game.draft-phase .me-area .hand-row{flex:0 0 auto;max-height:110px;min-height:0;overflow:hidden}
+  #screen-game.draft-phase .me-area .city-row{flex:1 1 40%;min-height:90px;max-height:none;overflow:hidden}
+  #screen-game.draft-phase .me-area .hand-row{flex:1 1 60%;min-height:112px;max-height:none;overflow:hidden}
+  #screen-game.draft-phase .me-area .city-row>.card,
+  #screen-game.draft-phase .me-area .hand-row>.card{width:88px!important;height:123px!important}
 }
 
 /* PWA 独立窗口：无浏览器地址栏时也收起顶部菜单，改用右下角浮动菜单。 */
