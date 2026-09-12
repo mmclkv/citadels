@@ -120,14 +120,23 @@ ok(fixedHeights.every(x => Math.abs(x.h - fixedHeights[0].h) < 1e-9),
 ok(Math.abs(fixedHeights[0].h - tallest.h) < 0.5,
   '统一高度等于原来最高那张（' + tallest.h.toFixed(1) + 'px）→ 只有变长的、没有变短的');
 
-/* ---------------- 4. 出局角色小卡不受影响 ---------------- */
+/* ---------------- 4. 选角蓝框紧贴卡图 ---------------- */
+const draftTightRule = /html\[data-theme="neon"\]\s*#screen-game\.draft-phase\s*#draft-pool\s*\.char-card\.neon-role-card\s*\{([^}]*)\}/.exec(baseCss);
+ok(!!draftTightRule && /padding\s*:\s*0\s*!important/.test(draftTightRule[1]),
+  '选角牌外层蓝框没有内边距，边框紧贴卡图');
+const draftImgRule = /html\[data-theme="neon"\]\s*#screen-game\.draft-phase\s*#draft-pool\s*\.char-card\.neon-role-card\s*\.cc-art\s+img\s*\{([^}]*)\}/.exec(baseCss);
+ok(!!draftImgRule && /height\s*:\s*100%\s*!important/.test(draftImgRule[1]) &&
+  /max-height\s*:\s*none\s*!important/.test(draftImgRule[1]),
+  '选角卡图撑满蓝框，并覆盖 PC 紧凑布局的 120px 高度上限');
+
+/* ---------------- 5. 出局角色小卡不受影响 ---------------- */
 const removedRule = /\.removed-corner\s+\.char-card\.mini\s*,\s*\.removed-corner\s+\.facedown\.sm\s*\{([^}]*)\}/.exec(baseCss);
 ok(!!removedRule && /height\s*:\s*\d+px\s*!important/.test(removedRule[1]),
   '「本轮出局角色」小卡依旧是固定宽高（width/height 都写了 !important）');
 ok(/\.removed-corner\s+\.char-card\.mini\s+\.cc-art\s*\{[^}]*height\s*:\s*100%/.test(baseCss),
   '小卡的 .cc-art 显式 height:100% → 同时有宽有高时 aspect-ratio 自动失效，尺寸不受新规则影响');
 
-/* ---------------- 5. 角色一览同样对齐，且不碰建筑卡图 ---------------- */
+/* ---------------- 6. 角色一览同样对齐，且不碰建筑卡图 ---------------- */
 const refRule = /html\[data-theme="neon"\]\s*\.ref-card\s+\.rc-art:not\(\.district-ref-art\)\s*\{([^}]*)\}/.exec(neonCss);
 ok(!!refRule, '角色一览的角色卡图也套用同一比例');
 ok(/aspect-ratio\s*:\s*var\(--role-card-ratio\)/.test(refRule[1]) && /object-fit\s*:\s*cover/.test(refRule[1]),
@@ -135,7 +144,7 @@ ok(/aspect-ratio\s*:\s*var\(--role-card-ratio\)/.test(refRule[1]) && /object-fit
 ok(/:not\(\.district-ref-art\)/.test(refRule[0]),
   '排除建筑卡图（建筑 30 张缩略图本来就统一 280×420，不需要也不应该被改）');
 
-/* ---------------- 6. 缓存版本已更新 ---------------- */
+/* ---------------- 7. 缓存版本已更新 ---------------- */
 const themeVer = /themes\/neon\/theme\.css\?v=(\d+)/.exec(indexHtml);
 ok(!!themeVer, 'index.html 里 theme.css 带版本号（当前 v=' + (themeVer ? themeVer[1] : '?') + '）');
 

@@ -1407,6 +1407,23 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   .card-hd-stage img{max-width:45vw!important;max-height:39vh!important}
 }
 
+/* 选角牌池（霓虹主题）：外层蓝框就是卡图的选择框，不再保留装饰性内边距。
+   同时覆盖 PC 紧凑布局中的 120px 图片上限，避免图片变矮后在框底留下空白。 */
+html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-role-card{
+  padding:0!important;
+  background:transparent;
+}
+html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-role-card .cc-art{
+  margin:0!important;
+  border-radius:4px;
+}
+html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-role-card .cc-art img{
+  width:100%!important;
+  height:100%!important;
+  max-height:none!important;
+  object-fit:cover;
+}
+
 /* 角色牌旁的手牌数量指示：主题牌背 × 阿拉伯数字图标。 */
 .opp-char-stats,.me-char-stats{min-width:64px;padding-top:0;display:flex;align-items:center;justify-content:center}
 .hand-count-indicator{display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;color:var(--ink2)}
