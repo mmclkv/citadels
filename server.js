@@ -14,11 +14,13 @@ const CitEngine = require('./src/engine.js');
 const CitAI = require('./src/ai.js');
 const AgentModule = require('./src/agent.js');
 const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
+const TrainingManagerModule = require('./lib/training-manager.js');
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
+const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT });
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 20000;
@@ -607,8 +609,53 @@ function lobbyView(r) {
 }
 
 /* ------------------------------ HTTP 服务 ------------------------------ */
+function sendJson(res, status, value) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(value));
+}
+
+function readJsonBody(req, limit = 65536) {
+  return new Promise((resolve, reject) => {
+    let body = '', size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > limit) { reject(new Error('请求内容过大')); req.destroy(); return; }
+      body += chunk.toString('utf8');
+    });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); }
+      catch (_) { reject(new Error('请求不是有效 JSON')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function isLoopback(req) {
+  const address = req.socket && req.socket.remoteAddress || '';
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+}
+
 const server = http.createServer(async (req, res) => {
   if (localCodexGateway && await localCodexGateway.handle(req, res)) return;
+  const pathname = req.url.split('?')[0];
+  if (pathname === '/api/training/status' && req.method === 'GET') {
+    const payload = trainingManager.status();
+    payload.profiles = {
+      fast: trainingManager.profileInfo('fast'),
+      balanced: trainingManager.profileInfo('balanced'),
+      large: trainingManager.profileInfo('large')
+    };
+    return sendJson(res, 200, payload);
+  }
+  if (pathname === '/api/training/start' && req.method === 'POST') {
+    if (!isLoopback(req)) return sendJson(res, 403, { error: '训练只能从服务器本机启动' });
+    try { return sendJson(res, 200, trainingManager.start(await readJsonBody(req))); }
+    catch (error) { return sendJson(res, 400, { error: error.message }); }
+  }
+  if (pathname === '/api/training/stop' && req.method === 'POST') {
+    if (!isLoopback(req)) return sendJson(res, 403, { error: '训练只能从服务器本机停止' });
+    return sendJson(res, 200, trainingManager.stop());
+  }
   if (req.url === '/api/agent/status') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
     return res.end(JSON.stringify(agentStatus()));

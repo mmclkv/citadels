@@ -12,3 +12,6 @@ __pycache__/
 .env.*
 .DS_Store
 Thumbs.db
+
+# 本地神经网络训练输出（checkpoint、状态与指标）
+training-data/

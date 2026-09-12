@@ -18,6 +18,29 @@ node server.js 9000       # 指定端口
 
 零依赖：只用到 Node 内置模块（HTTP、WebSocket 手写实现），无需 `npm install`。
 
+## 本地策略神经网络训练
+
+启动服务器后访问 `http://localhost:8787/training.html`，也可以从主菜单进入“神经网络训练”。
+训练器不依赖 Python 或第三方 npm 包，直接复用游戏引擎，在独立 Node.js 子进程中执行共享策略网络自对弈。
+
+- 支持开始、优雅停止与从 checkpoint 继续训练；停止时会保存当前模型。
+- 所有座位使用同一个策略价值网络，并且网络输入来自 `Engine.sanitize`，不会读取对手手牌、隐藏角色或牌库顺序。
+- 使用合法动作枚举与动作掩码，策略只在通过引擎校验的行动中采样。
+- 使用 PPO 裁剪目标、价值损失与探索熵；控制台实时显示损失曲线、速度、推理延迟、分数和座位胜局。
+- `fast`、`balanced`、`large` 三档约为 12.4 万、32.1 万、61.6 万参数；当前电脑建议先用 `balanced` 跑 100 局基准，再决定是否使用 `large`。
+- 模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
+
+训练控制接口只允许服务器本机调用：
+
+```text
+GET  /api/training/status
+POST /api/training/start
+POST /api/training/stop
+```
+
+建议先进行 100～500 局短跑，确认平均整局耗时和损失变化正常，再启动 10,000 局正式训练。
+浏览器页面可以关闭，后台训练不会停止；重新打开控制台即可继续查看进度。
+
 ## 用手机玩
 
 手机和电脑连**同一个 WiFi** 时，手机浏览器直接打开 `http://<电脑内网IP>:8787` 即可
