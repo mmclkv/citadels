@@ -2001,6 +2001,7 @@
   }
 
   function renderOpponents(s) {
+    hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
     const wrap = $('#opponents');
     const totalPlayers = s.players.length || 1;
     const mobileRingLayout = isMobileOpponentLayout() && totalPlayers >= 5;
@@ -2075,12 +2076,9 @@
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
         '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
-        '<span class="opp-gold"><i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>';
-      const sb = el('button', 'score-btn');
-      sb.title = '显示 ' + p.name + ' 的得分与计算过程';
-      sb.textContent = '分数';
-      onTap(sb, () => openScore(i));
-      head.appendChild(sb);
+        '<span class="opp-gold"><i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
+        scoreBadgeHTML(i, p.name);
+      bindScoreBadge(head.querySelector('.score-badge'), i);
 
       const city = d.querySelector('.opp-city');
       if (!p.city.length) {
@@ -2570,7 +2568,61 @@
   }
   function closeScore() { $('#score-popup').hidden = true; }
 
+  /* 分数徽章：蓝色圆圈图标 + 数值，样式对齐金币徽章。
+     鼠标悬停 / 键盘聚焦弹出轻量计分组成提示；点击 / 触屏仍打开完整明细窗。 */
+  function scoreBadgeHTML(idx, name) {
+    const s = App.state || {};
+    const row = s.scores && s.scores[idx];
+    const total = row ? row.total : 0;
+    return '<button type="button" class="score-badge" title="显示 ' + escapeHtml(name || '') +
+      ' 的得分与计算过程"><i class="score-icon" aria-hidden="true"></i><span class="score-val">' +
+      total + '</span></button>';
+  }
+  function bindScoreBadge(btn, idx) {
+    if (!btn) return;
+    onTap(btn, () => openScore(idx));
+    btn.addEventListener('mouseenter', () => showScoreTip(btn, idx));
+    btn.addEventListener('mouseleave', hideScoreTip);
+    btn.addEventListener('focus', () => showScoreTip(btn, idx));
+    btn.addEventListener('blur', hideScoreTip);
+  }
+  let scoreTipEl = null;
+  function hideScoreTip() {
+    if (scoreTipEl && scoreTipEl.parentNode) scoreTipEl.parentNode.removeChild(scoreTipEl);
+    scoreTipEl = null;
+  }
+  function showScoreTip(btn, idx) {
+    const s = App.state;
+    if (!s || !btn) return;
+    const row = s.scores && s.scores[idx];
+    const p = s.players && s.players[idx];
+    if (!p) return;
+    hideScoreTip();
+    const tip = document.createElement('div');
+    tip.className = 'score-tip';
+    let html = '<div class="st-name">' + escapeHtml(p.name) + '</div>';
+    if (row && row.detail && row.detail.length) {
+      html += row.detail.map(d =>
+        '<div class="st-row"><span>' + escapeHtml(d.label) + '</span><b>' +
+        (d.value >= 0 ? '+' : '') + d.value + '</b></div>').join('');
+      html += '<div class="st-row total"><span>合计</span><b>' + row.total + '</b></div>';
+    } else {
+      html += '<div class="st-row"><span>暂无计分</span></div>';
+    }
+    tip.innerHTML = html;
+    document.body.appendChild(tip);
+    const r = btn.getBoundingClientRect();
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = Math.min(Math.max(8, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 8);
+    let top = r.top - th - 8;
+    if (top < 8) top = r.bottom + 8;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+    scoreTipEl = tip;
+  }
+
   function renderMe(s) {
+    hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
     const me = s.players.find(p => p.id === App.myId);
     if (!me) return;
     App.myIdx = s.players.findIndex(p => p.id === App.myId);
@@ -2597,6 +2649,11 @@
     const myStats = $('#my-char-stats');
     if (myStats) myStats.innerHTML = handCountHTML(me.hand.length);
     $('#my-gold').innerHTML = '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
+    const myScoreVal = $('#my-score-val');
+    if (myScoreVal) {
+      const srow = s.scores && s.scores[App.myIdx];
+      myScoreVal.textContent = srow ? srow.total : 0;
+    }
     $('#my-city-count').textContent = '';
     $('#my-hand-count').textContent = '';
     $('#my-chars-tip').innerHTML = '';
@@ -3176,7 +3233,14 @@
     $('#event-overlay').onclick = e => { if (e.target === $('#event-overlay')) dismissEvent(); };
 
     // 得分明细浮动窗口
-    $('#btn-my-score').onclick = () => openScore(App.myIdx);
+    const myScoreBtn = $('#btn-my-score');
+    if (myScoreBtn) {
+      myScoreBtn.onclick = () => openScore(App.myIdx);
+      myScoreBtn.addEventListener('mouseenter', () => showScoreTip(myScoreBtn, App.myIdx));
+      myScoreBtn.addEventListener('mouseleave', hideScoreTip);
+      myScoreBtn.addEventListener('focus', () => showScoreTip(myScoreBtn, App.myIdx));
+      myScoreBtn.addEventListener('blur', hideScoreTip);
+    }
     $('#score-close').onclick = closeScore;
     $('#score-popup').onclick = e => { if (e.target === $('#score-popup')) closeScore(); };
 
