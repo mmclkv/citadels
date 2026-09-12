@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=43">
+  <link rel="stylesheet" href="./style.css?v=45">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=11">
 </head>
 <body>
@@ -249,8 +249,10 @@
           <div class="opponents" id="opponents"></div>
           <div class="me-area" id="me-area">
           <div class="zone-head"><h3>我的城市 <span class="dim small" id="my-city-count"></span></h3>
-            <button type="button" class="score-badge" id="btn-my-score" title="显示我的得分与计算过程"><i class="score-icon" aria-hidden="true"></i><span class="score-val" id="my-score-val">0</span></button>
-            <span class="gold-badge" id="my-gold"><i class="coin-icon" aria-hidden="true"></i><span>0</span></span></div>
+            <span class="me-stats">
+              <span class="opp-gold" id="my-gold"><i class="coin-icon" aria-hidden="true"></i><span>0</span></span>
+              <button type="button" class="score-badge" id="btn-my-score" title="显示我的得分与计算过程"><i class="score-icon" aria-hidden="true"></i><span class="score-val" id="my-score-val">0</span></button>
+            </span></div>
           <div class="me-role-row">
             <div class="me-char" id="my-char-status"></div>
             <div class="me-char-stats" id="my-char-stats"></div>
@@ -367,6 +369,6 @@
 <script src="./src/cards.js?v=3"></script>
 <script src="./src/engine.js?v=13"></script>
 <script src="./src/ai.js?v=2"></script>
-<script src="./app.js?v=64"></script>
+<script src="./app.js?v=65"></script>
 </body>
 </html>

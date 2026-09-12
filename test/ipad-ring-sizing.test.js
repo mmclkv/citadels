@@ -17,16 +17,16 @@ const path = require('path');
 function computeSizing({ wrapWidth, viewportH, totalPlayers, pwa }) {
   const width = Math.max(280, wrapWidth);
   const spacious = width >= 900 && viewportH >= 560;
-  const boost = spacious ? 1.25 : 1;
+  const boost = spacious ? 1.45 : 1;
   const maxWidth = Math.max(126, Math.floor(width * (pwa && totalPlayers >= 5
-    ? (totalPlayers >= 7 ? .34 : .38)
+    ? (totalPlayers >= 7 ? .38 : .42)
     : (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58)) * boost));
-  const baseRatio = pwa && totalPlayers >= 5 ? (spacious ? .24 : .18) : .25;
+  const baseRatio = pwa && totalPlayers >= 5 ? (spacious ? .30 : .18) : .25;
   const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * baseRatio * boost)));
   const height = pwa && totalPlayers >= 5
-    ? Math.max(420, Math.min(spacious ? 600 : 620, Math.round(viewportH * (spacious ? .72 : .62))))
+    ? Math.max(420, Math.min(spacious ? 640 : 620, Math.round(viewportH * (spacious ? .76 : .62))))
     : Math.max(300, Math.min(400, Math.round(viewportH * .44)));
-  return { spacious, boost, maxWidth, cardWidth, height, cityCardBase: spacious ? 44 : 40 };
+  return { spacious, boost, maxWidth, cardWidth, height, cityCardBase: spacious ? 52 : 40 };
 }
 
 // 玩家框最终宽度 ≈ min(maxWidth, max(cardWidth, 按建筑数算出的需求宽度))
@@ -36,8 +36,8 @@ function panelWidth(sz, cityCount) {
 }
 
 // —— 环形座位几何：复刻 renderOpponents 的既约半径 ——
-const RADIUS_X = { many: 40, few: 36 };
-const RADIUS_Y = { many: 40, few: 38 };
+const RADIUS_X = { many: 48, few: 36 };
+const RADIUS_Y = { many: 52, few: 38 };
 function seatCenters(wrapWidth, wrapHeight, opponents) {
   // opponents = 除自己外的对手数；总人数 = opponents + 1
   const total = opponents + 1;
@@ -89,10 +89,10 @@ const phonePanel = panelWidth(phone, 6);
 ok(ipadPanel > phonePanel * 1.15,
   'iPad 玩家框明显更宽（' + phonePanel + 'px → ' + ipadPanel + 'px，+'
   + Math.round((ipadPanel / phonePanel - 1) * 100) + '%）');
-ok(ipad.cityCardBase === 44 && phone.cityCardBase === 40,
-  '建筑牌基准宽度大屏 44 / 手机 40（CSS 原先把手机档锁死在 32px）');
-ok(ipad.height === Math.round(820 * .72) && ipad97.height === Math.round(768 * .72),
-  '环形区高度按视口 72% 提升（iPad 820→' + ipad.height + 'px，768→' + ipad97.height + 'px）');
+ok(ipad.cityCardBase === 52 && phone.cityCardBase === 40,
+  '建筑牌基准宽度大屏 52 / 手机 40（CSS 原先把手机档锁死在 32px）');
+ok(ipad.height === Math.round(820 * .76) && ipad97.height === Math.round(768 * .76),
+  '环形区高度按视口 76% 提升（iPad 820→' + ipad.height + 'px，768→' + ipad97.height + 'px）');
 ok(phone.height === 420 && phonePortrait.height === Math.round(844 * .62),
   '手机档沿用原 .62 系数（横屏取下限 420px，竖屏 523px），未被改动');
 
@@ -101,9 +101,9 @@ const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), '
 ok(css.indexOf('(min-width:900px) and (min-height:560px)') >= 0,
   'style.css 存在 min-width:900px + min-height:560px 的大屏媒体查询');
 const cssBlock = css.slice(css.indexOf('(min-width:900px) and (min-height:560px)'));
-ok(/\.opponents\[data-layout="mobile-ring"\] \.opp \.cs-card\{[\s\S]{0,160}width:48px!important/.test(cssBlock),
-  'CSS 大屏下角色牌放大到 48×72');
-ok(/\.opp-city>\.card\{[\s\S]{0,200}width:var\(--mobile-city-card-width,44px\)!important/.test(cssBlock),
+ok(/\.opponents\[data-layout="mobile-ring"\] \.opp \.cs-card\{[\s\S]{0,160}width:56px!important/.test(cssBlock),
+  'CSS 大屏下角色牌放大到 56×84');
+ok(/\.opp-city>\.card\{[\s\S]{0,200}width:var\(--mobile-city-card-width,52px\)!important/.test(cssBlock),
   'CSS 大屏下建筑牌改用引擎算出的自适应变量，解除 32px 锁死');
 ok(cssBlock.indexOf('aspect-ratio:2 / 3') >= 0, '建筑牌保持 2:3 比例，卡图不被拉伸');
 

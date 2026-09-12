@@ -447,7 +447,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opponents .opp[data-compact="2"] .opp-head,.opponents .opp[data-compact="3"] .opp-head{gap:5px;margin-bottom:5px}
 .opponents[data-layout="mobile-collision"]{position:relative;display:block;overflow:visible;height:auto;min-height:0}
 .opponents[data-layout="mobile-collision"] .opp{position:absolute!important;left:0;top:0;width:var(--mobile-opp-width)!important;min-width:0!important;transform:none!important;margin:0!important;flex:none!important}
-.opponents[data-layout="mobile-ring"]{position:relative!important;display:block!important;height:clamp(300px,44vh,400px)!important;overflow:visible!important;min-height:0}
+.opponents[data-layout="mobile-ring"]{position:relative!important;display:block!important;height:clamp(300px,44vh,400px);overflow:visible!important;min-height:0}
 .opponents[data-layout="mobile-ring"] .opp{position:absolute!important;left:calc(var(--seat-x) * 1%)!important;top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px))!important;width:var(--mobile-opp-width)!important;min-width:0!important;transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)))!important;margin:0!important;flex:none!important}
 .opponents[data-layout="mobile-ring"] .opp-role-row{gap:6px;margin-bottom:5px}
 .opponents[data-layout="mobile-ring"] .opp{padding:5px 6px!important}
@@ -561,8 +561,10 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .me-area.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.16),0 10px 28px rgba(200,149,43,.18)}
 .zone-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 7px}
 .zone-head h3{font-size:14px;color:#6a4f18}
-.gold-badge{display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#a97c15;background:linear-gradient(180deg,#fbf0d5,#f3e0b4);
-  border:1px solid #e2c587;border-radius:16px;padding:2px 12px;font-size:13px}
+/* 我的城市右上角的金币+分数集群：与其它玩家框（.opp-head 内的 .opp-gold + .score-badge）保持同一套样式 */
+.me-stats{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
+.me-stats .opp-gold{margin-left:0}
+.me-stats .score-badge{margin-left:0}
 /* 通用金币图标：不用文字，适配经典与霓虹两套主题。 */
 .coin-icon{position:relative;display:inline-block;flex:0 0 auto;width:17px;height:17px;border-radius:50%;
   background:radial-gradient(circle at 34% 28%,#fff3a8 0 12%,#f5c94b 30%,#d99318 72%,#8e5b0c 100%);
@@ -1176,42 +1178,49 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
    建筑牌宽度仍用 --mobile-city-card-width 变量，由 app.js 按建筑数量自适应
    （applyMobileRingLayout 的 spacious 分支给出更大基数），避免牌多时溢出。
    媒体查询条件必须与 app.js 中 spacious 判据保持一致。 */
-@media (display-mode:standalone) and (min-width:900px) and (min-height:560px),
-       (display-mode:fullscreen) and (min-width:900px) and (min-height:560px){
+@media (min-width:900px) and (min-height:560px){
+  /* iPad 级大屏：把环形玩家框整体再放大一档，解决圆角矩形与手牌/建筑牌过小的问题。 */
   #screen-game .opponents[data-layout="mobile-ring"] .opp{
-    padding:10px 12px!important;
-    border-radius:14px;
+    padding:12px 14px!important;
+    border-radius:16px;
   }
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-role-row{gap:8px;margin-bottom:7px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char{gap:7px;margin-bottom:7px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-head{gap:6px;margin-bottom:6px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-seat-no{font-size:11px;padding:2px 7px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-name{font-size:15px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-gold{font-size:13px;gap:4px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .score-badge{font-size:13px;gap:4px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char-stats{font-size:12px;min-width:66px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-body{gap:7px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-city{gap:4px;min-height:44px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-name{font-size:13px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-role-row{gap:10px;margin-bottom:9px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char{gap:8px;margin-bottom:8px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-head{gap:7px;margin-bottom:7px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-seat-no{font-size:12px;padding:2px 8px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-name{font-size:17px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-gold{font-size:15px;gap:5px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .score-badge{font-size:15px;gap:5px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char-stats{font-size:13px;min-width:72px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-body{gap:8px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-city{gap:5px;min-height:54px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-name{font-size:14px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-card{
-    width:48px!important;height:72px!important;
-    min-width:48px!important;min-height:72px!important;
-    max-width:48px!important;max-height:72px!important;
-    flex:0 0 48px!important;
+    width:56px!important;height:84px!important;
+    min-width:56px!important;min-height:84px!important;
+    max-width:56px!important;max-height:84px!important;
+    flex:0 0 56px!important;
+  }
+  /* 紧凑降级时也别缩得太小 */
+  #screen-game .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .cs-card{
+    width:44px!important;height:66px!important;
+    min-width:44px!important;min-height:66px!important;
+    max-width:44px!important;max-height:66px!important;
+    flex:0 0 44px!important;
   }
   #screen-game .opponents[data-layout="mobile-ring"] .opp .facedown.hand-count-back{
-    width:30px!important;height:45px!important;
-    min-width:30px!important;min-height:45px!important;
-    max-width:30px!important;max-height:45px!important;
-    flex:0 0 30px!important;
+    width:38px!important;height:57px!important;
+    min-width:38px!important;min-height:57px!important;
+    max-width:38px!important;max-height:57px!important;
+    flex:0 0 38px!important;
   }
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-multiply{font-size:21px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-number{font-size:17px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-multiply{font-size:24px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-number{font-size:19px}
   /* 解除手机档固定 32×48 的限制，改由引擎按建筑数量算出的变量决定尺寸。 */
   #screen-game .opponents.pwa-many-players .opp-city>.card,
   #screen-game .opponents[data-layout="mobile-ring"] .opp-city>.card{
-    width:var(--mobile-city-card-width,44px)!important;
-    height:var(--mobile-city-card-height,66px)!important;
+    width:var(--mobile-city-card-width,52px)!important;
+    height:var(--mobile-city-card-height,78px)!important;
     min-width:0!important;
     min-height:0!important;
     max-width:none!important;
@@ -1219,6 +1228,49 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     flex:0 0 auto!important;
     aspect-ratio:2 / 3;
   }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city>.card{
+    width:var(--mobile-city-card-width,40px)!important;
+    height:var(--mobile-city-card-height,60px)!important;
+  }
+
+  /* 大屏下「我的城市」也放大：单排横向滚动，卡牌更大，便于看清手牌。 */
+  #opponents[data-layout="mobile-ring"] ~ .me-area{
+    width:calc(100% - 16px)!important;
+    margin:8px auto 0!important;
+    padding:10px 12px!important;
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area .zone-head{margin:6px 0 4px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .zone-head h3{font-size:14px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-role-row{gap:8px;margin-bottom:6px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char{gap:6px;margin:0 0 6px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char-stats{min-width:64px;font-size:11px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char .cs-card{width:72px!important;height:108px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .city-row{
+    display:flex!important;grid-auto-flow:unset;grid-template-rows:none;
+    height:120px;max-height:120px;padding:6px;gap:6px;
+    overflow-x:auto;overflow-y:hidden
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area .hand-row{
+    display:flex;flex-wrap:nowrap;gap:6px;
+    height:120px;max-height:120px;padding:6px;
+    overflow-x:auto;overflow-y:hidden
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area .city-row>.card,
+  #opponents[data-layout="mobile-ring"] ~ .me-area .hand-row>.card{width:78px!important;height:117px!important}
+
+  /* PWA 5+ 的 me-area.many-players grid 也同步放大（只在环形移动端生效） */
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players{
+    grid-template-columns:minmax(110px,auto) minmax(0,1fr);
+    grid-template-rows:minmax(130px,auto) minmax(130px,auto);
+    gap:8px 12px;min-height:280px!important;max-height:340px!important
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players>.city-row,
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players>.hand-row{height:130px!important;max-height:130px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .me-char .cs-card{width:84px!important;height:126px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .city-row>.card,
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .hand-row>.card{width:84px!important;height:126px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .city-row>.card.mini,
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .hand-row>.card.mini{width:72px!important;height:108px!important}
 }
 
 /* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */
