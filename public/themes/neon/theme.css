@@ -261,7 +261,20 @@ html[data-theme="neon"] .tag { color:var(--ink2); background:rgba(14,35,49,.72);
 html[data-theme="neon"] .tag.crown { color:#ffe39a; background:rgba(90,68,25,.42); border-color:#80682b; }
 html[data-theme="neon"] .tag.dead { color:var(--c-red-d); background:rgba(85,24,34,.38); border-color:rgba(255,94,103,.4); }
 html[data-theme="neon"] .tag.magic { color:var(--c-purple-d); background:rgba(64,27,96,.4); border-color:rgba(191,113,255,.45); }
-html[data-theme="neon"] .score-btn { color:var(--ui-cyan); background:rgba(9,27,41,.8); border-color:var(--line2); }
+html[data-theme="neon"] .score-badge { color:#7fc4ff; }
+html[data-theme="neon"] .score-icon {
+  background:radial-gradient(circle at 32% 25%,#cfeaff 0 10%,#5db1ff 28%,#2b7fd9 66%,#0d3a70 100%);
+  border-color:#57c0ff; box-shadow:inset 0 0 0 2px rgba(190,228,255,.5),0 0 9px rgba(80,170,255,.55);
+}
+html[data-theme="neon"] .score-icon::before { border-color:rgba(207,234,255,.8); }
+html[data-theme="neon"] .score-tip {
+  background:rgba(9,27,41,.96); border-color:var(--line2); border-top-color:#57c0ff;
+  box-shadow:0 0 0 1px rgba(87,192,255,.16),0 0 18px rgba(87,192,255,.2),var(--shadow2);
+  color:var(--ink2);
+}
+html[data-theme="neon"] .score-tip .st-name { color:var(--ink); }
+html[data-theme="neon"] .score-tip .st-row b { color:#7fc4ff; }
+html[data-theme="neon"] .score-tip .st-row.total span { color:var(--ink); }
 html[data-theme="neon"] .removed-corner {
   background:var(--ui-panel-strong); border-color:rgba(67,228,255,.62);
   box-shadow:0 0 0 1px rgba(255,79,199,.16),0 0 18px rgba(67,228,255,.2),var(--shadow2);

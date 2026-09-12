@@ -457,7 +457,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opponents[data-layout="mobile-ring"] .opp-seat-no{font-size:8px;padding:1px 3px}
 .opponents[data-layout="mobile-ring"] .opp-name{font-size:10px}
 .opponents[data-layout="mobile-ring"] .opp-gold{font-size:9px;gap:2px}
-.opponents[data-layout="mobile-ring"] .opp .score-btn{width:22px;height:22px;font-size:10px}
+.opponents[data-layout="mobile-ring"] .opp .score-badge{font-size:10px;gap:2px}
 .opponents[data-layout="mobile-ring"] .opp-body{gap:4px}
 .opponents[data-layout="mobile-ring"] .opp-city{gap:2px;min-height:34px}
 .opponents[data-layout="mobile-ring"] .opp-city>.card{width:40px;height:60px}
@@ -533,14 +533,27 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .cs-card.flip-in .cs-inner{animation:csflip .65s ease}
 @keyframes csflip{from{transform:rotateY(0deg)}to{transform:rotateY(180deg)}}
 
-/* 得分按钮（每个玩家信息框右上角） */
-.score-btn{flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);
-  background:#fff;color:#7a5c22;font-size:13px;line-height:1;cursor:pointer;
-  display:inline-flex;align-items:center;justify-content:center;
-  box-shadow:0 1px 3px rgba(0,0,0,.08);transition:transform .08s,background .15s}
-.score-btn:hover{background:#fbf0d5;transform:scale(1.08)}
-.score-btn:active{transform:scale(.92)}
-.zone-head .score-btn{margin-left:auto}
+/* 分数徽章：蓝色圆圈图标 + 数值，样式对齐金币徽章（每个玩家信息框右上角） */
+.score-badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;
+  border:0;background:transparent;padding:0;font:inherit;cursor:pointer;
+  font-size:13px;font-weight:700;color:#1c62b0;font-variant-numeric:tabular-nums}
+.score-badge:hover{transform:scale(1.06)}
+.score-badge:active{transform:scale(.94)}
+.score-icon{position:relative;display:inline-block;flex:0 0 auto;width:17px;height:17px;border-radius:50%;
+  background:radial-gradient(circle at 34% 28%,#bcd8ff 0 12%,#5a9ae8 30%,#2f6fc4 72%,#123a72 100%);
+  border:1px solid #123a72;box-shadow:inset 0 0 0 2px rgba(214,232,255,.45),0 1px 3px rgba(10,40,90,.35)}
+.score-icon::before{content:'';position:absolute;inset:3px;border:1px solid rgba(214,232,255,.7);border-radius:50%}
+.zone-head .score-badge{margin-left:auto}
+/* 悬停 / 聚焦时显示的计分组成小浮层 */
+.score-tip{position:fixed;z-index:320;min-width:150px;max-width:240px;padding:9px 12px;
+  background:#fffdf8;border:1px solid var(--line);border-top:3px solid #2f6fc4;border-radius:10px;
+  box-shadow:0 6px 18px rgba(20,40,80,.22);pointer-events:none;font-size:12px;line-height:1.5;color:var(--ink2)}
+.score-tip .st-name{font-weight:800;font-size:13px;color:var(--ink);margin-bottom:4px}
+.score-tip .st-row{display:flex;justify-content:space-between;gap:12px}
+.score-tip .st-row b{font-weight:700;color:#1c62b0;font-variant-numeric:tabular-nums}
+.score-tip .st-row.total{margin-top:3px;padding-top:3px;border-top:1px dashed var(--line)}
+.score-tip .st-row.total span{font-weight:800;color:var(--ink)}
+.score-tip .st-row.total b{font-size:14px}
 
 .me-area{position:relative;z-index:3;width:min(860px,92%);margin:0 auto;padding:10px 14px 0;border:1px solid var(--gold-l);border-radius:16px;background:rgba(255,253,246,.96);box-shadow:0 8px 22px rgba(80,60,30,.12);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
 .building-arrival-expand{animation:buildingArrivalExpand .85s ease}
@@ -1175,7 +1188,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-seat-no{font-size:11px;padding:2px 7px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-name{font-size:15px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-gold{font-size:13px;gap:4px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .score-btn{width:32px;height:32px;font-size:13px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .score-badge{font-size:13px;gap:4px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char-stats{font-size:12px;min-width:66px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-body{gap:7px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-city{gap:4px;min-height:44px}
@@ -1193,7 +1206,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     flex:0 0 30px!important;
   }
   #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-multiply{font-size:21px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-number{width:28px;height:28px;font-size:16px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-number{font-size:17px}
   /* 解除手机档固定 32×48 的限制，改由引擎按建筑数量算出的变量决定尺寸。 */
   #screen-game .opponents.pwa-many-players .opp-city>.card,
   #screen-game .opponents[data-layout="mobile-ring"] .opp-city>.card{
@@ -1294,5 +1307,5 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .facedown.hand-count-back{width:24px!important;height:36px!important;min-width:24px!important;min-height:36px!important;
   max-width:24px!important;max-height:36px!important;flex:0 0 24px!important;border-width:1px;font-size:0;border-radius:4px}
 .hand-count-multiply{font-size:18px;font-weight:800;line-height:1;color:var(--dim)}
-.hand-count-number{width:24px;height:24px;border:1px solid var(--line2);border-radius:50%;display:inline-flex;
-  align-items:center;justify-content:center;background:var(--paper);color:var(--ink);font-size:14px;font-weight:800;line-height:1}
+.hand-count-number{display:inline-flex;align-items:center;justify-content:center;
+  color:var(--ink);font-size:15px;font-weight:800;line-height:1}
