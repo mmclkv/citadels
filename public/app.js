@@ -2006,8 +2006,16 @@
     const totalPlayers = s.players.length || 1;
     const mobileRingLayout = isMobileOpponentLayout() && totalPlayers >= 5;
     const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
-    const radiusX = totalPlayers >= 7 ? 43 : totalPlayers >= 5 ? 40 : 36;
-    const radiusY = totalPlayers >= 7 ? 42 : totalPlayers >= 5 ? 40 : 38;
+    const viewportH = (typeof window !== 'undefined' && window.innerHeight) || 720;
+    const wrapWidth = wrap.clientWidth || window.innerWidth || 0;
+    const spacious = wrapWidth >= 900 && viewportH >= 560;
+    // iPad 级大屏：把环形座位半径拉大，给放大的玩家框留出更多横向/纵向间距。
+    const radiusX = mobileRingLayout && spacious
+      ? (totalPlayers >= 7 ? 50 : 48)
+      : (totalPlayers >= 7 ? 43 : totalPlayers >= 5 ? 40 : 36);
+    const radiusY = mobileRingLayout && spacious
+      ? (totalPlayers >= 7 ? 54 : 52)
+      : (totalPlayers >= 7 ? 42 : totalPlayers >= 5 ? 40 : 38);
     const cardWidth = totalPlayers >= 8 ? 17 : totalPlayers >= 7 ? 19 : totalPlayers >= 5 ? 21 : totalPlayers === 4 ? 30 : 24;
     wrap.dataset.players = String(totalPlayers);
     wrap.dataset.layout = mobileRingLayout ? 'mobile-ring' : 'ring';
@@ -2136,25 +2144,24 @@
     const pwa = typeof window !== 'undefined' && window.matchMedia &&
       window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
     // iPad 级大屏（横屏、宽 ≥900 且高 ≥560）：屏幕远大于手机，玩家框与内部元素整体
-    // 放大一档，避免圆角矩形和卡牌在宽屏上显得过小、四周留大片空白。
+    // 再放大一档，避免圆角矩形和卡牌在宽屏上显得过小、四周留大片空白。
     // 判据与 style.css 中同名媒体查询保持一致，保证尺寸计算与样式同进同退。
     const viewportH = (typeof window !== 'undefined' && window.innerHeight) || 720;
     const spacious = width >= 900 && viewportH >= 560;
-    const boost = spacious ? 1.25 : 1;
+    const boost = spacious ? 1.45 : 1;
     // 玩家框至少保持 1.5:1 的宽高比；有空间时先横向容纳更多建筑，
     // 空间不足时再切换到更紧凑的卡牌尺寸。
     const maxWidth = Math.max(126, Math.floor(width * (pwa && totalPlayers >= 5
-      ? (totalPlayers >= 7 ? .34 : .38)
+      ? (totalPlayers >= 7 ? .38 : .42)
       : (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58)) * boost));
-    // 大屏时玩家框的基础宽度也提高一档（.18 → .24），让圆角矩形本身明显变大，
-    // 而不只是内部卡牌变大。
-    const baseRatio = pwa && totalPlayers >= 5 ? (spacious ? .24 : .18) : .25;
+    // 大屏时玩家框的基础宽度再提高一档（.18 → .30），让圆角矩形本身明显变大。
+    const baseRatio = pwa && totalPlayers >= 5 ? (spacious ? .30 : .18) : .25;
     const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * baseRatio * boost)));
     const minWidth = Math.max(104, Math.floor(cardWidth * .78));
-    // 大屏时环形区更高（视口 72%），保证放大后的上下两排玩家框仍有足够垂直间距，
-    // 不会因为互相挤压被碰撞逻辑再次压回手机尺寸。
+    // 大屏时环形区更高（视口 76%，上限 640），配合加大的半径，
+    // 保证放大后的上下两排玩家框仍有足够垂直间距。
     const height = pwa && totalPlayers >= 5
-      ? Math.max(420, Math.min(spacious ? 600 : 620, Math.round(viewportH * (spacious ? .72 : .62))))
+      ? Math.max(420, Math.min(spacious ? 640 : 620, Math.round(viewportH * (spacious ? .76 : .62))))
       : Math.max(300, Math.min(400, Math.round(viewportH * .44)));
     wrap.style.display = 'block';
     wrap.style.height = height + 'px';
@@ -2175,8 +2182,8 @@
           const compact = Number(node.dataset.compact || 3);
           const cityCount = Number(node.dataset.cityCount || 0);
           const cityCardWidth = compact >= 4
-            ? Math.max(16, Math.min(spacious ? 36 : 31, Math.floor((maxWidth - 18 - Math.max(0, cityCount - 1) * 3) / Math.max(1, cityCount))))
-            : (spacious ? 44 : 40);
+            ? Math.max(16, Math.min(spacious ? 42 : 31, Math.floor((maxWidth - 18 - Math.max(0, cityCount - 1) * 3) / Math.max(1, cityCount))))
+            : (spacious ? 52 : 40);
           node.style.setProperty('--mobile-city-card-width', cityCardWidth + 'px');
           node.style.setProperty('--mobile-city-card-height', Math.round(cityCardWidth * 1.5) + 'px');
           const cityNeed = cityCount
@@ -2269,7 +2276,7 @@
     const viewportH = (window.innerHeight || 720);
     const spacious = (wrap.clientWidth || window.innerWidth || 0) >= 900 && viewportH >= 560;
     const currentHeight = parseFloat(wrap.style.height) || wrap.clientHeight || 0;
-    const targetHeight = Math.max(currentHeight, Math.min(spacious ? 600 : 620, Math.max(420, Math.round(viewportH * (spacious ? .72 : .62)))));
+    const targetHeight = Math.max(currentHeight, Math.min(spacious ? 640 : 620, Math.max(420, Math.round(viewportH * (spacious ? .76 : .62)))));
     wrap.style.height = targetHeight + 'px';
 
     const addPush = (node, dx, dy) => {
@@ -2307,8 +2314,8 @@
 
           const aw = parseFloat(getComputedStyle(nodes[i]).width) || 0;
           const bw = parseFloat(getComputedStyle(nodes[j]).width) || 0;
-          if (Math.min(aw, bw) > (spacious ? 132 : 84)) {
-            const floor = spacious ? 132 : 84;
+          if (Math.min(aw, bw) > (spacious ? 160 : 84)) {
+            const floor = spacious ? 160 : 84;
             const next = Math.max(floor, Math.floor(Math.min(aw, bw) * .94));
             nodes[i].style.setProperty('--mobile-opp-width', next + 'px');
             nodes[j].style.setProperty('--mobile-opp-width', next + 'px');

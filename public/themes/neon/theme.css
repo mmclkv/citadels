@@ -248,9 +248,7 @@ html[data-theme="neon"] .turn-banner .tb-stats b { color:var(--ink2); }
 html[data-theme="neon"] .opp.active { border-color:var(--ui-magenta); box-shadow:0 0 0 2px rgba(255,79,199,.18),0 0 26px rgba(255,79,199,.12); background:rgba(22,14,34,.76); }
 html[data-theme="neon"] .opp-name { color:var(--ink); }
 html[data-theme="neon"] .opp-seat-no { color:var(--ui-cyan); border-color:rgba(67,228,255,.35); }
-html[data-theme="neon"] .opp-gold,
-html[data-theme="neon"] .gold-badge { color:var(--gold); }
-html[data-theme="neon"] .gold-badge { background:rgba(88,66,21,.28); border-color:#80682b; }
+html[data-theme="neon"] .opp-gold { color:var(--gold); }
 html[data-theme="neon"] .coin-icon {
   background:radial-gradient(circle at 32% 25%,#fff7b5 0 10%,#ffd75a 28%,#f0a52f 66%,#9b5f16 100%);
   border-color:#ffca47; box-shadow:inset 0 0 0 2px rgba(255,246,174,.5),0 0 9px rgba(255,190,54,.52);
