@@ -126,6 +126,25 @@ class PolicyValueNetwork {
     this.optimizerStep = 0;
   }
 
+  exportFlat() {
+    const flat = new Float32Array(this.parameterCount);
+    let offset = 0;
+    for (const layer of this.layers) {
+      flat.set(layer.w, offset); offset += layer.w.length;
+      flat.set(layer.b, offset); offset += layer.b.length;
+    }
+    return flat;
+  }
+
+  importFlat(flat) {
+    if (!flat || flat.length !== this.parameterCount) throw new Error('模型二进制参数数量不匹配');
+    let offset = 0;
+    for (const layer of this.layers) {
+      layer.w.set(flat.subarray(offset, offset + layer.w.length)); offset += layer.w.length;
+      layer.b.set(flat.subarray(offset, offset + layer.b.length)); offset += layer.b.length;
+    }
+  }
+
   forward(state, actions, temperature = 1) {
     const s1 = this.state1.forward(state);
     const s2 = this.state2.forward(s1.output);
@@ -168,7 +187,7 @@ class PolicyValueNetwork {
       this.layers.forEach(l => l.zeroGrad());
       for (let k = 0; k < transitions.length; k++) {
         const tr = transitions[k];
-        const out = this.forward(tr.state, tr.actions, 1);
+        const out = this.forward(tr.state, tr.actions, tr.temperature || 1);
         const selected = tr.chosen;
         const prob = Math.max(1e-8, out.probs[selected]);
         const oldProb = Math.max(1e-8, tr.oldProb);

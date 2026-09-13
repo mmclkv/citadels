@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=1">
+  <link rel="stylesheet" href="./training.css?v=2">
 </head>
 <body>
   <header class="train-header">
@@ -21,9 +21,12 @@
         <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option></select></label>
         <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
+        <label><span>训练设备</span><select id="backend"><option value="gpu" selected>CUDA GPU</option><option value="cpu">PyTorch CPU</option><option value="js">兼容 JS CPU</option></select></label>
         <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" max="0.01" step="0.00001" value="0.0003"></label>
         <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="32" value="4"></label>
+        <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="4"></label>
         <label><span>PPO 训练轮数</span><input id="ppo-epochs" type="number" min="1" max="6" value="2"></label>
+        <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" max="2048" step="32" value="256"></label>
         <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="100"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"><option value="">从头训练</option></select></label>
@@ -49,8 +52,8 @@
     </section>
 
     <section class="chart-grid">
-      <article class="panel chart-panel"><div class="section-title"><div><h2>训练损失</h2><p>策略损失、价值损失与总损失</p></div><span id="loss-now">—</span></div><canvas id="loss-chart"></canvas></article>
-      <article class="panel chart-panel"><div class="section-title"><div><h2>策略状态</h2><p>探索熵与 PPO 裁剪比例</p></div><span id="entropy-now">—</span></div><canvas id="policy-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>价值与总损失</h2><p>不再与微小的策略损失共用纵轴</p></div><span id="loss-now">—</span></div><canvas id="loss-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>独立纵轴；标题同步显示 KL、梯度和探索熵</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>座位胜局</h2><p>用于观察先后手与座位偏差</p></div></div><canvas id="seat-chart"></canvas></article>
     </section>
@@ -61,6 +64,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=1"></script>
+  <script src="./training.js?v=2"></script>
 </body>
 </html>

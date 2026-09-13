@@ -7,6 +7,8 @@ const os = require('os');
 const Engine = require('../src/engine.js');
 const HeuristicAI = require('../src/ai.js');
 const { PolicyValueNetwork, PROFILES, mulberry32 } = require('./neural-policy.js');
+const { TorchBridge } = require('./torch-bridge.js');
+const { SelfPlayPool } = require('./selfplay-pool.js');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
@@ -218,7 +220,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop) {
     inferenceMs += performance.now() - t0;
     if (legal.length > 1) transitions.push({
       playerId: actor.id, state: encoded.vector, actions: actionVectors, chosen: decision.chosen,
-      oldProb: decision.probability, oldValue: decision.value
+      oldProb: decision.probability, oldValue: decision.value, temperature
     });
     let result = Engine.applyAction(state, actor.id, legal[decision.chosen]);
     if (!result.ok) {
@@ -255,9 +257,12 @@ function sanitizeConfig(input = {}) {
     charSet: ['base', 'dark', 'mixed', 'random'].includes(input.charSet) ? input.charSet : 'random',
     endDistricts: [7, 8].includes(Number(input.endDistricts)) ? Number(input.endDistricts) : 8,
     profile: PROFILES[input.profile] ? input.profile : 'balanced',
+    backend: ['gpu', 'cpu', 'js'].includes(input.backend) ? input.backend : 'gpu',
     learningRate: Math.max(1e-6, Math.min(0.01, Number(input.learningRate) || 0.0003)),
     batchGames: Math.max(1, Math.min(32, Number(input.batchGames) || 4)),
     ppoEpochs: Math.max(1, Math.min(6, Number(input.ppoEpochs) || 2)),
+    miniBatch: Math.max(32, Math.min(2048, Number(input.miniBatch) || 256)),
+    workers: Math.max(1, Math.min(6, Number(input.workers) || Math.max(1, Math.min(4, os.cpus().length - 2)))),
     checkpointEvery: Math.max(1, Math.min(10000, Number(input.checkpointEvery) || 100)),
     seed: Math.floor(Number(input.seed) || 20260913),
     maxSteps: Math.max(1000, Math.min(100000, Number(input.maxSteps) || 60000)),
@@ -296,34 +301,57 @@ async function train(rawConfig, hooks = {}) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const model = new PolicyValueNetwork({ profile: config.profile, stateSize: STATE_SIZE, actionSize: ACTION_SIZE, seed: config.seed });
   let completedGames = loadCheckpoint(model, config.resumeCheckpoint);
+  const initialCompletedGames = completedGames;
+  let stopping = false, pool = null;
+  process.on('message', msg => {
+    if (msg && msg.type === 'stop') { stopping = true; if (pool) pool.stop(); }
+  });
+  let torch = null, accelerator = { device: 'JavaScript CPU', torch: '', cuda: '', gpu: '' };
+  if (config.backend !== 'js') {
+    torch = new TorchBridge({ root: ROOT, model, config, onLog: text => send({ type: 'log', text }) });
+    accelerator = await torch.start(config.resumeCheckpoint);
+  }
   const startedAt = Date.now();
   const rng = mulberry32(config.seed ^ 0xA53C9E11);
   const history = [];
   const recentGames = [];
   const winSeats = Array(8).fill(0);
   let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0;
-  let stopping = false, rollout = [];
-  process.on('message', msg => { if (msg && msg.type === 'stop') stopping = true; });
+  let rollout = [];
+  pool = torch && !stopping ? new SelfPlayPool({ root: ROOT, config, size: Math.min(config.workers, config.batchGames) }) : null;
   const shouldStop = () => stopping || (hooks.shouldStop && hooks.shouldStop());
   send({ type: 'started', config, parameterCount: model.parameterCount, completedGames,
     hardware: { cpu: os.cpus()[0] && os.cpus()[0].model, logicalCores: os.cpus().length,
-      memoryGB: +(os.totalmem() / 2 ** 30).toFixed(1), runtime: process.version } });
+      memoryGB: +(os.totalmem() / 2 ** 30).toFixed(1), runtime: process.version,
+      device: accelerator.device, torch: accelerator.torch, cuda: accelerator.cuda, gpu: accelerator.gpu } });
 
+  try {
   while (completedGames < config.targetGames && !shouldStop()) {
-    const result = await runSelfPlayGame(model, config, completedGames + 1, rng, shouldStop);
-    if (result.stopped) break;
-    completedGames++;
-    rollout.push(...result.transitions);
-    totalSteps += result.steps;
-    totalInferenceMs += result.avgInferenceMs * result.steps;
-    totalFallbacks += result.fallbackCount;
-    result.winners.forEach(seat => { if (seat >= 0 && seat < winSeats.length) winSeats[seat]++; });
-    recentGames.push(result);
-    if (recentGames.length > 50) recentGames.shift();
+    let results;
+    if (pool) {
+      const count = Math.min(config.batchGames, config.targetGames - completedGames);
+      const indices = Array.from({ length: count }, (_, i) => completedGames + i + 1);
+      results = await pool.run(indices, torch.modelPath, completedGames);
+    } else {
+      const result = await runSelfPlayGame(model, config, completedGames + 1, rng, shouldStop);
+      results = result.stopped ? [] : [{ gameIndex: completedGames + 1, ...result }];
+    }
+    if (!results.length) break;
+    for (const result of results) {
+      completedGames++;
+      rollout.push(...result.transitions);
+      totalSteps += result.steps;
+      totalInferenceMs += result.avgInferenceMs * result.steps;
+      totalFallbacks += result.fallbackCount;
+      result.winners.forEach(seat => { if (seat >= 0 && seat < winSeats.length) winSeats[seat]++; });
+      recentGames.push(result);
+      if (recentGames.length > 50) recentGames.shift();
+    }
     let losses = history.length ? history[history.length - 1] :
-      { policyLoss: 0, valueLoss: 0, totalLoss: 0, entropy: 0, clipFraction: 0 };
-    if (completedGames % config.batchGames === 0 && rollout.length) {
-      losses = model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs });
+      { policyLoss: 0, valueLoss: 0, totalLoss: 0, entropy: 0, clipFraction: 0, approxKl: 0, gradientNorm: 0 };
+    if ((pool || completedGames % config.batchGames === 0) && rollout.length) {
+      losses = torch ? await torch.train(rollout) :
+        model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs });
       rollout = [];
     }
     const checkpointDue = completedGames % config.checkpointEvery === 0 || completedGames === config.targetGames;
@@ -335,26 +363,39 @@ async function train(rawConfig, hooks = {}) {
     const point = {
       game: completedGames, elapsedMs, steps: totalSteps, policyLoss: losses.policyLoss,
       valueLoss: losses.valueLoss, totalLoss: losses.totalLoss, entropy: losses.entropy,
-      clipFraction: losses.clipFraction, gamesPerMinute: completedGames / Math.max(1e-6, elapsedMs / 60000),
+      clipFraction: losses.clipFraction, approxKl: losses.approxKl || 0, gradientNorm: losses.gradientNorm || 0,
+      gpuMemoryMB: losses.gpuMemoryMB || 0,
+      gamesPerMinute: (completedGames - initialCompletedGames) / Math.max(1e-6, elapsedMs / 60000),
       avgGameMs: recentDuration, avgInferenceMs: totalInferenceMs / Math.max(1, totalSteps),
       avgScore: recentScore, avgReward: recentReward, fallbacks: totalFallbacks,
       avgRounds: recentGames.reduce((sum, g) => sum + g.rounds, 0) / recentGames.length,
       winSeats: winSeats.slice(0, config.maxPlayers)
     };
-    if (completedGames % config.batchGames === 0 || completedGames === 1) history.push(point);
+    history.push(point);
     if (history.length > 1000) history.shift();
-    if (checkpointDue) checkpoint = saveCheckpoint(model, config, completedGames, history);
+    if (checkpointDue) {
+      checkpoint = saveCheckpoint(model, config, completedGames, history);
+      if (torch) await torch.checkpoint(checkpoint);
+    }
     send({ type: 'progress', point, history: history.slice(-400), checkpoint });
     if (hooks.onProgress) hooks.onProgress(point);
     await immediate();
   }
 
-  if (rollout.length && !shouldStop()) model.trainPPO(rollout, { learningRate: config.learningRate, epochs: 1 });
+  if (rollout.length && !shouldStop()) {
+    if (torch) await torch.train(rollout);
+    else model.trainPPO(rollout, { learningRate: config.learningRate, epochs: 1 });
+  }
   const finalCheckpoint = completedGames > 0 ? saveCheckpoint(model, config, completedGames, history) : '';
+  if (torch && finalCheckpoint) await torch.checkpoint(finalCheckpoint);
   const final = { type: shouldStop() ? 'stopped' : 'completed', completedGames,
     targetGames: config.targetGames, elapsedMs: Date.now() - startedAt, checkpoint: finalCheckpoint };
   send(final);
   return final;
+  } finally {
+    if (pool) await pool.close();
+    if (torch) await torch.close();
+  }
 }
 
 if (require.main === module) {

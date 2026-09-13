@@ -21,14 +21,16 @@ node server.js 9000       # 指定端口
 ## 本地策略神经网络训练
 
 启动服务器后访问 `http://localhost:8787/training.html`，也可以从主菜单进入“神经网络训练”。
-训练器不依赖 Python 或第三方 npm 包，直接复用游戏引擎，在独立 Node.js 子进程中执行共享策略网络自对弈。
+训练器直接复用游戏引擎，在独立 Node.js 子进程中执行共享策略网络自对弈。当前电脑已配置项目私有 Python 3.12、PyTorch CUDA 12.6 和 GTX 1660 SUPER 加速环境。
 
 - 支持开始、优雅停止与从 checkpoint 继续训练；停止时会保存当前模型。
 - 所有座位使用同一个策略价值网络，并且网络输入来自 `Engine.sanitize`，不会读取对手手牌、隐藏角色或牌库顺序。
 - 使用合法动作枚举与动作掩码，策略只在通过引擎校验的行动中采样。
-- 使用 PPO 裁剪目标、价值损失与探索熵；控制台实时显示损失曲线、速度、推理延迟、分数和座位胜局。
+- 默认由 4 个 Node worker 并行生成自对弈轨迹，再由 PyTorch 在 CUDA GPU 上批量执行 PPO 更新；也可选择 PyTorch CPU 或旧版 JavaScript CPU 兼容模式。
+- 使用 PPO 裁剪目标、价值损失与探索熵；控制台把策略损失放在独立纵轴，并实时显示 KL 散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
 - `fast`、`balanced`、`large` 三档约为 12.4 万、32.1 万、61.6 万参数；当前电脑建议先用 `balanced` 跑 100 局基准，再决定是否使用 `large`。
 - 模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
+- GPU optimizer 状态保存在同编号的 `.optimizer.pt` 文件中；旧 JavaScript checkpoint 可以直接迁移到 GPU 训练。
 
 训练控制接口只允许服务器本机调用：
 

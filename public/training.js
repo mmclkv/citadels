@@ -23,8 +23,9 @@ function formConfig() {
   return {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
-    profile: $('profile').value, learningRate: +$('learning-rate').value,
-    batchGames: +$('batch-games').value, ppoEpochs: +$('ppo-epochs').value,
+    profile: $('profile').value, backend: $('backend').value, learningRate: +$('learning-rate').value,
+    batchGames: +$('batch-games').value, workers: +$('workers').value,
+    ppoEpochs: +$('ppo-epochs').value, miniBatch: +$('mini-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
     resumeCheckpoint: $('resume-checkpoint').value, endDistricts: 8
   };
@@ -64,7 +65,9 @@ function render(status) {
   $('m-score').textContent = num(point.avgScore, 1);
   $('m-fallbacks').textContent = integer(point.fallbacks);
   $('loss-now').textContent = '总损失 ' + num(point.totalLoss, 4);
-  $('entropy-now').textContent = '熵 ' + num(point.entropy, 3);
+  const policy = Number(point.policyLoss);
+  $('policy-now').textContent = (Number.isFinite(policy) ? policy.toExponential(3) : '—') +
+    ' · KL ' + num(point.approxKl, 5) + ' · 梯度 ' + num(point.gradientNorm, 3) + ' · 熵 ' + num(point.entropy, 3);
   $('speed-now').textContent = num(point.avgGameMs / 1000, 2) + ' 秒/局';
   $('control-message').textContent = status.error || (status.checkpoint ? '最近存档：' + status.checkpoint : '');
   const profiles = status.profiles || {};
@@ -74,13 +77,11 @@ function render(status) {
   renderLogs(status);
   const history = status.history || [];
   drawLines($('loss-chart'), history, [
-    { key: 'policyLoss', color: '#35dcff', label: '策略' },
     { key: 'valueLoss', color: '#ff4fc7', label: '价值' },
     { key: 'totalLoss', color: '#ffd36a', label: '总计' }
   ]);
   drawLines($('policy-chart'), history, [
-    { key: 'entropy', color: '#55e69a', label: '探索熵' },
-    { key: 'clipFraction', color: '#ff7285', label: '裁剪比例' }
+    { key: 'policyLoss', color: '#35dcff', label: '策略损失' }
   ]);
   drawLines($('speed-chart'), history, [
     { key: 'avgGameMs', color: '#35dcff', label: '整局毫秒', scale: .001 },
@@ -94,8 +95,11 @@ function renderRuntime(status) {
   const h = status.hardware || {}, c = status.config || {};
   const rows = [
     ['处理器', h.cpu || '—'], ['逻辑核心', h.logicalCores || '—'], ['内存', h.memoryGB ? h.memoryGB + ' GB' : '—'],
-    ['Node.js', h.runtime || '—'], ['训练进程', status.pid || '—'], ['参数量', integer(status.parameterCount)],
-    ['网络档位', c.profile || '—'], ['玩家范围', c.minPlayers ? c.minPlayers + '–' + c.maxPlayers + ' 人' : '—'],
+    ['Node.js', h.runtime || '—'], ['训练设备', h.device || 'JavaScript CPU'], ['显卡', h.gpu || '—'],
+    ['PyTorch / CUDA', h.torch ? h.torch + ' / ' + (h.cuda || 'CPU') : '—'], ['训练进程', status.pid || '—'], ['参数量', integer(status.parameterCount)],
+    ['网络档位', c.profile || '—'], ['并行自对弈', c.workers ? c.workers + ' 个进程' : '—'],
+    ['GPU 峰值显存', status.point && status.point.gpuMemoryMB ? num(status.point.gpuMemoryMB, 0) + ' MB' : '—'],
+    ['玩家范围', c.minPlayers ? c.minPlayers + '–' + c.maxPlayers + ' 人' : '—'],
     ['运行时间', status.startedAt ? duration(Date.now() - new Date(status.startedAt).getTime()) : '—']
   ];
   $('runtime-info').innerHTML = rows.map(([k, v]) => '<dt>' + k + '</dt><dd>' + v + '</dd>').join('');
