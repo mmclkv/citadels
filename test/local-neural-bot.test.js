@@ -32,7 +32,7 @@ let bot;
     assert.equal(repositoryStatus.source, 'repository');
     assert.equal(repositoryStatus.checkpoint, 'policy-default.json.gz');
     assert.equal(repositoryStatus.game, 10000, '状态接口从轻量元数据读取训练局数');
-    assert.equal(repositoryStatus.tta.variants, TTA_VARIANTS, '默认启用十六个 TTA 视图');
+    assert.equal(repositoryStatus.tta.variants, TTA_VARIANTS, '默认启用 ' + TTA_VARIANTS + ' 个 TTA 视图');
     assert.equal(repositoryStatus.tta.maxInferenceMs, MAX_INFERENCE_MS, '单步推理上限为二十秒');
 
     const dataDir = path.join(root, 'training-data');
