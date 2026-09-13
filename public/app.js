@@ -3122,6 +3122,10 @@
         render(); return;
       case 'choose_district':
         send(a); return;
+      case 'pending_back':
+        // 多步能力中撤回上一步前，先丢弃前端的多选/手选缓存，避免回退后仍残留旧选择
+        if (App.sel) { App.sel = null; }
+        send(a); return;
       default:
         send(a);
     }
