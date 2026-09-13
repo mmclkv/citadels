@@ -1750,6 +1750,9 @@
     // 先恢复原始布局再测量，避免上一次缩放结果影响下一次计算。
     root.classList.remove('mobile-fit-scaled');
     root.style.setProperty('--mobile-fit-scale', '1');
+    // PWA 大屏会同时命中 PC 选角样式。先把“我的城市”恢复到正常文档流，
+    // 再按实际 DOM 边界做最终碰撞校验，避免它盖住环形布局下排的玩家。
+    resolvePwaMeOpponentCollisions();
     const topbar = root.querySelector('.topbar');
     const board = root.querySelector('.board');
     const boardMain = root.querySelector('.board-main');
@@ -1770,6 +1773,61 @@
       root.style.setProperty('--mobile-fit-scale', scale.toFixed(4));
       root.classList.add('mobile-fit-scaled');
     }
+  }
+
+  function resolvePwaMeOpponentCollisions() {
+    const wrap = $('#opponents');
+    const me = $('#me-area');
+    if (!wrap || !me || typeof window === 'undefined') return;
+    const pwa = window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+    const active = !!pwa && wrap.dataset.layout === 'mobile-ring' &&
+      Number(wrap.dataset.players || 0) >= 5;
+    me.classList.toggle('pwa-collision-flow', active);
+    me.classList.remove('pwa-collision-compact');
+    me.style.removeProperty('--pwa-me-clearance');
+    if (!active) return;
+
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (!nodes.length) return;
+    const gap = Math.max(8, Math.min(16, Math.round(window.innerWidth * .012)));
+    const baseHeight = parseFloat(wrap.dataset.ringBaseHeight || wrap.style.height) ||
+      wrap.clientHeight || 0;
+    wrap.style.height = baseHeight + 'px';
+
+    // 先用正常流中的位置测量；若绝对定位的对手卡越过了环形容器底边，
+    // 就把容器精确撑到最后一张卡的底部，使后续的“我的城市”自然下移。
+    let wr = wrap.getBoundingClientRect();
+    let mr = me.getBoundingClientRect();
+    let requiredBottom = wr.top + baseHeight;
+    nodes.forEach(node => {
+      const r = node.getBoundingClientRect();
+      const horizontalHit = r.right + gap > mr.left && r.left - gap < mr.right;
+      if (horizontalHit) requiredBottom = Math.max(requiredBottom, r.bottom + gap);
+    });
+    const requiredHeight = Math.ceil(requiredBottom - wr.top);
+    if (requiredHeight > baseHeight) wrap.style.height = requiredHeight + 'px';
+
+    // 二次测量是真正的碰撞检测兜底。若主题样式或浏览器安全区仍造成相交，
+    // 只增加必要的间距，而不使用与设备绑定的固定偏移。
+    mr = me.getBoundingClientRect();
+    let clearance = 0;
+    nodes.forEach(node => {
+      const r = node.getBoundingClientRect();
+      const overlapX = Math.min(r.right, mr.right) - Math.max(r.left, mr.left);
+      const overlapY = Math.min(r.bottom, mr.bottom) - Math.max(r.top, mr.top);
+      if (overlapX > 0 && overlapY > 0) {
+        clearance = Math.max(clearance, Math.ceil(r.bottom + gap - mr.top));
+      }
+    });
+    if (clearance > 0) me.style.setProperty('--pwa-me-clearance', clearance + 'px');
+
+    // 总高度超过可视区时，压缩“我的城市”内部两排，但不改变卡牌长宽比。
+    // 随后的 mobile-fit 测量仍会选择可容纳整页的最大整体缩放比例。
+    const actionbar = $('#screen-game .actionbar');
+    const available = Math.max(240, window.innerHeight - (actionbar ? actionbar.offsetHeight : 0));
+    const span = me.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top;
+    me.classList.toggle('pwa-collision-compact', span > available * .96);
   }
 
   /* 领主摧毁建筑：克隆被毁建筑卡到 body 上播放摧毁动画（不受后续整局重渲染影响），并撒出碎片粒子 */
@@ -2188,6 +2246,7 @@
       : Math.max(300, Math.min(400, Math.round(viewportH * .44)));
     wrap.style.display = 'block';
     wrap.style.height = height + 'px';
+    wrap.dataset.ringBaseHeight = String(height);
     wrap.style.overflow = 'visible';
     nodes.forEach(node => {
       node.style.setProperty('--mobile-opp-width', cardWidth + 'px');
@@ -2364,6 +2423,7 @@
       if (!collided) break;
     }
     clamp();
+    wrap.dataset.ringBaseHeight = String(parseFloat(wrap.style.height) || targetHeight);
   }
 
   // 兼容旧调用名，保留旧实现，实际移动端使用上面的圆桌布局。
