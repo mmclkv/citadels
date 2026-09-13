@@ -219,15 +219,37 @@
       return false;
     } finally { clearTimeout(timer); }
   }
-  async function startAgentSingle(cfg) {
-    if (!await checkAgentServer()) return;
+  async function checkNeuralServer() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(gameServerBase() + '/api/neural/status', { cache: 'no-store', signal: controller.signal });
+      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/json')) {
+        throw new Error('当前地址没有本地神经网络后端，请启动本机游戏服务器');
+      }
+      const status = await response.json();
+      if (!status.configured) throw new Error(status.message || '服务器上没有可用的训练 checkpoint');
+      const message = status.message || ('已加载 ' + status.checkpoint);
+      ['#cfg-agent-status', '#net-agent-status'].forEach(sel => { const node = $(sel); if (node) node.textContent = message; });
+      return true;
+    } catch (e) {
+      const message = e.name === 'AbortError' || e instanceof TypeError
+        ? '无法连接本地神经网络后端，请检查游戏服务器地址' : e.message;
+      ['#cfg-agent-status', '#net-agent-status'].forEach(sel => { const node = $(sel); if (node) node.textContent = message; });
+      toast(message);
+      return false;
+    } finally { clearTimeout(timer); }
+  }
+  async function startServerBotSingle(cfg) {
+    const available = cfg.botType === 'agent' ? await checkAgentServer() : await checkNeuralServer();
+    if (!available) return;
     clearTimeout(Local.timer);
     App.mode = 'net'; App.leavingNetGame = false;
     Net.name = cfg.name;
     Net.connect(() => {
       Net.autoStart = true;
       Net.send({ t: 'createRoom', name: cfg.name, config: {
-        playerCount: cfg.players, bots: cfg.players - 1, botType: 'agent', botLevel: cfg.level,
+        playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
         endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act
       } });
     });
@@ -515,7 +537,7 @@
   const Local = {
     state: null, myId: null, timer: null, pendingMs: null,
     start(cfg) {
-      if (cfg.botType === 'agent') return startAgentSingle(cfg);
+      if (cfg.botType === 'agent' || cfg.botType === 'neural') return startServerBotSingle(cfg);
       const seats = [{ id: 'me', name: cfg.name, isBot: false }];
       for (let i = 1; i < cfg.players; i++) {
         seats.push({ id: 'bot' + i, name: '电脑 ' + i, isBot: true, botType: cfg.botType, botLevel: cfg.level });
@@ -2079,7 +2101,8 @@
       if (cs._lastHTML !== csHtml) { cs.innerHTML = csHtml; cs._lastHTML = csHtml; }
       const tags = (p.disconnected ? '<span class="tag disconnected">已断连</span>' : '') +
         (p.left ? '<span class="tag left">已离开</span>' : '') +
-        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">' + (p.botType === 'agent' ? 'AI Agent' : '电脑') + '</span>' : '');
+        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">' +
+          (p.botType === 'agent' ? 'AI Agent' : p.botType === 'neural' ? '本地神经' : '电脑') + '</span>' : '');
       const crownIcon = p.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '';
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
@@ -3163,7 +3186,7 @@
     const amHost = seats.length && seats[0].id === App.myId;
     seats.forEach((s, i) => {
       const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
-      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : '普通电脑') : (s.taken ? '真人玩家' : '可加入');
+      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : s.botType === 'neural' ? '本地神经网络' : '普通电脑') : (s.taken ? '真人玩家' : '可加入');
       d.innerHTML = '<div class="seat-no">座位 ' + (i + 1) + (i === 0 ? ' · 房主' : '') + '</div>' +
         '<div class="seat-name">' + (s.taken ? escapeHtml(s.name) : '空缺') + '</div>' +
         '<div class="seat-tag">' + (s.disconnected ? '已断连' : s.left ? '已离开' :
@@ -3176,7 +3199,7 @@
         if (s.isBot) {
           const type = el('select');
           type.setAttribute('aria-label', s.name + '的电脑类型');
-          type.innerHTML = '<option value="npc">普通电脑</option><option value="agent">AI Agent（模型）</option>';
+          type.innerHTML = '<option value="npc">普通电脑</option><option value="neural">本地神经网络</option><option value="agent">AI Agent（模型）</option>';
           type.value = s.botType || 'npc';
           type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
           ops.appendChild(type);
@@ -3314,7 +3337,7 @@
         App.speed = $('#cfg-speed').value; saveSpeed();
       }
       App.lastCfg = cfg; App.mode = 'local'; App.name = cfg.name;
-      if (cfg.botType === 'agent') { startAgentSingle(cfg); return; }
+      if (cfg.botType === 'agent' || cfg.botType === 'neural') { startServerBotSingle(cfg); return; }
       Local.start(cfg);
       showScreen('screen-game');
     };
@@ -3322,6 +3345,7 @@
     // 联机
     $('#btn-create').onclick = async () => {
       if ($('#net-bot-type').value === 'agent' && !await checkAgentServer()) return;
+      if ($('#net-bot-type').value === 'neural' && !await checkNeuralServer()) return;
       Net.name = ($('#net-name').value || '玩家').trim();
       Net.connect(() => {
         Net.send({
