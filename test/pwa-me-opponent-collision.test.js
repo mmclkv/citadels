@@ -17,6 +17,9 @@ assert.ok(/overlapX > 0 && overlapY > 0/.test(app) &&
   '使用实际 DOM 矩形的横纵交集计算必要间距');
 assert.ok(/wrap\.dataset\.ringBaseHeight/.test(app),
   '每次布局保存环形区基础高度，避免重复测量累加空白');
+assert.ok(/d\.dataset\.pushX = '0';[\s\S]{0,80}d\.dataset\.pushY = '0';/.test(app) &&
+  /d\.dataset\.pushX = String\(pushX\);[\s\S]{0,80}d\.dataset\.pushY = String\(pushY\);/.test(app),
+  '桌面圆环每次重绘重置碰撞偏移，并同步本帧的圆桌避让位移');
 assert.ok(/arena\.dataset\.layout\s*=\s*wrap\.dataset\.layout/.test(app),
   '父棋盘同步记录移动环形布局，供 PWA 解除桌面裁剪规则');
 
@@ -33,7 +36,7 @@ assert.ok(draftArenaRule && /height\s*:\s*auto!important/.test(draftArenaRule[1]
   /min-height\s*:\s*0!important/.test(draftArenaRule[1]) &&
   /overflow\s*:\s*visible!important/.test(draftArenaRule[1]),
   'PWA 环形选角棋盘按内容展开且不裁掉我的城市');
-assert.ok(/style\.css\?v=53/.test(html) && /app\.js\?v=72/.test(html),
+assert.ok(/style\.css\?v=54/.test(html) && /app\.js\?v=74/.test(html),
   '静态资源版本已更新，PWA 能获取新布局代码');
 
-console.log('PWA 我的面板与对手碰撞回归：9 项断言全部通过');
+console.log('PWA 我的面板与对手碰撞回归：10 项断言全部通过');
