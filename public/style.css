@@ -944,7 +944,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 
   .mobile-menu-toggle{position:fixed;right:18px;bottom:18px;z-index:46;
     display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border:1px solid var(--line2);border-radius:11px;
-    background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:13px;font-weight:700;cursor:pointer}
+    background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:13px;font-weight:700;cursor:pointer;
+    transition:right .2s ease,border-color .15s ease,background .15s ease}
   .mobile-menu-toggle:hover{border-color:var(--gold);background:var(--bg2)}
   #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold);border-color:var(--gold)}
 
@@ -1020,6 +1021,12 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game.draft-phase .me-area .hand-row{flex:1 1 60%;min-height:112px;max-height:none;overflow:hidden}
   #screen-game.draft-phase .me-area .city-row>.card,
   #screen-game.draft-phase .me-area .hand-row>.card{width:88px!important;height:123px!important}
+}
+
+/* 战报展开后，按战报的实际宽度移动菜单按钮与浮窗，使其继续贴住棋盘右边界。 */
+@media (min-width:821px){
+  #screen-game.log-panel-open .mobile-menu-toggle{right:calc(18px + var(--desktop-log-width,288px))}
+  #screen-game.log-panel-open.mobile-menu-open .topbar{right:calc(18px + var(--desktop-log-width,288px))}
 }
 
 /* PWA 独立窗口：无浏览器地址栏时也收起顶部菜单，改用右下角浮动菜单。 */

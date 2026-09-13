@@ -3466,7 +3466,18 @@
       // 竖屏下拉需从顶栏下沿开始：同步顶栏实际高度，避免盖住按钮也无法返回
       const tb = document.querySelector('.topbar');
       if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
-      sp.classList.toggle('show');
+      sp.classList.toggle('show', willShow);
+      // PC 端战报会占用棋盘右侧宽度；让浮动菜单继续锚定在战斗区域右下角，
+      // 而不是盖到战报内容上。移动端由媒体查询维持原有定位。
+      if (gameScreen) {
+        gameScreen.classList.toggle('log-panel-open', willShow);
+        if (willShow) {
+          gameScreen.style.setProperty('--desktop-log-width',
+            Math.ceil(sp.getBoundingClientRect().width) + 'px');
+        } else {
+          gameScreen.style.removeProperty('--desktop-log-width');
+        }
+      }
       if (willShow && App.state) renderLog(App.state);
     };
     $('#btn-again').onclick = () => {
