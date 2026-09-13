@@ -345,16 +345,22 @@
 
     switch (n.kind) {
       case 'assassin_declare':
-        if (byMe) return;
         if (holdsIt) {
           App.deathWarned = n.round;
           queueEvent({
             tone: 'danger', icon: '!', title: '你被刺杀了！', hold: 6000,
-            text: escapeHtml(n.byName) + ' 的【刺客】宣布刺杀 <b>' + n.num + ' 号角色</b>，' +
+            text: escapeHtml(n.byName) + ' 的【刺客】宣布刺杀 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || myCharName(s, n.num)) + '</b>，' +
                   '正是你的『<b>' + escapeHtml(myCharName(s, n.num)) + '</b>』。<br>' +
                   '本轮叫到它时会<b>直接跳过</b>——不能领资源、不能建造、不能用能力。'
           });
-        } else toast('! ' + n.byName + ' 宣布刺杀 ' + n.num + ' 号角色');
+        } else {
+          queueEvent({
+            tone: 'danger', icon: '!', title: '刺客已宣告目标', hold: 4600,
+            text: escapeHtml(n.byName) + ' 的【刺客】宣布刺杀 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || (n.num + ' 号角色')) + '</b>。'
+          });
+        }
         return;
 
       case 'witch_declare':
@@ -371,15 +377,21 @@
         return;
 
       case 'thief_declare':
-        if (byMe) return;
         if (holdsIt) {
           queueEvent({
             tone: 'warn', icon: '$', title: '盗贼盯上了你', hold: 5000,
-            text: escapeHtml(n.byName) + ' 的【盗贼】宣布偷窃 <b>' + n.num + ' 号角色</b>（你的『' +
+            text: escapeHtml(n.byName) + ' 的【盗贼】宣布偷窃 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || myCharName(s, n.num)) + '</b>（你的『' +
                   escapeHtml(myCharName(s, n.num)) + '』）。<br>' +
                   '轮到你时手上的金币会被<b>全部拿走</b>，建议先想好怎么花。'
           });
-        } else toast('$ ' + n.byName + ' 宣布偷窃 ' + n.num + ' 号角色');
+        } else {
+          queueEvent({
+            tone: 'warn', icon: '$', title: '盗贼已宣告目标', hold: 4600,
+            text: escapeHtml(n.byName) + ' 的【盗贼】宣布偷窃 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || (n.num + ' 号角色')) + '</b>。'
+          });
+        }
         return;
 
       case 'assassinated':
