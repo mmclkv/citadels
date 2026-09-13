@@ -52,8 +52,8 @@
     </section>
 
     <section class="chart-grid">
-      <article class="panel chart-panel"><div class="section-title"><div><h2>价值与总损失</h2><p>不再与微小的策略损失共用纵轴</p></div><span id="loss-now">—</span></div><canvas id="loss-chart"></canvas></article>
-      <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>独立纵轴；标题同步显示 KL、梯度和探索熵</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>价值与总损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="loss-now">—</span></div><canvas id="loss-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次；策略损失在 PPO 中通常围绕零波动</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>座位胜局</h2><p>用于观察先后手与座位偏差</p></div></div><canvas id="seat-chart"></canvas></article>
     </section>
@@ -64,6 +64,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=2"></script>
+  <script src="./training.js?v=3"></script>
 </body>
 </html>

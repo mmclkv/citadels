@@ -277,20 +277,27 @@ function atomicWrite(file, data) {
   fs.writeFileSync(tmp, data); fs.renameSync(tmp, file);
 }
 
+function sampleHistory(history, limit = 400) {
+  if (history.length <= limit) return history.slice();
+  const sampled = [];
+  for (let i = 0; i < limit; i++) sampled.push(history[Math.round(i * (history.length - 1) / (limit - 1))]);
+  return sampled;
+}
+
 function saveCheckpoint(model, config, game, history) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const name = 'checkpoint-' + String(game).padStart(6, '0') + '.json.gz';
-  const payload = JSON.stringify({ createdAt: new Date().toISOString(), game, config, model: model.export(), history: history.slice(-200) });
+  const payload = JSON.stringify({ createdAt: new Date().toISOString(), game, config, model: model.export(), history: sampleHistory(history) });
   atomicWrite(path.join(DATA_DIR, name), zlib.gzipSync(payload, { level: 6 }));
   return name;
 }
 
 function loadCheckpoint(model, name) {
-  if (!name) return 0;
+  if (!name) return { game: 0, history: [] };
   const file = path.join(DATA_DIR, path.basename(name));
   const payload = JSON.parse(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8'));
   model.import(payload.model);
-  return Number(payload.game) || 0;
+  return { game: Number(payload.game) || 0, history: Array.isArray(payload.history) ? payload.history : [] };
 }
 
 function send(message) { if (process.send) process.send(message); else console.log(JSON.stringify(message)); }
@@ -300,7 +307,8 @@ async function train(rawConfig, hooks = {}) {
   const config = sanitizeConfig(rawConfig);
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const model = new PolicyValueNetwork({ profile: config.profile, stateSize: STATE_SIZE, actionSize: ACTION_SIZE, seed: config.seed });
-  let completedGames = loadCheckpoint(model, config.resumeCheckpoint);
+  const restored = loadCheckpoint(model, config.resumeCheckpoint);
+  let completedGames = restored.game;
   const initialCompletedGames = completedGames;
   let stopping = false, pool = null;
   process.on('message', msg => {
@@ -313,7 +321,7 @@ async function train(rawConfig, hooks = {}) {
   }
   const startedAt = Date.now();
   const rng = mulberry32(config.seed ^ 0xA53C9E11);
-  const history = [];
+  let history = restored.history.slice();
   const recentGames = [];
   const winSeats = Array(8).fill(0);
   let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0;
@@ -372,12 +380,12 @@ async function train(rawConfig, hooks = {}) {
       winSeats: winSeats.slice(0, config.maxPlayers)
     };
     history.push(point);
-    if (history.length > 1000) history.shift();
+    if (history.length > 800) history = sampleHistory(history, 400);
     if (checkpointDue) {
       checkpoint = saveCheckpoint(model, config, completedGames, history);
       if (torch) await torch.checkpoint(checkpoint);
     }
-    send({ type: 'progress', point, history: history.slice(-400), checkpoint });
+    send({ type: 'progress', point, history: sampleHistory(history), checkpoint });
     if (hooks.onProgress) hooks.onProgress(point);
     await immediate();
   }
@@ -413,5 +421,5 @@ if (require.main === module) {
 
 module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
-  enumerateLegalActions, currentActor, STATE_SIZE, ACTION_SIZE, DATA_DIR
+  enumerateLegalActions, currentActor, sampleHistory, STATE_SIZE, ACTION_SIZE, DATA_DIR
 };
