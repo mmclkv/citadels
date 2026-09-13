@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=53">
+  <link rel="stylesheet" href="./style.css?v=54">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=11">
 </head>
 <body>
@@ -222,6 +222,7 @@
       <button class="btn tiny" id="btn-buildings">建筑一览</button>
       <button class="btn tiny" id="btn-rules-top">游戏规则</button>
       <button class="btn tiny" id="btn-log-toggle">战报</button>
+      <button class="btn tiny" id="btn-chat" type="button" hidden>发言</button>
     </div>
   </header>
 
@@ -282,6 +283,11 @@
     <div class="actions" id="actions"></div>
   </footer>
   </div>
+  <form class="chat-composer" id="chat-composer" hidden autocomplete="off">
+    <label class="sr-only" for="chat-input">输入发言内容</label>
+    <input id="chat-input" type="text" maxlength="120" enterkeyhint="send" placeholder="输入要说的话…">
+    <button class="btn primary" id="chat-send" type="submit">发送</button>
+  </form>
   <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
     <span aria-hidden="true">☰</span><span>菜单</span>
   </button>
@@ -374,6 +380,6 @@
 <script src="./src/cards.js?v=4"></script>
 <script src="./src/engine.js?v=14"></script>
 <script src="./src/ai.js?v=2"></script>
-<script src="./app.js?v=72"></script>
+<script src="./app.js?v=75"></script>
 </body>
 </html>
