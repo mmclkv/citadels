@@ -24,6 +24,6 @@ assert.ok(/#screen-game\.draft-phase \.me-area\s*\{[^}]*position\s*:\s*absolute[
   '我的城市固定在棋盘下方的当前玩家座位');
 assert.ok(/#screen-game\.draft-phase \.me-area\s*\{[^}]*height\s*:\s*clamp\(390px,46%,440px\)/.test(pc),
   '我的城市使用充足的棋盘高度，完整容纳角色、城区和手牌');
-assert.ok(/href="\.\/style\.css\?v=50"/.test(html), '样式缓存版本已更新');
+assert.ok(/href="\.\/style\.css\?v=51"/.test(html), '样式缓存版本已更新');
 
 console.log('PC 选角阶段全屏圆桌布局：8 项断言全部通过');

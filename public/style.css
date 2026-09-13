@@ -1206,6 +1206,43 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game .me-area.many-players .hand-row>.card.mini{width:34px!important;height:48px!important}
 }
 
+/* PWA 5+ 最终碰撞层：iPad 横屏也会命中 PC 选角规则，PC 规则会把我的面板
+   绝对定位到棋盘底部。这里强制它回到对手环之后的正常流，再由 app.js 按真实
+   DOM 边界提供必要间距，保证我的面板永远不会覆盖任一玩家框。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow{
+    position:relative!important;
+    left:auto!important;
+    right:auto!important;
+    top:auto!important;
+    bottom:auto!important;
+    transform:none!important;
+    height:auto!important;
+    margin-top:var(--pwa-me-clearance,8px)!important;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact{
+    grid-template-columns:minmax(76px,auto) minmax(0,1fr)!important;
+    grid-template-rows:minmax(72px,auto) minmax(68px,auto)!important;
+    min-height:150px!important;
+    max-height:190px!important;
+    padding:5px 7px!important;
+    gap:4px 7px!important;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact>.city-row,
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact>.hand-row{
+    height:68px!important;
+    max-height:68px!important;
+    padding:3px!important;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .me-char .cs-card{
+    width:42px!important;height:63px!important;aspect-ratio:2 / 3;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .city-row>.card,
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .hand-row>.card{
+    width:42px!important;height:63px!important;aspect-ratio:2 / 3;
+  }
+}
+
 /* PWA 5 人以上环形玩家框：关闭测量期间的宽度过渡，并强制建筑牌保持 2:3。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
   #screen-game .opponents.pwa-many-players .opp{transition:none!important}
