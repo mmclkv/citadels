@@ -29,7 +29,8 @@ node server.js 9000       # 指定端口
 - 默认由 4 个 Node worker 并行生成自对弈轨迹，再由 PyTorch 在 CUDA GPU 上批量执行 PPO 更新；也可选择 PyTorch CPU 或旧版 JavaScript CPU 兼容模式。
 - 使用 PPO 裁剪目标、价值损失与探索熵；控制台把策略损失放在独立纵轴，并实时显示 KL 散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
 - `fast`、`balanced`、`large` 三档约为 12.4 万、32.1 万、61.6 万参数；当前电脑建议先用 `balanced` 跑 100 局基准，再决定是否使用 `large`。
-- 模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
+- 训练过程的模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
+- 已训练 10000 局的默认推理权重发布在 `models/policy-default.json.gz`。新拉取的仓库无需复制 checkpoint，创建房间时选择“策略神经网络（仓库自带权重）”即可使用。服务器优先加载这个版本化模型；仅当它缺失时，才回退到 `training-data` 中局数最高的本地 checkpoint。
 - GPU optimizer 状态保存在同编号的 `.optimizer.pt` 文件中；旧 JavaScript checkpoint 可以直接迁移到 GPU 训练。
 
 训练控制接口只允许服务器本机调用：

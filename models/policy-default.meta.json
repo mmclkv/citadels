@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "game": 10000,
+  "profile": "balanced",
+  "backend": "gpu",
+  "trainedAt": "2026-09-13T05:07:08.272Z",
+  "sha256": "030adfbccb744d6bb72e1e50996973295f806d4b21818dd027a4e34bbe7947c1"
+}

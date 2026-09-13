@@ -89,7 +89,7 @@
         <span>电脑类型</span>
         <select id="cfg-bot-type">
           <option value="npc" selected>普通电脑（启发式）</option>
-          <option value="neural">本地神经网络（使用训练 checkpoint）</option>
+          <option value="neural">策略神经网络（仓库自带权重）</option>
           <option value="agent">AI Agent 电脑（大模型决策，需要联网）</option>
         </select>
       </label>
@@ -121,9 +121,9 @@
         <input id="cfg-name" type="text" value="我" maxlength="10">
       </label>
     </div>
-    <label class="field"><span>游戏服务器地址（AI Agent / 本地神经网络需要；留空使用当前站点）</span>
+    <label class="field"><span>游戏服务器地址（AI Agent / 策略神经网络需要；留空使用当前站点）</span>
       <input id="cfg-server" type="url" placeholder="https://你的游戏服务器"></label>
-    <p class="dim small" id="cfg-agent-status" role="status">普通电脑可以离线玩；AI Agent 和本地神经网络通过游戏服务器运行。</p>
+    <p class="dim small" id="cfg-agent-status" role="status">普通电脑可以离线玩；AI Agent 和策略神经网络通过游戏服务器运行。</p>
     <div class="btn-row">
       <button class="btn ghost" data-goto="home">返回</button>
       <button class="btn primary" id="btn-start-single">开始游戏</button>
@@ -139,7 +139,7 @@
     <div id="lobby-pre">
       <label class="field"><span>游戏服务器地址（留空使用当前站点）</span>
         <input id="net-server" type="url" placeholder="https://你的游戏服务器"></label>
-      <p class="dim small" id="net-agent-status" role="status">AI Agent 需要模型服务；本地神经网络自动使用服务器上的最新 checkpoint。</p>
+      <p class="dim small" id="net-agent-status" role="status">AI Agent 需要模型服务；策略神经网络可直接使用仓库自带权重。</p>
       <div class="lobby-cols">
         <div class="lobby-box">
           <h3>创建房间</h3>
@@ -156,7 +156,7 @@
               <option value="2">2 个电脑</option><option value="3">3 个电脑</option><option value="4">4 个电脑</option></select>
           </label>
           <label class="field"><span>电脑类型</span>
-            <select id="net-bot-type"><option value="npc" selected>普通电脑（启发式）</option><option value="neural">本地神经网络（训练 checkpoint）</option><option value="agent">AI Agent 电脑（大模型决策）</option></select>
+            <select id="net-bot-type"><option value="npc" selected>普通电脑（启发式）</option><option value="neural">策略神经网络（仓库自带权重）</option><option value="agent">AI Agent 电脑（大模型决策）</option></select>
           </label>
           <label class="field"><span>结束条件</span>
             <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
@@ -374,6 +374,6 @@
 <script src="./src/cards.js?v=4"></script>
 <script src="./src/engine.js?v=13"></script>
 <script src="./src/ai.js?v=2"></script>
-<script src="./app.js?v=69"></script>
+<script src="./app.js?v=70"></script>
 </body>
 </html>

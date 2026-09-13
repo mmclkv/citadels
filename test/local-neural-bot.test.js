@@ -16,6 +16,21 @@ try {
   assert.equal(bot.status().configured, false, '没有 checkpoint 时神经网络电脑不可用');
   assert.throws(() => bot.decide({}, 'missing'), /checkpoint/, '没有 checkpoint 时给出明确错误');
 
+  const repositoryDir = path.join(root, 'models');
+  fs.mkdirSync(repositoryDir, { recursive: true });
+  const repositoryModel = new PolicyValueNetwork({ profile: 'fast', seed: 66 });
+  fs.writeFileSync(path.join(repositoryDir, 'policy-default.json.gz'), zlib.gzipSync(JSON.stringify({
+    game: 10000, config: { profile: 'fast' }, model: repositoryModel.export(), history: []
+  })));
+  fs.writeFileSync(path.join(repositoryDir, 'policy-default.meta.json'), JSON.stringify({
+    game: 10000, profile: 'fast'
+  }));
+  const repositoryStatus = bot.status();
+  assert.equal(repositoryStatus.configured, true, '干净 checkout 可直接发现仓库默认模型');
+  assert.equal(repositoryStatus.source, 'repository');
+  assert.equal(repositoryStatus.checkpoint, 'policy-default.json.gz');
+  assert.equal(repositoryStatus.game, 10000, '状态接口从轻量元数据读取训练局数');
+
   const dataDir = path.join(root, 'training-data');
   fs.mkdirSync(dataDir, { recursive: true });
   const model = new PolicyValueNetwork({ profile: 'fast', seed: 77 });
@@ -23,10 +38,14 @@ try {
   fs.writeFileSync(path.join(dataDir, 'checkpoint-000321.json.gz'),
     zlib.gzipSync(JSON.stringify(payload)));
 
+  const repositoryPreferred = bot.status();
+  assert.equal(repositoryPreferred.source, 'repository', '房间始终优先使用版本化仓库模型');
+  fs.rmSync(path.join(repositoryDir, 'policy-default.json.gz'));
   const status = bot.status();
   assert.equal(status.configured, true);
   assert.equal(status.checkpoint, 'checkpoint-000321.json.gz');
   assert.equal(status.game, 321);
+  assert.equal(status.source, 'training', '仓库模型缺失时可回退到本地训练 checkpoint');
 
   const seats = Array.from({ length: 4 }, (_, i) => ({
     id: 'neural-' + i, name: '神经网络 ' + (i + 1), isBot: true, botType: 'neural'
