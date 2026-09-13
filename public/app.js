@@ -2100,7 +2100,12 @@
     wrap.dataset.players = String(totalPlayers);
     wrap.dataset.layout = mobileRingLayout ? 'mobile-ring' : 'ring';
     const arena = $('#table-arena');
-    if (arena) arena.dataset.players = String(totalPlayers);
+    if (arena) {
+      arena.dataset.players = String(totalPlayers);
+      // PWA 横屏可能同时命中桌面选角规则。把实际布局模式同步给父容器，
+      // 让 CSS 能解除固定高度与裁剪，确保后面的“我的城市”参与整页适配。
+      arena.dataset.layout = wrap.dataset.layout;
+    }
     // 多人时顶部玩家卡片更容易向下延伸，圆桌下移到环形座位的空白中心，避免相互覆盖。
     const me = s.players.find(p => p.id === App.myId);
     const meSeat = me ? me.seat : 0;

@@ -1217,6 +1217,18 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
    绝对定位到棋盘底部。这里强制它回到对手环之后的正常流，再由 app.js 按真实
    DOM 边界提供必要间距，保证我的面板永远不会覆盖任一玩家框。 */
 @media (display-mode:standalone), (display-mode:fullscreen){
+  /* iPad 横屏会命中桌面选角布局；桌面规则原本把棋盘固定高度并裁剪溢出，
+     导致回到正常流的“我的城市”整块落在裁剪区外。环形移动布局必须按
+     对手区 + 我的城市的实际高度展开，再交给 mobile-fit 做整页缩放。 */
+  #screen-game.draft-phase .table-arena[data-layout="mobile-ring"]{
+    flex:0 0 auto!important;
+    height:auto!important;
+    min-height:0!important;
+    overflow:visible!important;
+  }
+  #screen-game.draft-phase .table-arena[data-layout="mobile-ring"]>.opponents{
+    flex:0 0 auto!important;
+  }
   #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow{
     position:relative!important;
     left:auto!important;
