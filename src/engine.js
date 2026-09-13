@@ -668,10 +668,11 @@
         return { prompt: '【魔术师】选择与谁交换手牌', actions: otherPlayers(state, t.playerIdx).map(i => ({
           type: 'choose_player', target: state.players[i].id,
           label: state.players[i].name + '（' + state.players[i].hand.length + ' 张手牌）'
-        }))};
+        })).concat([{ type: 'pending_back', to: 'magician_choice', label: '« 返回上一步', disabled: true }]) };
       case 'magician_redraw':
         return { prompt: '【魔术师】选择要弃掉的手牌（可留空）', actions: [
-          { type: 'choose_cards', uids: [], label: '确定（可点选手牌后再确定）' }
+          { type: 'choose_cards', uids: [], label: '确定（可点选手牌后再确定）' },
+          { type: 'pending_back', to: 'magician_choice', label: '« 返回上一步', disabled: true }
         ], selectable: 'hand', multi: true };
       case 'warlord_destroy':
         return { prompt: '【领主】选择要摧毁的建筑', actions: destroyChoices(state, t) };
@@ -683,7 +684,9 @@
         return { prompt: '【外交官】选择你自己的一栋建筑用于交换', actions: acts };
       }
       case 'diplomat_theirs':
-        return { prompt: '【外交官】选择要换取的建筑', actions: diplomatTargets(state, t) };
+        return { prompt: '【外交官】选择要换取的建筑', actions: diplomatTargets(state, t).concat([
+          { type: 'pending_back', to: 'diplomat_mine', label: '« 返回上一步', disabled: true }
+        ]) };
       case 'artist': {
         const chosen = pd.selected || [];
         // 已达 2 栋上限或金币不足时，不要再给出建筑选项：
@@ -725,7 +728,8 @@
       case 'emperor_take':
         return { prompt: '【皇帝】从 ' + state.players[pd.targetIdx].name + ' 处拿取', actions: [
           { type: 'emperor_take', mode: 'gold', label: '拿 1 枚金币' },
-          { type: 'emperor_take', mode: 'card', label: '随机拿 1 张手牌' }
+          { type: 'emperor_take', mode: 'card', label: '随机拿 1 张手牌' },
+          { type: 'pending_back', to: 'emperor_crown', label: '« 返回上一步（重新选皇冠对象）', disabled: true }
         ]};
       case 'prophet_give':
         return { prompt: '【预言家】还给 ' + state.players[pd.targetIdx].name + ' 一张手牌', actions:
@@ -1233,7 +1237,8 @@
           fromIdx: fromIdx, fromId: fromPlayer && fromPlayer.id, fromName: fromPlayer && fromPlayer.name,
           toIdx: ti, toId: state.players[ti].id, toName: state.players[ti].name
         });
-        t.pending = { kind: 'emperor_take', targetIdx: ti };
+        // 记下皇冠原持有者，供「返回上一步」时还回去
+        t.pending = { kind: 'emperor_take', targetIdx: ti, _fromCrownIdx: fromIdx };
         return ok();
       }
       case 'emperor_take': {
@@ -1283,6 +1288,40 @@
         return ok();
       }
       case 'reaction': return err('请使用响应接口');
+
+      /* ---------- 退回上一步（仅限安全子步骤） ---------- */
+      case 'pending_back': {
+        const pd = t.pending;
+        if (!pd) return err('当前没有可退回的选择');
+        const target = action.to;
+        if (!target) return err('此步骤不能退回');
+        // 1) 魔术师：swap / redraw → 退回 choice（无副作用，弃牌还没真丢）
+        if ((pd.kind === 'magician_swap' || pd.kind === 'magician_redraw') && target === 'magician_choice') {
+          t.pending = { kind: 'magician_choice' };
+          log(state, p.name + ' 退回到【魔术师】能力选择。', 'info');
+          return ok();
+        }
+        // 2) 外交官：theirs → 退回 mine（无副作用，还未真正交换）
+        if (pd.kind === 'diplomat_theirs' && target === 'diplomat_mine') {
+          t.pending = { kind: 'diplomat_mine' };
+          log(state, p.name + ' 退回到【外交官】选择要交出的建筑。', 'info');
+          return ok();
+        }
+        // 3) 皇帝：take → 退回 crown（必须把皇冠还给原持有者）
+        if (pd.kind === 'emperor_take' && target === 'emperor_crown') {
+          const prev = pd._fromCrownIdx;
+          if (prev == null || prev < 0 || prev >= state.players.length) {
+            // 没记录原持有者（例如旧存档/老回合遗留）就降级：直接退回步骤但不还皇冠
+            log(state, p.name + ' 退回到【皇帝】选择皇冠对象（无法定位原皇冠持有者）。', 'info');
+          } else {
+            setCrown(state, prev);
+            log(state, '【皇帝】' + p.name + ' 收回皇冠，转回 ' + state.players[prev].name + '。', 'info');
+          }
+          t.pending = { kind: 'emperor_crown' };
+          return ok();
+        }
+        return err('此步骤不能退回');
+      }
 
       /* ---------- 结束回合 ---------- */
       case 'end_turn': {
