@@ -1069,17 +1069,27 @@
       case 'choose_char': {
         const pd = t.pending;
         if (!pd) return err('当前无需选择角色');
+        const targetId = (state.charDeck || []).find(id => charOf(id).num === action.num);
+        const targetChar = targetId ? charOf(targetId) : null;
+        const targetName = targetChar ? targetChar.name : '未知角色';
+        const targetText = action.num + ' 号角色『' + targetName + '』';
         if (pd.kind === 'assassin') {
           state.effects.assassinated = action.num;
           t.abilityUsed = true; t.pending = null;
-          log(state, '【刺客】' + p.name + ' 宣布刺杀 ' + action.num + ' 号角色。', 'bad');
-          notify(state, 'assassin_declare', { num: action.num, byIdx: idx, byId: p.id, byName: p.name });
+          log(state, '【刺客】' + p.name + ' 宣布刺杀 ' + targetText + '。', 'bad');
+          notify(state, 'assassin_declare', {
+            num: action.num, charId: targetId || '', charName: targetName,
+            byIdx: idx, byId: p.id, byName: p.name
+          });
         } else if (pd.kind === 'thief') {
           state.effects.thief = action.num;
           state.effects.thiefBy = idx;
           t.abilityUsed = true; t.pending = null;
-          log(state, '【盗贼】' + p.name + ' 宣布偷窃 ' + action.num + ' 号角色。', 'bad');
-          notify(state, 'thief_declare', { num: action.num, byIdx: idx, byId: p.id, byName: p.name });
+          log(state, '【盗贼】' + p.name + ' 宣布偷窃 ' + targetText + '。', 'bad');
+          notify(state, 'thief_declare', {
+            num: action.num, charId: targetId || '', charName: targetName,
+            byIdx: idx, byId: p.id, byName: p.name
+          });
         } else if (pd.kind === 'witch_target') {
           state.effects.bewitched = action.num;
           state.effects.witchBy = idx;
