@@ -17,6 +17,8 @@ assert.ok(/overlapX > 0 && overlapY > 0/.test(app) &&
   '使用实际 DOM 矩形的横纵交集计算必要间距');
 assert.ok(/wrap\.dataset\.ringBaseHeight/.test(app),
   '每次布局保存环形区基础高度，避免重复测量累加空白');
+assert.ok(/arena\.dataset\.layout\s*=\s*wrap\.dataset\.layout/.test(app),
+  '父棋盘同步记录移动环形布局，供 PWA 解除桌面裁剪规则');
 
 const flowRule = /\.me-area\.pwa-collision-flow\s*\{([^}]*)\}/.exec(css);
 assert.ok(flowRule, 'PWA 碰撞布局拥有独立样式');
@@ -26,7 +28,12 @@ assert.ok(/position\s*:\s*relative!important/.test(flowRule[1]) &&
   'PWA 下覆盖 PC 选角阶段的绝对定位，让我的面板回到正常流');
 assert.ok(/#screen-game #opponents\[data-layout="mobile-ring"\] ~ \.me-area\.pwa-collision-flow\.pwa-collision-compact/.test(css),
   '空间不足时提供保持 2:3 卡牌比例的紧凑布局');
-assert.ok(/style\.css\?v=51/.test(html) && /app\.js\?v=68/.test(html),
+const draftArenaRule = /#screen-game\.draft-phase \.table-arena\[data-layout="mobile-ring"\]\s*\{([^}]*)\}/.exec(css);
+assert.ok(draftArenaRule && /height\s*:\s*auto!important/.test(draftArenaRule[1]) &&
+  /min-height\s*:\s*0!important/.test(draftArenaRule[1]) &&
+  /overflow\s*:\s*visible!important/.test(draftArenaRule[1]),
+  'PWA 环形选角棋盘按内容展开且不裁掉我的城市');
+assert.ok(/style\.css\?v=53/.test(html) && /app\.js\?v=71/.test(html),
   '静态资源版本已更新，PWA 能获取新布局代码');
 
-console.log('PWA 我的面板与对手碰撞回归：7 项断言全部通过');
+console.log('PWA 我的面板与对手碰撞回归：9 项断言全部通过');
