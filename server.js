@@ -15,12 +15,14 @@ const CitAI = require('./src/ai.js');
 const AgentModule = require('./src/agent.js');
 const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
 const TrainingManagerModule = require('./lib/training-manager.js');
+const LocalNeuralBotModule = require('./lib/local-neural-bot.js');
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
 const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT });
+const localNeuralBot = LocalNeuralBotModule.createLocalNeuralBot({ root: ROOT });
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 20000;
@@ -66,6 +68,16 @@ const AgentBackend = {
   status: agentStatus,
   decide: (...args) => CitAgent.decide(...args)
 };
+
+function normalizeBotType(value) {
+  return value === 'agent' || value === 'neural' ? value : 'npc';
+}
+
+function botTypeError(type) {
+  if (type === 'agent' && !agentStatus().configured) return agentStatus().message;
+  if (type === 'neural' && !localNeuralBot.status().configured) return localNeuralBot.status().message;
+  return '';
+}
 
 /* ------------------------------ 静态资源 ------------------------------ */
 const MIME = {
@@ -140,7 +152,7 @@ function createRoom(hostName, config) {
   seats.push({ id: genId('p'), name: hostName, resumeToken: genResumeToken(), isBot: false, taken: true,
     disconnected: false, left: false });
   for (let i = 0; i < bots; i++) {
-    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botType: config.botType === 'agent' ? 'agent' : 'npc', botLevel: config.botLevel || 'normal', taken: true });
+    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botType: normalizeBotType(config.botType), botLevel: config.botLevel || 'normal', taken: true });
   }
   for (let i = seats.length; i < total; i++) seats.push({ id: null, name: '', isBot: false, taken: false,
     disconnected: false, left: false });
@@ -152,7 +164,7 @@ function createRoom(hostName, config) {
       endDistricts: config.endDistricts || 8,
       charSetMode: config.charSetMode || 'base',
       botLevel: config.botLevel || 'normal',
-      botType: config.botType === 'agent' ? 'agent' : 'npc',
+      botType: normalizeBotType(config.botType),
       // 房主在开局设置里选的节奏（= 普通动作的间隔毫秒），服务器上的机器人按它减速
       botPace: Number(config.botPace) || 430
     },
@@ -206,6 +218,9 @@ function startRoom(r) {
   const usesAgent = seats.some(s => s.isBot && s.botType === 'agent') ||
     (seats.length < r.config.playerCount && r.config.botType === 'agent');
   if (usesAgent && !agentStatus().configured) return { error: agentStatus().message };
+  const usesNeural = seats.some(s => s.isBot && s.botType === 'neural') ||
+    (seats.length < r.config.playerCount && r.config.botType === 'neural');
+  if (usesNeural && !localNeuralBot.status().configured) return { error: localNeuralBot.status().message };
   // 空缺座位自动补电脑
   const filled = seats.slice();
   let bi = 1;
@@ -334,7 +349,7 @@ function currentActor(state) {
 }
 
 const botDriver = require('./lib/bot-driver.js').createBotDriver({
-  Engine: CitEngine, AI: CitAI, agent: AgentBackend, currentActor,
+  Engine: CitEngine, AI: CitAI, agent: AgentBackend, neural: localNeuralBot, currentActor,
   send: sendPersonal, delay: botDelayFor
 });
 function botTick(r) { botDriver.tick(r); }
@@ -434,8 +449,9 @@ function handle(ws, info, msg) {
       break;
 
     case 'createRoom': {
-      if (msg.config && msg.config.botType === 'agent' && !agentStatus().configured) {
-        wsSend(ws, JSON.stringify({ t: 'error', error: agentStatus().message })); break;
+      const backendError = botTypeError(msg.config && msg.config.botType);
+      if (backendError) {
+        wsSend(ws, JSON.stringify({ t: 'error', error: backendError })); break;
       }
       const r = createRoom(msg.name || info.name || '房主', msg.config || {});
       info.roomId = r.id;
@@ -516,9 +532,10 @@ function handle(ws, info, msg) {
       if (i === 0) break;
       const s = r.seats[i];
       if (msg.kind === 'bot') {
-        const botType = msg.botType === 'npc' ? 'npc' : msg.botType === 'agent' ? 'agent' : r.config.botType;
-        if (botType === 'agent' && !agentStatus().configured) {
-          wsSend(ws, JSON.stringify({ t: 'error', error: agentStatus().message })); break;
+        const botType = msg.botType ? normalizeBotType(msg.botType) : r.config.botType;
+        const backendError = botTypeError(botType);
+        if (backendError) {
+          wsSend(ws, JSON.stringify({ t: 'error', error: backendError })); break;
         }
         r.seats[i] = { id: s.isBot ? s.id : genId('b'), name: '电脑 ' + i, isBot: true, botType, botLevel: r.config.botLevel || 'normal', taken: true,
           disconnected: false, left: false };
@@ -660,6 +677,10 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
     return res.end(JSON.stringify(agentStatus()));
   }
+  if (req.url === '/api/neural/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify(localNeuralBot.status()));
+  }
   if (req.url === '/api/rooms') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ rooms: Object.values(rooms).map(publicRoom) }));
@@ -750,5 +771,6 @@ server.listen(PORT, () => {
   nets.forEach(a => console.log('  局域网访问：http://' + a + ':' + PORT));
   if (useLocalCodex) console.log('  AI Agent：  本机 ' + localCodex.version + '（无需另配 API）');
   else console.log('  AI Agent：  ' + agentStatus().message);
+  console.log('  本地神经网络：' + localNeuralBot.status().message);
   console.log('');
 });
