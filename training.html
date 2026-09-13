@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>本地神经网络训练 · 富饶之城</title>
+  <link rel="stylesheet" href="./training.css?v=2">
+</head>
+<body>
+  <header class="train-header">
+    <div><p class="eyebrow">CITADELS SELF-PLAY LAB</p><h1>本地策略神经网络训练</h1></div>
+    <div class="header-actions"><span id="status-badge" class="status idle">空闲</span><a href="./">返回游戏</a></div>
+  </header>
+
+  <main>
+    <section class="panel controls">
+      <div class="section-title"><div><h2>训练任务</h2><p>所有座位共享同一神经网络，仅使用各自可见状态进行自对弈。</p></div></div>
+      <form id="train-form">
+        <label><span>目标对局数</span><input id="target-games" type="number" min="1" max="1000000" value="10000"></label>
+        <label><span>最少玩家</span><select id="min-players"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+        <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option></select></label>
+        <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
+        <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
+        <label><span>训练设备</span><select id="backend"><option value="gpu" selected>CUDA GPU</option><option value="cpu">PyTorch CPU</option><option value="js">兼容 JS CPU</option></select></label>
+        <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" max="0.01" step="0.00001" value="0.0003"></label>
+        <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="32" value="4"></label>
+        <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="4"></label>
+        <label><span>PPO 训练轮数</span><input id="ppo-epochs" type="number" min="1" max="6" value="2"></label>
+        <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" max="2048" step="32" value="256"></label>
+        <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="100"></label>
+        <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
+        <label><span>继续已有训练</span><select id="resume-checkpoint"><option value="">从头训练</option></select></label>
+      </form>
+      <div class="control-row">
+        <button id="start-training" class="primary">开始训练</button>
+        <button id="stop-training" class="danger" disabled>停止训练</button>
+        <span id="control-message" role="status"></span>
+      </div>
+      <div class="progress-track"><div id="progress-bar"></div></div>
+      <div class="progress-caption"><span id="progress-text">0 / 0 局</span><span id="eta">预计剩余：—</span></div>
+    </section>
+
+    <section class="metrics" aria-label="关键训练指标">
+      <article><span>已完成</span><strong id="m-games">0</strong><small>局</small></article>
+      <article><span>训练速度</span><strong id="m-speed">—</strong><small>局/分钟</small></article>
+      <article><span>平均整局</span><strong id="m-game-ms">—</strong><small>秒</small></article>
+      <article><span>单步推理</span><strong id="m-inference">—</strong><small>毫秒</small></article>
+      <article><span>总决策步</span><strong id="m-steps">0</strong><small>步</small></article>
+      <article><span>平均轮数</span><strong id="m-rounds">—</strong><small>轮</small></article>
+      <article><span>平均分数</span><strong id="m-score">—</strong><small>分</small></article>
+      <article><span>非法行动兜底</span><strong id="m-fallbacks">0</strong><small>次</small></article>
+    </section>
+
+    <section class="chart-grid">
+      <article class="panel chart-panel"><div class="section-title"><div><h2>价值与总损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="loss-now">—</span></div><canvas id="loss-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次；策略损失在 PPO 中通常围绕零波动</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>座位胜局</h2><p>用于观察先后手与座位偏差</p></div></div><canvas id="seat-chart"></canvas></article>
+    </section>
+
+    <section class="detail-grid">
+      <article class="panel info-panel"><h2>运行信息</h2><dl id="runtime-info"></dl></article>
+      <article class="panel info-panel"><h2>Checkpoint</h2><div id="checkpoints" class="checkpoint-list"><p>暂无存档</p></div></article>
+      <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
+    </section>
+  </main>
+  <script src="./training.js?v=3"></script>
+</body>
+</html>

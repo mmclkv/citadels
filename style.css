@@ -1,0 +1,1512 @@
+/* =======================================================================
+   富饶之城 — 样式（浅色 · 羊皮纸中世纪风）
+   ======================================================================= */
+:root{
+  --bg:#f4ece0;
+  --bg2:#efe4d4;
+  --paper:#fdf8ef;
+  --ink:#33291f;
+  --ink2:#6b5c48;
+  --dim:#9b8a74;
+  --line:#dfcdb2;
+  --line2:#cbb694;
+  --gold:#c8952b;
+  --gold-l:#f0d79a;
+  --shadow:0 2px 10px rgba(80,60,30,.10);
+  --shadow2:0 6px 22px rgba(80,60,30,.16);
+
+  --c-yellow:#e3ae33;  --c-yellow-d:#a97c15;
+  --c-blue:#4a86cc;    --c-blue-d:#2c5f9c;
+  --c-green:#48a86f;   --c-green-d:#2f7a4c;
+  --c-red:#d2584a;     --c-red-d:#a53b30;
+  --c-purple:#8f63c9;  --c-purple-d:#653fa0;
+}
+*{box-sizing:border-box}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+body{
+  margin:0;background:
+    radial-gradient(1200px 700px at 50% -10%, #fbf5ea 0%, transparent 60%),
+    var(--bg);
+  color:var(--ink);
+  font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit}
+h1,h2,h3{margin:0;font-weight:700;letter-spacing:.02em}
+a{color:var(--gold-d, #a97c15)}
+
+/* ------------------------------ 屏幕切换 ------------------------------ */
+.screen{display:none;height:100vh;height:100dvh;overflow:hidden}
+.screen.active{display:flex;flex-direction:column}
+.mobile-fit-root{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;transform-origin:top left}
+.mobile-menu-toggle{display:none}
+#screen-home.active,#screen-setup.active,#screen-lobby.active,#screen-over.active{
+  align-items:center;justify-content:center;overflow:auto;padding:24px;
+}
+
+/* ------------------------------ 主菜单 ------------------------------ */
+.home-wrap{max-width:820px;text-align:center}
+.home-title{margin-bottom:18px}
+.home-title .crown{font-size:52px;color:var(--gold);line-height:1;filter:drop-shadow(0 3px 4px rgba(0,0,0,.12))}
+.home-title h1{font-size:46px;letter-spacing:.16em;margin:6px 0 2px;
+  background:linear-gradient(180deg,#8a6a1f,#c8952b 60%,#e0b557);-webkit-background-clip:text;background-clip:text;color:transparent}
+.home-title .sub{color:var(--dim);letter-spacing:.34em;font-size:12px;margin:0}
+.home-desc{color:var(--ink2);max-width:600px;margin:0 auto 26px;font-size:14px}
+.home-modes{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.mode-card{
+  width:206px;padding:22px 16px;background:var(--paper);border:1px solid var(--line);
+  border-radius:14px;cursor:pointer;box-shadow:var(--shadow);transition:.18s;text-align:center;color:var(--ink);
+}
+.mode-card:hover{transform:translateY(-3px);box-shadow:var(--shadow2);border-color:var(--gold)}
+.mode-card.training-link{text-decoration:none;color:var(--ink)}
+.mode-icon{font-size:30px;margin-bottom:6px}
+.mode-name{font-weight:700;font-size:16px;margin-bottom:4px}
+.mode-tip{font-size:12px;color:var(--dim)}
+.home-foot{margin-top:26px;font-size:12px;color:var(--dim)}
+.home-foot a{color:#a97c15;text-decoration:none}
+.home-foot a:hover{text-decoration:underline}
+
+/* ------------------------------ 面板 ------------------------------ */
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:16px;
+  padding:24px 26px;box-shadow:var(--shadow2);width:min(680px,94vw)}
+.wide-panel{width:min(880px,95vw)}
+.panel h2{font-size:20px;margin-bottom:18px;color:#5a4520;
+  border-bottom:2px solid var(--gold-l);padding-bottom:10px}
+
+/* ------------------------------ 表单 ------------------------------ */
+.setup-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.field>span{font-size:12px;color:var(--ink2);font-weight:600}
+.field.inline{flex-direction:row;align-items:center;gap:6px;margin:0}
+.field.inline>span{white-space:nowrap}
+input,select{
+  padding:9px 11px;border:1px solid var(--line2);border-radius:9px;background:#fffdf8;
+  color:var(--ink);font-size:14px;font-family:inherit;outline:none;transition:.15s;width:100%}
+input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.16)}
+.btn{
+  padding:9px 16px;border-radius:9px;border:1px solid var(--line2);background:#fffdf8;
+  color:var(--ink);cursor:pointer;font-size:14px;transition:.15s;font-weight:600}
+.btn:hover{background:#fdf4e2;border-color:var(--gold)}
+.btn.primary{background:linear-gradient(180deg,#d9a836,#c0881f);color:#fff;border-color:#a97c15}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.ghost{background:transparent}
+.btn.tiny{padding:4px 10px;font-size:12px;border-radius:7px}
+.btn.block{width:100%;margin-top:6px}
+.btn-row{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.dim{color:var(--dim)}
+.small{font-size:12px}
+
+/* ------------------------------ 大厅 ------------------------------ */
+.lobby-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.lobby-box{background:#fffdf7;border:1px solid var(--line);border-radius:12px;padding:16px}
+.lobby-box h3{font-size:14px;color:#7a5c22;margin-bottom:12px}
+.room-list{margin-top:14px;max-height:230px;overflow:auto;display:flex;flex-direction:column;gap:7px}
+.room-item{display:flex;justify-content:space-between;align-items:center;padding:8px 11px;
+  border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer;transition:.15s}
+.room-item:hover{border-color:var(--gold);background:#fffaf0}
+.room-item .ri-code{font-weight:700;color:var(--gold);letter-spacing:.1em}
+.room-item .ri-info{font-size:12px;color:var(--dim)}
+.room-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px}
+.room-code{font-size:13px;color:var(--ink2)}
+.room-code b{font-size:24px;color:var(--gold);letter-spacing:.22em;margin-left:6px}
+.room-cfg{display:flex;gap:14px;flex-wrap:wrap}
+.seat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.seat{border:1px dashed var(--line2);border-radius:11px;padding:11px;background:#fffdf7;
+  display:flex;flex-direction:column;gap:7px;min-height:96px}
+.seat.taken{border-style:solid;border-color:var(--line)}
+.seat.me{border-color:var(--gold);background:#fffaef;box-shadow:0 0 0 3px rgba(200,149,43,.12)}
+.seat .seat-no{font-size:11px;color:var(--dim);font-weight:700}
+.seat .seat-name{font-weight:700;font-size:15px;word-break:break-all}
+.seat .seat-tag{font-size:11px;color:var(--dim)}
+.seat .seat-ops{display:flex;gap:6px;margin-top:auto}
+
+/* ============================== 对局 ============================== */
+.topbar{
+  flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:8px 16px;background:linear-gradient(180deg,#fffdf7,#f7efdf);
+  border-bottom:1px solid var(--line);box-shadow:0 1px 6px rgba(80,60,30,.06);z-index:5}
+.tb-left,.tb-mid,.tb-right{display:flex;align-items:center;gap:8px}
+.tb-title{font-weight:700;color:#6a4f18}
+.chip{background:#fff;border:1px solid var(--line);border-radius:20px;padding:3px 11px;font-size:12px;color:var(--ink2)}
+.chip b{color:var(--ink)}
+.board{flex:1 1 auto;display:flex;min-height:0}
+.board-main{flex:1 1 auto;overflow:auto;padding:14px 16px 16px;min-width:0}
+.side-panel{flex:0 0 288px;border-left:1px solid var(--line);background:#fdf9f1;
+  display:none;flex-direction:column;min-height:0}
+/* 桌面端默认隐藏，点「战报」后在右侧出现栏位，再点收起 */
+.side-panel.show{display:flex;flex:0 0 288px}
+.side-panel h3{font-size:13px;padding:10px 14px;border-bottom:1px solid var(--line);color:#7a5c22}
+.log{flex:1 1 auto;overflow:auto;padding:10px 14px;font-size:12.5px;line-height:1.65}
+.log div{padding:2px 0;border-bottom:1px dotted rgba(200,180,150,.4)}
+.log .sys{color:#8a7550;font-weight:600}
+.log .round{color:#a97c15;font-weight:700;background:#fdf3dd;margin:4px -14px;padding:5px 14px;border-radius:5px}
+.log .good{color:#2f7a4c}
+.log .bad{color:#a53b30}
+.log .magic{color:#653fa0}
+.log .build{color:#2c5f9c}
+.log .crown{color:#a97c15;font-weight:600}
+.log .score{color:#5a4520;font-weight:700}
+@media(max-width:1000px){.side-panel{display:none}.side-panel.show{display:flex;position:fixed;right:0;top:52px;bottom:60px;width:300px;z-index:20}}
+
+/* ------------------------------ 卡牌 ------------------------------ */
+.card{
+  position:relative;width:76px;height:106px;border-radius:8px;background:#fffdf8;
+  border:1px solid var(--line2);box-shadow:var(--shadow);flex:0 0 auto;
+  display:flex;flex-direction:column;overflow:hidden;transition:.15s;user-select:none}
+.card.clickable{cursor:pointer;border-color:#d9b45f}
+.card.clickable:hover{transform:translateY(-5px);box-shadow:var(--shadow2);border-color:var(--gold)}
+.card.selected{outline:3px solid var(--gold);transform:translateY(-6px)}
+/* 选择建筑模式：目标高亮 + 呼吸动画（手机端无 hover，必须常驻可见） */
+.card.pickable{
+  border-color:var(--gold)!important;
+  box-shadow:0 0 0 2px rgba(200,149,43,.45),0 4px 14px rgba(200,149,43,.35)!important;
+  animation:pickPulse 1.5s ease-in-out infinite}
+.card.pickable::after{
+  content:'▼';position:absolute;top:-9px;right:3px;color:var(--gold);
+  font-size:12px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+@keyframes pickPulse{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){
+  .card.pickable{animation:none}
+}
+.card.disabled{opacity:.42;filter:grayscale(.6);cursor:not-allowed}
+.card .c-top{height:4px;flex:0 0 auto}
+.card .c-cost{position:absolute;top:8px;left:6px;width:20px;height:20px;border-radius:50%;
+  background:linear-gradient(180deg,#f3d485,#c8952b);color:#5a3f06;font-size:11px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.22);z-index:2}
+.card .c-name{writing-mode:vertical-rl;text-orientation:upright;flex:1 1 auto;display:flex;
+  align-items:center;justify-content:center;font-size:14px;font-weight:700;letter-spacing:.06em;padding:22px 0 4px}
+.card .c-en{flex:0 0 auto;text-align:center;font-size:7.5px;color:var(--dim);
+  padding:2px 3px;letter-spacing:.02em;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.card .c-badges{position:absolute;bottom:2px;right:3px;display:flex;gap:2px;font-size:10px}
+.museum-stack{position:absolute;left:5px;bottom:5px;width:40px;height:29px;z-index:4;pointer-events:none}
+.museum-stack-card{position:absolute;left:calc(var(--stack-index) * 4px);bottom:calc(var(--stack-index) * 3px);
+  width:17px;height:23px;border:1px solid #9b7a42;border-radius:3px;
+  background:repeating-linear-gradient(135deg,#e9d4a5 0 3px,#b89455 3px 5px);
+  box-shadow:0 1px 2px rgba(30,20,5,.4);transform:rotate(calc((var(--stack-index) - 1) * 8deg))}
+.museum-stack-count{position:absolute;right:0;top:0;min-width:17px;height:17px;padding:0 3px;
+  display:flex;align-items:center;justify-content:center;border-radius:9px;background:#6a4f18;color:#fff8df;
+  border:1px solid #f0d79a;font-size:10px;font-weight:800;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.card.mini{width:60px;height:84px}
+.card.mini .c-name{font-size:12px;padding:18px 0 3px}
+.card.mini .c-cost{width:17px;height:17px;font-size:10px;top:6px;left:5px}
+
+.c-yellow .c-top{background:var(--c-yellow)} .c-yellow .c-name{color:var(--c-yellow-d)}
+.c-blue   .c-top{background:var(--c-blue)}   .c-blue   .c-name{color:var(--c-blue-d)}
+.c-green  .c-top{background:var(--c-green)}  .c-green  .c-name{color:var(--c-green-d)}
+.c-red    .c-top{background:var(--c-red)}    .c-red    .c-name{color:var(--c-red-d)}
+.c-purple .c-top{background:var(--c-purple)} .c-purple .c-name{color:var(--c-purple-d)}
+
+/* ------------------------------ 角色牌 ------------------------------ */
+.char-card{width:150px;border:1px solid var(--line2);border-radius:10px;background:#fffdf8;
+  padding:8px 8px 6px;box-shadow:var(--shadow);cursor:pointer;transition:.15s;flex:0 0 auto;
+  text-align:center;position:relative}
+/* 出局角色条里用到的精简小卡，比选角池牌略小但依旧清晰 */
+.char-card.mini{width:104px;padding:6px 6px 5px;cursor:default}
+.char-card:hover{transform:translateY(-4px);box-shadow:var(--shadow2);border-color:var(--gold)}
+/* 选角牌池中当前可点的角色牌：金边高亮，手机端无 hover 也常驻可见 */
+.char-card.clickable{border-color:var(--gold);box-shadow:0 0 0 2px rgba(200,149,43,.45),0 4px 14px rgba(200,149,43,.3);
+  animation:charPulse 1.5s ease-in-out infinite}
+.char-card.clickable::after{content:'▼';position:absolute;top:-9px;right:4px;color:var(--gold);
+  font-size:12px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+@keyframes charPulse{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){.char-card.clickable{animation:none}}
+.char-card .cc-num{display:inline-flex;width:24px;height:24px;border-radius:50%;
+  background:linear-gradient(180deg,#7a5c22,#5a4013);color:var(--gold-l);font-weight:800;
+  align-items:center;justify-content:center;margin-bottom:5px;font-size:13px}
+.char-card .cc-name{font-weight:700;font-size:13px;margin-bottom:2px}
+.char-card .cc-art{margin-bottom:6px;display:block;border-radius:7px;overflow:hidden;
+  background:linear-gradient(180deg,#efe2c9,#e3d2b2)}
+.char-card .cc-art img{width:100%;height:auto;display:block}
+.char-card .cc-art-emoji{width:100%;aspect-ratio:3/4;display:flex;align-items:center;
+  justify-content:center;font-size:42px;background:#efe2c9}
+.char-card.mini .cc-num{width:21px;height:21px;font-size:11px;margin-bottom:4px}
+.char-card.mini .cc-name{font-size:12px;margin-bottom:1px}
+.char-card.mini .cc-art{margin-bottom:4px}
+
+/* 移动端：去掉 300ms 点击延迟与双击缩放，让点击更跟手（仍可正常滚动页面） */
+@media (hover:none){
+  button,.char-card,.card{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  /* 触屏没有悬浮态：可点的角色卡常驻金边高亮，避免看不出能点 */
+  .char-card.clickable{animation:none;border-color:var(--gold);
+    box-shadow:0 0 0 3px rgba(200,149,43,.5),0 4px 14px rgba(200,149,43,.32)}
+}
+
+/* 角色卡悬浮放大浮窗 */
+.char-zoom{position:fixed;z-index:300;width:300px;pointer-events:auto;
+  background:#fffdf6;border:2px solid var(--gold);border-radius:12px;
+  box-shadow:0 12px 38px rgba(60,40,10,.4);padding:8px;overflow:hidden;
+  animation:czoom-in .12s ease-out}
+.char-zoom[hidden]{display:none}
+.char-zoom.interactive{pointer-events:auto}
+/* 触屏模式：居中弹出、可交互（有确认/取消按钮），配半透明遮罩 */
+.char-zoom.touch{left:50%!important;top:50%!important;transform:translate(-50%,-50%);
+  width:min(300px,84vw);max-height:88vh;overflow-y:auto;pointer-events:auto;z-index:360;
+  animation:cz-touch-in .16s ease-out}
+@keyframes cz-touch-in{from{opacity:0;transform:translate(-50%,-50%) scale(.9)}
+  to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.char-zoom-bg{position:fixed;inset:0;z-index:355;background:rgba(28,18,4,.5)}
+.char-zoom-bg[hidden]{display:none}
+/* 放大卡图下方的确认 / 取消 */
+.cz-actions{display:flex;gap:10px;margin-top:10px}
+.cz-actions[hidden]{display:none}
+.cz-btn{flex:1 1 0;padding:11px 10px;font-size:15px;font-weight:700;border-radius:10px;
+  border:1px solid var(--line2);background:#fffdf8;color:var(--ink)}
+.cz-btn.cz-ok{background:linear-gradient(180deg,#fbe6b0,#f0cf82);border-color:var(--gold);color:#6a4f18}
+.cz-btn.cz-cancel{background:#f4f0e8}
+.cz-btn:active{transform:translateY(1px)}
+.char-zoom img{width:100%;height:auto;display:block;border-radius:7px}
+.cz-hd-btn{display:block;width:100%;margin-top:8px;padding:8px 10px;font-size:12px;
+  border:1px solid var(--gold-l);border-radius:8px;background:#fff7dc;color:#6a4f18}
+.cz-hd-btn:hover{filter:brightness(1.04);border-color:var(--gold)}
+.char-zoom-back{width:100%;aspect-ratio:2/3;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;font-size:64px;color:#ffe9bd;
+  background:repeating-linear-gradient(45deg,#8a652f,#8a652f 10px,#a87d3c 10px,#a87d3c 20px);
+  border:2px solid #4a3510}
+@keyframes czoom-in{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
+
+/* 高清卡图查看器：使用 full 资源并尽量占满可用视口 */
+.card-hd-overlay{position:fixed;inset:0;z-index:500;display:flex;align-items:center;
+  justify-content:center;padding:18px;background:rgba(30,22,12,.72);backdrop-filter:blur(5px)}
+.card-hd-overlay[hidden]{display:none}
+body.card-hd-open{overflow:hidden}
+.card-hd-box{width:min(680px,96vw);max-height:94vh;display:flex;flex-direction:column;
+  background:#fffdf6;border:2px solid var(--gold);border-radius:14px;
+  box-shadow:0 20px 70px rgba(35,20,4,.48);overflow:hidden;animation:hd-pop .16s ease-out}
+.card-hd-head{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:12px 16px;border-bottom:1px solid var(--line);background:rgba(255,253,246,.96)}
+.card-hd-kicker{font-size:10px;color:var(--dim);letter-spacing:.14em;text-transform:uppercase}
+.card-hd-head h3{margin:2px 0 0;color:#6a4f18;font-size:17px}
+.card-hd-stage{min-height:0;flex:1;display:grid;place-items:center;overflow:hidden;padding:16px;
+  background:radial-gradient(circle at 50% 38%,#fffdf7 0,#f4ead8 68%,#e4d3b7 100%);
+  touch-action:none;overscroll-behavior:contain;cursor:default}
+.card-hd-stage.zoomed{cursor:grab}
+.card-hd-stage.is-dragging{cursor:grabbing}
+.card-hd-stage img{display:block;width:auto;height:auto;max-width:min(88vw,560px);max-height:78vh;
+  object-fit:contain;border-radius:7px;box-shadow:0 10px 30px rgba(50,30,8,.28);
+  transform-origin:center center;transition:transform .16s cubic-bezier(.2,.8,.2,1);
+  user-select:none;-webkit-user-drag:none}
+.card-hd-stage.is-dragging img{transition:none}
+.card-hd-controls{display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:8px 16px;border-top:1px solid var(--line);background:rgba(255,253,246,.96)}
+.card-hd-controls .btn{min-width:36px;line-height:1.1}
+.card-hd-controls span{min-width:52px;text-align:center;color:var(--ink);font-size:12px;
+  font-variant-numeric:tabular-nums}
+.card-hd-controls button:disabled{opacity:.35;cursor:not-allowed;filter:none}
+.card-hd-foot{padding:8px 16px;color:var(--dim);font-size:11px;text-align:center;
+  border-top:1px solid var(--line);background:rgba(255,253,246,.96)}
+.ref-hd-trigger{display:block;width:100%;margin:4px 0 9px;padding:6px 8px;border:1px solid var(--gold-l);
+  border-radius:7px;background:#fff7dc;color:#6a4f18;font-size:11px;cursor:pointer}
+.ref-hd-trigger:hover{border-color:var(--gold);filter:brightness(1.03)}
+@keyframes hd-pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+@media (max-width:600px){
+  .card-hd-overlay{padding:10px}
+  .card-hd-box{width:96vw;max-height:94vh;border-radius:10px}
+  .card-hd-stage{padding:10px}
+  .card-hd-stage img{max-width:90vw;max-height:78vh}
+  .card-hd-controls{padding:8px 10px}
+}
+@media (prefers-reduced-motion:reduce){.card-hd-box{animation:none}}
+
+/* 金币飞行（盗贼偷窃） */
+.fly-coin{position:fixed;z-index:400;font-size:22px;pointer-events:none;
+  transform:translate(0,0);opacity:1;
+  transition:transform .9s cubic-bezier(.4,.05,.35,1),opacity .9s ease;
+  filter:drop-shadow(0 0 4px rgba(231,181,60,.6))}
+.fly-coin .coin-icon{width:22px;height:22px}
+.hand-swap-flight{position:fixed;z-index:405;width:42px;height:58px;display:grid;place-items:center;
+  border:2px solid var(--ui-cyan,var(--gold));border-radius:6px;color:var(--ui-cyan,var(--gold));
+  background:repeating-linear-gradient(45deg,rgba(55,31,105,.96) 0 6px,rgba(23,17,57,.96) 6px 12px);
+  box-shadow:0 0 14px rgba(112,73,255,.65);font-size:22px;pointer-events:none;
+  animation:handSwapFlight .95s cubic-bezier(.22,.72,.28,1) forwards}
+@keyframes handSwapFlight{0%{opacity:.95;transform:rotate(var(--swap-rotate)) scale(.8)}45%{opacity:1;transform:translate(calc(var(--swap-dx) * .55),calc(var(--swap-dy) * .55)) rotate(0deg) scale(1.05)}100%{opacity:0;transform:translate(var(--swap-dx),var(--swap-dy)) rotate(calc(var(--swap-rotate) * -1)) scale(.72)}}
+.hand-swap-badge{position:fixed;z-index:406;padding:4px 9px;border:1px solid var(--ui-magenta,var(--gold));border-radius:12px;
+  color:var(--ui-magenta,var(--gold));background:rgba(7,17,29,.9);box-shadow:0 0 14px rgba(255,79,199,.35);
+  font-size:11px;font-weight:800;pointer-events:none;animation:handSwapBadge 1.2s ease forwards}
+@keyframes handSwapBadge{0%,65%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.9)}}
+.crown-flight{position:fixed;z-index:410;width:22px;height:22px;display:grid;place-items:center;
+  pointer-events:none;color:var(--gold);filter:drop-shadow(0 0 7px rgba(255,205,71,.9));
+  animation:crownTransferFlight 1.05s cubic-bezier(.2,.72,.25,1) forwards}
+.crown-flight .crown-icon{font-size:21px;color:var(--gold)}
+@keyframes crownTransferFlight{
+  0%{opacity:0;transform:translate(0,0) scale(.7) rotate(-15deg)}
+  12%{opacity:1;transform:translate(0,0) scale(1.15) rotate(0)}
+  72%{opacity:1;transform:translate(calc(var(--crown-dx) * .72),calc(var(--crown-dy) * .72)) scale(1.08) rotate(8deg)}
+  100%{opacity:0;transform:translate(var(--crown-dx),var(--crown-dy)) scale(.82) rotate(0)}
+}
+.hand-transfer-flight{animation-duration:1.05s}
+.building-swap-flight{position:fixed!important;z-index:407!important;width:63px!important;height:95px!important;
+  margin:0!important;pointer-events:none!important}
+.building-swap-flight.is-flying{animation:buildingSwapFlight .95s cubic-bezier(.22,.72,.28,1) forwards}
+@keyframes buildingSwapFlight{0%{opacity:.95;transform:rotate(var(--swap-rotate)) scale(1)}45%{opacity:1;transform:translate(calc(var(--swap-dx) * .55),calc(var(--swap-dy) * .55)) rotate(0deg) scale(1.06)}100%{opacity:0;transform:translate(var(--swap-dx),var(--swap-dy)) rotate(calc(var(--swap-rotate) * -1)) scale(var(--swap-scale-x),var(--swap-scale-y))}}
+.building-build-flight{position:fixed!important;z-index:408!important;margin:0!important;pointer-events:none!important;opacity:.98;box-shadow:0 0 0 3px rgba(200,149,43,.3),0 12px 34px rgba(80,60,30,.35)}
+.building-build-flight.is-flying{animation:buildingBuildFlight .63s cubic-bezier(.18,.76,.25,1) forwards}
+@keyframes buildingBuildFlight{0%{transform:translate(0,0) scale(1.08) rotate(-3deg);opacity:.98}55%{transform:translate(calc(var(--build-dx) * .55),calc(var(--build-dy) * .55)) scale(.72) rotate(2deg);opacity:1}100%{transform:translate(var(--build-dx),var(--build-dy)) scale(var(--build-scale-x),var(--build-scale-y)) rotate(0);opacity:.08}}
+body.building-animation-paused #screen-game .topbar,
+body.building-animation-paused #screen-game .board,
+body.building-animation-paused #screen-game .actionbar{pointer-events:none}
+
+/* 领主摧毁建筑：克隆卡播放抖动/红光/塌陷/淡出 */
+.card.destroying{pointer-events:none;z-index:402;animation:cardDestroy .72s ease forwards}
+@keyframes cardDestroy{
+  0%{transform:scale(1) rotate(0);opacity:1;filter:none}
+  14%{transform:scale(1.07) rotate(-2.5deg);box-shadow:0 0 0 3px #ff6a3c,0 0 18px #ff5a3c;filter:brightness(1.45)}
+  34%{transform:scale(.97) rotate(3deg);box-shadow:0 0 0 4px #ff3b20,0 0 22px #ff3b20;filter:brightness(1.7) saturate(1.5)}
+  60%{transform:scale(.5) rotate(-6deg);opacity:.85;filter:brightness(.7) blur(1px)}
+  100%{transform:scale(.18) rotate(11deg);opacity:0;filter:blur(3px)}
+}
+/* 摧毁时向四周飞散的碎片 / 火花 */
+.debris{position:fixed;z-index:401;font-size:18px;pointer-events:none;
+  transform:translate(0,0);opacity:1;
+  transition:transform .7s cubic-bezier(.2,.7,.3,1),opacity .7s ease}
+
+
+/* ------------------------------ 布局区 ------------------------------ */
+.turn-banner{
+  background:linear-gradient(180deg,#fffdf6,#fbf1dc);border:1px solid var(--gold-l);
+  border-radius:12px;padding:10px 16px;margin-bottom:14px;display:flex;
+  align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.turn-banner .tb-who{font-size:16px;font-weight:700;color:#6a4f18}
+.turn-banner .tb-sub{font-size:12px;color:var(--dim)}
+.turn-banner .tb-stats{display:flex;gap:14px;font-size:12px;color:var(--ink2)}
+.turn-banner .tb-stats b{color:var(--ink)}
+.turn-banner > .turn-order-guide{display:flex!important;visibility:visible;opacity:1;width:100%;flex:0 0 100%;margin:4px 0 0;box-shadow:none;order:10;min-height:27px}
+.turn-order-guide.draft-guide{display:flex!important;visibility:visible;opacity:1;position:relative;z-index:2}
+.turn-order-guide[hidden]{display:none!important}
+.turn-banner{align-content:flex-start}
+/* 轮末战果确认：列出每位玩家的确认状态 + 确认按钮 */
+.rc-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.rc-who{font-size:11px;padding:2px 9px;border-radius:10px;background:#f1e5cd;color:#7a5c22;
+  border:1px solid var(--line);white-space:nowrap}
+.rc-who.ok{background:#e8f5e9;color:#2e7d32;border-color:#bcd8bf;font-weight:700}
+.rc-btn{flex:0 0 auto;font-size:14px;font-weight:700;padding:9px 18px;border-radius:10px;
+  border:1px solid var(--gold);color:#6a4f18;cursor:pointer;white-space:nowrap;
+  background:linear-gradient(180deg,#fbe6b0,#f0cf82);box-shadow:var(--shadow)}
+.rc-btn:hover:not(:disabled){filter:brightness(1.05)}
+.rc-btn:active:not(:disabled){transform:translateY(1px)}
+.rc-btn:disabled{cursor:default;opacity:.75}
+/* 轮末战果确认块较高，不钉死高度，允许内部滚动（仅轮末出现一次，非回合内抽动源） */
+.turn-banner.rc{min-height:auto;max-height:42vh;overflow-y:auto}
+
+.table-arena{position:relative;min-height:840px;margin:0 -4px 16px;padding-top:0;border:1px solid var(--line);
+  border-radius:24px;background:rgba(255,253,246,.28);overflow:hidden}
+.table-core{position:absolute;z-index:1;left:50%;top:340px;width:min(30%,360px);height:190px;transform:translate(-50%,-50%);
+  border:2px solid rgba(200,149,43,.35);border-radius:50%;background:radial-gradient(ellipse,#fffaf0,#f1dfbf 72%,#e3c896);
+  box-shadow:0 0 0 10px rgba(255,255,255,.25),0 12px 32px rgba(92,61,22,.14),inset 0 0 30px rgba(200,149,43,.2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+.table-core::before{content:'';position:absolute;inset:12px;border:1px dashed rgba(122,92,34,.3);border-radius:50%}
+.table-core-title{position:relative;font-size:17px;font-weight:900;letter-spacing:.12em;color:#7a5c22}
+.table-core-hint{position:relative;margin-top:8px;font-size:11px;color:#9b8a74}
+.table-removed{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:7px;min-height:30px;z-index:1;pointer-events:auto}
+.table-removed[hidden]{display:none}
+.table-removed-label{font-size:9px;color:var(--dim);white-space:nowrap}
+.table-removed-cards{display:flex;align-items:center;gap:4px}
+.table-removed .char-card.mini{width:42px!important;padding:0;border-radius:4px}
+.table-removed .char-card.mini .cc-art{margin:0}
+.table-removed .facedown.sm{width:42px;height:56px;font-size:14px;border-radius:4px}
+.table-removed .char-card{pointer-events:auto;cursor:zoom-in}
+.table-core.has-removed .table-core-hint{margin-top:4px}
+.table-core.active{border-color:var(--gold);box-shadow:0 0 0 10px rgba(200,149,43,.08),0 0 32px rgba(200,149,43,.28),inset 0 0 30px rgba(200,149,43,.2)}
+.removed-corner{position:fixed;left:16px;bottom:76px;z-index:8;display:flex;flex-direction:column;align-items:flex-start;gap:5px;
+  padding:5px;border:1px solid var(--line2);border-radius:10px;background:var(--paper);box-shadow:var(--shadow2);color:var(--ink2)}
+.removed-corner[hidden]{display:none}
+.removed-widget-toggle{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line2);border-radius:7px;background:transparent;color:var(--ink2);font-size:10px;font-weight:700;padding:5px 8px;cursor:pointer;white-space:nowrap}
+.removed-widget-toggle:hover{background:var(--bg2);border-color:var(--gold)}
+.removed-widget-icon{color:var(--gold);font-size:12px;line-height:1}
+.removed-widget-count{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border-radius:8px;background:var(--gold);color:#fff;font-size:9px;line-height:1}
+.removed-widget-content{display:flex;align-items:flex-end;gap:7px;padding:5px 3px 3px;border-top:1px solid var(--line);max-width:min(86vw,250px)}
+.removed-corner.collapsed .removed-widget-content{display:none}
+.removed-corner-label{font-size:10px;color:var(--dim);white-space:nowrap;writing-mode:vertical-rl;align-self:center}
+.removed-corner .rs-cards{display:flex;align-items:center;gap:5px}
+.removed-corner .char-card.mini,.removed-corner .facedown.sm{width:54px!important;height:81px!important;padding:0!important;margin:0;border-radius:6px;overflow:hidden}
+.removed-corner .rs-cards .char-card.mini,.removed-corner .rs-cards .facedown.sm{flex:0 0 54px;aspect-ratio:2/3}
+.removed-corner .char-card.mini .cc-art{width:100%;height:100%;margin:0;border-radius:5px}
+.removed-corner .char-card.mini .cc-art img{width:100%;height:100%;object-fit:cover}
+.removed-corner .char-card.mini .cc-num,.removed-corner .char-card.mini .cc-name{display:none}
+.removed-corner .char-card{pointer-events:auto;cursor:zoom-in}
+.turn-order-guide{position:relative;z-index:6;top:auto;left:auto;width:min(94%,720px);margin:10px auto 8px;transform:none;display:flex;align-items:center;justify-content:center;gap:5px;
+  min-height:27px;padding:4px 10px;border:1px solid var(--line2);border-radius:16px;background:rgba(255,253,246,.9);box-shadow:var(--shadow);font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden}
+.order-label{font-weight:800;color:#7a5c22;flex:0 0 auto;margin-right:3px}
+.order-note{color:var(--dim);flex:0 0 auto}
+.order-step{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:10px;color:var(--ink2);flex:0 0 auto}
+.order-step .order-seat{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:#e8dcc5;color:#7a5c22;font-size:9px;font-weight:900}
+.order-step.current{background:#fff0c8;color:#6a4f18;font-weight:800;box-shadow:0 0 0 1px var(--gold-l)}
+.order-step.current .order-seat{background:var(--gold);color:#fff}
+.order-arrow{color:#c2a66c;font-weight:900;flex:0 0 auto}
+.opponents{position:relative;display:block;height:600px;margin:0 0 14px;z-index:2}
+/* 玩家框互斥分离期间关闭宽度过渡：否则测量会拿到过渡中的中间宽度，分离结果来回抖动 */
+.opponents.separating .opp{transition:none!important}
+.opp{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fffdf7;box-shadow:var(--shadow);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
+.opponents .opp{position:absolute;left:calc(var(--seat-x) * 1%);top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px));width:min(272px,24%);transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)));margin:0}
+.opponents .opp[data-compact="1"]{padding:9px 10px;font-size:.94em}
+.opponents .opp[data-compact="2"]{padding:8px 9px;font-size:.88em}
+.opponents .opp[data-compact="3"]{padding:7px 8px;font-size:.82em}
+.opponents .opp[data-compact="2"] .cs-card{width:56px;height:84px}
+.opponents .opp[data-compact="3"] .cs-card{width:50px;height:75px}
+.opponents .opp[data-compact="2"] .opp-head,.opponents .opp[data-compact="3"] .opp-head{gap:5px;margin-bottom:5px}
+.opponents[data-layout="mobile-collision"]{position:relative;display:block;overflow:visible;height:auto;min-height:0}
+.opponents[data-layout="mobile-collision"] .opp{position:absolute!important;left:0;top:0;width:var(--mobile-opp-width)!important;min-width:0!important;transform:none!important;margin:0!important;flex:none!important}
+.opponents[data-layout="mobile-ring"]{position:relative!important;display:block!important;height:clamp(300px,44vh,400px);overflow:visible!important;min-height:0}
+.opponents[data-layout="mobile-ring"] .opp{position:absolute!important;left:calc(var(--seat-x) * 1%)!important;top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px))!important;width:var(--mobile-opp-width)!important;min-width:0!important;transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)))!important;margin:0!important;flex:none!important}
+.opponents[data-layout="mobile-ring"] .opp-role-row{gap:6px;margin-bottom:5px}
+.opponents[data-layout="mobile-ring"] .opp{padding:5px 6px!important}
+.opponents[data-layout="mobile-ring"] .opp-char{gap:4px;margin-bottom:4px}
+.opponents[data-layout="mobile-ring"] .opp-char-stats{min-width:48px;font-size:8px;line-height:1.35}
+.opponents[data-layout="mobile-ring"] .opp-head{gap:3px;margin-bottom:3px}
+.opponents[data-layout="mobile-ring"] .opp-seat-no{font-size:8px;padding:1px 3px}
+.opponents[data-layout="mobile-ring"] .opp-name{font-size:10px}
+.opponents[data-layout="mobile-ring"] .opp-gold{font-size:9px;gap:2px}
+.opponents[data-layout="mobile-ring"] .opp .score-badge{font-size:10px;gap:2px}
+.opponents[data-layout="mobile-ring"] .opp-body{gap:4px}
+.opponents[data-layout="mobile-ring"] .opp-city{gap:2px;min-height:34px}
+.opponents[data-layout="mobile-ring"] .opp-city>.card{width:40px;height:60px}
+.opponents[data-layout="mobile-ring"] .opp .cs-card{width:40px;height:60px}
+.opponents[data-layout="mobile-ring"] .opp .cs-name{font-size:10px}
+.opponents[data-layout="mobile-ring"] .opp-city{flex-wrap:nowrap;overflow:hidden}
+.opponents[data-layout="mobile-ring"] .opp-city>.card{width:var(--mobile-city-card-width,40px);height:var(--mobile-city-card-height,60px);flex:0 0 auto}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"]{padding:4px 5px!important;font-size:.74em}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .cs-card{width:31px;height:47px}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-head{gap:2px;margin-bottom:2px}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-seat-no{font-size:7px;padding:1px 2px}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-name{font-size:9px}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-gold{font-size:8px}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city{gap:3px;min-height:28px}
+.opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city>.card{height:var(--mobile-city-card-height,47px)}
+/* 移动端5人以上：我的城市固定为两行，建筑牌按列横向扩展，避免继续向下撑高页面。 */
+#opponents[data-layout="mobile-ring"] ~ .me-area{width:calc(100% - 12px)!important;margin:4px auto 0!important;padding:5px 7px!important;border:1px solid var(--line2)!important;border-radius:10px!important}
+#opponents[data-layout="mobile-ring"] ~ .me-area .me-role-row{gap:5px;margin-bottom:4px}
+#opponents[data-layout="mobile-ring"] ~ .me-area .me-char{gap:4px;margin:0 0 4px}
+#opponents[data-layout="mobile-ring"] ~ .me-area .me-char .cs-card{width:42px!important;height:63px!important}
+#opponents[data-layout="mobile-ring"] ~ .me-area .me-char-stats{min-width:46px;font-size:8px;line-height:1.35}
+#opponents[data-layout="mobile-ring"] ~ .me-area .zone-head{margin:4px 0 3px}
+#opponents[data-layout="mobile-ring"] ~ .me-area .zone-head h3{font-size:11px}
+#opponents[data-layout="mobile-ring"] ~ .me-area .city-row{display:grid!important;grid-auto-flow:column;grid-template-rows:repeat(2,minmax(0,1fr));grid-auto-columns:52px;gap:4px;min-height:0!important;max-height:154px;padding:5px;overflow-x:auto;overflow-y:hidden}
+#opponents[data-layout="mobile-ring"] ~ .me-area .city-row>.card{width:48px!important;height:72px!important}
+#opponents[data-layout="mobile-ring"] ~ .me-area .hand-row{display:flex;flex-wrap:nowrap;gap:4px;min-height:0!important;max-height:80px;padding:4px;overflow-x:auto;overflow-y:hidden}
+#opponents[data-layout="mobile-ring"] ~ .me-area .hand-row>.card{width:48px!important;height:72px!important}
+.opp.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.14);background:#fffcf2}
+.opp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+.opp-seat-no{font-size:10px;font-weight:800;color:var(--dim);padding:1px 5px;border:1px solid var(--line);border-radius:8px;flex:0 0 auto}
+.opp-name{font-weight:700;font-size:14px}
+.opp-me{color:var(--gold);font-size:12px}
+.tag{font-size:11px;padding:1px 7px;border-radius:10px;background:#f1e5cd;color:#7a5c22;border:1px solid var(--line)}
+.tag.bot{background:#eef3fb;color:#3a5f8a;border-color:#d3e0ee}
+.tag.disconnected{background:#fff0e8;color:#b44b28;border-color:#efb49b}
+.tag.left{background:#f4e9e9;color:#9a4b4b;border-color:#dfbebe}
+.tag.crown{background:linear-gradient(180deg,#f7e3b0,#e9c977);color:#7a5310;border-color:#d9b45f;font-weight:700}
+.crown-icon{display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-family:"Segoe UI Symbol","Noto Sans Symbols 2",serif;font-size:16px;line-height:1;color:var(--gold);text-shadow:0 1px 2px rgba(80,50,0,.28)}
+.crown-chip{display:inline-flex;align-items:center;gap:5px}
+.crown-chip .crown-icon{font-size:15px}
+.crown-icon-tag{display:inline-flex!important;align-items:center;justify-content:center;background:transparent!important;border:0!important;padding:0 2px!important;box-shadow:none!important}
+.crown-icon-tag .crown-icon{font-size:17px}
+.tag.dead{background:#fbe9e7;color:#a53b30;border-color:#f0c9c3}
+.tag.magic{background:#f3ecfb;color:#653fa0;border-color:#ddd0f0}
+.opp-gold{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;color:#a97c15;margin-left:auto}
+/* 皇冠图标紧贴金币左侧（对手框与“我的城市”共用 .opp-gold） */
+.opp-gold .crown-icon{font-size:1.1em;line-height:1}
+.opp-role-row,.me-role-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:9px}
+.opp-body{display:flex;gap:9px;align-items:flex-start}
+.opp-city{display:flex;flex-wrap:wrap;gap:5px;flex:1 1 auto;min-height:60px}
+.table-arena[data-players="4"] .opp-city{flex-wrap:nowrap;overflow:visible}
+.table-arena[data-players="4"] .opp-city>.card{flex:0 0 auto}
+.table-arena[data-players="4"] .me-area .city-row{flex-wrap:nowrap;overflow:visible}
+.opp-char-stats,.me-char-stats{font-size:11px;color:var(--dim);line-height:1.7;padding-top:2px;min-width:74px}
+.opp-char-stats b,.me-char-stats b{color:var(--ink2)}
+/* 玩家小框框里的角色卡状态（盖牌 / 翻面） */
+.opp-char{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.me-char{display:flex;align-items:center;gap:8px;margin:2px 0 9px}
+/* 角色名（翻面后跟在卡牌右侧）/ 盖牌占位 */
+.cs-name{font-weight:800;font-size:15px;color:#6a4f18;line-height:1.1}
+.cs-label{font-size:11px;color:var(--dim)}
+.cs-card{position:relative;width:64px;height:96px;flex:0 0 auto}
+.cs-card.none{border:1px dashed var(--line2);border-radius:7px;background:transparent;opacity:.72}
+.cs-inner{position:relative;width:100%;height:100%;transform-style:preserve-3d;transform:rotateY(0deg)}
+.cs-card.up .cs-inner{transform:rotateY(180deg)}
+.cs-face{position:absolute;inset:0;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;overflow:hidden;backface-visibility:hidden;border:1px solid var(--line2);
+  box-shadow:0 2px 6px rgba(70,45,10,.18)}
+.cs-back{background:repeating-linear-gradient(45deg,#8a652f,#8a652f 6px,#a87d3c 6px,#a87d3c 12px);
+  color:#ffe9bd;font-size:30px;font-weight:700}
+.cs-front{transform:rotateY(180deg);background:#fffdf8}
+.cs-front img{width:100%;height:100%;object-fit:contain;display:block}
+.cs-front .cs-emoji{font-size:28px}
+/* 盖牌→翻面 的翻牌动画 */
+.cs-card.flip-in .cs-inner{animation:csflip .65s ease}
+@keyframes csflip{from{transform:rotateY(0deg)}to{transform:rotateY(180deg)}}
+
+/* 分数徽章：蓝色圆圈图标 + 数值，样式对齐金币徽章（每个玩家信息框右上角） */
+.score-badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;
+  border:0;background:transparent;padding:0;font:inherit;cursor:pointer;
+  font-size:13px;font-weight:700;color:#1c62b0;font-variant-numeric:tabular-nums}
+.score-badge:hover{transform:scale(1.06)}
+.score-badge:active{transform:scale(.94)}
+.score-icon{position:relative;display:inline-block;flex:0 0 auto;width:17px;height:17px;border-radius:50%;
+  background:radial-gradient(circle at 34% 28%,#bcd8ff 0 12%,#5a9ae8 30%,#2f6fc4 72%,#123a72 100%);
+  border:1px solid #123a72;box-shadow:inset 0 0 0 2px rgba(214,232,255,.45),0 1px 3px rgba(10,40,90,.35)}
+.score-icon::before{content:'';position:absolute;inset:3px;border:1px solid rgba(214,232,255,.7);border-radius:50%}
+.zone-head .score-badge{margin-left:auto}
+/* 悬停 / 聚焦时显示的计分组成小浮层 */
+.score-tip{position:fixed;z-index:320;min-width:150px;max-width:240px;padding:9px 12px;
+  background:#fffdf8;border:1px solid var(--line);border-top:3px solid #2f6fc4;border-radius:10px;
+  box-shadow:0 6px 18px rgba(20,40,80,.22);pointer-events:none;font-size:12px;line-height:1.5;color:var(--ink2)}
+.score-tip .st-name{font-weight:800;font-size:13px;color:var(--ink);margin-bottom:4px}
+.score-tip .st-row{display:flex;justify-content:space-between;gap:12px}
+.score-tip .st-row b{font-weight:700;color:#1c62b0;font-variant-numeric:tabular-nums}
+.score-tip .st-row.total{margin-top:3px;padding-top:3px;border-top:1px dashed var(--line)}
+.score-tip .st-row.total span{font-weight:800;color:var(--ink)}
+.score-tip .st-row.total b{font-size:14px}
+
+.me-area{position:relative;z-index:3;width:min(860px,92%);margin:0 auto;padding:10px 14px 0;border:1px solid var(--gold-l);border-radius:16px;background:rgba(255,253,246,.96);box-shadow:0 8px 22px rgba(80,60,30,.12);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
+.building-arrival-expand{animation:buildingArrivalExpand .85s ease}
+@keyframes buildingArrivalExpand{0%,100%{box-shadow:var(--shadow),0 0 0 rgba(200,149,43,0)}35%{box-shadow:0 0 0 4px rgba(200,149,43,.28),0 0 28px rgba(200,149,43,.35)}}
+.me-area.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.16),0 10px 28px rgba(200,149,43,.18)}
+.zone-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 7px}
+.zone-head h3{font-size:14px;color:#6a4f18}
+/* 我的城市右上角的金币+分数集群：与其它玩家框（.opp-head 内的 .opp-gold + .score-badge）保持同一套样式 */
+.me-stats{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
+.me-stats .opp-gold{margin-left:0}
+.me-stats .score-badge{margin-left:0}
+/* 通用金币图标：不用文字，适配经典与霓虹两套主题。 */
+.coin-icon{position:relative;display:inline-block;flex:0 0 auto;width:17px;height:17px;border-radius:50%;
+  background:radial-gradient(circle at 34% 28%,#fff3a8 0 12%,#f5c94b 30%,#d99318 72%,#8e5b0c 100%);
+  border:1px solid #8e5b0c;box-shadow:inset 0 0 0 2px rgba(255,245,170,.42),0 1px 3px rgba(100,60,0,.35)}
+.coin-icon::before{content:'';position:absolute;inset:3px;border:1px solid rgba(255,247,177,.72);border-radius:50%}
+.coin-icon::after{content:'✦';position:absolute;inset:0;display:grid;place-items:center;color:#fff1a0;font-size:8px;line-height:1;text-shadow:0 1px 1px #9b650e}
+.city-row,.hand-row{display:flex;flex-wrap:wrap;gap:7px;min-height:90px;
+  padding:9px;border:1px dashed var(--line);border-radius:11px;background:#fffdf8}
+.hand-row{min-height:112px}
+.empty-hint{color:var(--dim);font-size:12px;align-self:center;margin:auto}
+
+/* ------------------------------ 选角 ------------------------------ */
+.draft-area{margin-bottom:14px}
+.draft-head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px}
+.draft-head h3{font-size:15px;color:#6a4f18}
+.draft-row{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:12px}
+.draft-pool{display:flex;flex-wrap:wrap;gap:10px;padding:14px;border:1px dashed var(--line2);
+  border-radius:12px;background:#fffdf8;min-height:80px}
+.facedown{width:60px;height:90px;border-radius:8px;background:
+  repeating-linear-gradient(45deg,#6a4f18 0 6px,#5a4013 6px 12px);
+  border:2px solid #4a3510;color:var(--gold-l);display:flex;align-items:center;
+  justify-content:center;font-size:22px;box-shadow:var(--shadow)}
+.faceup-char{opacity:.62;filter:grayscale(.35)}
+
+/* 出局角色条：明置移除画整卡，暗置移除画盖牌牌背 */
+.removed-strip{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  background:linear-gradient(180deg,#fffdf6,#fbf1dc);border:1px solid var(--gold-l);
+  border-radius:12px;padding:10px 14px;margin-bottom:14px}
+.removed-strip[hidden]{display:none}
+.rs-label{font-weight:700;color:#6a4f18;font-size:13px;flex:0 0 auto}
+.rs-group{display:flex;align-items:center;gap:9px}
+.rs-tag{font-size:11px;padding:2px 9px;border-radius:10px;background:#f1e5cd;color:#7a5c22;
+  border:1px solid var(--line);flex:0 0 auto;white-space:nowrap}
+.rs-tag-secret{background:#efe3cf;color:#8a6a2a}
+.rs-cards{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.facedown.sm{width:54px;height:81px;font-size:18px;border-radius:7px}
+
+/* ------------------------------ 行动栏 ------------------------------ */
+.actionbar{flex:0 0 auto;border-top:1px solid var(--line);background:linear-gradient(180deg,#fdf8ef,#f6eddd);
+  padding:9px 16px;min-height:62px;display:flex;flex-direction:column;gap:8px;z-index:6}
+.prompt{font-size:13px;color:var(--ink2);font-weight:600}
+.prompt b{color:var(--gold)}
+.prompt .pick-tip{color:var(--gold);background:#fdf3dd;border:1px solid var(--gold-l);
+  border-radius:6px;padding:1px 7px;font-size:12px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.act{padding:8px 14px;border-radius:9px;border:1px solid var(--line2);background:#fffdf8;
+  cursor:pointer;font-size:13px;transition:.15s;font-weight:600;color:var(--ink);text-align:left}
+.act:hover{background:#fdf3dd;border-color:var(--gold);transform:translateY(-1px)}
+.act.main{background:linear-gradient(180deg,#d9a836,#c0881f);color:#fff;border-color:#a97c15}
+.act.main:hover{filter:brightness(1.07)}
+.act.danger{border-color:#e3b0a8;color:#a53b30}
+.act.danger:hover{background:#fdeeeb;border-color:#d2584a}
+.act:disabled,.act.disabled{opacity:.42;cursor:not-allowed;filter:grayscale(.45);transform:none!important}
+.act:disabled:hover,.act.disabled:hover{background:#fffdf8;border-color:var(--line2);filter:grayscale(.45)}
+.act .a-sub{display:block;font-size:11px;opacity:.72;font-weight:400;margin-top:1px}
+.waiting{color:var(--dim);font-size:13px;font-style:italic}
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+.chat-composer{position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));z-index:70;
+  transform:translateX(-50%);display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 24px));
+  padding:10px;border:1px solid var(--line2);border-radius:14px;background:var(--paper);box-shadow:var(--shadow2)}
+.chat-composer[hidden]{display:none}
+.chat-composer input{min-width:0;flex:1;padding:10px 12px;border:1px solid var(--line2);border-radius:9px;
+  background:var(--paper2);color:var(--ink);font:inherit;outline:none}
+.chat-composer input:focus{border-color:var(--gold);box-shadow:0 0 0 2px rgba(200,149,43,.16)}
+.player-chat-bubble{position:fixed;z-index:65;max-width:min(280px,72vw);padding:8px 11px;border:1px solid var(--line2);
+  border-radius:13px;background:var(--paper);color:var(--ink);box-shadow:var(--shadow2);font-size:13px;line-height:1.4;
+  overflow-wrap:anywhere;pointer-events:none;animation:chat-bubble-in .18s ease-out}
+.player-chat-bubble::after{content:'';position:absolute;left:50%;bottom:-6px;width:10px;height:10px;
+  background:var(--paper);border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);transform:translateX(-50%) rotate(45deg)}
+.player-chat-bubble .chat-speaker{display:block;margin-bottom:2px;color:var(--gold);font-size:11px;font-weight:800}
+@keyframes chat-bubble-in{from{opacity:0;transform:translateY(5px) scale(.96)}to{opacity:1;transform:none}}
+
+/* ------------------------------ 结算 ------------------------------ */
+.score-table{width:100%;border-collapse:collapse;font-size:14px}
+.score-table th,.score-table td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}
+.score-table th{color:#7a5c22;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.score-table tr.win{background:linear-gradient(90deg,#fdf4dd,#fffdf6)}
+.score-table td.total{font-weight:800;font-size:17px;color:#a97c15}
+.score-detail{font-size:11.5px;color:var(--dim)}
+
+/* ------------------------------ 弹层 ------------------------------ */
+.modal{position:fixed;inset:0;background:rgba(50,38,22,.5);display:flex;
+  align-items:center;justify-content:center;z-index:100;padding:20px}
+.modal[hidden]{display:none}
+.modal-box{background:var(--paper);border-radius:16px;width:min(860px,95vw);max-height:88vh;
+  display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;border-bottom:1px solid var(--line)}
+.modal-head h3{font-size:17px;color:#6a4f18}
+.modal-body{padding:18px 20px;overflow:auto;display:flex;flex-direction:column}
+.char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:11px}
+.ref-card{border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;
+  padding:10px 12px;background:#fffdf8}
+.ref-card h4{margin:0 0 6px;font-size:13px;display:flex;align-items:center;gap:7px}
+.ref-card .rc-num{width:20px;height:20px;border-radius:50%;background:#6a4f18;color:var(--gold-l);
+  font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.ref-card p{margin:0;font-size:12px;color:var(--ink2);line-height:1.5}
+.ref-card .rc-en{font-size:10px;color:var(--dim);font-weight:400}
+.ref-card .rc-art{width:100%;height:auto;display:block;border-radius:6px;
+  margin-bottom:6px;background:#efe2c9}
+/* margin:auto 安全居中：内容不超出时垂直居中，超出时退回顶部对齐、可正常滚动
+   （避免 align-content:center 在溢出时把顶部裁掉且无法滚动的问题） */
+.pick-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center;margin:auto}
+/* 桌面端「抽 2 张建筑牌保留 1 张」：卡牌需要足够大，方便辨认卡面文字和插画。 */
+@media (min-width:821px){
+  .pick-grid-draw_keep{gap:18px}
+  /* 与桌面端悬浮预览接近的阅读尺寸，方便直接比较两张建筑牌。 */
+  .pick-grid-draw_keep .card{width:300px;height:450px}
+}
+.section-title{font-size:13px;color:#7a5c22;margin:16px 0 8px;font-weight:700;
+  border-bottom:1px solid var(--line);padding-bottom:5px}
+.color-legend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;font-size:12px}
+.color-legend span{display:inline-flex;align-items:center;gap:5px}
+.dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+
+/* ------------------------------ Toast ------------------------------ */
+.toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);
+  background:rgba(60,45,25,.94);color:#fff;padding:10px 20px;border-radius:10px;
+  font-size:13px;z-index:200;box-shadow:0 6px 22px rgba(0,0,0,.3);max-width:80vw;text-align:center}
+.toast[hidden]{display:none}
+
+/* ------------------------------ 关键事件提示弹层 ------------------------------ */
+.event-overlay{position:fixed;inset:0;z-index:300;display:flex;align-items:center;justify-content:center;
+  background:rgba(46,34,18,.55);backdrop-filter:blur(2px);padding:18px}
+.event-overlay[hidden]{display:none}
+.event-box{position:relative;width:min(420px,92vw);background:var(--paper);border:1px solid var(--line);
+  border-top:5px solid var(--gold);border-radius:16px;padding:26px 24px 22px;box-shadow:var(--shadow2);
+  text-align:center;animation:evPop .22s ease}
+@keyframes evPop{from{transform:translateY(10px) scale(.96);opacity:0}to{transform:none;opacity:1}}
+.event-box.tone-danger{border-top-color:var(--c-red)}
+.event-box.tone-magic{border-top-color:var(--c-purple)}
+.event-box.tone-warn{border-top-color:var(--gold)}
+.event-box.tone-info{border-top-color:var(--c-blue)}
+.event-icon{font-size:46px;line-height:1;margin-bottom:8px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.15))}
+.event-title{margin:0 0 10px;font-size:20px;color:var(--ink)}
+.event-box.tone-danger .event-title{color:var(--c-red-d)}
+.event-box.tone-magic  .event-title{color:var(--c-purple-d)}
+.event-box.tone-warn   .event-title{color:#a97c15}
+.event-box.tone-info   .event-title{color:var(--c-blue-d)}
+.event-text{margin:0 0 16px;font-size:14px;line-height:1.6;color:var(--ink2)}
+.event-text b{color:var(--ink)}
+.event-bar{position:absolute;left:0;bottom:0;width:100%;height:4px;background:var(--line);
+  border-radius:0 0 16px 16px;overflow:hidden}
+.event-bar i{display:block;height:100%;width:100%;background:var(--gold)}
+.event-box.tone-danger .event-bar i{background:var(--c-red)}
+.event-box.tone-magic  .event-bar i{background:var(--c-purple)}
+.event-box.tone-warn   .event-bar i{background:var(--gold)}
+.event-box.tone-info   .event-bar i{background:var(--c-blue)}
+
+/* 得分明细浮动窗口 */
+.score-popup{position:fixed;inset:0;z-index:310;display:flex;align-items:center;justify-content:center;
+  background:rgba(46,34,18,.45);backdrop-filter:blur(2px);padding:18px}
+.score-popup[hidden]{display:none}
+.score-box{position:relative;width:min(360px,92vw);background:var(--paper);border:1px solid var(--line);
+  border-top:5px solid var(--gold);border-radius:16px;padding:18px 20px 16px;box-shadow:var(--shadow2);
+  animation:evPop .2s ease}
+.score-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.score-name{font-weight:800;font-size:16px;color:var(--ink)}
+.score-total{font-size:34px;font-weight:900;color:var(--gold-d);line-height:1.1;text-align:center;margin:2px 0 4px}
+.score-sub{font-size:11.5px;color:var(--dim);text-align:center;margin-bottom:10px}
+.score-detail{list-style:none;margin:0;padding:0;border-top:1px dashed var(--line)}
+.score-detail .sd-row{display:flex;justify-content:space-between;align-items:baseline;
+  padding:7px 2px;border-bottom:1px dashed var(--line);font-size:13px}
+.score-detail .sd-label{color:var(--ink2)}
+.score-detail .sd-val{font-weight:700;color:var(--gold-d);font-variant-numeric:tabular-nums}
+.score-detail .sd-row.total{border-bottom:none;margin-top:2px;font-size:15px}
+.score-detail .sd-row.total .sd-label{font-weight:800;color:var(--ink)}
+.score-detail .sd-row.total .sd-val{font-size:18px}
+.score-foot{font-size:11px;color:var(--dim);text-align:center;margin-top:8px}
+
+/* 顶栏「被刺杀 / 被施咒」警示 chip */
+.chip.danger{background:#fbe9e7;color:var(--c-red-d);border-color:#f0c9c3;font-weight:700}
+
+/* 思考中省略号（电脑选牌 / 机器人行动时） */
+.dots{display:inline-flex;gap:3px;vertical-align:middle;margin-left:4px}
+.dots i{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.4;
+  animation:dotB 1.1s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.18s}
+.dots i:nth-child(3){animation-delay:.36s}
+@keyframes dotB{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-4px);opacity:1}}
+
+/* ------------------------------ 滚动条 ------------------------------ */
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#d8c6a6;border-radius:5px}
+::-webkit-scrollbar-thumb:hover{background:#c2a97f}
+::-webkit-scrollbar-track{background:transparent}
+
+/* =======================================================================
+   移动端适配（手机 / 平板竖屏）
+   ======================================================================= */
+@media (max-width:820px){
+  body{font-size:13px;-webkit-text-size-adjust:100%}
+  .screen{height:100dvh}
+
+  /* -------- 主菜单 -------- */
+  .home-wrap{padding:10px 0}
+  .home-title .crown{font-size:42px}
+  .home-title h1{font-size:34px}
+  .home-desc{font-size:13px;margin-bottom:18px;padding:0 6px}
+  .home-modes{gap:11px}
+  .mode-card{width:100%;max-width:330px;padding:15px;display:flex;align-items:center;
+    gap:13px;text-align:left}
+  .mode-icon{font-size:26px;margin:0}
+  .mode-name{margin-bottom:2px}
+  .mode-tip{font-size:11.5px}
+
+  /* -------- 面板 -------- */
+  .panel{padding:17px 15px;border-radius:13px}
+  .panel h2{font-size:17px;margin-bottom:13px}
+  .btn-row{position:sticky;bottom:0;background:var(--paper);
+    padding:10px 0 2px;margin-top:14px}
+  .setup-grid{grid-template-columns:1fr;gap:0}
+  .lobby-cols{grid-template-columns:1fr;gap:13px}
+
+  /* -------- 顶栏 -------- */
+  .topbar{padding:6px 9px;gap:6px;flex-wrap:wrap}
+  .tb-title{display:none}
+  .tb-mid{gap:5px;order:3;width:100%;overflow-x:auto;padding-bottom:1px}
+  .chip{font-size:11px;padding:2px 8px;white-space:nowrap}
+  .tb-left,.tb-right{gap:6px}
+  .btn.tiny{padding:6px 11px;font-size:12px}
+
+  /* -------- 主体：纵向排列 + 各区横向滚动 -------- */
+  .board{flex-direction:column}
+  .board-main{padding:9px 10px 10px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+  .turn-banner{padding:8px 11px;margin-bottom:10px;gap:6px;min-height:60px;overflow:hidden}
+  /* 钉死高度：关键文本单行，避免条件片段（已建造/已领资源/盗贼锁定）换行撑高把下方手牌区推挤 → 抽动 */
+  .turn-banner .tb-who{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .turn-banner .tb-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .turn-banner .tb-stats{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}
+  .tb-who,.turn-banner .tb-who{font-size:14px}
+  .tb-sub,.turn-banner .tb-sub{font-size:11px}
+  .turn-banner .tb-stats{width:100%;gap:10px;font-size:11px}
+
+  /* 移动端保留顺序流，避免圆桌卡片过度缩小；桌面端才使用环形座位。 */
+  .table-arena{min-height:0;margin:0 0 11px;padding-top:0;border:0;border-radius:0;background:none;overflow:visible}
+  .table-core{display:none}
+  .removed-corner{left:10px;bottom:calc(68px + env(safe-area-inset-bottom));padding:4px}
+  .turn-order-guide{position:relative;top:auto;left:auto;width:100%;transform:none;justify-content:flex-start;margin:0 0 8px;overflow-x:auto;border-radius:10px}
+  .opponents{display:flex;gap:9px;overflow-x:auto;padding-bottom:5px;margin-bottom:11px;
+    -webkit-overflow-scrolling:touch;height:auto}
+  .opponents .opp{position:relative;left:auto;top:auto;width:auto!important;transform:none;flex:0 0 260px;min-width:260px;padding:9px 11px}
+  .me-area{width:auto;margin:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none}
+  .opp-body{flex-direction:column;gap:7px}
+  .opp-city{overflow-x:auto;flex-wrap:nowrap;min-height:52px;padding-bottom:3px}
+  .opp-char-stats,.me-char-stats{min-width:0;font-size:10px}
+
+  /* 我的城市 / 手牌：横向滚动，保证行动栏始终可见 */
+  .zone-head{margin:9px 0 5px}
+  .zone-head h3{font-size:13.5px}
+  .city-row,.hand-row{flex-wrap:nowrap;overflow-x:auto;min-height:0;
+    padding:8px 9px;-webkit-overflow-scrolling:touch}
+  .city-row{min-height:100px}
+  .hand-row{min-height:124px}
+  .empty-hint{margin:0;align-self:center}
+
+  /* 卡牌整体缩小一档 */
+  .card{width:64px;height:90px}
+  .card .c-name{font-size:13px;padding:19px 0 4px}
+  .card .c-cost{width:18px;height:18px;font-size:10px;top:7px;left:5px}
+  .card .c-en{font-size:6.5px}
+  .card.mini{width:54px;height:76px}
+  .card.mini .c-name{font-size:11px;padding:16px 0 3px}
+
+  /* -------- 选角 -------- */
+  .draft-pool{padding:10px;gap:8px;max-height:46vh;overflow-y:auto}
+  .char-card{width:82px;padding:8px 6px}
+  .char-card .cc-desc{font-size:9.5px;max-height:56px}
+  .draft-row{gap:7px}
+  .facedown{width:54px;height:81px}
+
+  /* -------- 行动栏：底部，最大高度限制，内容少则自动收缩，避免大片空白 -------- */
+  .actionbar{padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+    flex:0 0 auto;display:flex;flex-direction:column;min-height:0;
+    max-height:42vh}
+  .prompt{font-size:12.5px;line-height:1.45;flex:0 0 auto;margin-bottom:6px}
+  .actions{flex:0 1 auto;min-height:0;max-height:100%;overflow-y:auto;gap:7px;padding-right:2px;align-content:flex-start}
+  .act{min-height:42px;padding:9px 13px;font-size:13px;border-radius:10px}
+  .act .a-sub{font-size:10.5px}
+
+  /* -------- 战报：默认隐藏，点「战报」切换 -------- */
+  .side-panel{display:none}
+  /* 横屏：右侧栏（与桌面端一致） */
+  .side-panel.show{display:flex;flex:0 0 280px}
+  /* 竖屏：下拉占据菜单栏以下的全屏，可再次点击收起 */
+  @media (orientation:portrait){
+    .side-panel.show{position:fixed;left:0;right:0;bottom:0;top:var(--topbar-h,52px);
+      width:100%;flex:none;z-index:60;border:none}
+  }
+  .side-panel h3{font-size:14px;padding:12px 14px}
+  .log{font-size:13px;line-height:1.75;padding:12px 14px}
+
+  /* -------- 弹层：接近全屏 -------- */
+  .modal{padding:0}
+  .modal-box{width:100%;max-width:100%;height:100dvh;max-height:100dvh;border-radius:0;
+    display:flex;flex-direction:column}
+  .modal-body{flex:1 1 auto;padding:14px 15px calc(20px + env(safe-area-inset-bottom))}
+  .char-grid{grid-template-columns:1fr;gap:9px}
+  .pick-grid{gap:16px;padding:18px 0}
+  .pick-grid .card{width:min(44vw, 180px);height:auto;aspect-ratio:2/3}
+  .pick-grid .card .c-name{font-size:20px;padding:26px 0 6px}
+  .pick-grid .card .c-cost{width:26px;height:26px;font-size:14px;top:10px;left:8px}
+  .pick-grid .card .c-en{font-size:9px}
+
+  /* -------- 结算 -------- */
+  .score-table{font-size:12.5px}
+  .score-table th,.score-table td{padding:8px 7px}
+  .score-table td.total{font-size:15px}
+  .score-detail{font-size:10.5px}
+
+  /* -------- 大厅座位 -------- */
+  .seat-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+  .room-head{gap:8px}
+  .room-code b{font-size:20px}
+  .seat{min-height:84px;padding:9px}
+
+  /* -------- Toast 上移，避免被行动栏遮挡 -------- */
+  .toast{bottom:auto;top:58px;left:50%;transform:translateX(-50%);max-width:88vw}
+}
+
+/* 横屏手机 / 小平板 */
+@media (max-width:1000px) and (min-width:821px) and (max-height:560px){
+  .card{width:60px;height:84px}
+  .hand-row,.city-row{min-height:96px}
+  .actionbar{flex:0 0 auto;display:flex;flex-direction:column;min-height:0;max-height:38vh}
+  .prompt{flex:0 0 auto;margin-bottom:6px}
+  .actions{flex:0 1 auto;min-height:0;max-height:100%;overflow-y:auto;gap:7px;padding-right:2px;align-content:flex-start}
+}
+
+@media (max-width:820px){
+  /* 手机屏幕空间有限：选角阶段横条与行动指引在移动端收起，信息由进度栏/底部提示承接。 */
+  #screen-game .turn-banner,
+  #screen-game .turn-order-guide{display:none!important}
+  /* 运行时自适应缩放的根容器：扩大布局空间后再缩放，避免制造横向滚动条。 */
+  .mobile-fit-root.mobile-fit-scaled{width:calc(100% / var(--mobile-fit-scale));height:calc(100% / var(--mobile-fit-scale));
+    flex:0 0 auto;transform:scale(var(--mobile-fit-scale));overflow:hidden}
+  #screen-game:not(.mobile-menu-open) .topbar{display:none}
+  #screen-game.mobile-menu-open .topbar{position:fixed;right:12px;bottom:calc(68px + env(safe-area-inset-bottom) + 46px);z-index:44;
+    display:flex;flex-direction:column;align-items:stretch;gap:8px;width:min(92vw,340px);padding:9px;
+    border:1px solid var(--line2);border-radius:12px;background:var(--paper);box-shadow:var(--shadow2)}
+  #screen-game.mobile-menu-open .topbar::after{content:'';position:absolute;right:18px;bottom:-7px;width:12px;height:12px;
+    background:var(--paper);border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);transform:rotate(45deg)}
+  #screen-game.mobile-menu-open .topbar .tb-left,
+  #screen-game.mobile-menu-open .topbar .tb-mid,
+  #screen-game.mobile-menu-open .topbar .tb-right{width:100%;display:flex;flex-wrap:wrap;justify-content:flex-start;gap:5px}
+  #screen-game.mobile-menu-open .topbar .tb-mid{order:2;overflow-x:auto}
+  #screen-game.mobile-menu-open .topbar .tb-right{order:3}
+  #screen-game.mobile-menu-open .topbar .tb-left{order:1}
+  .mobile-menu-toggle{position:fixed;right:12px;bottom:calc(68px + env(safe-area-inset-bottom));z-index:45;
+    display:inline-flex;align-items:center;gap:5px;padding:8px 11px;border:1px solid var(--line2);border-radius:10px;
+    background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:11px;font-weight:700;cursor:pointer}
+  .mobile-menu-toggle:hover{border-color:var(--gold);background:var(--bg2)}
+  #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold)}
+  #screen-game.chat-open .mobile-menu-toggle{display:none!important}
+  .chat-composer{bottom:calc(8px + env(safe-area-inset-bottom));width:calc(100vw - 16px);padding:7px;gap:6px}
+  .chat-composer input{padding:9px 10px;font-size:16px}
+
+  /* 菜单栏收起后释放出的空间用于放大卡牌，提升移动端可读性。 */
+  .card{width:40px!important;height:56px!important}
+  .card.mini{width:34px!important;height:48px!important}
+  .char-card{width:52px!important;padding:5px 4px!important}
+  .char-card.mini{width:66px!important;padding:4px!important}
+  .char-card .cc-num{width:15px;height:15px;font-size:8px}
+  .char-card .cc-name{font-size:8px}
+  .char-card .cc-desc{font-size:6px;max-height:34px}
+  .facedown{width:34px!important;height:51px!important;font-size:13px}
+  .cs-card{width:40px!important;height:60px!important}
+  .table-removed .char-card.mini,.table-removed .facedown.sm{width:26px!important;height:39px!important}
+  .removed-corner .char-card.mini,.removed-corner .facedown.sm{width:34px!important;height:51px!important}
+  .opponents[data-layout="mobile-ring"] .opp .cs-card{width:28px!important;height:42px!important}
+  .opponents[data-layout="mobile-ring"] .opp-city>.card{width:28px!important;height:42px!important}
+  .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .cs-card{width:22px!important;height:33px!important}
+  .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city>.card{width:22px!important;height:33px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char .cs-card{width:30px!important;height:45px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .city-row>.card,
+  #opponents[data-layout="mobile-ring"] ~ .me-area .hand-row>.card{width:30px!important;height:45px!important}
+  .pick-grid .card{width:110px!important;height:165px!important}
+  .pick-grid-draw_keep .card{width:180px!important;height:270px!important}
+  .char-zoom{width:180px!important}
+  .card-hd-stage img{max-width:60vw!important;max-height:55vh!important}
+}
+
+/* PC / 大屏（>=821px）：顶栏整条收起，只保留右下角一个浮动「菜单」按钮，
+   点开后在按钮上方弹出原来的菜单项与对局状态。 */
+@media (min-width:821px){
+  /* 选角阶段的说明横条（选角阶段 + 行动指引）纯占位，PC 端整块收起。
+     :not(.rc) 保护轮末「确认本轮战果」块——它复用同一个容器。 */
+  #screen-game.draft-phase .turn-banner:not(.rc){display:none!important}
+  /* 行动指引与横条里的「轮到谁」重复，PC 端不再单列一行。 */
+  #screen-game .turn-order-guide{display:none!important}
+
+  .mobile-menu-toggle{position:fixed;right:18px;bottom:18px;z-index:46;
+    display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border:1px solid var(--line2);border-radius:11px;
+    background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:13px;font-weight:700;cursor:pointer;
+    transition:right .2s ease,border-color .15s ease,background .15s ease}
+  .mobile-menu-toggle:hover{border-color:var(--gold);background:var(--bg2)}
+  #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold);border-color:var(--gold)}
+
+  #screen-game:not(.mobile-menu-open) .topbar{display:none}
+  #screen-game.mobile-menu-open .topbar{position:fixed;right:18px;bottom:68px;z-index:45;
+    display:flex;flex-direction:column;align-items:stretch;gap:10px;width:min(92vw,392px);padding:12px;
+    border:1px solid var(--line2);border-radius:14px;background:var(--paper);box-shadow:var(--shadow2);
+    max-height:calc(100dvh - 106px);overflow-y:auto}
+  #screen-game.mobile-menu-open .topbar::after{content:'';position:absolute;right:20px;bottom:-7px;width:12px;height:12px;
+    background:var(--paper);border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);transform:rotate(45deg)}
+  #screen-game.mobile-menu-open .topbar .tb-left,
+  #screen-game.mobile-menu-open .topbar .tb-mid,
+  #screen-game.mobile-menu-open .topbar .tb-right{width:100%;display:flex;flex-wrap:wrap;justify-content:flex-start;gap:7px}
+  #screen-game.mobile-menu-open .topbar .tb-left{order:1}
+  #screen-game.mobile-menu-open .topbar .tb-mid{order:2}
+  #screen-game.mobile-menu-open .topbar .tb-right{order:3}
+  #screen-game.mobile-menu-open .topbar .tb-mid{padding-top:2px;border-top:1px solid var(--line)}
+  #screen-game.mobile-menu-open .topbar .chip{font-size:12px}
+  /* 行动栏右侧留出浮动按钮的位置，避免按钮压住行动选项。 */
+  #screen-game .actionbar{padding-right:118px}
+
+  /* === 选角阶段 PC 大屏布局：隐藏标题/状态条，压缩角色卡，下方战斗区放大，
+        使角色牌池与“我的城市”在同一屏内同时可见（无滚动）。 === */
+  #screen-game.draft-phase .draft-head{display:none}
+  #screen-game.draft-phase .turn-banner:not(.rc){display:none!important}
+  #screen-game.draft-phase .actionbar{display:none!important}
+  #screen-game.draft-phase .board-main{
+    display:flex;flex-direction:column;overflow:hidden;padding-top:8px;padding-bottom:8px;height:100%}
+  #screen-game.draft-phase .draft-area{flex:0 0 auto;margin-bottom:8px}
+  #screen-game.draft-phase .draft-pool{
+    display:flex;flex-wrap:wrap;gap:8px;justify-content:center;
+    max-height:240px;overflow-y:auto;padding:8px 10px}
+  #screen-game.draft-phase .draft-pool .char-card{
+    width:96px;padding:5px 4px;cursor:pointer}
+  #screen-game.draft-phase .draft-pool .char-card .cc-art{margin-bottom:3px;border-radius:5px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-art img{height:auto;max-height:120px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-num{width:18px;height:18px;font-size:10px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-name{font-size:11px;margin-bottom:1px}
+  #screen-game.draft-phase .draft-pool .char-card .cc-desc{font-size:8px;max-height:34px;line-height:1.35}
+
+  #screen-game.draft-phase .play-area{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  #screen-game.draft-phase .table-arena{
+    flex:1 1 auto;min-height:520px!important;display:block;position:relative;
+    margin:0;padding-top:0;overflow:hidden}
+  /* 使用完整棋盘高度恢复圆桌座位分布；当前玩家留在下方，其他玩家沿上方和两侧展开。 */
+  #screen-game.draft-phase .opponents[data-layout="ring"]{
+    position:absolute!important;inset:0!important;display:block!important;
+    width:100%;height:100%!important;min-height:0!important;margin:0!important;
+    overflow:visible;padding:0}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp{
+    position:absolute!important;
+    left:calc(var(--seat-x) * 1%)!important;
+    top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px))!important;
+    transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)))!important;
+    margin:0!important;width:min(300px,24%)!important;min-width:220px!important}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-city{
+    min-height:34px;gap:4px;flex-wrap:wrap!important}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-city>.card{
+    width:34px!important;height:51px!important}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp .cs-card{
+    width:40px!important;height:60px!important}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-name{font-size:12px}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .opp-gold{font-size:11px}
+  #screen-game.draft-phase .opponents[data-layout="ring"] .score-badge{font-size:11px}
+
+  #screen-game.draft-phase .me-area{
+    position:absolute;left:50%;bottom:10px;transform:translateX(-50%);
+    width:min(860px,52%);height:clamp(390px,46%,440px);min-height:0;margin:0;
+    display:flex;flex-direction:column;padding-bottom:8px;overflow:hidden}
+  #screen-game.draft-phase .me-area .zone-head{flex:0 0 auto;margin:6px 0 4px}
+  #screen-game.draft-phase .me-area .me-role-row{flex:0 0 auto;margin-bottom:6px}
+  #screen-game.draft-phase .me-area .city-row{flex:1 1 40%;min-height:90px;max-height:none;overflow:hidden}
+  #screen-game.draft-phase .me-area .hand-row{flex:1 1 60%;min-height:112px;max-height:none;overflow:hidden}
+  #screen-game.draft-phase .me-area .city-row>.card,
+  #screen-game.draft-phase .me-area .hand-row>.card{width:88px!important;height:123px!important}
+}
+
+/* 战报展开后，按战报的实际宽度移动菜单按钮与浮窗，使其继续贴住棋盘右边界。 */
+@media (min-width:821px){
+  #screen-game.log-panel-open .mobile-menu-toggle{right:calc(18px + var(--desktop-log-width,288px))}
+  #screen-game.log-panel-open.mobile-menu-open .topbar{right:calc(18px + var(--desktop-log-width,288px))}
+}
+
+/* PWA 独立窗口：无浏览器地址栏时也收起顶部菜单，改用右下角浮动菜单。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  .mobile-fit-root.mobile-fit-scaled{width:calc(100% / var(--mobile-fit-scale));height:calc(100% / var(--mobile-fit-scale));
+    flex:0 0 auto;transform:scale(var(--mobile-fit-scale));overflow:hidden}
+  #screen-game:not(.mobile-menu-open) .topbar{display:none}
+  #screen-game.mobile-menu-open .topbar{position:fixed;right:16px;bottom:76px;z-index:44;
+    display:flex;flex-direction:column;align-items:stretch;gap:8px;width:min(92vw,340px);padding:9px;
+    border:1px solid var(--line2);border-radius:12px;background:var(--paper);box-shadow:var(--shadow2)}
+  #screen-game.mobile-menu-open .topbar::after{content:'';position:absolute;right:18px;bottom:-7px;width:12px;height:12px;
+    background:var(--paper);border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);transform:rotate(45deg)}
+  #screen-game.mobile-menu-open .topbar .tb-left,
+  #screen-game.mobile-menu-open .topbar .tb-mid,
+  #screen-game.mobile-menu-open .topbar .tb-right{width:100%;display:flex;flex-wrap:wrap;justify-content:flex-start;gap:5px}
+  #screen-game.mobile-menu-open .topbar .tb-mid{order:2;overflow-x:auto}
+  #screen-game.mobile-menu-open .topbar .tb-right{order:3}
+  #screen-game.mobile-menu-open .topbar .tb-left{order:1}
+  .mobile-menu-toggle{position:fixed;right:16px;bottom:16px;z-index:45;
+    display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid var(--line2);border-radius:9px;
+    background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:11px;font-weight:700;cursor:pointer}
+  .mobile-menu-toggle:hover{border-color:var(--gold);background:var(--bg2)}
+  #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold)}
+}
+
+/* PWA 动画性能：为频繁变化的元素提示独立合成层，减少主界面重绘。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .mobile-fit-root,
+  #screen-game .card,
+  #screen-game .char-card,
+  #screen-game .cs-inner,
+  #screen-game .table-core,
+  #screen-game .opp,
+  #screen-game .me-area,
+  #screen-game .fly-coin,
+  #screen-game .hand-swap-flight,
+  #screen-game .building-swap-flight,
+  #screen-game .building-build-flight,
+  #screen-game .crown-flight,
+  #char-zoom,
+  .card-hd-box{will-change:transform,opacity;backface-visibility:hidden}
+  #screen-game .table-core,
+  #screen-game .opp,
+  #screen-game .me-area{contain:paint}
+  #screen-game .fly-coin,
+  #screen-game .crown-flight,
+  #screen-game .building-swap-flight,
+  #screen-game .building-build-flight{contain:layout paint;pointer-events:none}
+  #char-zoom,
+  #card-hd-overlay{contain:layout paint}
+}
+
+/* PWA 底部行动栏：提示文字与操作按钮在栏内水平居中。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .actionbar{align-items:center}
+  #screen-game .actionbar .prompt{width:100%;text-align:center}
+  #screen-game .actionbar .actions{width:100%;justify-content:center}
+}
+
+/* PWA 横屏：菜单浮窗放大并抬高，和右下角菜单按钮之间留出明确间距；隐藏顶部行动顺序条。 */
+@media (display-mode:standalone) and (orientation:landscape),
+       (display-mode:fullscreen) and (orientation:landscape){
+  #screen-game .mobile-fit-root{position:relative}
+  #screen-game .turn-banner{display:none!important}
+  #screen-game .actionbar{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    min-height:54px;
+    max-height:30vh;
+    padding:8px 12px;
+    border-top:0;
+    border-bottom:1px solid var(--line);
+    z-index:7;
+  }
+  #screen-game .board-main{padding-top:70px}
+  #screen-game.draft-phase .actionbar{display:none!important}
+  #screen-game.draft-phase .board-main{padding-top:0}
+
+  #screen-game.mobile-menu-open .topbar{
+    right:16px;
+    bottom:96px;
+    width:min(94vw,620px);
+    max-height:calc(100dvh - 132px);
+    padding:18px;
+    gap:14px;
+    overflow-y:auto;
+  }
+  #screen-game.mobile-menu-open .topbar .btn.tiny{
+    min-height:42px;
+    padding:10px 15px;
+    font-size:14px;
+  }
+  #screen-game.mobile-menu-open .topbar .chip{
+    padding:5px 10px;
+    font-size:13px;
+  }
+  #screen-game.mobile-menu-open .topbar::after{bottom:-8px}
+  #screen-game .mobile-menu-toggle{right:16px;bottom:16px;padding:8px 12px}
+  #screen-game .turn-order-guide{display:none!important}
+}
+
+/* PWA 游戏页由自身布局控制缩放，避免浏览器双指缩放改变 viewport。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .mobile-fit-root{touch-action:pan-x pan-y}
+  #screen-game .card-hd-stage{touch-action:none}
+  /* 行动阶段保留可读性下限后，超出的内容在各自区域内滚动，不再缩小整页。 */
+  #screen-game.pwa-readable-mode .board-main{overflow:auto}
+  #screen-game.pwa-readable-mode .opponents{overflow:visible}
+  #screen-game.pwa-readable-mode .opp-city,
+  #screen-game.pwa-readable-mode .city-row,
+  #screen-game.pwa-readable-mode .hand-row{overflow-x:auto}
+}
+
+/* PWA 横屏选建筑：抽二选一弹窗中的两张建筑牌按可用高度自适应，确保完整显示。 */
+@media (display-mode:standalone) and (orientation:landscape),
+       (display-mode:fullscreen) and (orientation:landscape){
+  .pick-grid-draw_keep .card{
+    width:min(180px,24vw,calc((100dvh - 150px) * .6667))!important;
+    height:auto!important;
+    aspect-ratio:2 / 3;
+  }
+}
+
+/* PWA 5 人以上：玩家区压缩为两排，角色栏并入第一排，建筑牌横向滚动。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .me-area.many-players{
+    width:min(820px,calc(100% - 24px))!important;
+    margin:6px auto 0!important;
+    padding:6px 8px!important;
+    display:grid;
+    grid-template-columns:minmax(86px,auto) minmax(0,1fr);
+    grid-template-rows:minmax(58px,auto) minmax(54px,auto);
+    grid-template-areas:"role city" "hand-title hand";
+    gap:4px 8px;
+    min-height:0!important;
+    min-height:210px;
+    max-height:240px;
+    overflow:hidden;
+  }
+  #screen-game .me-area.many-players>.zone-head:first-child{
+    position:absolute;
+    top:3px;
+    right:8px;
+    margin:0;
+    z-index:2;
+  }
+  #screen-game .me-area.many-players>.zone-head:first-child h3{display:none}
+  #screen-game .me-area.many-players>.me-role-row{grid-area:role;align-self:center;margin:0;min-width:0}
+  #screen-game .me-area.many-players>.city-row{
+    grid-area:city;
+    min-width:0;
+    min-height:0!important;
+    height:58px;
+    padding:3px;
+    gap:4px;
+    flex-wrap:nowrap!important;
+    overflow-x:auto;
+    overflow-y:hidden;
+  }
+  #screen-game .me-area.many-players>.zone-head:nth-child(4){
+    grid-area:hand-title;
+    align-self:center;
+    min-width:0;
+    margin:0;
+  }
+  #screen-game .me-area.many-players>.zone-head:nth-child(4) h3{font-size:11px;white-space:nowrap}
+  #screen-game .me-area.many-players>.hand-row{
+    grid-area:hand;
+    min-width:0;
+    min-height:0!important;
+    height:54px;
+    padding:3px;
+    gap:4px;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    overflow-y:hidden;
+  }
+  #screen-game .me-area.many-players .me-char .cs-card{width:36px!important;height:54px!important}
+  #screen-game .me-area.many-players .city-row>.card,
+  #screen-game .me-area.many-players .hand-row>.card{width:38px!important;height:54px!important}
+  #screen-game .me-area.many-players .city-row>.card.mini,
+  #screen-game .me-area.many-players .hand-row>.card.mini{width:34px!important;height:48px!important}
+}
+
+/* PWA 5+ 最终碰撞层：iPad 横屏也会命中 PC 选角规则，PC 规则会把我的面板
+   绝对定位到棋盘底部。这里强制它回到对手环之后的正常流，再由 app.js 按真实
+   DOM 边界提供必要间距，保证我的面板永远不会覆盖任一玩家框。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  /* iPad 横屏会命中桌面选角布局；桌面规则原本把棋盘固定高度并裁剪溢出，
+     导致回到正常流的“我的城市”整块落在裁剪区外。环形移动布局必须按
+     对手区 + 我的城市的实际高度展开，再交给 mobile-fit 做整页缩放。 */
+  #screen-game.draft-phase .table-arena[data-layout="mobile-ring"]{
+    flex:0 0 auto!important;
+    height:auto!important;
+    min-height:0!important;
+    overflow:visible!important;
+  }
+  #screen-game.draft-phase .table-arena[data-layout="mobile-ring"]>.opponents{
+    flex:0 0 auto!important;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow{
+    position:relative!important;
+    left:auto!important;
+    right:auto!important;
+    top:auto!important;
+    bottom:auto!important;
+    transform:none!important;
+    height:auto!important;
+    margin-top:var(--pwa-me-clearance,8px)!important;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact{
+    grid-template-columns:minmax(76px,auto) minmax(0,1fr)!important;
+    grid-template-rows:minmax(72px,auto) minmax(68px,auto)!important;
+    min-height:150px!important;
+    max-height:190px!important;
+    padding:5px 7px!important;
+    gap:4px 7px!important;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact>.city-row,
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact>.hand-row{
+    height:68px!important;
+    max-height:68px!important;
+    padding:3px!important;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .me-char .cs-card{
+    width:42px!important;height:63px!important;aspect-ratio:2 / 3;
+  }
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .city-row>.card,
+  #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .hand-row>.card{
+    width:42px!important;height:63px!important;aspect-ratio:2 / 3;
+  }
+}
+
+/* PWA 5 人以上环形玩家框：关闭测量期间的宽度过渡，并强制建筑牌保持 2:3。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game .opponents.pwa-many-players .opp{transition:none!important}
+  #screen-game .opponents.pwa-many-players .opp-city>.card{
+    width:32px!important;
+    height:48px!important;
+    min-width:32px!important;
+    min-height:48px!important;
+    max-width:32px!important;
+    max-height:48px!important;
+    aspect-ratio:2 / 3;
+    flex:0 0 32px!important;
+  }
+  #screen-game .opponents.pwa-many-players .opp .cs-card{
+    width:36px!important;
+    height:54px!important;
+    min-width:36px!important;
+    min-height:54px!important;
+    max-width:36px!important;
+    max-height:54px!important;
+    aspect-ratio:2 / 3;
+    flex:0 0 36px!important;
+  }
+}
+
+/* iPad 级大屏 PWA（宽 ≥900 且高 ≥560）：手机档的环形玩家框在 iPad 上明显偏小，
+   四周留大片空白。这里把圆角矩形、角色牌、建筑牌与文字整体放大一档；
+   建筑牌宽度仍用 --mobile-city-card-width 变量，由 app.js 按建筑数量自适应
+   （applyMobileRingLayout 的 spacious 分支给出更大基数），避免牌多时溢出。
+   媒体查询条件必须与 app.js 中 spacious 判据保持一致。 */
+@media (min-width:900px) and (min-height:560px){
+  /* iPad 级大屏：把环形玩家框整体再放大一档，解决圆角矩形与手牌/建筑牌过小的问题。 */
+  #screen-game .opponents[data-layout="mobile-ring"] .opp{
+    padding:12px 14px!important;
+    border-radius:16px;
+  }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-role-row{gap:10px;margin-bottom:9px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char{gap:8px;margin-bottom:8px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-head{gap:7px;margin-bottom:7px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-seat-no{font-size:12px;padding:2px 8px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-name{font-size:17px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-gold{font-size:15px;gap:5px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .score-badge{font-size:15px;gap:5px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char-stats{font-size:13px;min-width:72px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-body{gap:8px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-city{gap:5px;min-height:54px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-name{font-size:14px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-card{
+    width:56px!important;height:84px!important;
+    min-width:56px!important;min-height:84px!important;
+    max-width:56px!important;max-height:84px!important;
+    flex:0 0 56px!important;
+  }
+  /* 紧凑降级时也别缩得太小 */
+  #screen-game .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .cs-card{
+    width:44px!important;height:66px!important;
+    min-width:44px!important;min-height:66px!important;
+    max-width:44px!important;max-height:66px!important;
+    flex:0 0 44px!important;
+  }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .facedown.hand-count-back{
+    width:38px!important;height:57px!important;
+    min-width:38px!important;min-height:57px!important;
+    max-width:38px!important;max-height:57px!important;
+    flex:0 0 38px!important;
+  }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-multiply{font-size:24px}
+  #screen-game .opponents[data-layout="mobile-ring"] .opp .hand-count-number{font-size:19px}
+  /* 解除手机档固定 32×48 的限制，改由引擎按建筑数量算出的变量决定尺寸。 */
+  #screen-game .opponents.pwa-many-players .opp-city>.card,
+  #screen-game .opponents[data-layout="mobile-ring"] .opp-city>.card{
+    width:var(--mobile-city-card-width,52px)!important;
+    height:var(--mobile-city-card-height,78px)!important;
+    min-width:0!important;
+    min-height:0!important;
+    max-width:none!important;
+    max-height:none!important;
+    flex:0 0 auto!important;
+    aspect-ratio:2 / 3;
+  }
+  #screen-game .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city>.card{
+    width:var(--mobile-city-card-width,40px)!important;
+    height:var(--mobile-city-card-height,60px)!important;
+  }
+
+  /* 大屏下「我的城市」也放大：单排横向滚动，卡牌更大，便于看清手牌。 */
+  #opponents[data-layout="mobile-ring"] ~ .me-area{
+    width:calc(100% - 16px)!important;
+    margin:8px auto 0!important;
+    padding:10px 12px!important;
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area .zone-head{margin:6px 0 4px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .zone-head h3{font-size:14px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-role-row{gap:8px;margin-bottom:6px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char{gap:6px;margin:0 0 6px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char-stats{min-width:64px;font-size:11px}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char .cs-card{width:72px!important;height:108px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .city-row{
+    display:flex!important;grid-auto-flow:unset;grid-template-rows:none;
+    height:120px;max-height:120px;padding:6px;gap:6px;
+    overflow-x:auto;overflow-y:hidden
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area .hand-row{
+    display:flex;flex-wrap:nowrap;gap:6px;
+    height:120px;max-height:120px;padding:6px;
+    overflow-x:auto;overflow-y:hidden
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area .city-row>.card,
+  #opponents[data-layout="mobile-ring"] ~ .me-area .hand-row>.card{width:78px!important;height:117px!important}
+
+  /* PWA 5+ 的 me-area.many-players grid 也同步放大（只在环形移动端生效） */
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players{
+    grid-template-columns:minmax(110px,auto) minmax(0,1fr);
+    grid-template-rows:minmax(130px,auto) minmax(130px,auto);
+    gap:8px 12px;min-height:280px!important;max-height:340px!important
+  }
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players>.city-row,
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players>.hand-row{height:130px!important;max-height:130px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .me-char .cs-card{width:84px!important;height:126px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .city-row>.card,
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .hand-row>.card{width:84px!important;height:126px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .city-row>.card.mini,
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .hand-row>.card.mini{width:72px!important;height:108px!important}
+}
+
+/* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */
+@media (display-mode:standalone) and (orientation:landscape),
+       (display-mode:fullscreen) and (orientation:landscape){
+  #screen-game .table-arena[data-players="4"] .opp .cs-card,
+  #screen-game .table-arena[data-players="4"] .me-area .me-char .cs-card{
+    width:77px!important;
+    height:115px!important;
+  }
+  #screen-game .table-arena[data-players="4"] .opp-city>.card,
+  #screen-game .table-arena[data-players="4"] .me-area .city-row>.card,
+  #screen-game .table-arena[data-players="4"] .me-area .hand-row>.card{
+    width:91px!important;
+    height:127px!important;
+  }
+  #screen-game .table-arena[data-players="4"] .opp-city>.card.mini,
+  #screen-game .table-arena[data-players="4"] .me-area .city-row>.card.mini,
+  #screen-game .table-arena[data-players="4"] .me-area .hand-row>.card.mini{
+    width:72px!important;
+    height:101px!important;
+  }
+}
+
+/* PWA 选角预览：整张角色卡必须在视口内可见，避免弹窗自身产生纵向滚动。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #char-zoom.touch{
+    width:min(240px,72vw)!important;
+    max-height:calc(100vh - 20px)!important;
+    max-height:calc(100dvh - 20px)!important;
+    overflow:hidden!important;
+    padding:6px!important;
+  }
+  #char-zoom.touch img,
+  #char-zoom.touch .char-zoom-back{
+    width:100%!important;
+    max-width:100%!important;
+    height:auto!important;
+    max-height:calc(100vh - 150px)!important;
+    max-height:calc(100dvh - 150px)!important;
+    object-fit:contain;
+  }
+  #char-zoom.touch .cz-actions{gap:6px;margin-top:6px}
+  #char-zoom.touch .cz-btn{padding:7px 6px;font-size:12px}
+  #char-zoom.touch .cz-hd-btn{margin-top:6px;padding:6px 8px;font-size:11px}
+}
+
+/* 移动端“我的城市”始终采用两排，建筑数量增加时只向右扩展，不把区域继续向下撑高。 */
+@media (max-width:820px){
+  #my-city.city-row{display:grid!important;grid-auto-flow:column;grid-template-rows:repeat(2,minmax(0,1fr));
+    grid-auto-columns:48px;gap:5px;min-height:0!important;height:128px;max-height:128px;
+    padding:6px;overflow-x:auto;overflow-y:hidden;align-content:stretch}
+  #my-city.city-row>.card{width:42px!important;height:59px!important;flex:none}
+  #my-hand.hand-row>.card{width:42px!important;height:59px!important}
+}
+
+/* 移动端统一卡牌缩放：普通卡与角色卡均缩为原来的约一半，桌面端不变。 */
+@media (max-width:820px){
+  .card{width:32px!important;height:45px!important}
+  .card.mini{width:27px!important;height:38px!important}
+  .char-card{width:41px!important;padding:4px 3px!important}
+  .char-card.mini{width:52px!important;padding:3px!important}
+  .char-card .cc-num{width:12px;height:12px;font-size:7px}
+  .char-card .cc-name{font-size:7px}
+  .char-card .cc-desc{font-size:5px;max-height:28px}
+  .facedown{width:27px!important;height:41px!important;font-size:11px}
+  .cs-card{width:32px!important;height:48px!important}
+  .table-removed .char-card.mini,.table-removed .facedown.sm{width:21px!important;height:28px!important}
+  .removed-corner .char-card.mini,.removed-corner .facedown.sm{width:27px!important;height:41px!important}
+  .opponents[data-layout="mobile-ring"] .opp .cs-card{width:20px!important;height:30px!important}
+  .opponents[data-layout="mobile-ring"] .opp-city>.card{width:20px!important;height:30px!important}
+  .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .cs-card{width:16px!important;height:24px!important}
+  .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city>.card{width:16px!important;height:24px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .me-char .cs-card{width:21px!important;height:32px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area .city-row>.card,
+  #opponents[data-layout="mobile-ring"] ~ .me-area .hand-row>.card{width:24px!important;height:36px!important}
+  .pick-grid .card{width:90px!important;height:135px!important}
+  .pick-grid-draw_keep .card{width:150px!important;height:225px!important}
+  .char-zoom{width:150px!important}
+  .card-hd-stage img{max-width:45vw!important;max-height:39vh!important}
+}
+
+/* 选角牌池（霓虹主题）：外层蓝框就是卡图的选择框，不再保留装饰性内边距。
+   同时覆盖 PC 紧凑布局中的 120px 图片上限，避免图片变矮后在框底留下空白。 */
+html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-role-card{
+  padding:0!important;
+  background:transparent;
+}
+html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-role-card .cc-art{
+  margin:0!important;
+  border-radius:4px;
+}
+html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-role-card .cc-art img{
+  width:100%!important;
+  height:100%!important;
+  max-height:none!important;
+  object-fit:cover;
+}
+
+/* 角色牌旁的手牌数量指示：主题牌背 × 阿拉伯数字图标。 */
+.opp-char-stats,.me-char-stats{min-width:64px;padding-top:0;display:flex;align-items:center;justify-content:center}
+.hand-count-indicator{display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;color:var(--ink2)}
+.facedown.hand-count-back{width:24px!important;height:36px!important;min-width:24px!important;min-height:36px!important;
+  max-width:24px!important;max-height:36px!important;flex:0 0 24px!important;border-width:1px;font-size:0;border-radius:4px}
+.hand-count-multiply{font-size:18px;font-weight:800;line-height:1;color:var(--dim)}
+.hand-count-number{display:inline-flex;align-items:center;justify-content:center;
+  color:var(--ink);font-size:15px;font-weight:800;line-height:1}
