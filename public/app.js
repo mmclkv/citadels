@@ -32,7 +32,8 @@
     noticeSeen: null,      // 已展示到第几条关键事件（seq）
     _reveal: {},           // 每位玩家上一帧的角色卡状态，用于检测「盖牌→翻面」触发动画
     myIdx: null,
-    leavingNetGame: false
+    leavingNetGame: false,
+    chatBubbles: new Map()
   };
 
   const NET_SESSION_KEY = 'citadels.net.session';
@@ -257,6 +258,10 @@
   function showScreen(id) {
     $$('.screen').forEach(s => s.classList.remove('active'));
     $('#' + id).classList.add('active');
+    if (id !== 'screen-game') {
+      closeChatComposer();
+      clearPlayerChatBubbles();
+    }
   }
 
   /* ======================= 关键事件提示（居中弹层） =======================
@@ -725,7 +730,9 @@
           }
           break;
         case 'error': this.autoStart = false; toast('✗ ' + m.error); break;
-        case 'chat': toast(m.from + '：' + m.text); break;
+        case 'chat':
+          if (m.playerId && m.playerId !== App.myId) showPlayerChatBubble(m);
+          break;
         case 'roomNotice': handleRoomNotice(m.notice); break;
       }
     },
@@ -1609,6 +1616,80 @@
     return document.querySelector('[data-seat="' + s + '"]');
   }
 
+  function clearPlayerChatBubbles() {
+    App.chatBubbles.forEach(item => {
+      clearTimeout(item.timer);
+      if (item.el && item.el.parentNode) item.el.parentNode.removeChild(item.el);
+    });
+    App.chatBubbles.clear();
+  }
+
+  function positionPlayerChatBubbles() {
+    if (!App.state || !App.state.players) return;
+    App.chatBubbles.forEach((item, playerId) => {
+      const player = App.state.players.find(p => p.id === playerId);
+      const box = player && playerBox(player.seat);
+      if (!box || !item.el || !item.el.isConnected) return;
+      const r = box.getBoundingClientRect();
+      const bubble = item.el;
+      const width = bubble.offsetWidth || 180;
+      const height = bubble.offsetHeight || 54;
+      const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.left + (r.width - width) / 2));
+      bubble.style.left = Math.round(left) + 'px';
+      bubble.style.top = Math.round(Math.max(8, r.top - height - 9)) + 'px';
+    });
+  }
+
+  function showPlayerChatBubble(message) {
+    if (!message || !message.playerId || !String(message.text || '').trim()) return;
+    const old = App.chatBubbles.get(message.playerId);
+    if (old) {
+      clearTimeout(old.timer);
+      if (old.el && old.el.parentNode) old.el.parentNode.removeChild(old.el);
+    }
+    const bubble = el('div', 'player-chat-bubble');
+    bubble.setAttribute('role', 'status');
+    const speaker = el('span', 'chat-speaker');
+    const textNode = el('span', 'chat-text');
+    speaker.textContent = message.playerName || '玩家';
+    textNode.textContent = String(message.text);
+    bubble.appendChild(speaker);
+    bubble.appendChild(textNode);
+    document.body.appendChild(bubble);
+    const item = { el: bubble, timer: null };
+    item.timer = setTimeout(() => {
+      if (bubble.parentNode) bubble.parentNode.removeChild(bubble);
+      App.chatBubbles.delete(message.playerId);
+    }, 6500);
+    App.chatBubbles.set(message.playerId, item);
+    requestAnimationFrame(positionPlayerChatBubbles);
+  }
+
+  function closeChatComposer() {
+    const composer = $('#chat-composer');
+    const screen = $('#screen-game');
+    if (composer) composer.hidden = true;
+    if (screen) screen.classList.remove('chat-open');
+  }
+
+  function openChatComposer() {
+    if (App.mode !== 'net' || !App.state || App.state.phase === 'gameover') return;
+    const composer = $('#chat-composer');
+    const input = $('#chat-input');
+    if (!composer || !input) return;
+    composer.hidden = false;
+    $('#screen-game').classList.add('chat-open');
+    input.value = '';
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function syncChatControl() {
+    const button = $('#btn-chat');
+    if (!button) return;
+    button.hidden = !(App.mode === 'net' && App.state && App.state.phase !== 'gameover');
+    if (button.hidden) closeChatComposer();
+  }
+
   /* 金币从被偷者飞向盗贼的动画 */
   function flyCoins(fromSeat, toSeat, amount) {
     if (fromSeat == null || toSeat == null || fromSeat === toSeat) return;
@@ -1904,6 +1985,7 @@
     $('#tb-room').textContent = s.roomName || (App.mode === 'local' ? '单人模式' : '联机房间 ' + (s.roomId || ''));
     syncSpeedBtn();
     syncThemeBtn();
+    syncChatControl();
 
     // 本轮生效的负面效果常驻显示，别让玩家忘了自己被刺杀/被盯上
     const fx = $('#tb-effects');
@@ -1940,6 +2022,7 @@
       renderOpponents(s);
       renderMe(s);
       renderLog(s);
+      requestAnimationFrame(positionPlayerChatBubbles);
       restoreScroll(_scrollSnap);
       scheduleMobileFitScale();
       return;
@@ -1952,6 +2035,7 @@
     renderLog(s);
     renderActions(s);
     autoOpenPick(s);
+    requestAnimationFrame(positionPlayerChatBubbles);
     restoreScroll(_scrollSnap);
     scheduleMobileFitScale();
   }
@@ -2164,8 +2248,11 @@
       d.dataset.widthBase = cityWidth;
       d.dataset.cardWidth = String(cardWidth);
       d.dataset.cityCount = String(p.city.length);
+      // 碰撞位移仅属于当前渲染，防止下一帧把旧偏移再次叠加到环形座位。
       d.style.setProperty('--push-x', '0px');
       d.style.setProperty('--push-y', '0px');
+      d.dataset.pushX = '0';
+      d.dataset.pushY = '0';
       d.dataset.compact = String(mobileRingLayout ? 3 : compactLevel);
       const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id);
       const actionActive = !!(s.turn && s.turn.playerIdx === p.seat);
@@ -2519,6 +2606,8 @@
     Array.prototype.forEach.call(wrap.querySelectorAll('.opp'), d => {
       d.style.setProperty('--push-x', '0px');
       d.style.setProperty('--push-y', '0px');
+      d.dataset.pushX = '0';
+      d.dataset.pushY = '0';
       const baseWidth = d.dataset.widthBase || ('min(340px, ' + (d.dataset.cardWidth || 24) + '%)');
       d.style.width = baseWidth;
       const r = d.getBoundingClientRect();
@@ -2532,6 +2621,8 @@
       else pushY = (dy < 0 ? -1 : 1) * (overlapY + 12);
       d.style.setProperty('--push-x', pushX + 'px');
       d.style.setProperty('--push-y', pushY + 'px');
+      d.dataset.pushX = String(pushX);
+      d.dataset.pushY = String(pushY);
       const expand = Math.min(26, Math.max(8, Math.round(overlapX * 0.12)));
       d.style.width = baseWidth.indexOf('px') >= 0
         ? 'min(720px, calc(' + baseWidth + ' + ' + expand + 'px))'
@@ -3226,8 +3317,9 @@
       '<p class="small">有玩家建成第 8 栋建筑时，本轮结束后游戏结束。分数＝建筑费用总和' +
       '＋五色齐全 3 分＋率先达标 4 分（其他达标者 2 分）＋特殊建筑加分，最高者获胜。</p>' +
       '<div class="section-title">皇冠</div>' +
-      '<p class="small">拥有皇冠者本轮优先选角。若有人使用 4 号角色，皇冠立即转移给该玩家；' +
-      '被刺杀的国王仍会在轮末获得皇冠。</p>';
+      '<p class="small">拥有皇冠者本轮优先选角。<b>国王 / 贵族</b>（4 号）被叫号时立即获得皇冠；' +
+      '<b>皇帝</b>（4 号，黑暗城市扩充）则必须把皇冠转交给另一名玩家，再从该玩家处拿 1 金币或抽 1 张手牌。' +
+      '被刺杀的国王 / 贵族仍会在轮末获得皇冠。</p>';
     $('#modal').hidden = false;
   }
 
@@ -3497,6 +3589,15 @@
       }
       if (willShow && App.state) renderLog(App.state);
     };
+    $('#btn-chat').onclick = openChatComposer;
+    $('#chat-composer').onsubmit = e => {
+      e.preventDefault();
+      const input = $('#chat-input');
+      const text = input ? input.value.trim() : '';
+      if (!text) { if (input) input.focus(); return; }
+      Net.send({ t: 'chat', text: text });
+      closeChatComposer();
+    };
     $('#btn-again').onclick = () => {
       if (App.mode === 'local' && App.lastCfg) {
         Local.start(App.lastCfg); showScreen('screen-game');
@@ -3506,10 +3607,11 @@
         showScreen('screen-lobby');
       }
     };
-    window.addEventListener('resize', scheduleMobileFitScale);
-    window.addEventListener('orientationchange', scheduleMobileFitScale);
+    window.addEventListener('resize', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
+    window.addEventListener('orientationchange', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape') return;
+      if ($('#chat-composer') && !$('#chat-composer').hidden) { closeChatComposer(); return; }
       // 展开的菜单优先级高于弹层：Esc 先收起菜单，再关弹层。
       if (gameScreen && gameScreen.classList.contains('mobile-menu-open')) { setMenuOpen(false); return; }
       closeModal();
