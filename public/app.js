@@ -1696,34 +1696,40 @@
     coinFlight(rectOf(playerBox(fromSeat)), rectOf(playerBox(toSeat)), amount);
   }
 
-  // 名称右侧是皇冠在界面中的视觉锚点；自己的玩家框没有对手同款名称节点，
-  // 因此退回到玩家框右上区域，保证皇冠动画在所有座位都能播放。
-  function playerNameAnchor(seat) {
+  // 皇冠动画的视觉锚点：玩家圆角矩形中金币图标左侧（皇冠在界面上的固定位置）。
+  // 对手框用 .opp-gold，自己框用 #my-gold；返回的是金币区域左缘的中心点。
+  function playerGoldAnchor(seat) {
     const box = playerBox(seat);
     if (!box) return null;
-    const name = box.querySelector('.opp-name');
-    const r = rectOf(name) || rectOf(box);
+    const gold = box.querySelector('.opp-gold') ||
+      (box.id === 'me-area' ? box.querySelector('#my-gold') : null);
+    const r = rectOf(gold) || rectOf(box);
     if (!r) return null;
-    return {
-      x: name ? r.right + 5 : r.right - Math.min(24, r.width * .12),
-      y: r.top + r.height / 2
-    };
+    return { x: r.left, y: r.top + r.height / 2 };
   }
 
   function crownTransferAnim(fromSeat, toSeat) {
     if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
         typeof document === 'undefined' || !document.body) return;
-    const from = playerNameAnchor(fromSeat), to = playerNameAnchor(toSeat);
-    if (!from || !to) return;
-    const crown = document.createElement('div');
-    crown.className = 'crown-flight';
-    crown.innerHTML = '<i class="crown-icon" aria-hidden="true">♛</i>';
-    crown.style.left = (from.x - 11) + 'px';
-    crown.style.top = (from.y - 11) + 'px';
-    crown.style.setProperty('--crown-dx', (to.x - from.x) + 'px');
-    crown.style.setProperty('--crown-dy', (to.y - from.y) + 'px');
-    document.body.appendChild(crown);
-    setTimeout(() => { if (crown.parentNode) crown.parentNode.removeChild(crown); }, 1250);
+    // 当前通知在 render() 的前半段触发，此时 renderOpponents 还没跑。
+    // 用 rAF 等到本轮 DOM reconciliation 完成后再读位置：
+    //   1) 原持有者的皇冠已随重渲染被移除（满足"起飞后原位皇冠消失"）；
+    //   2) 新持有者的 .opp-gold / #my-gold 也已就位，可正确取到锚点。
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    nextFrame(() => {
+      const from = playerGoldAnchor(fromSeat), to = playerGoldAnchor(toSeat);
+      if (!from || !to) return;
+      const crown = document.createElement('div');
+      crown.className = 'crown-flight';
+      crown.innerHTML = '<i class="crown-icon" aria-hidden="true">♛</i>';
+      crown.style.left = (from.x - 11) + 'px';
+      crown.style.top = (from.y - 11) + 'px';
+      crown.style.setProperty('--crown-dx', (to.x - from.x) + 'px');
+      crown.style.setProperty('--crown-dy', (to.y - from.y) + 'px');
+      document.body.appendChild(crown);
+      setTimeout(() => { if (crown.parentNode) crown.parentNode.removeChild(crown); }, 1250);
+    });
   }
 
   // 单张手牌从目标玩家飞向皇帝，使用牌背以保持信息隐藏。
