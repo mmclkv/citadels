@@ -606,8 +606,25 @@ function handle(ws, info, msg) {
 
     case 'chat': {
       const r = rooms[info.roomId];
-      if (!r) break;
-      const m = JSON.stringify({ t: 'chat', from: info.name || '?', text: String(msg.text || '').slice(0, 200) });
+      if (!r || !r.state || r.state.phase === 'gameover') {
+        wsSend(ws, JSON.stringify({ t: 'error', error: '仅可在进行中的对局内发言' }));
+        break;
+      }
+      const seat = r.seats.find(s => s.id === info.id && s.taken && !s.isBot && !s.left);
+      if (!seat) break;
+      const now = Date.now();
+      if (info.lastChatAt && now - info.lastChatAt < 600) {
+        wsSend(ws, JSON.stringify({ t: 'error', error: '发言太快了，请稍后再试' }));
+        break;
+      }
+      const text = Array.from(String(msg.text || '').replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim())
+        .slice(0, 120).join('');
+      if (!text) break;
+      info.lastChatAt = now;
+      const m = JSON.stringify({
+        t: 'chat', playerId: seat.id, playerName: seat.name,
+        text, sentAt: now
+      });
       r.seats.forEach(s => { if (s.id) sendTo(s.id, m); });
       break;
     }

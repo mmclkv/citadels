@@ -624,6 +624,21 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .act:disabled:hover,.act.disabled:hover{background:#fffdf8;border-color:var(--line2);filter:grayscale(.45)}
 .act .a-sub{display:block;font-size:11px;opacity:.72;font-weight:400;margin-top:1px}
 .waiting{color:var(--dim);font-size:13px;font-style:italic}
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+.chat-composer{position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));z-index:70;
+  transform:translateX(-50%);display:flex;align-items:center;gap:8px;width:min(680px,calc(100vw - 24px));
+  padding:10px;border:1px solid var(--line2);border-radius:14px;background:var(--paper);box-shadow:var(--shadow2)}
+.chat-composer[hidden]{display:none}
+.chat-composer input{min-width:0;flex:1;padding:10px 12px;border:1px solid var(--line2);border-radius:9px;
+  background:var(--paper2);color:var(--ink);font:inherit;outline:none}
+.chat-composer input:focus{border-color:var(--gold);box-shadow:0 0 0 2px rgba(200,149,43,.16)}
+.player-chat-bubble{position:fixed;z-index:65;max-width:min(280px,72vw);padding:8px 11px;border:1px solid var(--line2);
+  border-radius:13px;background:var(--paper);color:var(--ink);box-shadow:var(--shadow2);font-size:13px;line-height:1.4;
+  overflow-wrap:anywhere;pointer-events:none;animation:chat-bubble-in .18s ease-out}
+.player-chat-bubble::after{content:'';position:absolute;left:50%;bottom:-6px;width:10px;height:10px;
+  background:var(--paper);border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);transform:translateX(-50%) rotate(45deg)}
+.player-chat-bubble .chat-speaker{display:block;margin-bottom:2px;color:var(--gold);font-size:11px;font-weight:800}
+@keyframes chat-bubble-in{from{opacity:0;transform:translateY(5px) scale(.96)}to{opacity:1;transform:none}}
 
 /* ------------------------------ 结算 ------------------------------ */
 .score-table{width:100%;border-collapse:collapse;font-size:14px}
@@ -907,6 +922,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     background:var(--paper);color:var(--ink2);box-shadow:var(--shadow2);font-size:11px;font-weight:700;cursor:pointer}
   .mobile-menu-toggle:hover{border-color:var(--gold);background:var(--bg2)}
   #screen-game.mobile-menu-open .mobile-menu-toggle{color:var(--gold)}
+  #screen-game.chat-open .mobile-menu-toggle{display:none!important}
+  .chat-composer{bottom:calc(8px + env(safe-area-inset-bottom));width:calc(100vw - 16px);padding:7px;gap:6px}
+  .chat-composer input{padding:9px 10px;font-size:16px}
 
   /* 菜单栏收起后释放出的空间用于放大卡牌，提升移动端可读性。 */
   .card{width:40px!important;height:56px!important}
