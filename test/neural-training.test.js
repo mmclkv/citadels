@@ -37,6 +37,12 @@ const Train = require('../training/train.js');
   assert.ok(Object.values(loss).every(Number.isFinite), 'PPO 损失指标均为有限数值');
   assert.notStrictEqual(model.policyOut.w[0], before, 'PPO 反向传播更新网络参数');
 
+  const history = Array.from({ length: 1000 }, (_, i) => ({ game: (i + 1) * 4 }));
+  const sampled = Train.sampleHistory(history, 100);
+  assert.strictEqual(sampled.length, 100, '长训练历史会压缩到图表容量');
+  assert.strictEqual(sampled[0].game, 4, '历史压缩保留横轴起点');
+  assert.strictEqual(sampled[sampled.length - 1].game, 4000, '历史压缩保留横轴终点');
+
   console.log('本地神经网络训练：参数档位、隐私、整局自对弈、推理与 PPO 更新全部通过');
 })().catch(error => {
   console.error(error);

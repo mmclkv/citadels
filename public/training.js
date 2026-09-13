@@ -130,25 +130,62 @@ function prepareCanvas(canvas) {
   const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio); return { ctx, width: rect.width, height: rect.height };
 }
 
+function movingAverage(rows, key, windowSize, scale = 1) {
+  return rows.map((row, index) => {
+    const start = Math.max(0, index - windowSize + 1);
+    let sum = 0, count = 0;
+    for (let i = start; i <= index; i++) {
+      const value = Number(rows[i][key]) * scale;
+      if (Number.isFinite(value)) { sum += value; count++; }
+    }
+    return count ? sum / count : NaN;
+  });
+}
+
 function drawLines(canvas, history, series) {
-  const { ctx, width, height } = prepareCanvas(canvas), pad = { l: 42, r: 12, t: 22, b: 26 };
+  const { ctx, width, height } = prepareCanvas(canvas), pad = { l: 48, r: 16, t: 22, b: 38 };
+  const plotWidth = width - pad.l - pad.r, plotHeight = height - pad.t - pad.b;
   ctx.clearRect(0, 0, width, height); ctx.strokeStyle = '#174861'; ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) { const y = pad.t + (height - pad.t - pad.b) * i / 4; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(width - pad.r, y); ctx.stroke(); }
+  for (let i = 0; i <= 4; i++) { const y = pad.t + plotHeight * i / 4; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(width - pad.r, y); ctx.stroke(); }
   const values = [];
   history.forEach(row => series.forEach(s => { const v = Number(row[s.key]) * (s.scale || 1); if (Number.isFinite(v)) values.push(v); }));
   let min = values.length ? Math.min(...values) : 0, max = values.length ? Math.max(...values) : 1;
   if (min === max) { min -= .5; max += .5; }
-  ctx.font = '10px system-ui'; ctx.fillStyle = '#8aaaba'; ctx.fillText(max.toFixed(2), 3, pad.t + 3); ctx.fillText(min.toFixed(2), 3, height - pad.b);
+  const games = history.map((row, index) => Number.isFinite(Number(row.game)) ? Number(row.game) : index);
+  const firstGame = games.length ? games[0] : 0, lastGame = games.length ? games[games.length - 1] : 0;
+  const gameSpan = Math.max(1, lastGame - firstGame);
+  const xFor = (row, index) => pad.l + ((games[index] - firstGame) / gameSpan) * plotWidth;
+  const yFor = value => pad.t + (max - value) / (max - min) * plotHeight;
+  ctx.font = '10px system-ui'; ctx.fillStyle = '#8aaaba';
+  ctx.fillText(max.toFixed(2), 3, pad.t + 3); ctx.fillText(min.toFixed(2), 3, height - pad.b);
+  ctx.strokeStyle = '#34708d'; ctx.beginPath(); ctx.moveTo(pad.l, height - pad.b); ctx.lineTo(width - pad.r, height - pad.b); ctx.stroke();
+  const tickCount = width < 420 ? 4 : 6;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let tick = 0; tick <= tickCount; tick++) {
+    const ratio = tick / tickCount, x = pad.l + plotWidth * ratio;
+    const game = Math.round(firstGame + (lastGame - firstGame) * ratio);
+    ctx.strokeStyle = '#34708d'; ctx.beginPath(); ctx.moveTo(x, height - pad.b); ctx.lineTo(x, height - pad.b + 4); ctx.stroke();
+    ctx.fillStyle = '#8aaaba'; ctx.fillText(game.toLocaleString('zh-CN'), x, height - pad.b + 7);
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const averageWindow = Math.max(3, Math.ceil(history.length / 40));
   series.forEach((s, si) => {
-    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath(); let started = false;
+    ctx.strokeStyle = s.color; ctx.globalAlpha = .25; ctx.lineWidth = 1; ctx.beginPath(); let started = false;
     history.forEach((row, i) => {
       const v = Number(row[s.key]) * (s.scale || 1); if (!Number.isFinite(v)) return;
-      const x = pad.l + (width - pad.l - pad.r) * i / Math.max(1, history.length - 1);
-      const y = pad.t + (max - v) / (max - min) * (height - pad.t - pad.b);
-      started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true;
+      started ? ctx.lineTo(xFor(row, i), yFor(v)) : ctx.moveTo(xFor(row, i), yFor(v)); started = true;
     });
-    ctx.stroke(); ctx.fillStyle = s.color; ctx.fillRect(pad.l + si * 92, 5, 12, 3); ctx.fillText(s.label, pad.l + 17 + si * 92, 10);
+    ctx.stroke();
+    const average = movingAverage(history, s.key, averageWindow, s.scale || 1);
+    ctx.globalAlpha = 1; ctx.lineWidth = 2.3; ctx.beginPath(); started = false;
+    average.forEach((value, i) => {
+      if (!Number.isFinite(value)) return;
+      started ? ctx.lineTo(xFor(history[i], i), yFor(value)) : ctx.moveTo(xFor(history[i], i), yFor(value)); started = true;
+    });
+    ctx.stroke(); ctx.fillStyle = s.color; ctx.fillRect(pad.l + si * 112, 5, 12, 3);
+    ctx.fillText(s.label + '（均线）', pad.l + 17 + si * 112, 10);
   });
+  ctx.globalAlpha = 1;
   if (!history.length) { ctx.fillStyle = '#8aaaba'; ctx.textAlign = 'center'; ctx.fillText('等待训练数据', width / 2, height / 2); ctx.textAlign = 'left'; }
 }
 
