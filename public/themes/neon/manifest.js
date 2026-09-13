@@ -21,9 +21,12 @@
   ];
 
   function variants(folder, key) {
+    // 墓地卡图曾把建造费用 5 错印成能力支付费用 1；单独版本化，
+    // 让已安装 PWA 绕过旧图片的 HTTP / Service Worker 缓存。
+    const version = folder === 'districts' && key === 'graveyard' ? '?v=2' : '';
     return {
-      thumb: base + folder + '/thumb/' + key + '.webp',
-      full: base + folder + '/full/' + key + '.webp'
+      thumb: base + folder + '/thumb/' + key + '.webp' + version,
+      full: base + folder + '/full/' + key + '.webp' + version
     };
   }
 

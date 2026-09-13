@@ -13,7 +13,10 @@ vm.runInNewContext(manifestCode, sandbox, { filename: 'manifest.js' });
 const manifest = sandbox.CitadelThemeManifests && sandbox.CitadelThemeManifests.neon;
 if (!manifest) throw new Error('找不到 neon 主题 manifest');
 
-function assetPath(relative) { return path.join(root, 'public', relative.replace(/^\.\//, '')); }
+function assetPath(relative) {
+  const pathname = String(relative).split(/[?#]/, 1)[0];
+  return path.join(root, 'public', pathname.replace(/^\.\//, ''));
+}
 function safeKey(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 }
@@ -33,6 +36,15 @@ Cards.DISTRICTS.forEach(d => {
   const key = 'district_' + safeKey(d.en || d.name);
   checkEntry('建筑 ' + d.name + ' [' + key + ']', manifest.cards.districts[key]);
 });
+
+const graveyard = manifest.cards.districts.district_graveyard;
+if (!/graveyard\.webp\?v=2$/.test(graveyard.thumb) || !/graveyard\.webp\?v=2$/.test(graveyard.full)) {
+  throw new Error('墓地修正版卡图缺少缓存版本标记');
+}
+const graveyardCard = Cards.DISTRICTS.find(d => d.en === 'Graveyard');
+if (!graveyardCard || graveyardCard.cost !== 5 || !/支付1枚金币/.test(graveyardCard.desc)) {
+  throw new Error('墓地规则应为建造费用 5，发动回收能力支付 1 金');
+}
 
 const roleKeys = Object.keys(manifest.cards.roles);
 const districtKeys = Object.keys(manifest.cards.districts);
