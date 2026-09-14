@@ -10,6 +10,7 @@
 2. 建立动作回放校验链路（`replay_protocol.js`、`replay_verify.cpp`），并用强类型动作协议（`action_codec.hpp`）开始实现 C++ 规则适配器；
 3. 先迁移并验证可复现随机源（`js_rng.hpp`），再按回放逐块迁移状态变更规则；
 4. 用 `state_projection.js` / `state_codec.hpp` 固定搜索元状态，逐步接入 C++ 的状态变更实现；
+5. 已迁移选角状态机（`draft_machine.hpp`），下一步接入牌池和角色合法性规则；
 3. 接入批量网络评估；
 4. 将训练器的自对弈 worker 切换到 native MCTS。
 
