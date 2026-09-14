@@ -32,8 +32,8 @@ struct NativePlayer {
 
 struct NativeGameState {
   std::vector<NativePlayer> players;
-  DeckMachine* deck = nullptr;
-  JsRng* rng = nullptr;
+  DeckMachine deck;
+  JsRng rng;
   int active_player = -1;
   int end_districts = 8;
   int builds = 0;
@@ -59,9 +59,9 @@ struct NativeGameState {
 
   bool take_cards(DistrictDrawEffect effect = DistrictDrawEffect::None) {
     auto* p = active();
-    if (!p || resources_taken || !deck || !rng) return false;
+    if (!p || resources_taken) return false;
     const auto plan = plan_take_cards(p->role_id, ResourcePhase::Main, effect);
-    auto cards = deck->draw(plan.drawn, *rng);
+    auto cards = deck.draw(plan.drawn, rng);
     p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()),
                    std::make_move_iterator(cards.end()));
     p->gold += plan.gold;
@@ -108,12 +108,12 @@ struct NativeGameState {
 
   bool use_smithy(const std::string& building_uid) {
     auto* p = active();
-    if (!p || !deck || !rng || !std::any_of(p->city.begin(), p->city.end(), [&](const NativeDistrict& d) {
+    if (!p || !std::any_of(p->city.begin(), p->city.end(), [&](const NativeDistrict& d) {
       return d.card.uid == building_uid && d.effect == "smithy";
     })) return false;
     SpecialBuildingState s;
     s.gold = p->gold; s.hand = std::move(p->hand); s.has_smithy = true; s.used_smithy = used_smithy;
-    const bool ok = citadels::native::use_smithy(s, *deck, *rng);
+    const bool ok = citadels::native::use_smithy(s, deck, rng);
     p->gold = s.gold; p->hand = std::move(s.hand);
     used_smithy = s.used_smithy;
     return ok;

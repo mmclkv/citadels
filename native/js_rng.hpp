@@ -8,6 +8,7 @@ namespace citadels::native {
 // 确保 Windows/Linux 及不同编译器下的回放种子可复现。
 class JsRng {
  public:
+  JsRng() : state_(0) {}
   explicit JsRng(uint32_t seed) : state_(seed) {}
 
   uint32_t next_u32() {

@@ -6,10 +6,8 @@ using namespace citadels::native;
 
 int main() {
   auto deck_data = build_base_district_deck(11);
-  DeckMachine deck(std::move(deck_data));
-  JsRng rng(11);
   NativeGameState state;
-  state.deck = &deck; state.rng = &rng; state.active_player = 0;
+  state.deck = DeckMachine(std::move(deck_data)); state.rng = JsRng(11); state.active_player = 0;
   state.players.push_back({"p0", "architect", 2, {{"h1", "green", 1}}, {}, false});
   const bool a = state.take_gold();
   const bool b = state.take_gold();

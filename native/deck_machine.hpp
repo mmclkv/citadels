@@ -9,6 +9,7 @@ namespace citadels::native {
 
 class DeckMachine {
  public:
+  DeckMachine() = default;
   explicit DeckMachine(std::vector<DistrictCard> deck) : deck_(std::move(deck)) {}
 
   void discard(std::vector<DistrictCard> cards) {
