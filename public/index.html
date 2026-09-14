@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=54">
+  <link rel="stylesheet" href="./style.css?v=55">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=11">
 </head>
 <body>
@@ -222,6 +222,7 @@
       <button class="btn tiny" id="btn-buildings">建筑一览</button>
       <button class="btn tiny" id="btn-rules-top">游戏规则</button>
       <button class="btn tiny" id="btn-log-toggle">战报</button>
+      <button class="btn tiny" id="btn-chat-log-toggle" type="button" title="聊天记录侧栏">聊天</button>
       <button class="btn tiny" id="btn-chat" type="button" hidden>发言</button>
     </div>
   </header>
@@ -273,8 +274,18 @@
     </div>
 
     <aside class="side-panel" id="side-panel">
-      <h3>战报</h3>
-      <div class="log" id="log"></div>
+      <div class="side-tabs" id="side-tabs" hidden>
+        <button class="side-tab is-active" type="button" data-tab="log" id="tab-log">战报</button>
+        <button class="side-tab" type="button" data-tab="chat" id="tab-chat">聊天记录</button>
+      </div>
+      <div class="side-pane" id="pane-log">
+        <h3>战报</h3>
+        <div class="log" id="log"></div>
+      </div>
+      <div class="side-pane" id="pane-chat" hidden>
+        <h3>聊天记录</h3>
+        <div class="chat-log" id="chat-log"></div>
+      </div>
     </aside>
   </main>
 

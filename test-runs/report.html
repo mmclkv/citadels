@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>富饶之城 · 浏览器自动跑局测试报告</title>
+<style>
+  :root{
+    --ink:#1f2328; --ink2:#57606a; --ink3:#8b949e; --line:#d8dee4;
+    --bg:#ffffff; --bg2:#f6f8fa; --ok:#1a7f37; --okbg:#dafbe1;
+    --warn:#9a6700; --warnbg:#fff8c5; --bad:#cf222e; --badbg:#ffebe9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 20px 48px;background:var(--bg);color:var(--ink);
+    font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:920px;margin:0 auto}
+  h1{font-size:21px;font-weight:600;margin:0 0 6px}
+  .sub{color:var(--ink2);font-size:13px;margin-bottom:26px}
+  h2{font-size:15px;font-weight:600;margin:30px 0 10px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .car{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--bg2)}
+  .car .n{font-size:24px;font-weight:600;line-height:1.2}
+  .car .l{font-size:12px;color:var(--ink2);margin-top:2px}
+  .n.ok{color:var(--ok)} .n.bad{color:var(--bad)} .n.warn{color:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--ink2);font-weight:500;font-size:12px;background:var(--bg2)}
+  td.num{font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;line-height:1.6}
+  .tag.ok{background:var(--okbg);color:var(--ok)}
+  .tag.warn{background:var(--warnbg);color:var(--warn)}
+  .box{border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;
+    padding:14px 16px;background:var(--warnbg);margin:12px 0}
+  .box.info{border-left-color:#0969da;background:#ddf4ff}
+  .box.ok{border-left-color:var(--ok);background:var(--okbg)}
+  .box h3{margin:0 0 6px;font-size:13px;font-weight:600}
+  .box p{margin:5px 0}
+  code{background:rgba(175,184,193,.2);padding:1px 5px;border-radius:4px;
+    font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+  ul{margin:6px 0;padding-left:20px}
+  li{margin:3px 0}
+  .foot{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);color:var(--ink3);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>富饶之城 · 浏览器自动跑局测试报告</h1>
+  <div class="sub">单机模式（1 人类 + 电脑补位）· 真实浏览器驱动 · 2026-09-12</div>
+
+  <div class="cards">
+    <div class="car"><div class="n ok">10 / 10</div><div class="l">对局跑完</div></div>
+    <div class="car"><div class="n ok">0</div><div class="l">卡死</div></div>
+    <div class="car"><div class="n ok">0</div><div class="l">JS 异常</div></div>
+    <div class="car"><div class="n ok">0</div><div class="l">资源加载失败</div></div>
+    <div class="car"><div class="n ok">0</div><div class="l">可点元素被遮挡</div></div>
+    <div class="car"><div class="n warn">9</div><div class="l">建筑卡点击无反应</div></div>
+  </div>
+
+  <h2>测试方式</h2>
+  <ul>
+    <li>浏览器：<code>playwright-core 1.63</code> 驱动系统 Edge（Chromium 内核），无头模式，视口 1440×900</li>
+    <li>真实速度：不压缩任何定时器，按「快速」节奏等电脑行动，全程等同于真人观战</li>
+    <li>决策由脚本代打：领资源 → 建造 → 角色能力 → 结束回合，并处理关键事件弹层、选角、选牌弹窗、选择建筑</li>
+    <li>每局结束后回到主菜单重开，配置轮换：3～5 人 × 基本版 / 黑暗城市 / 加强版混合</li>
+    <li>每步探测可点元素是否被其它元素遮挡（<code>elementFromPoint</code> 命中测试）</li>
+  </ul>
+
+  <h2>逐局结果</h2>
+  <table>
+    <tr><th>局</th><th>人数 / 角色组</th><th>步数</th><th>用时</th><th>结果</th><th>异常</th></tr>
+    <tr><td class="num">1</td><td>4 人 · 基本版</td><td class="num">112</td><td class="num">120s</td><td>电脑 3 获胜</td><td><span class="tag ok">—</span></td></tr>
+    <tr><td class="num">2</td><td>5 人 · 黑暗城市</td><td class="num">101</td><td class="num">137s</td><td>电脑 4 获胜</td><td><span class="tag ok">—</span></td></tr>
+    <tr><td class="num">3</td><td>3 人 · 基本版</td><td class="num">88</td><td class="num">73s</td><td>电脑 1 获胜</td><td><span class="tag ok">—</span></td></tr>
+    <tr><td class="num">4</td><td>5 人 · 加强版混合</td><td class="num">153</td><td class="num">192s</td><td>电脑 4 获胜</td><td><span class="tag warn">建筑点击无效 ×6</span></td></tr>
+    <tr><td class="num">5</td><td>4 人 · 黑暗城市</td><td class="num">117</td><td class="num">131s</td><td>电脑 2 获胜</td><td><span class="tag ok">—</span></td></tr>
+    <tr><td class="num">6</td><td>5 人 · 基本版</td><td class="num">131</td><td class="num">176s</td><td>电脑 3 获胜</td><td><span class="tag ok">—</span></td></tr>
+    <tr><td class="num">7</td><td>3 人 · 黑暗城市</td><td class="num">88</td><td class="num">79s</td><td>电脑 1 获胜</td><td><span class="tag ok">—</span></td></tr>
+    <tr><td class="num">8</td><td>4 人 · 加强版混合</td><td class="num">99</td><td class="num">98s</td><td>电脑 1 获胜</td><td><span class="tag warn">建筑点击无效 ×3</span></td></tr>
+    <tr><td class="num">9</td><td>5 人 · 黑暗城市</td><td class="num">126</td><td class="num">172s</td><td>电脑 2 获胜</td><td><span class="tag ok">—</span></td></tr>
+    <tr><td class="num">10</td><td>4 人 · 基本版</td><td class="num">129</td><td class="num">130s</td><td>电脑 1 获胜</td><td><span class="tag ok">—</span></td></tr>
+  </table>
+
+  <h2>发现的问题</h2>
+
+  <div class="box">
+    <h3>1. 点击「高亮建筑」有时不生效（局 4 六次、局 8 三次）</h3>
+    <p>需要选建筑时（外交官 / 领主 / 元帅 / 艺术家），城市里有卡片被标成高亮可点，面板上同时有同名的红色按钮。同一动作的<strong>两条入口</strong>，走卡片那条偶发没有反应，界面完全不动。</p>
+    <p>现场快照（局 8）：提示语是「【外交官】选择你自己的一栋建筑用于交换 ← 点击高亮的建筑 ▼」，城市里 3 张卡带 <code>pickable</code>，面板上是 3 个对应按钮『堡垒』『庄园』『神庙』。点击高亮卡无反应，改点面板按钮后立刻推进。</p>
+    <p><strong>影响</strong>：不会卡死（面板按钮是有效兜底），但玩家会遇到「点了没反应」，容易误以为游戏坏了。</p>
+    <p><strong>可能原因</strong>：卡片点击走 <code>pickDistrict()</code>，需要拿卡片的 <code>uid</code> 回查 <code>App.state.available</code> 里的 <code>choose_district</code> 才能发出动作；一旦 DOM 上的高亮状态与最新一次 <code>available</code> 不同步（渲染后状态又被推进过），回查就会落空、静默什么都不做。面板按钮携带的是动作对象本身，不依赖回查，所以照常有效。</p>
+    <p><strong>修复方向</strong>：渲染时把动作对象直接存在节点上（例如 <code>node.__pickAction = a</code>），点击时直接发送，不再回查；或者回查落空时给出提示而不是静默返回。</p>
+  </div>
+
+  <div class="box info">
+    <h3>2. 魔术师选牌界面有两个「确定」按钮</h3>
+    <p>弃牌重抽时，面板同时出现引擎给的「确定（可点选手牌后再确定）」和前端追加的「✓ 确定（0）」以及「取消选择」。三个按钮里两个都叫“确定”，文案相近，容易误点。</p>
+    <p>功能正常（都能走通），属于易用性优化点：建议选牌模式下隐藏前者，或把它的文案改成「开始选择手牌」。</p>
+  </div>
+
+  <div class="box ok">
+    <h3>没有发现的问题</h3>
+    <ul>
+      <li>10 局全程无 JS 运行时异常、无未捕获 Promise 错误</li>
+      <li>无图片 / 资源加载失败（唯一的 404 是 favicon，已排除）</li>
+      <li>无可点元素被遮挡（按钮、手牌、选角卡逐一做了命中测试）</li>
+      <li>无回合卡死、无状态机死锁；电脑 AI 每局都能正常走完 7 栋结束条件</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    附：本轮测试过程中修正的三处「脚本自身缺陷」（避免误判为游戏问题）——<br>
+    ① 每步把 NPC 思考时间也算作步数，导致步数上限被空转吃光；② 「确定」按钮匹配到了说明性按钮，在魔术师界面把「已选 0/1」来回切了 400 多次；③ 兜底逻辑会无视黑名单反复点同一个死按钮，把真实卡死现场掩盖成无限空转。
+  </div>
+
+</div>
+</body>
+</html>

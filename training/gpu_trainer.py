@@ -75,6 +75,8 @@ def load_rollout(filename):
     maximum = max(len(row["actions"]) for row in rows)
     states, actions, masks = [], [], []
     chosen, old_probs, old_values, rewards, temperatures = [], [], [], [], []
+    pi_targets = []
+    has_pi = False
     for row in rows:
         count = len(row["actions"])
         states.append(row["state"])
@@ -85,7 +87,13 @@ def load_rollout(filename):
         old_values.append(row["oldValue"])
         rewards.append(row["reward"])
         temperatures.append(row.get("temperature", 1.0))
-    return {
+        if "pi" in row and row["pi"]:
+            row_pi = list(row["pi"]) + [0.0] * (maximum - len(row["pi"]))
+            pi_targets.append(row_pi)
+            has_pi = True
+        else:
+            pi_targets.append([0.0] * maximum)
+    result = {
         "states": torch.tensor(states, dtype=torch.float32),
         "actions": torch.tensor(actions, dtype=torch.float32),
         "masks": torch.tensor(masks, dtype=torch.bool),
@@ -95,27 +103,47 @@ def load_rollout(filename):
         "rewards": torch.tensor(rewards, dtype=torch.float32),
         "temperatures": torch.tensor(temperatures, dtype=torch.float32),
     }
+    if has_pi:
+        result["pi"] = torch.tensor(pi_targets, dtype=torch.float32)
+    return result
 
 
 def train_ppo(model, optimizer, device, data, epochs, batch_size=256):
     total = {"policy": 0.0, "value": 0.0, "entropy": 0.0, "clip": 0.0,
              "kl": 0.0, "gradient": 0.0, "samples": 0}
+    has_pi = "pi" in data
+    size = len(data["rewards"])
     advantages = data["rewards"] - data["old_values"]
     advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
-    size = len(advantages)
     for _ in range(epochs):
         for indices in torch.randperm(size).split(batch_size):
             batch = {key: value[indices].to(device, non_blocking=True) for key, value in data.items()}
             adv = advantages[indices].to(device, non_blocking=True)
             logits, values = model(batch["states"], batch["actions"], batch["masks"], batch["temperatures"])
             probs = torch.softmax(logits, dim=-1)
-            selected = probs.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-8)
-            old = batch["old_probs"].clamp_min(1e-8)
-            ratio = selected / old
-            clipped = ratio.clamp(0.8, 1.2)
-            policy_loss = -torch.minimum(ratio * adv, clipped * adv).mean()
+            if has_pi:
+                # AlphaZero 风格：用 MCTS 访问分布 π 当策略目标，纯交叉熵
+                pi = batch["pi"]
+                # 取最低有效动作位置的截断，避免 mask=False 的零位被梯度拉低（已 mask 后在 -1e9）
+                masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
+                norm_probs = masked_probs / masked_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+                policy_loss = -(pi * (norm_probs.clamp_min(1e-12)).log()).sum(dim=-1).mean()
+                # 用当前策略在所选动作上的概率反推 KL 估计（旧/新在同一分布上比较即可，意义近似）
+                selected = norm_probs.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-12)
+                pi_selected = pi.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-12)
+                approx_kl = (pi_selected.log() - selected.log()).mean()
+                clip_frac = torch.zeros((), device=device)
+            else:
+                selected = probs.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-8)
+                old = batch["old_probs"].clamp_min(1e-8)
+                ratio = selected / old
+                clipped = ratio.clamp(0.8, 1.2)
+                policy_loss = -torch.minimum(ratio * adv, clipped * adv).mean()
+                approx_kl = (old.log() - selected.log()).mean()
+                clip_frac = ((ratio - 1.0).abs() > 0.2).float().mean()
             value_loss = torch.nn.functional.mse_loss(values, batch["rewards"])
-            entropy = -(probs * probs.clamp_min(1e-8).log()).sum(dim=-1).mean()
+            masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
+            entropy = -(masked_probs * masked_probs.log()).sum(dim=-1).mean()
             loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -125,8 +153,8 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256):
             total["policy"] += policy_loss.item() * count
             total["value"] += value_loss.item() * count
             total["entropy"] += entropy.item() * count
-            total["clip"] += ((ratio - 1.0).abs() > 0.2).float().mean().item() * count
-            total["kl"] += (old.log() - selected.log()).mean().item() * count
+            total["clip"] += clip_frac.item() * count
+            total["kl"] += approx_kl.item() * count
             total["gradient"] += float(gradient) * count
             total["samples"] += count
     denominator = max(1, total["samples"])
@@ -177,6 +205,36 @@ def main():
                     metrics["gpuMemoryMB"] = torch.cuda.max_memory_allocated() / 1048576
                     torch.cuda.reset_peak_memory_stats()
                 reply({"ok": True, "metrics": metrics})
+            elif command["cmd"] == "batch_eval":
+                # MCTS 批量前向：一次性跑若干 (state, [actions]) 对，返回 probsList 与 values。
+                # 与 load_rollout 同款 padding 逻辑：动作列数对齐到 batch 内最大值，mask 屏蔽 padding。
+                state_vectors = command.get("stateVectors", [])
+                action_groups = command.get("actionVectorsList", [])
+                if not state_vectors:
+                    raise ValueError("batch_eval 缺少 stateVectors")
+                if len(state_vectors) != len(action_groups):
+                    raise ValueError("batch_eval 中 stateVectors 与 actionVectorsList 数量不一致")
+                maximum = max(1, max((len(group) for group in action_groups), default=1))
+                padded_actions = []
+                masks = []
+                for group in action_groups:
+                    padded = list(group) + [[0.0] * 64 for _ in range(maximum - len(group))]
+                    padded_actions.append(padded)
+                    masks.append([True] * len(group) + [False] * (maximum - len(group)))
+                states = torch.tensor(state_vectors, dtype=torch.float32, device=device)
+                actions = torch.tensor(padded_actions, dtype=torch.float32, device=device)
+                mask = torch.tensor(masks, dtype=torch.bool, device=device)
+                temperatures = torch.ones(len(states), dtype=torch.float32, device=device)
+                with torch.no_grad():
+                    logits, values = model(states, actions, mask, temperatures)
+                    probs = torch.softmax(logits, dim=-1)
+                probs_cpu = probs.cpu().tolist()
+                values_cpu = values.cpu().tolist()
+                # 截断到每个样本真实动作数（PyTorch 输出是 padding 后的固定宽度）
+                trimmed = [probs_cpu[i][:len(action_groups[i])] for i in range(len(probs_cpu))]
+                if device.type == "cuda":
+                    torch.cuda.reset_peak_memory_stats()
+                reply({"ok": True, "probsList": trimmed, "values": values_cpu})
             elif command["cmd"] == "checkpoint":
                 torch.save(optimizer.state_dict(), command["optimizerPath"])
                 reply({"ok": True})

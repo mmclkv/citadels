@@ -23,14 +23,16 @@ if %errorlevel% equ 0 (
   echo   [WARN] 防火墙放行失败，手机可能连不上。
 )
 
-rem ---- 找到 node ----
+rem ---- 找到 node（优先 PATH，否则在 WorkBuddy 托管目录里动态查找，避免写死版本号）----
 set "NODE_EXE=node"
 where node >nul 2>&1
 if %errorlevel% neq 0 (
-  if exist "%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2\node.exe" (
-    set "NODE_EXE=%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2\node.exe"
-  ) else (
-    echo   [ERROR] 找不到 node.exe，请先安装 Node.js。
+  set "NODE_EXE="
+  for /d %%D in ("%USERPROFILE%\.workbuddy\binaries\node\versions\*") do (
+    if exist "%%D\node.exe" set "NODE_EXE=%%D\node.exe"
+  )
+  if not defined NODE_EXE (
+    echo   [ERROR] 找不到 node.exe，请先安装 Node.js 或检查 WorkBuddy 托管目录。
     pause
     exit /b 1
   )

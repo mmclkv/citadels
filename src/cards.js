@@ -268,8 +268,17 @@
     return a;
   }
 
-  /** 根据人数与配置挑选本局使用的角色牌 */
-  function pickCharacterSet(playerCount, setMode) {
+  /**
+   * 根据人数与配置挑选本局使用的角色牌。
+   *
+   * @param {number} playerCount 玩家数
+   * @param {string} setMode     base / dark / mixed
+   * @param {function} [seedRandom] 可选随机数发生器，返回 [0,1)。
+   *   mixed 模式要从每个编号里抽一张，必须走这一条才能让同一 seed 复现同一套角色；
+   *   不传时退回 Math.random（仅 UI/展示场景可用，训练绝不能走这条路）。
+   */
+  function pickCharacterSet(playerCount, setMode, seedRandom) {
+    const rnd = seedRandom || Math.random;
     setMode = setMode || 'base';
     let pool;
     if (setMode === 'base') {
@@ -289,7 +298,7 @@
       });
       pool = Object.keys(byNum).map(k => {
         const list = byNum[k];
-        return list[Math.floor(Math.random() * list.length)];
+        return list[Math.floor(rnd() * list.length)];
       }).sort((a, b) => a.num - b.num);
     }
     // 规则限制

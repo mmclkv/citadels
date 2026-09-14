@@ -21,7 +21,9 @@ const run = spawnSync(process.execPath, [path.join(root, 'training', 'train.js')
   env: { ...process.env, CITADELS_TRAIN_CONFIG: JSON.stringify(config) }
 });
 assert.strictEqual(run.status, 0, run.stderr || run.stdout);
-const messages = run.stdout.trim().split(/\r?\n/).map(line => JSON.parse(line));
+// [train] 开头的行是 process.send 不可用时的 log() 兜底输出（fork 模式不会产生）；
+// 只解析以 { 开头的 JSON 消息，事件流（started/progress/completed）依然能拿到。
+const messages = run.stdout.trim().split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
 const started = messages.find(message => message.type === 'started');
 const progress = messages.find(message => message.type === 'progress');
 const completed = messages.find(message => message.type === 'completed');

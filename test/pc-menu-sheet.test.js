@@ -83,9 +83,24 @@ ok(/#screen-game\s+\.turn-order-guide\s*\{\s*display\s*:\s*none\s*!important/.te
 
 /* ---- D. 交互：共用一个开关，Esc 先收菜单，点菜单项自动收起 ---- */
 ok(/function setMenuOpen\(open\)/.test(appJs), 'app.js 抽出共用的 setMenuOpen(open)');
+// Esc 处理块：页面上有多个 keydown 监听（大图预览、聊天、菜单），也有多处
+// setMenuOpen(false)（点菜单项自动收起、Esc 收起）。用菜单 Esc 分支独有的
+// 调用点 'setMenuOpen(false); return;' 作为锚，往前找同一行的 Escape 判断，
+// 再比较它与紧随其后的 closeModal() 的先后顺序。这才是真正的不变量；
+// 不要用固定字符窗口界定（注释、换行、格式化都会把它撞坏）。
+function escHandler() {
+  const anchor = appJs.indexOf('setMenuOpen(false); return;');
+  if (anchor < 0) return '';
+  const start = appJs.lastIndexOf('Escape', anchor);
+  if (start < 0) return '';
+  const end = appJs.indexOf('});', anchor);
+  return appJs.slice(start, end < 0 ? anchor + 200 : end);
+}
 ok(/mobileMenuToggle\.onclick\s*=\s*\(\)\s*=>\s*setMenuOpen\(!gameScreen\.classList\.contains\('mobile-menu-open'\)\)/.test(appJs),
   '浮动按钮点击 = 反转菜单开关');
-ok(/e\.key\s*!==\s*'Escape'[\s\S]{0,200}setMenuOpen\(false\)[\s\S]{0,120}closeModal\(\)/.test(appJs),
+const esc = escHandler();
+ok(esc && esc.indexOf('setMenuOpen(false)') >= 0 && esc.indexOf('closeModal()') >= 0 &&
+  esc.indexOf('setMenuOpen(false)') < esc.indexOf('closeModal()'),
   'Esc 先收起菜单再关弹层');
 ok(/topbarEl\.addEventListener\('click'/.test(appJs) && /btn\.id\s*===\s*'btn-speed'/.test(appJs),
   '点菜单项后自动收起，但「电脑节奏」按钮保持展开（可连点切换）');

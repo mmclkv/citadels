@@ -1,0 +1,4930 @@
+{
+  "summary": {
+    "games": 100,
+    "charSet": "mixed",
+    "players": 6,
+    "endDistricts": 8,
+    "randomLevels": true,
+    "elapsedSec": "1.5",
+    "cleanFinished": 100,
+    "finishedAny": 100,
+    "crashes": 0,
+    "nonterminateOrStall": 0,
+    "unfinishedOther": 0,
+    "finishedWithWarnings": 0,
+    "problemKinds": {},
+    "stepStats": {
+      "min": 295,
+      "max": 792,
+      "avg": 463
+    },
+    "roundStats": {
+      "min": 8,
+      "max": 29,
+      "avg": 14.2
+    },
+    "problemCount": 0
+  },
+  "results": [
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 511,
+      "rounds": 16,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 28
+        },
+        {
+          "name": "电脑2",
+          "total": 16
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 28
+        },
+        {
+          "name": "电脑5",
+          "total": 17
+        },
+        {
+          "name": "电脑6",
+          "total": 30
+        }
+      ],
+      "seed": 931627401,
+      "levels": [
+        "easy",
+        "hard",
+        "normal",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 1
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 422,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 29
+        },
+        {
+          "name": "电脑2",
+          "total": 19
+        },
+        {
+          "name": "电脑3",
+          "total": 25
+        },
+        {
+          "name": "电脑4",
+          "total": 22
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 15
+        }
+      ],
+      "seed": 1907298266,
+      "levels": [
+        "hard",
+        "easy",
+        "hard",
+        "hard",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 2
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 621,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 15
+        },
+        {
+          "name": "电脑2",
+          "total": 23
+        },
+        {
+          "name": "电脑3",
+          "total": 28
+        },
+        {
+          "name": "电脑4",
+          "total": 22
+        },
+        {
+          "name": "电脑5",
+          "total": 15
+        },
+        {
+          "name": "电脑6",
+          "total": 25
+        }
+      ],
+      "seed": 1952789587,
+      "levels": [
+        "normal",
+        "hard",
+        "easy",
+        "hard",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 3
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 325,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 7
+        },
+        {
+          "name": "电脑2",
+          "total": 27
+        },
+        {
+          "name": "电脑3",
+          "total": 13
+        },
+        {
+          "name": "电脑4",
+          "total": 20
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 13
+        }
+      ],
+      "seed": 705267111,
+      "levels": [
+        "easy",
+        "easy",
+        "normal",
+        "easy",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 4
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 552,
+      "rounds": 19,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 16
+        },
+        {
+          "name": "电脑3",
+          "total": 27
+        },
+        {
+          "name": "电脑4",
+          "total": 25
+        },
+        {
+          "name": "电脑5",
+          "total": 16
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 1369116935,
+      "levels": [
+        "easy",
+        "normal",
+        "normal",
+        "easy",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 5
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 402,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 8
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 13
+        },
+        {
+          "name": "电脑6",
+          "total": 26
+        }
+      ],
+      "seed": 1014455004,
+      "levels": [
+        "easy",
+        "normal",
+        "normal",
+        "normal",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 6
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 426,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 26
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 18
+        }
+      ],
+      "seed": 1486810696,
+      "levels": [
+        "normal",
+        "normal",
+        "normal",
+        "hard",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 7
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 410,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 27
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 38
+        },
+        {
+          "name": "电脑4",
+          "total": 14
+        },
+        {
+          "name": "电脑5",
+          "total": 29
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 199396676,
+      "levels": [
+        "normal",
+        "normal",
+        "normal",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 8
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 412,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 20
+        },
+        {
+          "name": "电脑2",
+          "total": 22
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 15
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 24
+        }
+      ],
+      "seed": 988007940,
+      "levels": [
+        "hard",
+        "easy",
+        "hard",
+        "normal",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 9
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 303,
+      "rounds": 9,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 20
+        },
+        {
+          "name": "电脑2",
+          "total": 8
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 9
+        },
+        {
+          "name": "电脑6",
+          "total": 18
+        }
+      ],
+      "seed": 642043933,
+      "levels": [
+        "easy",
+        "normal",
+        "normal",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 10
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 359,
+      "rounds": 10,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 14
+        },
+        {
+          "name": "电脑2",
+          "total": 29
+        },
+        {
+          "name": "电脑3",
+          "total": 18
+        },
+        {
+          "name": "电脑4",
+          "total": 28
+        },
+        {
+          "name": "电脑5",
+          "total": 15
+        },
+        {
+          "name": "电脑6",
+          "total": 11
+        }
+      ],
+      "seed": 1784065512,
+      "levels": [
+        "easy",
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 11
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 418,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 25
+        },
+        {
+          "name": "电脑2",
+          "total": 23
+        },
+        {
+          "name": "电脑3",
+          "total": 30
+        },
+        {
+          "name": "电脑4",
+          "total": 18
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 13
+        }
+      ],
+      "seed": 989230175,
+      "levels": [
+        "normal",
+        "easy",
+        "hard",
+        "easy",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 12
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 679,
+      "rounds": 20,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 24
+        },
+        {
+          "name": "电脑3",
+          "total": 30
+        },
+        {
+          "name": "电脑4",
+          "total": 28
+        },
+        {
+          "name": "电脑5",
+          "total": 12
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 1579968602,
+      "levels": [
+        "easy",
+        "hard",
+        "easy",
+        "hard",
+        "easy",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 13
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 451,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 12
+        },
+        {
+          "name": "电脑2",
+          "total": 28
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 27
+        },
+        {
+          "name": "电脑5",
+          "total": 33
+        },
+        {
+          "name": "电脑6",
+          "total": 24
+        }
+      ],
+      "seed": 745390751,
+      "levels": [
+        "easy",
+        "easy",
+        "normal",
+        "normal",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 14
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 296,
+      "rounds": 10,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 10
+        },
+        {
+          "name": "电脑2",
+          "total": 16
+        },
+        {
+          "name": "电脑3",
+          "total": 22
+        },
+        {
+          "name": "电脑4",
+          "total": 32
+        },
+        {
+          "name": "电脑5",
+          "total": 23
+        },
+        {
+          "name": "电脑6",
+          "total": 12
+        }
+      ],
+      "seed": 1371700615,
+      "levels": [
+        "easy",
+        "normal",
+        "hard",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 15
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 395,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 28
+        },
+        {
+          "name": "电脑2",
+          "total": 18
+        },
+        {
+          "name": "电脑3",
+          "total": 19
+        },
+        {
+          "name": "电脑4",
+          "total": 8
+        },
+        {
+          "name": "电脑5",
+          "total": 23
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 1308050359,
+      "levels": [
+        "hard",
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 16
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 376,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 19
+        },
+        {
+          "name": "电脑2",
+          "total": 13
+        },
+        {
+          "name": "电脑3",
+          "total": 19
+        },
+        {
+          "name": "电脑4",
+          "total": 7
+        },
+        {
+          "name": "电脑5",
+          "total": 31
+        },
+        {
+          "name": "电脑6",
+          "total": 21
+        }
+      ],
+      "seed": 2109491699,
+      "levels": [
+        "hard",
+        "hard",
+        "easy",
+        "normal",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 17
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 349,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 15
+        },
+        {
+          "name": "电脑2",
+          "total": 6
+        },
+        {
+          "name": "电脑3",
+          "total": 29
+        },
+        {
+          "name": "电脑4",
+          "total": 25
+        },
+        {
+          "name": "电脑5",
+          "total": 9
+        },
+        {
+          "name": "电脑6",
+          "total": 21
+        }
+      ],
+      "seed": 1180269367,
+      "levels": [
+        "normal",
+        "normal",
+        "hard",
+        "normal",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 18
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 623,
+      "rounds": 18,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 15
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 19
+        },
+        {
+          "name": "电脑4",
+          "total": 27
+        },
+        {
+          "name": "电脑5",
+          "total": 15
+        },
+        {
+          "name": "电脑6",
+          "total": 26
+        }
+      ],
+      "seed": 1629996343,
+      "levels": [
+        "easy",
+        "normal",
+        "hard",
+        "easy",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 19
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 567,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 28
+        },
+        {
+          "name": "电脑2",
+          "total": 27
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 19
+        },
+        {
+          "name": "电脑5",
+          "total": 13
+        },
+        {
+          "name": "电脑6",
+          "total": 22
+        }
+      ],
+      "seed": 897872306,
+      "levels": [
+        "hard",
+        "normal",
+        "easy",
+        "normal",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 20
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 545,
+      "rounds": 18,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 26
+        },
+        {
+          "name": "电脑2",
+          "total": 23
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 20
+        }
+      ],
+      "seed": 1754338092,
+      "levels": [
+        "hard",
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 21
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 437,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 15
+        },
+        {
+          "name": "电脑3",
+          "total": 13
+        },
+        {
+          "name": "电脑4",
+          "total": 21
+        },
+        {
+          "name": "电脑5",
+          "total": 30
+        },
+        {
+          "name": "电脑6",
+          "total": 16
+        }
+      ],
+      "seed": 1163144902,
+      "levels": [
+        "easy",
+        "normal",
+        "normal",
+        "easy",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 22
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 414,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 40
+        },
+        {
+          "name": "电脑2",
+          "total": 18
+        },
+        {
+          "name": "电脑3",
+          "total": 30
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 31
+        }
+      ],
+      "seed": 188232572,
+      "levels": [
+        "normal",
+        "easy",
+        "hard",
+        "easy",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 23
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 399,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 26
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 26
+        },
+        {
+          "name": "电脑4",
+          "total": 32
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 28
+        }
+      ],
+      "seed": 243958706,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 24
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 588,
+      "rounds": 18,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 10
+        },
+        {
+          "name": "电脑2",
+          "total": 12
+        },
+        {
+          "name": "电脑3",
+          "total": 31
+        },
+        {
+          "name": "电脑4",
+          "total": 27
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 1919454165,
+      "levels": [
+        "easy",
+        "easy",
+        "hard",
+        "easy",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 25
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 452,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 29
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 22
+        },
+        {
+          "name": "电脑5",
+          "total": 29
+        },
+        {
+          "name": "电脑6",
+          "total": 33
+        }
+      ],
+      "seed": 1221687606,
+      "levels": [
+        "easy",
+        "easy",
+        "normal",
+        "hard",
+        "normal",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 26
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 468,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 26
+        },
+        {
+          "name": "电脑3",
+          "total": 17
+        },
+        {
+          "name": "电脑4",
+          "total": 22
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 19
+        }
+      ],
+      "seed": 702675872,
+      "levels": [
+        "normal",
+        "hard",
+        "normal",
+        "normal",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 27
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 319,
+      "rounds": 10,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 27
+        },
+        {
+          "name": "电脑2",
+          "total": 20
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 32
+        },
+        {
+          "name": "电脑6",
+          "total": 10
+        }
+      ],
+      "seed": 1386208552,
+      "levels": [
+        "normal",
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 28
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 430,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 10
+        },
+        {
+          "name": "电脑2",
+          "total": 14
+        },
+        {
+          "name": "电脑3",
+          "total": 19
+        },
+        {
+          "name": "电脑4",
+          "total": 13
+        },
+        {
+          "name": "电脑5",
+          "total": 32
+        },
+        {
+          "name": "电脑6",
+          "total": 15
+        }
+      ],
+      "seed": 364840259,
+      "levels": [
+        "normal",
+        "hard",
+        "hard",
+        "hard",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 29
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 432,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 16
+        },
+        {
+          "name": "电脑3",
+          "total": 27
+        },
+        {
+          "name": "电脑4",
+          "total": 25
+        },
+        {
+          "name": "电脑5",
+          "total": 17
+        },
+        {
+          "name": "电脑6",
+          "total": 21
+        }
+      ],
+      "seed": 799772838,
+      "levels": [
+        "normal",
+        "easy",
+        "normal",
+        "hard",
+        "normal",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 30
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 620,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 9
+        },
+        {
+          "name": "电脑2",
+          "total": 18
+        },
+        {
+          "name": "电脑3",
+          "total": 27
+        },
+        {
+          "name": "电脑4",
+          "total": 31
+        },
+        {
+          "name": "电脑5",
+          "total": 30
+        },
+        {
+          "name": "电脑6",
+          "total": 37
+        }
+      ],
+      "seed": 1940354329,
+      "levels": [
+        "easy",
+        "hard",
+        "easy",
+        "hard",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 31
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 391,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 8
+        },
+        {
+          "name": "电脑2",
+          "total": 27
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 35
+        },
+        {
+          "name": "电脑5",
+          "total": 30
+        },
+        {
+          "name": "电脑6",
+          "total": 21
+        }
+      ],
+      "seed": 387183567,
+      "levels": [
+        "normal",
+        "easy",
+        "normal",
+        "hard",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 32
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 430,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 26
+        },
+        {
+          "name": "电脑2",
+          "total": 31
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 18
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 17
+        }
+      ],
+      "seed": 1725043849,
+      "levels": [
+        "normal",
+        "easy",
+        "hard",
+        "easy",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 33
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 551,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 13
+        },
+        {
+          "name": "电脑3",
+          "total": 15
+        },
+        {
+          "name": "电脑4",
+          "total": 26
+        },
+        {
+          "name": "电脑5",
+          "total": 34
+        },
+        {
+          "name": "电脑6",
+          "total": 20
+        }
+      ],
+      "seed": 1445832401,
+      "levels": [
+        "hard",
+        "hard",
+        "hard",
+        "normal",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 34
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 500,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 24
+        },
+        {
+          "name": "电脑2",
+          "total": 9
+        },
+        {
+          "name": "电脑3",
+          "total": 22
+        },
+        {
+          "name": "电脑4",
+          "total": 19
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 15
+        }
+      ],
+      "seed": 995509106,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "normal",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 35
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 528,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 25
+        },
+        {
+          "name": "电脑2",
+          "total": 24
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 26
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 28
+        }
+      ],
+      "seed": 1760668718,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "hard",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 36
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 478,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 27
+        },
+        {
+          "name": "电脑3",
+          "total": 25
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 16
+        },
+        {
+          "name": "电脑6",
+          "total": 18
+        }
+      ],
+      "seed": 2136473988,
+      "levels": [
+        "easy",
+        "normal",
+        "hard",
+        "easy",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 37
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 436,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 17
+        },
+        {
+          "name": "电脑2",
+          "total": 19
+        },
+        {
+          "name": "电脑3",
+          "total": 17
+        },
+        {
+          "name": "电脑4",
+          "total": 19
+        },
+        {
+          "name": "电脑5",
+          "total": 30
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 1132211004,
+      "levels": [
+        "normal",
+        "hard",
+        "normal",
+        "normal",
+        "normal",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 38
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 457,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 31
+        },
+        {
+          "name": "电脑3",
+          "total": 32
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 6
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 1287728230,
+      "levels": [
+        "normal",
+        "hard",
+        "normal",
+        "normal",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 39
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 358,
+      "rounds": 10,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 1
+        },
+        {
+          "name": "电脑2",
+          "total": 34
+        },
+        {
+          "name": "电脑3",
+          "total": 28
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 33
+        },
+        {
+          "name": "电脑6",
+          "total": 19
+        }
+      ],
+      "seed": 585389359,
+      "levels": [
+        "normal",
+        "easy",
+        "normal",
+        "normal",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 40
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 365,
+      "rounds": 10,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 7
+        },
+        {
+          "name": "电脑3",
+          "total": 18
+        },
+        {
+          "name": "电脑4",
+          "total": 20
+        },
+        {
+          "name": "电脑5",
+          "total": 11
+        },
+        {
+          "name": "电脑6",
+          "total": 16
+        }
+      ],
+      "seed": 1026806419,
+      "levels": [
+        "hard",
+        "normal",
+        "normal",
+        "normal",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 41
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 386,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 27
+        },
+        {
+          "name": "电脑2",
+          "total": 22
+        },
+        {
+          "name": "电脑3",
+          "total": 13
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 33
+        },
+        {
+          "name": "电脑6",
+          "total": 18
+        }
+      ],
+      "seed": 152787944,
+      "levels": [
+        "normal",
+        "normal",
+        "easy",
+        "hard",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 42
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 475,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 24
+        },
+        {
+          "name": "电脑2",
+          "total": 26
+        },
+        {
+          "name": "电脑3",
+          "total": 34
+        },
+        {
+          "name": "电脑4",
+          "total": 36
+        },
+        {
+          "name": "电脑5",
+          "total": 29
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 645867594,
+      "levels": [
+        "normal",
+        "hard",
+        "easy",
+        "easy",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 43
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 398,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 16
+        },
+        {
+          "name": "电脑2",
+          "total": 24
+        },
+        {
+          "name": "电脑3",
+          "total": 13
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 24
+        }
+      ],
+      "seed": 792085094,
+      "levels": [
+        "normal",
+        "normal",
+        "hard",
+        "hard",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 44
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 447,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 6
+        },
+        {
+          "name": "电脑2",
+          "total": 13
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 29
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 21
+        }
+      ],
+      "seed": 1363421202,
+      "levels": [
+        "easy",
+        "hard",
+        "hard",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 45
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 570,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 27
+        },
+        {
+          "name": "电脑2",
+          "total": 10
+        },
+        {
+          "name": "电脑3",
+          "total": 28
+        },
+        {
+          "name": "电脑4",
+          "total": 31
+        },
+        {
+          "name": "电脑5",
+          "total": 32
+        },
+        {
+          "name": "电脑6",
+          "total": 20
+        }
+      ],
+      "seed": 1829849312,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "hard",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 46
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 638,
+      "rounds": 19,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 17
+        },
+        {
+          "name": "电脑2",
+          "total": 33
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 25
+        },
+        {
+          "name": "电脑5",
+          "total": 29
+        },
+        {
+          "name": "电脑6",
+          "total": 12
+        }
+      ],
+      "seed": 1148802823,
+      "levels": [
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 47
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 402,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 17
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 24
+        },
+        {
+          "name": "电脑5",
+          "total": 17
+        },
+        {
+          "name": "电脑6",
+          "total": 22
+        }
+      ],
+      "seed": 478588979,
+      "levels": [
+        "hard",
+        "normal",
+        "easy",
+        "normal",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 48
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 458,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 14
+        },
+        {
+          "name": "电脑2",
+          "total": 18
+        },
+        {
+          "name": "电脑3",
+          "total": 26
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 24
+        }
+      ],
+      "seed": 671206787,
+      "levels": [
+        "normal",
+        "easy",
+        "normal",
+        "hard",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 49
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 436,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 7
+        },
+        {
+          "name": "电脑2",
+          "total": 8
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 22
+        },
+        {
+          "name": "电脑5",
+          "total": 27
+        },
+        {
+          "name": "电脑6",
+          "total": 33
+        }
+      ],
+      "seed": 2053102585,
+      "levels": [
+        "hard",
+        "hard",
+        "normal",
+        "normal",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 50
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 295,
+      "rounds": 8,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 13
+        },
+        {
+          "name": "电脑2",
+          "total": 15
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 7
+        },
+        {
+          "name": "电脑5",
+          "total": 22
+        },
+        {
+          "name": "电脑6",
+          "total": 19
+        }
+      ],
+      "seed": 345279331,
+      "levels": [
+        "normal",
+        "normal",
+        "normal",
+        "normal",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 51
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 390,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 20
+        },
+        {
+          "name": "电脑2",
+          "total": 14
+        },
+        {
+          "name": "电脑3",
+          "total": 17
+        },
+        {
+          "name": "电脑4",
+          "total": 16
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 13
+        }
+      ],
+      "seed": 1000575829,
+      "levels": [
+        "easy",
+        "easy",
+        "hard",
+        "normal",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 52
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 792,
+      "rounds": 29,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 20
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 16
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 20
+        }
+      ],
+      "seed": 300657949,
+      "levels": [
+        "normal",
+        "normal",
+        "easy",
+        "hard",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 53
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 601,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 18
+        },
+        {
+          "name": "电脑2",
+          "total": 0
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 28
+        },
+        {
+          "name": "电脑5",
+          "total": 28
+        },
+        {
+          "name": "电脑6",
+          "total": 15
+        }
+      ],
+      "seed": 1830951540,
+      "levels": [
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 54
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 456,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 13
+        },
+        {
+          "name": "电脑2",
+          "total": 22
+        },
+        {
+          "name": "电脑3",
+          "total": 22
+        },
+        {
+          "name": "电脑4",
+          "total": 26
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 1608502567,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "hard",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 55
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 547,
+      "rounds": 16,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 19
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 26
+        },
+        {
+          "name": "电脑4",
+          "total": 28
+        },
+        {
+          "name": "电脑5",
+          "total": 30
+        },
+        {
+          "name": "电脑6",
+          "total": 14
+        }
+      ],
+      "seed": 2023201285,
+      "levels": [
+        "normal",
+        "normal",
+        "normal",
+        "easy",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 56
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 594,
+      "rounds": 20,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 20
+        },
+        {
+          "name": "电脑2",
+          "total": 19
+        },
+        {
+          "name": "电脑3",
+          "total": 9
+        },
+        {
+          "name": "电脑4",
+          "total": 33
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 17
+        }
+      ],
+      "seed": 1714765608,
+      "levels": [
+        "hard",
+        "easy",
+        "easy",
+        "normal",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 57
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 382,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 25
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 15
+        },
+        {
+          "name": "电脑4",
+          "total": 20
+        },
+        {
+          "name": "电脑5",
+          "total": 22
+        },
+        {
+          "name": "电脑6",
+          "total": 17
+        }
+      ],
+      "seed": 941403526,
+      "levels": [
+        "hard",
+        "easy",
+        "normal",
+        "normal",
+        "normal",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 58
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 397,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 31
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 28
+        },
+        {
+          "name": "电脑4",
+          "total": 21
+        },
+        {
+          "name": "电脑5",
+          "total": 23
+        },
+        {
+          "name": "电脑6",
+          "total": 15
+        }
+      ],
+      "seed": 722087782,
+      "levels": [
+        "easy",
+        "hard",
+        "easy",
+        "easy",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 59
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 548,
+      "rounds": 18,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 20
+        },
+        {
+          "name": "电脑2",
+          "total": 12
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 25
+        },
+        {
+          "name": "电脑5",
+          "total": 18
+        },
+        {
+          "name": "电脑6",
+          "total": 13
+        }
+      ],
+      "seed": 68357714,
+      "levels": [
+        "hard",
+        "hard",
+        "normal",
+        "normal",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 60
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 300,
+      "rounds": 10,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 10
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 10
+        },
+        {
+          "name": "电脑5",
+          "total": 18
+        },
+        {
+          "name": "电脑6",
+          "total": 10
+        }
+      ],
+      "seed": 1289541624,
+      "levels": [
+        "hard",
+        "easy",
+        "normal",
+        "easy",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 61
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 377,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 5
+        },
+        {
+          "name": "电脑3",
+          "total": 28
+        },
+        {
+          "name": "电脑4",
+          "total": 18
+        },
+        {
+          "name": "电脑5",
+          "total": 32
+        },
+        {
+          "name": "电脑6",
+          "total": 31
+        }
+      ],
+      "seed": 1879594288,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "easy",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 62
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 381,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 28
+        },
+        {
+          "name": "电脑2",
+          "total": 25
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 22
+        },
+        {
+          "name": "电脑5",
+          "total": 15
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 965893418,
+      "levels": [
+        "hard",
+        "hard",
+        "hard",
+        "hard",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 63
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 355,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 12
+        },
+        {
+          "name": "电脑3",
+          "total": 21
+        },
+        {
+          "name": "电脑4",
+          "total": 26
+        },
+        {
+          "name": "电脑5",
+          "total": 14
+        },
+        {
+          "name": "电脑6",
+          "total": 19
+        }
+      ],
+      "seed": 1932065600,
+      "levels": [
+        "easy",
+        "normal",
+        "normal",
+        "hard",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 64
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 436,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 15
+        },
+        {
+          "name": "电脑2",
+          "total": 27
+        },
+        {
+          "name": "电脑3",
+          "total": 27
+        },
+        {
+          "name": "电脑4",
+          "total": 31
+        },
+        {
+          "name": "电脑5",
+          "total": 28
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 452639948,
+      "levels": [
+        "hard",
+        "easy",
+        "normal",
+        "easy",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 65
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 689,
+      "rounds": 22,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 20
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 29
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 15
+        }
+      ],
+      "seed": 850785710,
+      "levels": [
+        "normal",
+        "hard",
+        "normal",
+        "hard",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 66
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 406,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 19
+        },
+        {
+          "name": "电脑3",
+          "total": 12
+        },
+        {
+          "name": "电脑4",
+          "total": 20
+        },
+        {
+          "name": "电脑5",
+          "total": 28
+        },
+        {
+          "name": "电脑6",
+          "total": 17
+        }
+      ],
+      "seed": 598447051,
+      "levels": [
+        "hard",
+        "hard",
+        "normal",
+        "easy",
+        "easy",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 67
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 507,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 33
+        },
+        {
+          "name": "电脑3",
+          "total": 23
+        },
+        {
+          "name": "电脑4",
+          "total": 28
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 15
+        }
+      ],
+      "seed": 1553003463,
+      "levels": [
+        "hard",
+        "easy",
+        "easy",
+        "normal",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 68
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 509,
+      "rounds": 16,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 18
+        },
+        {
+          "name": "电脑2",
+          "total": 15
+        },
+        {
+          "name": "电脑3",
+          "total": 23
+        },
+        {
+          "name": "电脑4",
+          "total": 37
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 17
+        }
+      ],
+      "seed": 1952957442,
+      "levels": [
+        "easy",
+        "normal",
+        "normal",
+        "easy",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 69
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 523,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 29
+        },
+        {
+          "name": "电脑2",
+          "total": 13
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 20
+        },
+        {
+          "name": "电脑5",
+          "total": 9
+        },
+        {
+          "name": "电脑6",
+          "total": 22
+        }
+      ],
+      "seed": 1454187540,
+      "levels": [
+        "hard",
+        "normal",
+        "easy",
+        "easy",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 70
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 413,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 27
+        },
+        {
+          "name": "电脑2",
+          "total": 22
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 15
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 25
+        }
+      ],
+      "seed": 1001691421,
+      "levels": [
+        "hard",
+        "hard",
+        "hard",
+        "easy",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 71
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 417,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 30
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 27
+        },
+        {
+          "name": "电脑4",
+          "total": 7
+        },
+        {
+          "name": "电脑5",
+          "total": 7
+        },
+        {
+          "name": "电脑6",
+          "total": 17
+        }
+      ],
+      "seed": 875982836,
+      "levels": [
+        "easy",
+        "hard",
+        "easy",
+        "normal",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 72
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 623,
+      "rounds": 20,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 18
+        },
+        {
+          "name": "电脑2",
+          "total": 24
+        },
+        {
+          "name": "电脑3",
+          "total": 27
+        },
+        {
+          "name": "电脑4",
+          "total": 30
+        },
+        {
+          "name": "电脑5",
+          "total": 10
+        },
+        {
+          "name": "电脑6",
+          "total": 34
+        }
+      ],
+      "seed": 320744720,
+      "levels": [
+        "normal",
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 73
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 389,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 11
+        },
+        {
+          "name": "电脑2",
+          "total": 28
+        },
+        {
+          "name": "电脑3",
+          "total": 18
+        },
+        {
+          "name": "电脑4",
+          "total": 25
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 2033885481,
+      "levels": [
+        "easy",
+        "normal",
+        "easy",
+        "hard",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 74
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 548,
+      "rounds": 19,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 12
+        },
+        {
+          "name": "电脑2",
+          "total": 12
+        },
+        {
+          "name": "电脑3",
+          "total": 13
+        },
+        {
+          "name": "电脑4",
+          "total": 18
+        },
+        {
+          "name": "电脑5",
+          "total": 29
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 1186403114,
+      "levels": [
+        "normal",
+        "easy",
+        "normal",
+        "hard",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 75
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 462,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 36
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 27
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 25
+        },
+        {
+          "name": "电脑6",
+          "total": 22
+        }
+      ],
+      "seed": 1577745814,
+      "levels": [
+        "easy",
+        "hard",
+        "hard",
+        "easy",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 76
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 589,
+      "rounds": 17,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 32
+        },
+        {
+          "name": "电脑2",
+          "total": 23
+        },
+        {
+          "name": "电脑3",
+          "total": 22
+        },
+        {
+          "name": "电脑4",
+          "total": 13
+        },
+        {
+          "name": "电脑5",
+          "total": 22
+        },
+        {
+          "name": "电脑6",
+          "total": 24
+        }
+      ],
+      "seed": 1313188631,
+      "levels": [
+        "normal",
+        "normal",
+        "hard",
+        "hard",
+        "normal",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 77
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 311,
+      "rounds": 9,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 9
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 24
+        },
+        {
+          "name": "电脑5",
+          "total": 10
+        },
+        {
+          "name": "电脑6",
+          "total": 11
+        }
+      ],
+      "seed": 1180665041,
+      "levels": [
+        "hard",
+        "normal",
+        "normal",
+        "normal",
+        "easy",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 78
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 407,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 24
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 19
+        }
+      ],
+      "seed": 62829488,
+      "levels": [
+        "normal",
+        "easy",
+        "hard",
+        "normal",
+        "easy",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 79
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 615,
+      "rounds": 20,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 17
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 22
+        },
+        {
+          "name": "电脑4",
+          "total": 25
+        },
+        {
+          "name": "电脑5",
+          "total": 24
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 745228342,
+      "levels": [
+        "normal",
+        "easy",
+        "normal",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 80
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 378,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 22
+        },
+        {
+          "name": "电脑3",
+          "total": 15
+        },
+        {
+          "name": "电脑4",
+          "total": 17
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 13
+        }
+      ],
+      "seed": 2075316990,
+      "levels": [
+        "easy",
+        "hard",
+        "normal",
+        "hard",
+        "easy",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 81
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 551,
+      "rounds": 19,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 26
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 17
+        },
+        {
+          "name": "电脑4",
+          "total": 13
+        },
+        {
+          "name": "电脑5",
+          "total": 22
+        },
+        {
+          "name": "电脑6",
+          "total": 28
+        }
+      ],
+      "seed": 1276469425,
+      "levels": [
+        "hard",
+        "hard",
+        "hard",
+        "easy",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 82
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 526,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 31
+        },
+        {
+          "name": "电脑2",
+          "total": 11
+        },
+        {
+          "name": "电脑3",
+          "total": 19
+        },
+        {
+          "name": "电脑4",
+          "total": 16
+        },
+        {
+          "name": "电脑5",
+          "total": 27
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 2142439356,
+      "levels": [
+        "easy",
+        "normal",
+        "hard",
+        "hard",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 83
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 572,
+      "rounds": 18,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 17
+        },
+        {
+          "name": "电脑2",
+          "total": 19
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 28
+        }
+      ],
+      "seed": 301668864,
+      "levels": [
+        "easy",
+        "easy",
+        "easy",
+        "easy",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 84
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 450,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 17
+        },
+        {
+          "name": "电脑2",
+          "total": 16
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 13
+        },
+        {
+          "name": "电脑5",
+          "total": 32
+        },
+        {
+          "name": "电脑6",
+          "total": 19
+        }
+      ],
+      "seed": 1877198645,
+      "levels": [
+        "normal",
+        "easy",
+        "easy",
+        "hard",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 85
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 543,
+      "rounds": 16,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 12
+        },
+        {
+          "name": "电脑2",
+          "total": 16
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 16
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 26
+        }
+      ],
+      "seed": 1920176633,
+      "levels": [
+        "normal",
+        "hard",
+        "normal",
+        "easy",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 86
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 717,
+      "rounds": 24,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 14
+        },
+        {
+          "name": "电脑2",
+          "total": 23
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 24
+        },
+        {
+          "name": "电脑5",
+          "total": 20
+        },
+        {
+          "name": "电脑6",
+          "total": 21
+        }
+      ],
+      "seed": 2105037998,
+      "levels": [
+        "easy",
+        "normal",
+        "easy",
+        "normal",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 87
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 484,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 26
+        },
+        {
+          "name": "电脑2",
+          "total": 16
+        },
+        {
+          "name": "电脑3",
+          "total": 19
+        },
+        {
+          "name": "电脑4",
+          "total": 19
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 16
+        }
+      ],
+      "seed": 806800737,
+      "levels": [
+        "normal",
+        "easy",
+        "easy",
+        "hard",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 88
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 380,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 30
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 32
+        },
+        {
+          "name": "电脑4",
+          "total": 31
+        },
+        {
+          "name": "电脑5",
+          "total": 21
+        },
+        {
+          "name": "电脑6",
+          "total": 19
+        }
+      ],
+      "seed": 1919227787,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "normal",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 89
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 445,
+      "rounds": 13,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 10
+        },
+        {
+          "name": "电脑3",
+          "total": 23
+        },
+        {
+          "name": "电脑4",
+          "total": 28
+        },
+        {
+          "name": "电脑5",
+          "total": 27
+        },
+        {
+          "name": "电脑6",
+          "total": 25
+        }
+      ],
+      "seed": 826049045,
+      "levels": [
+        "normal",
+        "hard",
+        "normal",
+        "easy",
+        "hard",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 90
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 398,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 14
+        },
+        {
+          "name": "电脑2",
+          "total": 23
+        },
+        {
+          "name": "电脑3",
+          "total": 20
+        },
+        {
+          "name": "电脑4",
+          "total": 30
+        },
+        {
+          "name": "电脑5",
+          "total": 30
+        },
+        {
+          "name": "电脑6",
+          "total": 6
+        }
+      ],
+      "seed": 1006909336,
+      "levels": [
+        "hard",
+        "normal",
+        "hard",
+        "hard",
+        "easy",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 91
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 465,
+      "rounds": 15,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 27
+        },
+        {
+          "name": "电脑2",
+          "total": 19
+        },
+        {
+          "name": "电脑3",
+          "total": 24
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 21
+        },
+        {
+          "name": "电脑6",
+          "total": 31
+        }
+      ],
+      "seed": 1112527041,
+      "levels": [
+        "hard",
+        "normal",
+        "easy",
+        "normal",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 92
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 527,
+      "rounds": 14,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 12
+        },
+        {
+          "name": "电脑2",
+          "total": 37
+        },
+        {
+          "name": "电脑3",
+          "total": 33
+        },
+        {
+          "name": "电脑4",
+          "total": 35
+        },
+        {
+          "name": "电脑5",
+          "total": 34
+        },
+        {
+          "name": "电脑6",
+          "total": 22
+        }
+      ],
+      "seed": 1703834686,
+      "levels": [
+        "easy",
+        "easy",
+        "normal",
+        "normal",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 93
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 367,
+      "rounds": 12,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 29
+        },
+        {
+          "name": "电脑2",
+          "total": 17
+        },
+        {
+          "name": "电脑3",
+          "total": 16
+        },
+        {
+          "name": "电脑4",
+          "total": 30
+        },
+        {
+          "name": "电脑5",
+          "total": 26
+        },
+        {
+          "name": "电脑6",
+          "total": 27
+        }
+      ],
+      "seed": 2058977686,
+      "levels": [
+        "easy",
+        "normal",
+        "hard",
+        "normal",
+        "hard",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 94
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 397,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 23
+        },
+        {
+          "name": "电脑2",
+          "total": 29
+        },
+        {
+          "name": "电脑3",
+          "total": 17
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 22
+        },
+        {
+          "name": "电脑6",
+          "total": 10
+        }
+      ],
+      "seed": 1185086695,
+      "levels": [
+        "easy",
+        "hard",
+        "easy",
+        "normal",
+        "normal",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 95
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 394,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 19
+        },
+        {
+          "name": "电脑2",
+          "total": 28
+        },
+        {
+          "name": "电脑3",
+          "total": 12
+        },
+        {
+          "name": "电脑4",
+          "total": 9
+        },
+        {
+          "name": "电脑5",
+          "total": 18
+        },
+        {
+          "name": "电脑6",
+          "total": 41
+        }
+      ],
+      "seed": 1453057420,
+      "levels": [
+        "normal",
+        "normal",
+        "easy",
+        "easy",
+        "normal",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 96
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 501,
+      "rounds": 16,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 6
+        },
+        {
+          "name": "电脑3",
+          "total": 28
+        },
+        {
+          "name": "电脑4",
+          "total": 22
+        },
+        {
+          "name": "电脑5",
+          "total": 19
+        },
+        {
+          "name": "电脑6",
+          "total": 26
+        }
+      ],
+      "seed": 605464885,
+      "levels": [
+        "normal",
+        "normal",
+        "hard",
+        "normal",
+        "easy",
+        "easy"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 97
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 499,
+      "rounds": 16,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 21
+        },
+        {
+          "name": "电脑2",
+          "total": 21
+        },
+        {
+          "name": "电脑3",
+          "total": 28
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 26
+        },
+        {
+          "name": "电脑6",
+          "total": 32
+        }
+      ],
+      "seed": 843598385,
+      "levels": [
+        "easy",
+        "easy",
+        "normal",
+        "easy",
+        "hard",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 98
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 392,
+      "rounds": 11,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 10
+        },
+        {
+          "name": "电脑2",
+          "total": 23
+        },
+        {
+          "name": "电脑3",
+          "total": 22
+        },
+        {
+          "name": "电脑4",
+          "total": 23
+        },
+        {
+          "name": "电脑5",
+          "total": 15
+        },
+        {
+          "name": "电脑6",
+          "total": 23
+        }
+      ],
+      "seed": 1792641470,
+      "levels": [
+        "normal",
+        "hard",
+        "hard",
+        "hard",
+        "easy",
+        "hard"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 99
+    },
+    {
+      "ok": true,
+      "reason": "finished",
+      "steps": 318,
+      "rounds": 10,
+      "fallbacks": 0,
+      "illegal": 0,
+      "stalls": 0,
+      "problems": [],
+      "scoreProblems": [],
+      "scores": [
+        {
+          "name": "电脑1",
+          "total": 22
+        },
+        {
+          "name": "电脑2",
+          "total": 13
+        },
+        {
+          "name": "电脑3",
+          "total": 23
+        },
+        {
+          "name": "电脑4",
+          "total": 12
+        },
+        {
+          "name": "电脑5",
+          "total": 26
+        },
+        {
+          "name": "电脑6",
+          "total": 24
+        }
+      ],
+      "seed": 161808305,
+      "levels": [
+        "easy",
+        "normal",
+        "normal",
+        "hard",
+        "easy",
+        "normal"
+      ],
+      "players": 6,
+      "charSet": "mixed",
+      "game": 100
+    }
+  ]
+}

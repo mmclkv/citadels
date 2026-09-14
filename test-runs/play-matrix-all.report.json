@@ -1,0 +1,194 @@
+{
+  "summary": {
+    "playerCounts": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "charSets": [
+      "base",
+      "dark",
+      "mixed"
+    ],
+    "perCombo": 60,
+    "totalGames": 1260,
+    "totalClean": 1260,
+    "totalBad": 0,
+    "elapsedSec": "14.0",
+    "rows": [
+      {
+        "players": 2,
+        "charSet": "base",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 2,
+        "charSet": "dark",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 2,
+        "charSet": "mixed",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 3,
+        "charSet": "base",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 3,
+        "charSet": "dark",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 3,
+        "charSet": "mixed",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 4,
+        "charSet": "base",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 4,
+        "charSet": "dark",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 4,
+        "charSet": "mixed",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 5,
+        "charSet": "base",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 5,
+        "charSet": "dark",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 5,
+        "charSet": "mixed",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 6,
+        "charSet": "base",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 6,
+        "charSet": "dark",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 6,
+        "charSet": "mixed",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 7,
+        "charSet": "base",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 7,
+        "charSet": "dark",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 7,
+        "charSet": "mixed",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 8,
+        "charSet": "base",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 8,
+        "charSet": "dark",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      },
+      {
+        "players": 8,
+        "charSet": "mixed",
+        "games": 60,
+        "clean": 60,
+        "bad": 0,
+        "kinds": {}
+      }
+    ]
+  },
+  "bad": []
+}

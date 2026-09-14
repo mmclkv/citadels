@@ -133,7 +133,10 @@
   }
 
   /* --------------------------- 选角决策 --------------------------- */
-  function draftDecision(state, idx) {
+  // rnd: 可选的 [0,1) 随机源。默认 Math.random()，保持既有行为；
+  //     传入确定性函数（如基于 seed）即可让同一局的 AI 决策完全可复现。
+  function draftDecision(state, idx, rnd) {
+    const rand = typeof rnd === 'function' ? rnd : Math.random;
     const d = state.draft;
     const step = d.steps[d.stepIdx];
     if (!step || step.player !== idx) return null;
@@ -155,14 +158,16 @@
     let best = null, bv = -1e9;
     pool.forEach(id => {
       let v = charValue(state, idx, id, level);
-      v += (Math.random() - 0.5) * (level === 0 ? 4.0 : level === 1 ? 1.2 : 0.25);
+      v += (rand() - 0.5) * (level === 0 ? 4.0 : level === 1 ? 1.2 : 0.25);
       if (v > bv) { bv = v; best = id; }
     });
     return { type: 'draft_pick', charId: best || pool[0] };
   }
 
   /* --------------------------- 主决策 --------------------------- */
-  function decide(state, playerId) {
+  // rnd: 可选随机源，见 draftDecision。默认 Math.random()。
+  function decide(state, playerId, rnd) {
+    const rand = typeof rnd === 'function' ? rnd : Math.random;
     const idx = state.players.findIndex(p => p.id === playerId);
     if (idx < 0) return null;
     const p = state.players[idx];
@@ -173,7 +178,7 @@
     if (state.roundConfirm) {
       return state.roundConfirm.confirmed[idx] ? null : { type: 'confirm_round' };
     }
-    if (state.phase === 'draft') return draftDecision(state, idx);
+    if (state.phase === 'draft') return draftDecision(state, idx, rand);
 
     if (state.reaction) {
       if (state.reaction.playerIdx !== idx) return null;
@@ -186,7 +191,7 @@
     if (!t || t.playerIdx !== idx) return null;
 
     // ---- 多步能力 ----
-    if (t.pending) return pendingDecision(state, idx, t, level);
+    if (t.pending) return pendingDecision(state, idx, t, level, rand);
 
     const c = CHAR_MAP[t.charId];
 
@@ -336,7 +341,8 @@
   }
 
   /* ------------------------ 多步能力决策 ------------------------ */
-  function pendingDecision(state, idx, t, level) {
+  function pendingDecision(state, idx, t, level, rnd) {
+    const rand = typeof rnd === 'function' ? rnd : Math.random;
     const pd = t.pending;
     const p = state.players[idx];
     const c = CHAR_MAP[t.charId];
@@ -352,7 +358,7 @@
           if (e.playerIdx === leader) v += 1.6;
           if (e.num === 8 && state.players[idx].city.length >= 5) v += 1.0;
           if (e.num === 2 && p.gold >= 5) v += 1.2;
-          v += (Math.random() - 0.5) * (level === 0 ? 2 : 0.5);
+          v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
           if (v > bv) { bv = v; best = e.num; }
         });
         return { type: 'choose_char', num: best != null ? best : 1 };
@@ -380,7 +386,7 @@
             state.players.forEach((o, i) => { if (i !== idx) mx = Math.max(mx, o.gold); });
             v += mx * 0.25;
           }
-          v += (Math.random() - 0.5) * (level === 0 ? 2 : 0.5);
+          v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
           if (v > bv) { bv = v; best = e.num; }
         });
         return { type: 'choose_char', num: best != null ? best : 3 };
@@ -391,7 +397,7 @@
         state.callQueue.forEach(e => {
           if (e.num === 1 || e.num === t.num) return;
           let v = pref[e.num] != null ? pref[e.num] : 1;
-          v += (Math.random() - 0.5) * (level === 0 ? 2 : 0.5);
+          v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
           if (v > bv) { bv = v; best = e.num; }
         });
         return { type: 'choose_char', num: best != null ? best : 2 };

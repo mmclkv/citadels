@@ -9,6 +9,9 @@ const HeuristicAI = require('../src/ai.js');
 const { PolicyValueNetwork, PROFILES, mulberry32 } = require('./neural-policy.js');
 const { TorchBridge } = require('./torch-bridge.js');
 const { SelfPlayPool } = require('./selfplay-pool.js');
+const { cloneTrimmed } = require('./search-state.js');
+const { applyRecorded } = require('./undo.js');
+const mcts = require('./mcts.js');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
@@ -149,11 +152,24 @@ function enumerateLegalActions(state, playerId) {
     } else if (action.type === 'choose_cards') candidates.push(...redrawCandidates(action, player.hand));
     else candidates.push(clone(action));
   }
-  candidates = uniqueActions(candidates).filter(action => Engine.applyAction(clone(state), playerId, action).ok);
+  // 增量落子 + 撤销：只拷贝一份 base（掐掉 UI 字段），每个候选在 base 上 apply 后立刻
+  // 撤销还原，而不是每个候选都做一次完整深拷贝。分支数越高省得越多（详见 training/undo.js）。
+  // base 是 cloneTrimmed 出来的独立副本，applyRecorded 原地修改它、undo 再精确还原，
+  // 因此循环结束后 base 与原始 state 逐字节等价（log/notices 始终为空）。
+  const base = cloneTrimmed(state);
+  candidates = uniqueActions(candidates).filter(action => {
+    const { ok, undo } = applyRecorded(base, playerId, action);
+    undo();
+    return ok;
+  });
   if (!candidates.length) {
     try {
       const fallback = HeuristicAI.decide(state, playerId);
-      if (fallback && Engine.applyAction(clone(state), playerId, fallback).ok) candidates.push(fallback);
+      if (fallback) {
+        const { ok, undo } = applyRecorded(base, playerId, fallback);
+        undo();
+        if (ok) candidates.push(fallback);
+      }
     } catch (_) { /* surfaced below */ }
   }
   return candidates;
@@ -189,7 +205,7 @@ function gameRewards(state) {
   return rewards;
 }
 
-async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop) {
+async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evaluator = null) {
   const playerCount = config.minPlayers + Math.floor(rng() * (config.maxPlayers - config.minPlayers + 1));
   const charSets = config.charSet === 'random' ? ['base', 'dark', 'mixed'] : [config.charSet];
   const charSet = charSets[Math.floor(rng() * charSets.length)];
@@ -216,16 +232,59 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop) {
     const t0 = performance.now();
     const temperatureProgress = Math.min(1, gameIndex / Math.max(1, config.targetGames * 0.7));
     const temperature = config.temperatureStart + (config.temperatureEnd - config.temperatureStart) * temperatureProgress;
-    const decision = model.choose(encoded.vector, actionVectors, temperature);
+    let decision;
+    let piVector = null;
+    let mctsValue = null;
+    if (config.mctsSimulations > 0) {
+      const mctsResult = await mcts.search({
+        rootState: state,
+        rootPlayerId: actor.id,
+        model,
+        Engine,
+        sanitize: Engine.sanitize,
+        legalFn: enumerateLegalActions,
+        rewardFn: gameRewards,
+        encodeState,
+        encodeAction,
+        simulate: config.mctsSimulations,
+        cPuct: config.mctsC_puct,
+        dirichletAlpha: config.mctsDirichletAlpha,
+        dirichletEpsilon: config.mctsDirichletEpsilon != null ? config.mctsDirichletEpsilon : 0.03,
+        maxDepth: config.mctsMaxDepth,
+        rng,
+        evaluator
+      });
+      piVector = mctsResult.pi;
+      mctsValue = mctsResult.value;
+      // 按访问分布比例抽样；既然分布已含 Dirichlet 噪声，这里不再额外加 temperature
+      let r = rng();
+      let chosen = Math.max(0, piVector.length - 1);
+      for (let i = 0; i < piVector.length; i++) {
+        r -= piVector[i];
+        if (r <= 0) { chosen = i; break; }
+      }
+      decision = { chosen, probability: piVector[chosen], value: mctsValue, entropy: 0,
+        mctsVisits: mctsResult.visits, mctsExpansions: mctsResult.expansions };
+    } else {
+      decision = model.choose(encoded.vector, actionVectors, temperature);
+    }
     inferenceMs += performance.now() - t0;
-    if (legal.length > 1) transitions.push({
-      playerId: actor.id, state: encoded.vector, actions: actionVectors, chosen: decision.chosen,
-      oldProb: decision.probability, oldValue: decision.value, temperature
-    });
+    if (legal.length > 1) {
+      const transition = {
+        playerId: actor.id, state: encoded.vector, actions: actionVectors, chosen: decision.chosen,
+        oldProb: decision.probability, oldValue: decision.value, temperature
+      };
+      if (piVector) {
+        // 序列化为普通数组以便后续 JSON 序列化（MCTS 模式向 GPU 训练侧暴露 π 目标）
+        transition.pi = Array.from(piVector);
+        transition.mctsValue = mctsValue;
+      }
+      transitions.push(transition);
+    }
     let result = Engine.applyAction(state, actor.id, legal[decision.chosen]);
     if (!result.ok) {
       fallbackCount++;
-      const fallback = legal.find(action => Engine.applyAction(clone(state), actor.id, action).ok);
+      const fallback = legal.find(action => Engine.applyAction(cloneTrimmed(state), actor.id, action).ok);
       if (!fallback) throw new Error('神经网络选择无法执行且没有兜底行动：' + result.error);
       result = Engine.applyAction(state, actor.id, fallback);
     }
@@ -251,6 +310,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop) {
 function sanitizeConfig(input = {}) {
   const minPlayers = Math.max(2, Math.min(8, Number(input.minPlayers) || 4));
   const maxPlayers = Math.max(minPlayers, Math.min(8, Number(input.maxPlayers) || minPlayers));
+  const mctsSimulations = Math.max(0, Math.min(10000, Number(input.mctsSimulations) || 0));
   return {
     targetGames: Math.max(1, Math.min(1000000, Number(input.targetGames) || 10000)),
     minPlayers, maxPlayers,
@@ -268,7 +328,17 @@ function sanitizeConfig(input = {}) {
     maxSteps: Math.max(1000, Math.min(100000, Number(input.maxSteps) || 60000)),
     temperatureStart: Math.max(0.2, Math.min(2, Number(input.temperatureStart) || 1.1)),
     temperatureEnd: Math.max(0.15, Math.min(1.5, Number(input.temperatureEnd) || 0.65)),
-    resumeCheckpoint: input.resumeCheckpoint ? path.basename(String(input.resumeCheckpoint)) : ''
+    resumeCheckpoint: input.resumeCheckpoint ? path.basename(String(input.resumeCheckpoint)) : '',
+    mctsSimulations,
+    mctsC_puct: Math.max(0, Math.min(10, Number(input.mctsC_puct) || 1.0)),
+    mctsDirichletAlpha: Math.max(0, Math.min(1, Number(input.mctsDirichletAlpha) || 0.3)),
+    mctsDirichletEpsilon: Math.max(0.001, Math.min(1, Number(input.mctsDirichletEpsilon) || 0.03)),
+    mctsMaxDepth: Math.max(10, Math.min(2000, Number(input.mctsMaxDepth) || 200)),
+    mctsEvaluator: ['js', 'gpu'].includes(input.mctsEvaluator) ? input.mctsEvaluator : 'js',
+    mctsBatchSize: Math.max(1, Math.min(256, Number(input.mctsBatchSize) || 32)),
+    // 0 是合法值，表示"不限制等待"（等满批或显式 flush 才发）；仅 undefined/NaN 取默认 1
+    mctsMaxWaitMs: Math.max(0, Math.min(50, Number.isFinite(Number(input.mctsMaxWaitMs)) ? Number(input.mctsMaxWaitMs) : 1)),
+    mctsCacheSize: Math.max(0, Math.min(1048576, Number(input.mctsCacheSize) || 65536))
   };
 }
 
@@ -284,9 +354,25 @@ function sampleHistory(history, limit = 400) {
   return sampled;
 }
 
+// 把训练配置里「会影响模型走向」的几个维度拼成可读、ASCII 安全、不带歧义的
+// checkpoint 后缀。训练者一眼就能从文件名区分出不同配置的产物：
+//   p<profile>    fast / balanced / large，决定网络层宽与深度
+//   m<mctsSims>   每步 MCTS 模拟数（0 = 未启用），决定训练目标分布的平滑度
+//   e<evaluator>  js / gpu，js 是 worker 内本地网络；gpu 是 PyTorch 批量 forward
+//   c<charSet>    random / base / dark / mixed，决定训练分布
+//   s<seed>       随机种子，决定初始权重与采样路径
+function configTag(config) {
+  const profile = PROFILES[config.profile] ? config.profile : 'balanced';
+  const mcts = Math.max(0, Math.min(10000, Math.round(Number(config.mctsSimulations) || 0)));
+  const evaluator = (config.mctsEvaluator === 'gpu') ? 'gpu' : 'js';
+  const charSet = ['base', 'dark', 'mixed', 'random'].includes(config.charSet) ? config.charSet : 'random';
+  const seed = Math.floor(Number(config.seed) || 0);
+  return ['p' + profile, 'm' + mcts, 'e' + evaluator, 'c' + charSet, 's' + seed].join('-');
+}
+
 function saveCheckpoint(model, config, game, history) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const name = 'checkpoint-' + String(game).padStart(6, '0') + '.json.gz';
+  const name = 'checkpoint-' + String(game).padStart(6, '0') + '-' + configTag(config) + '.json.gz';
   const payload = JSON.stringify({ createdAt: new Date().toISOString(), game, config, model: model.export(), history: sampleHistory(history) });
   atomicWrite(path.join(DATA_DIR, name), zlib.gzipSync(payload, { level: 6 }));
   return name;
@@ -301,6 +387,15 @@ function loadCheckpoint(model, name) {
 }
 
 function send(message) { if (process.send) process.send(message); else console.log(JSON.stringify(message)); }
+// 训练过程中各阶段产出的人读日志。事件流：
+//   启动横幅 / 设备 / resume / worker 池 / 进度点 / PPO 更新 / 存档 / 异常 / 收尾
+// 通过 {type:'log'} 推到 training-manager → UI 右下「事件与错误」面板，
+// 同时附加在父进程 stdout 上，方便命令行直接看。
+function log(text) {
+  const line = '[train] ' + String(text || '');
+  send({ type: 'log', text: line });
+  if (!process.send) console.log(line);
+}
 function immediate() { return new Promise(resolve => setImmediate(resolve)); }
 
 async function train(rawConfig, hooks = {}) {
@@ -315,9 +410,33 @@ async function train(rawConfig, hooks = {}) {
     if (msg && msg.type === 'stop') { stopping = true; if (pool) pool.stop(); }
   });
   let torch = null, accelerator = { device: 'JavaScript CPU', torch: '', cuda: '', gpu: '' };
+  // 启动横幅：让用户在事件日志里一眼确认配置与设备
+  log('启动训练：profile=' + config.profile + ' · 玩家 ' + config.minPlayers + '-' + config.maxPlayers +
+    ' · 目标 ' + config.targetGames + ' 局 · 每批 ' + config.batchGames + ' 局 · ' +
+    'workers=' + config.workers + ' · PPO epochs=' + config.ppoEpochs + ' · miniBatch=' + config.miniBatch +
+    ' · lr=' + config.learningRate + ' · seed=' + config.seed);
+  if (config.mctsSimulations > 0) {
+    log('MCTS 已启用：每步 ' + config.mctsSimulations + ' 模拟 · c_puct=' + config.mctsC_puct +
+      ' · α=' + config.mctsDirichletAlpha + ' · ε=' + config.mctsDirichletEpsilon +
+      ' · maxDepth=' + config.mctsMaxDepth +
+      ' · 评估器=' + config.mctsEvaluator + '（' +
+      (config.mctsEvaluator === 'gpu'
+        ? 'GPU 批量 forward 走 PyTorch 桥，批 ' + config.mctsBatchSize + ' · 等待 ' + config.mctsMaxWaitMs + 'ms'
+        : 'worker 内 JS 网络同步 forward') + '）');
+  } else {
+    log('MCTS 未启用，自对弈按网络 softmax 采样');
+  }
+  if (config.resumeCheckpoint) {
+    log('从存档继续：' + config.resumeCheckpoint + '（已训 ' + restored.game + ' 局，历史 ' + restored.history.length + ' 帧）');
+  }
   if (config.backend !== 'js') {
-    torch = new TorchBridge({ root: ROOT, model, config, onLog: text => send({ type: 'log', text }) });
+    torch = new TorchBridge({ root: ROOT, model, config, onLog: text => log('PyTorch: ' + text) });
     accelerator = await torch.start(config.resumeCheckpoint);
+    log('训练器已启动：设备=' + accelerator.device + (accelerator.gpu ? ' · 显卡=' + accelerator.gpu : '') +
+      (accelerator.torch ? ' · PyTorch ' + accelerator.torch : '') +
+      (accelerator.cuda ? ' · CUDA ' + accelerator.cuda : ''));
+  } else {
+    log('训练器：JavaScript CPU（无 PyTorch 桥）');
   }
   const startedAt = Date.now();
   const rng = mulberry32(config.seed ^ 0xA53C9E11);
@@ -326,7 +445,22 @@ async function train(rawConfig, hooks = {}) {
   const winSeats = Array(8).fill(0);
   let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0;
   let rollout = [];
-  pool = torch && !stopping ? new SelfPlayPool({ root: ROOT, config, size: Math.min(config.workers, config.batchGames) }) : null;
+  if (torch && !stopping) {
+    const poolOpts = { root: ROOT, config,
+      size: Math.min(config.workers, config.batchGames), onLog: text => log(text) };
+    if (config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu') {
+      // MCTS 在 worker 里跑，但神经网络 forward 走 PyTorch 子进程：主进程把 IPC 转发给 torch.batchForward。
+      // 多个 worker 会同时发起 forwardBatch，靠 selfplay-pool 内部按到达顺序代理，靠 torch-bridge 的
+      // FIFO 串行发给 Python；不会出现响应错位。
+      poolOpts.batchForward = (stateVectors, actionVectorsList) =>
+        torch.batchForward({ stateVectors, actionVectorsList });
+      log('MCTS 评估：worker 把批量 forward 转发给主进程 → torch.batchForward（PyTorch）');
+    } else if (config.mctsSimulations > 0) {
+      log('MCTS 评估：worker 内本地 JS 网络 forward（mctsEvaluator=js）');
+    }
+    pool = new SelfPlayPool(poolOpts);
+  }
+  if (pool) log('Worker 池已起：' + pool.size + ' 个并行自对弈 worker（每批并发跑 ' + config.batchGames + ' 局）');
   const shouldStop = () => stopping || (hooks.shouldStop && hooks.shouldStop());
   send({ type: 'started', config, parameterCount: model.parameterCount, completedGames,
     hardware: { cpu: os.cpus()[0] && os.cpus()[0].model, logicalCores: os.cpus().length,
@@ -354,12 +488,31 @@ async function train(rawConfig, hooks = {}) {
       result.winners.forEach(seat => { if (seat >= 0 && seat < winSeats.length) winSeats[seat]++; });
       recentGames.push(result);
       if (recentGames.length > 50) recentGames.shift();
+      // 异常局：单局时间显著高于近期均值时打印一次，便于训练者定位慢局
+      const SLOW_GAME_FACTOR = 5;
+      const slowThreshold = recentGames.length > 1
+        ? (recentGames.slice(0, -1).reduce((sum, g) => sum + g.durationMs, 0) / (recentGames.length - 1)) * SLOW_GAME_FACTOR
+        : Infinity;
+      if (result.durationMs > slowThreshold) {
+        log('游戏 #' + result.gameIndex + ' 异常耗时 ' + (result.durationMs / 1000).toFixed(1) + 's · ' +
+          result.steps + ' 步 · ' + result.playerCount + ' 人 · rounds=' + result.rounds);
+      }
     }
     let losses = history.length ? history[history.length - 1] :
       { policyLoss: 0, valueLoss: 0, totalLoss: 0, entropy: 0, clipFraction: 0, approxKl: 0, gradientNorm: 0 };
+    let justTrained = false;
     if ((pool || completedGames % config.batchGames === 0) && rollout.length) {
       losses = torch ? await torch.train(rollout) :
         model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs });
+      justTrained = true;
+      // 打印最近一次 PPO 的指标摘要（每批一次），方便在事件日志里看趋势
+      log('PPO 更新：策略损失 ' + losses.policyLoss.toExponential(2) +
+        ' · 价值损失 ' + Number(losses.valueLoss).toFixed(4) +
+        ' · 熵 ' + Number(losses.entropy).toFixed(3) +
+        ' · 裁剪率 ' + (losses.clipFraction * 100).toFixed(1) + '%' +
+        ' · KL ' + Number(losses.approxKl || 0).toFixed(4) +
+        ' · 梯度 ' + Number(losses.gradientNorm || 0).toFixed(3) +
+        (losses.gpuMemoryMB ? ' · 显存 ' + losses.gpuMemoryMB + ' MB' : ''));
       rollout = [];
     }
     const checkpointDue = completedGames % config.checkpointEvery === 0 || completedGames === config.targetGames;
@@ -377,13 +530,29 @@ async function train(rawConfig, hooks = {}) {
       avgGameMs: recentDuration, avgInferenceMs: totalInferenceMs / Math.max(1, totalSteps),
       avgScore: recentScore, avgReward: recentReward, fallbacks: totalFallbacks,
       avgRounds: recentGames.reduce((sum, g) => sum + g.rounds, 0) / recentGames.length,
-      winSeats: winSeats.slice(0, config.maxPlayers)
+      winSeats: winSeats.slice(0, config.maxPlayers),
+      mctsSimulations: config.mctsSimulations,
+      mctsC_puct: config.mctsC_puct,
+      mctsDirichletAlpha: config.mctsDirichletAlpha
     };
     history.push(point);
     if (history.length > 800) history = sampleHistory(history, 400);
+    // 进度点：每 batch 一次打印一行总览，训练者不用打开 UI 也能看到节奏
+    if (justTrained || results.some(r => r.gameIndex % Math.max(1, config.batchGames) === 0)) {
+      const pct = (completedGames / config.targetGames * 100).toFixed(1);
+      const etaMs = point.gamesPerMinute > 0 ? (config.targetGames - completedGames) / point.gamesPerMinute * 60000 : NaN;
+      const etaStr = Number.isFinite(etaMs) ? ' · 预计剩余 ' + Math.round(etaMs / 60000) + ' 分钟' : '';
+      log('进度 ' + completedGames + '/' + config.targetGames + ' 局（' + pct + '%）· ' +
+        '整局 ' + (point.avgGameMs / 1000).toFixed(2) + 's · 单步 ' + point.avgInferenceMs.toFixed(2) + 'ms · ' +
+        point.gamesPerMinute.toFixed(1) + ' 局/分 · avg_score=' + point.avgScore.toFixed(1) +
+        ' · avg_reward=' + point.avgReward.toFixed(2) + ' · rounds=' + point.avgRounds.toFixed(1) +
+        etaStr);
+    }
     if (checkpointDue) {
       checkpoint = saveCheckpoint(model, config, completedGames, history);
       if (torch) await torch.checkpoint(checkpoint);
+      const sizeKB = (fs.statSync(path.join(DATA_DIR, checkpoint)).size / 1024).toFixed(0);
+      log('存档：' + checkpoint + '（' + sizeKB + ' KB）');
     }
     send({ type: 'progress', point, history: sampleHistory(history), checkpoint });
     if (hooks.onProgress) hooks.onProgress(point);
@@ -399,6 +568,10 @@ async function train(rawConfig, hooks = {}) {
   const final = { type: shouldStop() ? 'stopped' : 'completed', completedGames,
     targetGames: config.targetGames, elapsedMs: Date.now() - startedAt, checkpoint: finalCheckpoint };
   send(final);
+  const elapsedMin = (final.elapsedMs / 60000).toFixed(1);
+  const reason = shouldStop() ? '被停止' : '完成';
+  log('训练' + reason + '：共 ' + completedGames + ' / ' + config.targetGames + ' 局 · 用时 ' + elapsedMin + ' 分钟 · ' +
+    'checkpoint=' + (finalCheckpoint || '(无)'));
   return final;
   } finally {
     if (pool) await pool.close();
@@ -421,5 +594,6 @@ if (require.main === module) {
 
 module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
-  enumerateLegalActions, currentActor, sampleHistory, STATE_SIZE, ACTION_SIZE, DATA_DIR
+  enumerateLegalActions, currentActor, gameRewards, sampleHistory, redrawCandidates,
+  cloneTrimmed, STATE_SIZE, ACTION_SIZE, DATA_DIR
 };

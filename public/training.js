@@ -27,8 +27,44 @@ function formConfig() {
     batchGames: +$('batch-games').value, workers: +$('workers').value,
     ppoEpochs: +$('ppo-epochs').value, miniBatch: +$('mini-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
-    resumeCheckpoint: $('resume-checkpoint').value, endDistricts: 8
+    resumeCheckpoint: $('resume-checkpoint').value, endDistricts: 8,
+    mctsSimulations: +$('mcts-simulations').value,
+    mctsC_puct: +$('mcts-cpuct').value,
+    mctsDirichletAlpha: +$('mcts-dirichlet').value,
+    mctsDirichletEpsilon: +$('mcts-diri-eps').value,
+    mctsMaxDepth: +$('mcts-max-depth').value,
+    mctsEvaluator: $('mcts-evaluator').value,
+    mctsBatchSize: +$('mcts-batch-size').value,
+    mctsMaxWaitMs: +$('mcts-max-wait').value,
+    mctsCacheSize: +$('mcts-cache-size').value
   };
+}
+
+function estimateMCTS() {
+  const sims = +$('mcts-simulations').value || 0;
+  const out = $('mcts-time-estimate');
+  if (!sims) { out.textContent = '关闭'; return; }
+  const evaluator = $('mcts-evaluator').value;
+  const perStepHint = evaluator === 'gpu'
+    ? 'GPU 批量 forward 实测取决于模拟数和批大小'
+    : '单步 ~' + (sims * 0.87 / 1000).toFixed(2) + ' 秒（JS CPU forward 估算）';
+  let bullet;
+  if (sims <= 50) bullet = '轻量 A 档';
+  else if (sims <= 200) bullet = '适中 B 档';
+  else if (sims <= 400) bullet = '重度 C 档';
+  else bullet = '极限档';
+  out.textContent = bullet + ' · ' + perStepHint;
+}
+
+function updateMctsEvaluatorUI() {
+  const evaluator = $('mcts-evaluator').value;
+  const backend = $('backend').value;
+  document.querySelectorAll('.gpu-only').forEach(el => {
+    el.style.display = evaluator === 'gpu' ? '' : 'none';
+  });
+  $('mcts-evaluator-hint').textContent = backend === 'js'
+    ? '⚠ backend=js 时 GPU 评估器会被忽略（自对弈同步跑）'
+    : (evaluator === 'gpu' ? '✓ worker 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
 }
 
 function setControls(status) {
@@ -36,6 +72,7 @@ function setControls(status) {
   $('start-training').disabled = running;
   $('stop-training').disabled = !running || status.stopping;
   document.querySelectorAll('#train-form input,#train-form select').forEach(el => { el.disabled = running; });
+  document.querySelectorAll('#mcts-form input').forEach(el => { el.disabled = running; });
 }
 
 function stateLabel(state) {
@@ -93,6 +130,11 @@ function render(status) {
 
 function renderRuntime(status) {
   const h = status.hardware || {}, c = status.config || {};
+  const mctsSims = c.mctsSimulations || (status.point && status.point.mctsSimulations) || 0;
+  const mctsLabel = mctsSims > 0
+    ? mctsSims + ' 模拟 · c_puct ' + (c.mctsC_puct || '—') +
+      ' · α ' + (c.mctsDirichletAlpha != null ? c.mctsDirichletAlpha : '—')
+    : '未启用';
   const rows = [
     ['处理器', h.cpu || '—'], ['逻辑核心', h.logicalCores || '—'], ['内存', h.memoryGB ? h.memoryGB + ' GB' : '—'],
     ['Node.js', h.runtime || '—'], ['训练设备', h.device || 'JavaScript CPU'], ['显卡', h.gpu || '—'],
@@ -100,14 +142,27 @@ function renderRuntime(status) {
     ['网络档位', c.profile || '—'], ['并行自对弈', c.workers ? c.workers + ' 个进程' : '—'],
     ['GPU 峰值显存', status.point && status.point.gpuMemoryMB ? num(status.point.gpuMemoryMB, 0) + ' MB' : '—'],
     ['玩家范围', c.minPlayers ? c.minPlayers + '–' + c.maxPlayers + ' 人' : '—'],
+    ['MCTS', mctsLabel],
     ['运行时间', status.startedAt ? duration(Date.now() - new Date(status.startedAt).getTime()) : '—']
   ];
   $('runtime-info').innerHTML = rows.map(([k, v]) => '<dt>' + k + '</dt><dd>' + v + '</dd>').join('');
 }
 
+function formatTimestamp(ms) {
+  const date = new Date(ms);
+  if (!Number.isFinite(date.getTime())) return '—';
+  const pad = n => String(n).padStart(2, '0');
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+    ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+}
+
 function renderCheckpoints(list) {
-  $('checkpoints').innerHTML = list.length ? list.map(item =>
-    '<div class="checkpoint"><span>' + item.name + '</span><span>' + num(item.bytes / 1024 / 1024, 1) + ' MB</span></div>').join('') : '<p>暂无存档</p>';
+  if (!list.length) { $('checkpoints').innerHTML = '<p>暂无存档</p>'; return; }
+  $('checkpoints').innerHTML = list.map(item =>
+    '<div class="checkpoint">' +
+      '<span class="ckpt-name">' + item.name + '</span>' +
+      '<span class="ckpt-meta">' + formatTimestamp(item.mtimeMs) + ' · ' + num(item.bytes / 1024 / 1024, 1) + ' MB</span>' +
+    '</div>').join('');
 }
 
 function renderLogs(status) {
@@ -119,9 +174,11 @@ function renderLogs(status) {
 
 function updateCheckpointOptions(list) {
   const select = $('resume-checkpoint'), current = select.value;
-  const names = list.map(x => x.name);
-  select.innerHTML = '<option value="">从头训练</option>' + names.map(name => '<option value="' + name + '">' + name + '</option>').join('');
-  if (names.includes(current)) select.value = current;
+  select.innerHTML = '<option value="">从头训练</option>' +
+    list.map(item =>
+      '<option value="' + item.name + '">' + item.name + ' · ' + formatTimestamp(item.mtimeMs) + '</option>'
+    ).join('');
+  if (list.some(x => x.name === current)) select.value = current;
 }
 
 function prepareCanvas(canvas) {
@@ -219,5 +276,13 @@ $('stop-training').onclick = async () => {
   catch (error) { $('control-message').textContent = error.message; }
 };
 $('profile').onchange = () => { if (latest) render(latest); };
+$('backend').onchange = updateMctsEvaluatorUI;
+$('mcts-evaluator').onchange = updateMctsEvaluatorUI;
+['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth',
+  'mcts-batch-size', 'mcts-max-wait', 'mcts-cache-size'].forEach(id => {
+  $(id).oninput = estimateMCTS;
+});
+estimateMCTS();
+updateMctsEvaluatorUI();
 window.addEventListener('resize', () => { if (latest) render(latest); });
 refresh(); setInterval(refresh, 1000);

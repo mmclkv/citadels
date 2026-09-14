@@ -147,6 +147,22 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .log .build{color:#2c5f9c}
 .log .crown{color:#a97c15;font-weight:600}
 .log .score{color:#5a4520;font-weight:700}
+/* 侧栏标签页：战报 / 聊天记录 同时开启时叠加切换（仿 Chrome 标签） */
+.side-tabs{display:flex;border-bottom:1px solid var(--line);background:#f7efe0}
+.side-tabs[hidden]{display:none}
+.side-tab{flex:1 1 0;appearance:none;margin:0;border:0;background:transparent;padding:9px 6px;
+  font-family:inherit;font-size:13px;font-weight:800;color:#7a5c22;cursor:pointer;border-bottom:2px solid transparent}
+.side-tab:hover{color:#a97c15}
+.side-tab.is-active{color:#a97c15;border-bottom-color:var(--gold,#c8952b)}
+.side-pane{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.side-pane[hidden]{display:none}
+.chat-log{flex:1 1 auto;overflow:auto;padding:10px 14px;font-size:12.5px;line-height:1.65}
+.chat-log .chat-empty{color:#9b8a74;padding:8px 0}
+.chat-log .chat-entry{padding:4px 0;border-bottom:1px dotted rgba(200,180,150,.4);overflow-wrap:anywhere}
+.chat-log .chat-entry .name{color:#a97c15;font-weight:700;margin-right:5px}
+.chat-log .chat-entry.self .name{color:#2c5f9c}
+.chat-log .chat-entry .text{color:#4a3a1c}
+.chat-log .chat-entry .ts{color:#9b8a74;font-size:10.5px;margin-left:6px}
 @media(max-width:1000px){.side-panel{display:none}.side-panel.show{display:flex;position:fixed;right:0;top:52px;bottom:60px;width:300px;z-index:20}}
 
 /* ------------------------------ 卡牌 ------------------------------ */
@@ -337,6 +353,15 @@ body.card-hd-open{overflow:hidden}
   100%{opacity:0;transform:translate(var(--crown-dx),var(--crown-dy)) scale(.82) rotate(0)}
 }
 .hand-transfer-flight{animation-duration:1.05s}
+/* 贵族抽牌：建筑牌从牌堆飞进玩家手牌区（牌背朝上，不泄露具体牌面） */
+.fly-card{position:fixed;z-index:403;width:34px;height:46px;display:grid;place-items:center;
+  border:2px solid var(--gold);border-radius:5px;color:var(--gold);
+  background:repeating-linear-gradient(45deg,rgba(55,31,105,.96) 0 5px,rgba(23,17,57,.96) 5px 10px);
+  box-shadow:0 0 12px rgba(112,73,255,.5);font-size:18px;pointer-events:none;
+  transform:translate(0,0) rotate(-6deg);opacity:1;
+  transition:transform .9s cubic-bezier(.4,.05,.35,1),opacity .9s ease;
+  filter:drop-shadow(0 0 4px rgba(231,181,60,.5))}
+.fly-card .card-back-icon{font-style:normal;line-height:1}
 .building-swap-flight{position:fixed!important;z-index:407!important;width:63px!important;height:95px!important;
   margin:0!important;pointer-events:none!important}
 .building-swap-flight.is-flying{animation:buildingSwapFlight .95s cubic-bezier(.22,.72,.28,1) forwards}
@@ -638,6 +663,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .player-chat-bubble::after{content:'';position:absolute;left:50%;bottom:-6px;width:10px;height:10px;
   background:var(--paper);border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);transform:translateX(-50%) rotate(45deg)}
 .player-chat-bubble .chat-speaker{display:block;margin-bottom:2px;color:var(--gold);font-size:11px;font-weight:800}
+/* 自己发言的气泡：用蓝调与对手区分，仍显示在「我的圆角矩形」头顶 */
+.player-chat-bubble.self{border-color:#2c5f9c;background:#eef4fb}
+.player-chat-bubble.self .chat-speaker{color:#2c5f9c}
 @keyframes chat-bubble-in{from{opacity:0;transform:translateY(5px) scale(.96)}to{opacity:1;transform:none}}
 
 /* ------------------------------ 结算 ------------------------------ */

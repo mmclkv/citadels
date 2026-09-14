@@ -68,6 +68,19 @@
   }
   /** 允许同名建筑的最大数量（采石场 +1） */
   function maxSameName(player) { return 1 + quarryCount(player); }
+  /**
+   * 博物馆下压着的建筑牌是「物理牌」，会附着在博物馆建筑对象上（card.museum）。
+   * 当一栋建筑离开玩家城市（被摧毁 / 墓地回收 / 外交官或元帅转移）时，
+   * 它附带的 museum 牌必须显式处理，否则会随浅拷贝丢失、导致整局牌数不守恒。
+   * 这里统一把附带的牌收回弃牌堆（它们是已被使用的牌，不应重新进入城市）。
+   * 注意：调用方必须先把该建筑从 city 中移除，再调用本函数。
+   */
+  function detachMuseum(state, card) {
+    if (card && Array.isArray(card.museum) && card.museum.length) {
+      card.museum.forEach(mc => { if (mc) state.discard.push(mc); });
+      card.museum = [];
+    }
+  }
   /** 计算某颜色的建筑数量（用于收入）；魔法学院可视为任意颜色 */
   function countColorForIncome(player, color, anyColorChoice) {
     let n = 0, wild = 0;
@@ -158,7 +171,9 @@
       });
     });
 
-    state.charDeck = CitCards.pickCharacterSet(playerCount, state.config.charSetMode).map(c => c.id);
+    // mixed 模式要按编号抽一套角色，必须吃同一条种子流，否则同一 seed 复现不出同一局
+    state.charDeck = CitCards.pickCharacterSet(playerCount, state.config.charSetMode,
+      () => nextRand(state)).map(c => c.id);
     return state;
   }
 
@@ -422,6 +437,10 @@
     if (n > 0) {
       const cards = drawCards(state, n);
       p.hand = p.hand.concat(cards);
+      notify(state, 'noble_draw', {
+        playerIdx: t.playerIdx, playerId: p.id, playerName: p.name,
+        amount: n, cardNames: cards.map(c => c.name)
+      });
       log(state, '【贵族】' + p.name + ' 因 ' + n + ' 栋皇家建筑抽取 ' + n + ' 张建筑牌。', 'good');
     }
     t.incomeTaken = true;
@@ -1006,7 +1025,12 @@
         p.gold -= card.cost;
         t.spentOnBuild += card.cost;
         p.hand = p.hand.filter(x => x.uid !== action.uid);
-        const built = Object.assign({}, card, { beautified: 0, museum: [], builtRound: state.round });
+        // 保留 card 上可能附着的 museum 牌（经由墓地回收等路径回到手牌的建筑会带着它们）。
+        // 不能无条件 museum: [] —— 那会让这些物理牌从整局中消失。
+        const built = Object.assign({}, card, {
+          beautified: 0, builtRound: state.round,
+          museum: Array.isArray(card.museum) ? card.museum.slice() : []
+        });
         p.city.push(built);
         t.builds++;
         log(state, p.name + ' 建造了『' + card.name + '』（' + card.cost + ' 金）。', 'build');
@@ -1423,6 +1447,7 @@
 
     me.gold -= cost;
     tp.city = tp.city.filter(x => x.uid !== card.uid);
+    detachMuseum(state, card);
     t.abilityUsed = true; t.pending = null;
     log(state, '【领主】' + me.name + ' 支付 ' + cost + ' 金摧毁了 ' + tp.name + ' 的『' + card.name + '』。', 'bad');
     notify(state, 'destroyed', {
@@ -1454,6 +1479,7 @@
     if (action.use) {
       if (p.gold < 1) return err('金币不足');
       p.gold -= 1;
+      // 该牌已随摧毁从原城市移除；附着其上的博物馆牌在 doDestroy 里已收回弃牌堆。
       p.hand.push(card);
       log(state, '【墓地】' + p.name + ' 支付 1 金将『' + card.name + '』收入手牌。', 'good');
       r.queue = [];
@@ -1488,6 +1514,7 @@
     me.gold -= card.cost;
     tp.gold += card.cost;
     tp.city = tp.city.filter(x => x.uid !== card.uid);
+    detachMuseum(state, card);
     me.city.push(card);
     t.abilityUsed = true; t.pending = null;
     log(state, '【元帅】' + me.name + ' 支付 ' + card.cost + ' 金给 ' + tp.name +
@@ -1517,6 +1544,8 @@
     tp.gold += diff;
     tp.city = tp.city.filter(x => x.uid !== theirs.uid);
     me.city = me.city.filter(x => x.uid !== mine.uid);
+    detachMuseum(state, theirs);
+    detachMuseum(state, mine);
     me.city.push(theirs);
     tp.city.push(mine);
     t.abilityUsed = true; t.pending = null;

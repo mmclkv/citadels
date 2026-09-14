@@ -19,6 +19,18 @@ class TorchBridge {
     this.pending = [];
     this.child = null;
     this.info = null;
+    // GPU 串行锁：train / batchForward / checkpoint 共享同一个 PyTorch 子进程，
+    // 用这条 Promise 链保证它们互斥执行，绝不在 GPU 上并发（避免权重读写竞争与响应错位）。
+    this._gpuLock = Promise.resolve();
+  }
+
+  // 把一次「独占 GPU 子进程」的操作串到锁链上：同一时刻只有一项在跑。
+  // 即便调用方并发发来 train 与 batchForward，后者也会等前者彻底结束（含读回权重）后才发出。
+  _withGpuLock(task) {
+    const run = this._gpuLock.then(task);
+    // 无论成功失败都推进锁链，避免一次异常永久卡死后续 GPU 操作
+    this._gpuLock = run.then(() => {}, () => {});
+    return run;
   }
 
   writeModel() {
@@ -70,6 +82,9 @@ class TorchBridge {
         cmd: 'init', profile: this.config.profile, learningRate: this.config.learningRate,
         device: this.config.backend === 'cpu' ? 'cpu' : 'cuda', modelPath: this.modelPath, optimizerPath
       });
+      this.onLog('训练器 init 完成：profile=' + this.config.profile + ' · lr=' + this.config.learningRate +
+        ' · device=' + (this.config.backend === 'cpu' ? 'cpu' : 'cuda') +
+        (resumeCheckpoint ? ' · 续训 optimizer 已挂载' : ' · 全新 optimizer'));
       return this.info;
     } catch (error) {
       if (this.child) this.child.kill();
@@ -79,11 +94,22 @@ class TorchBridge {
   }
 
   async train(transitions) {
+    return this._withGpuLock(() => this._trainCore(transitions));
+  }
+
+  async _trainCore(transitions) {
     const rolloutPath = path.join(this.dataDir, 'rollout-' + process.pid + '.json.gz');
-    const serializable = transitions.map(row => ({
-      state: Array.from(row.state), actions: row.actions.map(action => Array.from(action)), chosen: row.chosen,
-      oldProb: row.oldProb, oldValue: row.oldValue, reward: row.reward, temperature: row.temperature || 1
-    }));
+    const serializable = transitions.map(row => {
+      const out = {
+        state: Array.from(row.state), actions: row.actions.map(action => Array.from(action)),
+        chosen: row.chosen, oldProb: row.oldProb, oldValue: row.oldValue,
+        reward: row.reward, temperature: row.temperature || 1
+      };
+      // MCTS 模式：把访问分布 π 一起序列化，让 GPU 训练侧用交叉熵替代比例裁剪
+      if (row.pi) out.pi = row.pi;
+      if (row.mctsValue != null) out.mctsValue = row.mctsValue;
+      return out;
+    });
     fs.writeFileSync(rolloutPath, zlib.gzipSync(JSON.stringify(serializable), { level: 1 }));
     try {
       const response = await this.request({ cmd: 'train', rolloutPath, modelPath: this.modelPath,
@@ -98,7 +124,19 @@ class TorchBridge {
   async checkpoint(checkpointName) {
     if (!this.child || !checkpointName) return;
     const optimizerPath = path.join(this.dataDir, checkpointName.replace(/\.json\.gz$/, '.optimizer.pt'));
-    await this.request({ cmd: 'checkpoint', optimizerPath });
+    return this._withGpuLock(() => this.request({ cmd: 'checkpoint', optimizerPath }));
+  }
+
+  /**
+   * 批量前向评估：把 MCTS 在 worker 里攒出来的若干 (state, [actions]) 一次送进 PyTorch。
+   * 经 _withGpuLock 串行：与 train / checkpoint 互斥，绝不会在 PPO 更新权重的过程中
+   * 并发插入一次批量前向（否则会用到半更新权重、或让 FIFO 响应错位）。
+   */
+  async batchForward({ stateVectors, actionVectorsList }) {
+    if (!this.child) throw new Error('PyTorch 桥未启动，无法 batch_forward');
+    return this._withGpuLock(() => this.request({
+      cmd: 'batch_eval', stateVectors, actionVectorsList, profile: this.config.profile
+    }));
   }
 
   async close() {

@@ -45,3 +45,30 @@ test('chat UI uses text nodes and includes the collapsible composer controls', (
   assert.match(app, /textNode\.textContent = String\(message\.text\)/);
   assert.match(app, /Net\.send\(\{ t: 'chat', text: text \}\);\s*closeChatComposer\(\);/);
 });
+
+test('chat history sidebar: toggle, tabbed panes, and self-bubble are wired', () => {
+  const root = path.join(__dirname, '..');
+  const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
+
+  // 菜单里的「聊天记录」开关
+  assert.match(html, /id="btn-chat-log-toggle"[^>]*>\s*聊天\s*<\/button>/);
+  // 侧栏改为可切换的标签页结构（战报 / 聊天记录叠加）
+  assert.match(html, /id="side-tabs"[^>]*>/);
+  assert.match(html, /id="tab-log"[^>]*>战报<\/button>/);
+  assert.match(html, /id="tab-chat"[^>]*>聊天记录<\/button>/);
+  assert.match(html, /id="pane-log"[^>]*>/);
+  assert.match(html, /id="pane-chat"[^>]*>/);
+  assert.match(html, /id="chat-log"[^>]*>/);
+  // 开关与切页逻辑
+  assert.match(app, /function updateSidePanel\(\)/);
+  assert.match(app, /App\.chatOpen = !App\.chatOpen/);
+  assert.match(app, /\$\('#tab-log'\)\.onclick/);
+  assert.match(app, /\$\('#tab-chat'\)\.onclick/);
+  // 聊天记录被收集并在打开时渲染
+  assert.match(app, /App\.chatHistory\.push\(/);
+  assert.match(app, /function renderChatLog\(\)/);
+  // 自己发言也在自己圆角矩形头顶弹出气泡（不再用 !== App.myId 过滤）
+  assert.match(app, /if \(m\.playerId\) showPlayerChatBubble\(m\)/);
+  assert.match(app, /bubble\.classList\.add\('self'\)/);
+});

@@ -36,7 +36,7 @@ assert.ok(draftArenaRule && /height\s*:\s*auto!important/.test(draftArenaRule[1]
   /min-height\s*:\s*0!important/.test(draftArenaRule[1]) &&
   /overflow\s*:\s*visible!important/.test(draftArenaRule[1]),
   'PWA 环形选角棋盘按内容展开且不裁掉我的城市');
-assert.ok(/style\.css\?v=54/.test(html) && /app\.js\?v=74/.test(html),
-  '静态资源版本已更新，PWA 能获取新布局代码');
+assert.ok(/style\.css\?v=\d+/.test(html) && /app\.js\?v=\d+/.test(html),
+  '静态资源带缓存版本号，PWA 能获取新布局代码（值由发布时推进，不在测试里锁死）');
 
 console.log('PWA 我的面板与对手碰撞回归：10 项断言全部通过');

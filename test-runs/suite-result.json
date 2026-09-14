@@ -1,0 +1,330 @@
+[
+  {
+    "file": "agent-net.test.js",
+    "status": 0,
+    "pass": 2,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: missing model configuration rejects Agent creation while normal NPC remains available\nok 1 - missing model configuration rejects Agent creation while normal NPC remains available\n  ---\n  duration_ms: 419.912\n  type: 'test'\n  ...\n# Subtest: multiplayer Agent waits for HTTP, pauses on failure, retries, and drops restarted answers\nok 2 - multiplayer Agent waits for HTTP, pauses on failure, retries, and drops restarted answers\n  ---\n  duration_ms: 1289.4067\n  type: 'test'\n  ...\n1..2\n# tests 2\n# suites 0\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1941.8559\n"
+  },
+  {
+    "file": "agent.test.js",
+    "status": 0,
+    "pass": 5,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: actual HTTP request waits for model, follows its choice and masks hidden information\nok 1 - actual HTTP request waits for model, follows its choice and masks hidden information\n  ---\n  duration_ms: 98.0575\n  type: 'test'\n  ...\n# Subtest: missing config, auth failure, malformed and illegal model output never fall back\nok 2 - missing config, auth failure, malformed and illegal model output never fall back\n  ---\n  duration_ms: 33.3402\n  type: 'test'\n  ...\n# Subtest: hand subset decisions validate ownership and reject duplicates\nok 3 - hand subset decisions validate ownership and reject duplicates\n  ---\n  duration_ms: 2.959\n  type: 'test'\n  ...\n# Subtest: room driver serializes requests, discards restart answers, and pauses on model error\nok 4 - room driver serializes requests, discards restart answers, and pauses on model error\n  ---\n  duration_ms: 120.9336\n  type: 'test'\n  ...\n# Subtest: Agent candidate path completes full games across all character sets\nok 5 - Agent candidate path completes full games across all character sets\n  ---\n  duration_ms: 4291.848\n  type: 'test'\n  ...\n1..5\n# tests 5\n# suites 0\n# pass 5\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 4793.3079\n"
+  },
+  {
+    "file": "checkpoint-filename.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Checkpoint 文件名编码与最近修改时间：4 组断言全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\checkpoint-filename.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\checkpoint-filename.test.js\n  ---\n  duration_ms: 323.2606\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 333.7551\n"
+  },
+  {
+    "file": "codex-agent-gateway.test.js",
+    "status": 0,
+    "pass": 2,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: local Codex gateway completes the existing model HTTP contract\nok 1 - local Codex gateway completes the existing model HTTP contract\n  ---\n  duration_ms: 79.2376\n  type: 'test'\n  ...\n# Subtest: gateway validates output, loopback addresses, CLI presence and child environment\nok 2 - gateway validates output, loopback addresses, CLI presence and child environment\n  ---\n  duration_ms: 184.0552\n  type: 'test'\n  ...\n1..2\n# tests 2\n# suites 0\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 515.415\n"
+  },
+  {
+    "file": "declare-target-notice.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# 刺客/盗贼宣告：全体弹窗、编号与角色名战报全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\declare-target-notice.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\declare-target-notice.test.js\n  ---\n  duration_ms: 220.5557\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 233.5297\n"
+  },
+  {
+    "file": "desktop-panel-overlap.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "都不相交\n#   ✓ 2560px 宽：玩家框都留在圆桌区内\n#   ✓ 2245px 宽：分离后任意两张玩家框都不相交\n#   ✓ 2245px 宽：玩家框都留在圆桌区内\n#   ✓ 1920px 宽：分离后任意两张玩家框都不相交\n#   ✓ 1920px 宽：玩家框都留在圆桌区内\n#   ✓ 1600px 宽：分离后任意两张玩家框都不相交\n#   ✓ 1600px 宽：玩家框都留在圆桌区内\n#   ✓ 1400px 宽：分离后任意两张玩家框都不相交\n#   ✓ 1400px 宽：玩家框都留在圆桌区内\n#   ✓ 1200px 宽：分离后任意两张玩家框都不相交\n#   ✓ 1200px 宽：玩家框都留在圆桌区内\n#   ✓ 2245px 宽：只推开、不缩小玩家框（340px 保持不变）\n#   ✓ 2245px 宽：确实通过位移完成分离（-12, 12, -12, 12）\n#   ✓ 1920px 宽：只推开、不缩小玩家框（340px 保持不变）\n#   ✓ 1920px 宽：确实通过位移完成分离（-36, 36, -36, 36）\n#   ✓ 1600px 宽：只推开、不缩小玩家框（336px 保持不变）\n#   ✓ 1600px 宽：确实通过位移完成分离（-13, 100, -100, 13）\n#   ✓ 2560px 宽：原本不重叠时不做任何位移\n#   ✓ 左右两侧对称分离（座位1/4 与 座位2/3 的位移互为镜像）\n#   ✓ 座位 1 向左、座位 2 向右，两张框背向分开\n#   ✓ 2245px 宽 4 人局：分离没有把玩家框推到中央圆桌上\n#   ✓ 2245px 宽 4 人局：玩家框之间也不相交\n#   ✓ 1600px 宽 4 人局：分离没有把玩家框推到中央圆桌上\n#   ✓ 1600px 宽 4 人局：玩家框之间也不相交\n#   ✓ 1200px 宽 4 人局：分离没有把玩家框推到中央圆桌上\n#   ✓ 1200px 宽 4 人局：玩家框之间也不相交\n#   ✓ 6 人局：分离函数不抛异常\n#   ✓ 6 人局：玩家框留在圆桌区内\n#   ✓ 7 人局：分离函数不抛异常\n#   ✓ 7 人局：玩家框留在圆桌区内\n#   ✓ 8 人局：分离函数不抛异常\n#   ✓ 8 人局：玩家框留在圆桌区内\n#   ✓ renderOpponents 的桌面分支在圆桌碰撞之后调用了 separateOpponentPanels(wrap)\n#   ✓ 调用点在 else（桌面）分支内，移动端环形布局不受影响\n#   ✓ style.css 在分离期间关闭 .opp 的宽度过渡（否则测量到过渡中间值会来回抖）\n#   ✓ separating 类在函数出入口成对增删\n# Results: 43 passed, 0 failed\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\desktop-panel-overlap.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\desktop-panel-overlap.test.js\n  ---\n  duration_ms: 208.2499\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 218.6846\n"
+  },
+  {
+    "file": "diplomat-no-buildings.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "   ✓ [mixed] 被拒后 pending 仍为 null\n#   ✓ [mixed] 面板非空（有收入/结束可用）\n#   ✓ [mixed] 面板含 income 与 end_turn\n#   ✓ [mixed] 面板不含 ability_skip（从未进 pending）\n#   ✓ [mixed] 领取收入成功（回合未卡死）\n#   ✓ [mixed] 结束回合成功\n#   ✓ [base] 有建筑时能力按钮可点(disabled 不为 true)\n#   ✓ [base] 有建筑时发动能力成功\n#   ✓ [base] 进入 diplomat_mine pending\n#   ✓ [base] 面板非空\n#   ✓ [dark] 有建筑时能力按钮可点(disabled 不为 true)\n#   ✓ [dark] 有建筑时发动能力成功\n#   ✓ [dark] 进入 diplomat_mine pending\n#   ✓ [dark] 面板非空\n#   ✓ [mixed] 有建筑时能力按钮可点(disabled 不为 true)\n#   ✓ [mixed] 有建筑时发动能力成功\n#   ✓ [mixed] 进入 diplomat_mine pending\n#   ✓ [mixed] 面板非空\n#   ✓ [base] 已进 diplomat_mine\n#   ✓ [base] 选自己建筑成功\n#   ✓ [base] 进入 diplomat_theirs\n#   ✓ [base] 对手无建筑→面板给出 ability_skip 兜底\n#   ✓ [base] 点击兜底正常收尾\n#   ✓ [base] pending 已清除\n#   ✓ [base] abilityUsed 已置位\n#   ✓ [dark] 已进 diplomat_mine\n#   ✓ [dark] 选自己建筑成功\n#   ✓ [dark] 进入 diplomat_theirs\n#   ✓ [dark] 对手无建筑→面板给出 ability_skip 兜底\n#   ✓ [dark] 点击兜底正常收尾\n#   ✓ [dark] pending 已清除\n#   ✓ [dark] abilityUsed 已置位\n#   ✓ [mixed] 已进 diplomat_mine\n#   ✓ [mixed] 选自己建筑成功\n#   ✓ [mixed] 进入 diplomat_theirs\n#   ✓ [mixed] 对手无建筑→面板给出 ability_skip 兜底\n#   ✓ [mixed] 点击兜底正常收尾\n#   ✓ [mixed] pending 已清除\n#   ✓ [mixed] abilityUsed 已置位\n# 外交官无建筑回归测试：通过 57，失败 0\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\diplomat-no-buildings.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\diplomat-no-buildings.test.js\n  ---\n  duration_ms: 226.171\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 236.5214\n"
+  },
+  {
+    "file": "district-pick-deadclick.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# [场景1] 未选满 + 有金币：正常给出可选建筑\n#   ✓ 给出 4 个建筑选项（堡垒也允许，艺术家可美化独特建筑）\n#   ✓ 同时给出「不美化，跳过」\n#   ✓ 提示语是常规那条\n#   ✓ 选项里的建筑都不在已选列表（此时为空）\n# [场景2] 已选 1 栋：排除已选，仍可再选 1 栋\n#   ✓ 剩余 3 个建筑选项（已选的 d1 被排除）\n#   ✓ 确认按钮显示「确定美化（1 栋）」\n# [场景3] 已选满 2 栋：不再给出任何建筑选项（修复点）\n#   ✓ 建筑选项为 0 —— 修复前会给 2 个，点下去必被「最多美化 2 栋」拒绝\n#   ✓ 仍保留「确定美化（2 栋）」\n#   ✓ 提示语说明已选满\n#   ✓ 硬发 choose_district 仍被引擎拒绝（限制未放松）\n# [场景4] 金币不足：不再给出建筑选项\n#   ✓ 金币 0 时建筑选项为 0\n#   ✓ 提示语说明金币不足\n#   ✓ 金币 1 且已选 1 栋（再选就要 2 金）时也不再给出选项\n#   ✓ 硬发也被引擎以「金币不足」拒绝（选第 N+1 栋前须还剩 1 金）\n# [场景5] 已美化的建筑始终不可选\n#   ✓ 已美化的 d1 不在选项里\n# [场景6] 其余需要选建筑的角色不受影响\n#   ✓ 领主摧毁仍给出 3 个目标（2 敌 + 1 己，未被本次改动波及）\n#   ✓ 其中 2 个指向对手 p1\n# [场景7] 前端绑定方式：卡片点击必须带动作对象，不能只按 uid 回查\n#   ✓ pickDistrict 接受 boundAction 参数\n#   ✓ 优先使用绑定的动作对象（不再先回查）\n#   ✓ 回查落空时重绘同步高亮，不留死点\n#   ✓ 我的城区与对手城区两处都已传入动作对象（2 处）\n#   ✓ 渲染时用 districtActionFor 取动作（不再只判断布尔）\n# [场景8] 多选时不再出现两个「确定」\n#   ✓ 渲染动作时跳过与「✓ 确定（N）」重复的 choose_cards 按钮\n# 结果：通过 23，失败 0\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\district-pick-deadclick.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\district-pick-deadclick.test.js\n  ---\n  duration_ms: 215.5631\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 227.293\n"
+  },
+  {
+    "file": "draw-keep-card-en.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   ✓ take_cards action succeeds\n#   ✓ pending kind is draw_keep\n#   ✓ pending has 2 cards\n#   ✓ every pending card has en field\n#   ✓ neon manifest contains thumb for \"港口\" (en=Harbor, key=district_harbor)\n#   ✓ neon manifest contains thumb for \"集市\" (en=Market, key=district_market)\n# Results: 6 passed, 0 failed\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\draw-keep-card-en.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\draw-keep-card-en.test.js\n  ---\n  duration_ms: 221.7775\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 232.9879\n"
+  },
+  {
+    "file": "draw-privacy.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# [场景1] 抽 2 留 1：战报不得出现保留牌的牌名\n#   ✓ take_cards 执行成功\n#   ✓ 进入 draw_keep 待选状态\n#   ✓ 确实抽到了 2 张牌\n#   ✓ draw_keep 执行成功\n#   ✓ 战报未泄露保留的牌名「长城」\n#   ✓ 战报仍记录抽牌动作（保留了 1 张）\n#   ✓ 战报说明其余牌放回牌库底\n#   ✓ 选择的牌确实进了自己手牌\n#   ✓ 手牌只多了 1 张\n# [场景2] 抽牌待选时：只有行动者本人能拿到具体牌面\n#   ✓ 本人可见待选牌面\n#   ✓ 其他玩家拿不到牌面\n#   ✓ 旁观者拿不到牌面\n#   ✓ 他人仍知道正在选牌（kind 保留）\n#   ✓ 他人可知抽了几张（count）\n# [场景3] 学者选牌：战报与下发同样保密\n#   ✓ 学者待选时他人看不到牌面\n#   ✓ 学者待选时本人可见 3 张牌面\n#   ✓ scholar_pick 执行成功\n#   ✓ 战报未泄露学者选中的牌名\n#   ✓ 战报仍说明「从 3 张中选择了 1 张」\n#   ✓ 选中的牌进入手牌\n# [场景4] 回归：公开信息仍然正常公开（建造必须写进战报）\n#   ✓ 建造成功\n#   ✓ 建造的牌名照常公开在战报\n# 结果：22 通过 / 0 失败\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\draw-privacy.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\draw-privacy.test.js\n  ---\n  duration_ms: 215.8783\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 226.5291\n"
+  },
+  {
+    "file": "evaluator.test.js",
+    "status": 0,
+    "pass": 6,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: JsEvaluator 调用 model.forward 并把 (P, V) 填进 node\nok 1 - JsEvaluator 调用 model.forward 并把 (P, V) 填进 node\n  ---\n  duration_ms: 1.517\n  type: 'test'\n  ...\n# Subtest: JsEvaluator.evaluate(已 expanded 节点) 是空操作\nok 2 - JsEvaluator.evaluate(已 expanded 节点) 是空操作\n  ---\n  duration_ms: 0.1983\n  type: 'test'\n  ...\n# Subtest: BatchEvaluator 攒齐 batchSize 时一次性 forwardBatch（含 dedup）\nok 3 - BatchEvaluator 攒齐 batchSize 时一次性 forwardBatch（含 dedup）\n  ---\n  duration_ms: 107.7456\n  type: 'test'\n  ...\n# Subtest: BatchEvaluator 同状态 hash 命中缓存，不重复 forward\nok 4 - BatchEvaluator 同状态 hash 命中缓存，不重复 forward\n  ---\n  duration_ms: 32.023\n  type: 'test'\n  ...\n# Subtest: BatchEvaluator 单条 evaluate 等待 maxWaitMs 后也 flush\nok 5 - BatchEvaluator 单条 evaluate 等待 maxWaitMs 后也 flush\n  ---\n  duration_ms: 45.567\n  type: 'test'\n  ...\n# Subtest: hashStateVector 对相同向量稳定，对不同向量不同\nok 6 - hashStateVector 对相同向量稳定，对不同向量不同\n  ---\n  duration_ms: 0.2794\n  type: 'test'\n  ...\n1..6\n# tests 6\n# suites 0\n# pass 6\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 419.8679\n"
+  },
+  {
+    "file": "gpu-lock.test.js",
+    "status": 0,
+    "pass": 3,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: GPU 锁：并发 batchForward 不会让 request 并发发出\nok 1 - GPU 锁：并发 batchForward 不会让 request 并发发出\n  ---\n  duration_ms: 6.6328\n  type: 'test'\n  ...\n# Subtest: GPU 锁：首个 forward 占用 GPU 时，第二个会等它结束才发（顺序 = FIFO）\nok 2 - GPU 锁：首个 forward 占用 GPU 时，第二个会等它结束才发（顺序 = FIFO）\n  ---\n  duration_ms: 61.0467\n  type: 'test'\n  ...\n# Subtest: GPU 锁：train 与 batchForward 互斥，不会在权重更新中插入前向\nok 3 - GPU 锁：train 与 batchForward 互斥，不会在权重更新中插入前向\n  ---\n  duration_ms: 62.3178\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 368.192\n"
+  },
+  {
+    "file": "gpu-training.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# GPU 训练：CUDA、并行轨迹、PPO 梯度和指标全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\gpu-training.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\gpu-training.test.js\n  ---\n  duration_ms: 20874.3049\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 20885.225\n"
+  },
+  {
+    "file": "ipad-ring-sizing.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# iPad 环形玩家框尺寸自适应\n#   ✓ iPad 横屏命中 spacious 分支\n#   ✓ 手机横屏（高 390）不命中 spacious，尺寸不受影响\n#   ✓ 手机竖屏（宽 390）不命中 spacious，尺寸不受影响\n#   ✓ iPad 玩家框明显更宽（276px → 487px，+76%）\n#   ✓ 建筑牌基准宽度大屏 52 / 手机 40（CSS 原先把手机档锁死在 32px）\n#   ✓ 环形区高度按视口 76% 提升（iPad 820→623px，768→584px）\n#   ✓ 手机档沿用原 .62 系数（横屏取下限 420px，竖屏 523px），未被改动\n#   ✓ style.css 存在 min-width:900px + min-height:560px 的大屏媒体查询\n#   ✓ CSS 大屏下角色牌放大到 56×84\n#   ✓ CSS 大屏下建筑牌改用引擎算出的自适应变量，解除 32px 锁死\n#   ✓ 建筑牌保持 2:3 比例，卡图不被拉伸\n#   ✓ iPad 10.9\"：4 个对手分成上下两排（上 2 / 下 2）\n#   ✓ iPad 10.9\"：上下两排玩家框留有间距（93px，面板高 203px）\n#   ✓ iPad 10.9\"：玩家框不超出环形区底部（623px）\n#   ✓ iPad 9.7\"：4 个对手分成上下两排（上 2 / 下 2）\n#   ✓ iPad 9.7\"：上下两排玩家框留有间距（67px，面板高 203px）\n#   ✓ iPad 9.7\"：玩家框不超出环形区底部（584px）\n#   ✓ 手机档上下两排间距不变（38px），未被放大逻辑影响\n# 全部 18 项断言通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\ipad-ring-sizing.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\ipad-ring-sizing.test.js\n  ---\n  duration_ms: 444.6623\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 454.8685\n"
+  },
+  {
+    "file": "local-neural-bot.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# 本地神经网络电脑：checkpoint、TTA 聚合、硬超时与合法行动全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\local-neural-bot.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\local-neural-bot.test.js\n  ---\n  duration_ms: 1108.1608\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1118.7761\n"
+  },
+  {
+    "file": "mcts-backup-sign.test.js",
+    "status": 0,
+    "pass": 12,
+    "fail": 0,
+    "ok": true,
+    "tail": "N 都恰好 +1\nok 1 - 同一次回传中，路径上每个节点的 N 都恰好 +1\n  ---\n  duration_ms: 1.3015\n  type: 'test'\n  ...\n# Subtest: 两人局退化为经典取反：根 = −V，对手 = +V\nok 2 - 两人局退化为经典取反：根 = −V，对手 = +V\n  ---\n  duration_ms: 0.226\n  type: 'test'\n  ...\n# Subtest: 同一玩家回合内连续决策不取反\nok 3 - 同一玩家回合内连续决策不取反\n  ---\n  duration_ms: 0.1588\n  type: 'test'\n  ...\n# Subtest: 两个不同对手之间不取反（paranoid：其余玩家视为同一阵营）\nok 4 - 两个不同对手之间不取反（paranoid：其余玩家视为同一阵营）\n  ---\n  duration_ms: 0.2431\n  type: 'test'\n  ...\n# Subtest: 三人局绕回同一玩家时符号自洽：叶与根都是「我」，根拿到 +V\nok 5 - 三人局绕回同一玩家时符号自洽：叶与根都是「我」，根拿到 +V\n  ---\n  duration_ms: 0.1774\n  type: 'test'\n  ...\n# Subtest: 我方 / 对手方交替时逐段取反\nok 6 - 我方 / 对手方交替时逐段取反\n  ---\n  duration_ms: 0.142\n  type: 'test'\n  ...\n# Subtest: 终局回传 0 时各节点 W 增量为 0，但 N 仍然累加\nok 7 - 终局回传 0 时各节点 W 增量为 0，但 N 仍然累加\n  ---\n  duration_ms: 0.2173\n  type: 'test'\n  ...\n# Subtest: 终局节点回传真实胜负，而不是 0\nok 8 - 终局节点回传真实胜负，而不是 0\n  ---\n  duration_ms: 0.4196\n  type: 'test'\n  ...\n# Subtest: 终局节点按视角换算：对手的真实得分对我是相反的符号\nok 9 - 终局节点按视角换算：对手的真实得分对我是相反的符号\n  ---\n  duration_ms: 0.5575\n  type: 'test'\n  ...\n# Subtest: 终局判定优先于扩展：不再浪费一次网络评估\nok 10 - 终局判定优先于扩展：不再浪费一次网络评估\n  ---\n  duration_ms: 0.4846\n  type: 'test'\n  ...\n# Subtest: 未提供 rewardFn 时终局仍回传 0，保持向后兼容\nok 11 - 未提供 rewardFn 时终局仍回传 0，保持向后兼容\n  ---\n  duration_ms: 0.217\n  type: 'test'\n  ...\n# Subtest: terminalValue 对缺失 / 异常的 rewardFn 安全降级为 0\nok 12 - terminalValue 对缺失 / 异常的 rewardFn 安全降级为 0\n  ---\n  duration_ms: 0.1939\n  type: 'test'\n  ...\n1..12\n# tests 12\n# suites 0\n# pass 12\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 286.6942\n"
+  },
+  {
+    "file": "mcts-batch-evaluator.test.js",
+    "status": 0,
+    "pass": 4,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   BatchEvaluator 收集：forwardCalls=8 · totalForwardedNodes=8 · visits=30\n# Subtest: BatchEvaluator 下 MCTS 行为与 JsEvaluator 等价\nok 1 - BatchEvaluator 下 MCTS 行为与 JsEvaluator 等价\n  ---\n  duration_ms: 153.782\n  type: 'test'\n  ...\n# Subtest: BatchEvaluator maxWaitMs=0 表示即时 flush（下一 tick 即发送，不强制等待）\nok 2 - BatchEvaluator maxWaitMs=0 表示即时 flush（下一 tick 即发送，不强制等待）\n  ---\n  duration_ms: 43.8392\n  type: 'test'\n  ...\n# Subtest: BatchEvaluator maxWaitMs=0 在 mcts.search 中不会死锁（串行 await 可被即时 flush 唤醒）\nok 3 - BatchEvaluator maxWaitMs=0 在 mcts.search 中不会死锁（串行 await 可被即时 flush 唤醒）\n  ---\n  duration_ms: 93.7717\n  type: 'test'\n  ...\n# Subtest: BatchEvaluator 同 state 跨批次命中缓存\nok 4 - BatchEvaluator 同 state 跨批次命中缓存\n  ---\n  duration_ms: 4.7714\n  type: 'test'\n  ...\n1..4\n# tests 4\n# suites 0\n# pass 4\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 5500.7493\n"
+  },
+  {
+    "file": "mcts-rollout-gpu.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# pi present: True pi shape: (8, 6)\n# GPU π 训练路径：{\"policyLoss\":1.791785717010498,\"valueLoss\":0.20606058835983276,\"entropy\":1.791758954524994,\"approxKl\":-0.23237848281860352,\"clipFraction\":0}\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\mcts-rollout-gpu.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\mcts-rollout-gpu.test.js\n  ---\n  duration_ms: 8846.2738\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 8856.635\n"
+  },
+  {
+    "file": "mcts.test.js",
+    "status": 0,
+    "pass": 6,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: sampleDirichlet 返回长度一致、归一化的概率分布\nok 1 - sampleDirichlet 返回长度一致、归一化的概率分布\n  ---\n  duration_ms: 2.2061\n  type: 'test'\n  ...\n# Subtest: MCTS 在零模拟时直接返回网络先验作为 π\nok 2 - MCTS 在零模拟时直接返回网络先验作为 π\n  ---\n  duration_ms: 18.8128\n  type: 'test'\n  ...\n# Subtest: MCTS 经过若干次模拟后访问分布归一化且 visits 总和等于模拟数\nok 3 - MCTS 经过若干次模拟后访问分布归一化且 visits 总和等于模拟数\n  ---\n  duration_ms: 19.3659\n  type: 'test'\n  ...\n# Subtest: MCTS 根节点加入 Dirichlet 噪声后访问分布非纯贪心\nok 4 - MCTS 根节点加入 Dirichlet 噪声后访问分布非纯贪心\n  ---\n  duration_ms: 19.6814\n  type: 'test'\n  ...\n# Subtest: 自对弈接 MCTS 时 transition 上有 pi 且求和为 1\nok 5 - 自对弈接 MCTS 时 transition 上有 pi 且求和为 1\n  ---\n  duration_ms: 6080.7372\n  type: 'test'\n  ...\n# Subtest: 关闭 MCTS 时 transition 没有 pi 字段（保持向后兼容）\nok 6 - 关闭 MCTS 时 transition 没有 pi 字段（保持向后兼容）\n  ---\n  duration_ms: 257.4081\n  type: 'test'\n  ...\n1..6\n# tests 6\n# suites 0\n# pass 6\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 6677.3593\n"
+  },
+  {
+    "file": "museum-card-conservation.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# [场景1] 墓地将「博物馆」收回手牌后重新建造：museum 子牌守恒（核心回归）\n#   ✓ 回收进手牌阶段牌数不变\n#   ✓ 重新建造博物馆成功\n#   ✓ 重建后牌数守恒（museum 下的 s1 未丢失）\n#   ✓ 重建后的博物馆仍压着 s1\n# [场景2] doDestroy 的 detachMuseum：摧毁带 museum 的建筑 → 子牌进弃牌堆，不丢\n#   ✓ 领主摧毁博物馆成功\n#   ✓ 摧毁后牌数守恒\n#   ✓ 被压的 s1 已进弃牌堆（未随摧毁消失）\n#   ✓ 被摧毁的博物馆本体也在弃牌堆或反应暂存中\n# 结果：通过 8 项，失败 0 项\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\museum-card-conservation.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\museum-card-conservation.test.js\n  ---\n  duration_ms: 210.4136\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 221.6345\n"
+  },
+  {
+    "file": "net-chat.test.js",
+    "status": 0,
+    "pass": 3,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: multiplayer chat identifies the speaker and broadcasts sanitized text in game\nok 1 - multiplayer chat identifies the speaker and broadcasts sanitized text in game\n  ---\n  duration_ms: 444.2349\n  type: 'test'\n  ...\n# Subtest: chat UI uses text nodes and includes the collapsible composer controls\nok 2 - chat UI uses text nodes and includes the collapsible composer controls\n  ---\n  duration_ms: 3.4047\n  type: 'test'\n  ...\n# Subtest: chat history sidebar: toggle, tabbed panes, and self-bubble are wired\nok 3 - chat history sidebar: toggle, tabbed panes, and self-bubble are wired\n  ---\n  duration_ms: 2.1423\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 685.7095\n"
+  },
+  {
+    "file": "neural-training.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# 本地神经网络训练：参数档位、隐私、整局自对弈、推理与 PPO 更新全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\neural-training.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\neural-training.test.js\n  ---\n  duration_ms: 434.8677\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 445.4626\n"
+  },
+  {
+    "file": "noble-income.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# [场景1] 贵族有 3 栋皇家建筑 → 回合开始立刻抽 3 张建筑牌\n#   ✓ 推进到贵族回合成功\n#   ✓ 贵族手牌 +3（抽牌而非拿金）\n#   ✓ 贵族金币不变（仍为 0，不是拿金）\n#   ✓ 日志记录了贵族抽牌\n#   ✓ 发出了 noble_draw 通知（amount=3）\n#   ✓ 收入已标记为领取（incomeTaken）\n# [场景2] 贵族 0 栋皇家建筑 → 不抽牌、不拿金，但仍取得皇冠\n#   ✓ 推进成功\n#   ✓ 贵族手牌不变\n#   ✓ 贵族金币不变（仍为 0）\n#   ✓ 贵族仍取得皇冠\n#   ✓ 无 noble_draw 通知（amount=0 不发）\n# [场景3] 贵族有 1 栋皇家建筑 → 仅抽 1 张（拿 0 金）\n#   ✓ 推进成功\n#   ✓ 贵族手牌 +1\n#   ✓ 贵族金币不变（仍为 0）\n#   ✓ 发出了 noble_draw 通知（amount=1）\n# 结果：15 通过 / 0 失败\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\noble-income.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\noble-income.test.js\n  ---\n  duration_ms: 209.891\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 220.0777\n"
+  },
+  {
+    "file": "pc-draft-space.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# PC 选角阶段全屏圆桌布局：8 项断言全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pc-draft-space.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pc-draft-space.test.js\n  ---\n  duration_ms: 199.8047\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 209.923\n"
+  },
+  {
+    "file": "pc-menu-log-offset.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# PC 战报展开时菜单锚点回归：6 项断言全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pc-menu-log-offset.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pc-menu-log-offset.test.js\n  ---\n  duration_ms: 195.0356\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 205.1634\n"
+  },
+  {
+    "file": "pc-menu-sheet.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "  ✓ 顶栏控件 \\#btn-speed 仍在 DOM 中\n#   ✓ 顶栏控件 \\#tb-room 仍在 DOM 中\n#   ✓ 顶栏控件 \\#tb-round 仍在 DOM 中\n#   ✓ 顶栏控件 \\#tb-target 仍在 DOM 中\n#   ✓ 顶栏控件 \\#tb-deck 仍在 DOM 中\n#   ✓ 顶栏控件 \\#tb-crown 仍在 DOM 中\n#   ✓ 顶栏控件 \\#tb-effects 仍在 DOM 中\n#   ✓ 顶栏控件 \\#btn-theme 仍在 DOM 中\n#   ✓ 顶栏控件 \\#btn-chars 仍在 DOM 中\n#   ✓ 顶栏控件 \\#btn-buildings 仍在 DOM 中\n#   ✓ 顶栏控件 \\#btn-rules-top 仍在 DOM 中\n#   ✓ 顶栏控件 \\#btn-log-toggle 仍在 DOM 中\n#   ✓ 右下角浮动菜单按钮 \\#mobile-menu-toggle 仍在 DOM 中\n#   ✓ PC 端菜单收起时顶栏 display:none\n#   ✓ PC 端菜单展开时顶栏改成 fixed 浮层\n#   ✓ 浮层锚定在右下角（right + bottom）\n#   ✓ PC 端浮动菜单按钮是 fixed 定位\n#   ✓ PC 端浮动菜单按钮可见（覆盖基础样式里的 display:none）\n#   ✓ 浮动菜单按钮贴在画面右下角\n#   ✓ 浮层里三组控件各占一行（tb-left/tb-mid/tb-right）\n#   ✓ 选角阶段隐藏「选角阶段 + 行动指引」横条\n#   ✓ 没有不带 :not(.rc) 的同名规则（否则会连「确认本轮战果」按钮一起藏掉）\n#   ✓ 轮末确认块确实会带 .rc 类（:not(.rc) 保护有效）\n#   ✓ PC 端不再单列「行动指引」一行（用 !important 顶掉内联 display:flex）\n#   ✓ app.js 抽出共用的 setMenuOpen(open)\n#   ✓ 浮动按钮点击 = 反转菜单开关\n#   ✓ Esc 先收起菜单再关弹层\n#   ✓ 点菜单项后自动收起，但「电脑节奏」按钮保持展开（可连点切换）\n#   ✓ 行动栏右侧留出浮动按钮的位置（padding-right）\n#   ✓ 预留宽度足够放下「☰ 菜单」按钮（当前 118px）\n#   ✓ 顶栏里的「菜单」已改名为「返回主菜单」，不与浮动按钮重名\n#   ✓ 移动端依旧整块隐藏横条与行动指引\n#   ✓ 移动端浮动菜单按钮样式保持不变\n#   ✓ index.html 给 style.css 带了版本号\n#   ✓ index.html 给 app.js 带了版本号\n#   ✓ 主题样式版本号仍在\n# PC 菜单浮层 + 选角横条收起：44 项断言全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pc-menu-sheet.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pc-menu-sheet.test.js\n  ---\n  duration_ms: 210.1778\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 220.6911\n"
+  },
+  {
+    "file": "pending-back.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   ✓ 魔术师选择 swap 后 pending 进入 magician_swap\n#   ✓ magician_swap 步骤列出 pending_back 按钮\n#   ✓ pending_back 按钮对电脑/AI 禁用\n#   ✓ 回退到 magician_choice 成功\n#   ✓ magician_choice → magician_redraw\n#   ✓ magician_redraw 步骤也列出 pending_back\n#   ✓ magician_redraw 回退到 magician_choice\n#   ✓ 外交官 mine → theirs 步骤\n#   ✓ diplomat_theirs 步骤列出 pending_back 按钮\n#   ✓ 外交官 pending_back 也禁用\n#   ✓ 外交官 theirs 回退到 mine\n#   ✓ 回退后自己城市没有变化\n#   ✓ 皇帝把皇冠交给玩家 2\n#   ✓ pending 进入 emperor_take 并记录 _fromCrownIdx\n#   ✓ emperor_take 步骤列出 pending_back 按钮\n#   ✓ 皇帝 take → 回退到 crown\n#   ✓ 回退后皇冠还给原持有者（玩家 1）\n#   ✓ 顶层步骤尝试退回被拒\n# 返回上一步按钮：18 通过 / 0 失败\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pending-back.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pending-back.test.js\n  ---\n  duration_ms: 205.8948\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 218.6852\n"
+  },
+  {
+    "file": "pwa-me-opponent-collision.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# PWA 我的面板与对手碰撞回归：10 项断言全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pwa-me-opponent-collision.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\pwa-me-opponent-collision.test.js\n  ---\n  duration_ms: 200.1074\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 210.4112\n"
+  },
+  {
+    "file": "removed-widget-keyed.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# [场景1] 跨轮次 faceUp 全部更换 → 修复前会漏删（复现 bug）\n#   ✓ 第 1 轮 DOM 正确\n#   ✓ 【修复前】确实漏删 → DOM 残留 3 个（即多显示一张）\n#   ✓ 【修复前】残留的是上一轮第 2 张\n# [场景2] 同样的序列走修复后的快照遍历\n#   ✓ 第 1 轮 DOM 正确\n#   ✓ 跨轮全换后只剩新角色（不再多显示）\n# [场景3] 部分保留：同 id 节点必须复用（不能重建，否则霓虹立绘会闪）\n#   ✓ 保留项节点引用不变（复用成功）\n#   ✓ 被移除项已删除、新项已加入\n#   ✓ 总数仍为 2\n# [场景4] 多轮连续更替（模拟一局走很多轮）\n#   ✓ 10 轮之后 DOM 恰好等于最后一轮的 2 张\n#   ✓ 无幽灵节点累积\n# [场景5] 清空（faceUp 为空）\n#   ✓ 全部清空\n# 结果：11 通过 / 0 失败\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\removed-widget-keyed.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\removed-widget-keyed.test.js\n  ---\n  duration_ms: 220.4098\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 230.8381\n"
+  },
+  {
+    "file": "repro-determinism.test.js",
+    "status": 0,
+    "pass": 5,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# Subtest: 同一 seed + mixed 模式：整套初始局面逐字节相同\nok 1 - 同一 seed + mixed 模式：整套初始局面逐字节相同\n  ---\n  duration_ms: 6.5289\n  type: 'test'\n  ...\n# Subtest: 不同 seed 应该产生不同局面（防止退化成常量）\nok 2 - 不同 seed 应该产生不同局面（防止退化成常量）\n  ---\n  duration_ms: 1.0261\n  type: 'test'\n  ...\n# Subtest: 跑完整局：同 seed 两次的结果完全一致（mixed）\nok 3 - 跑完整局：同 seed 两次的结果完全一致（mixed）\n  ---\n  duration_ms: 8.5062\n  type: 'test'\n  ...\n# Subtest: base / dark 模式同样可复现\nok 4 - base / dark 模式同样可复现\n  ---\n  duration_ms: 1.2717\n  type: 'test'\n  ...\n# Subtest: pickCharacterSet：注入 rnd 时可复现，不注入时仍能工作\nok 5 - pickCharacterSet：注入 rnd 时可复现，不注入时仍能工作\n  ---\n  duration_ms: 0.464\n  type: 'test'\n  ...\n1..5\n# tests 5\n# suites 0\n# pass 5\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 251.399\n"
+  },
+  {
+    "file": "role-card-height.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   ✓ 读到 21 张霓虹角色卡图\n#   ✓ 最高的一张是刺客（280×469，比例 0.5970）\n#   ✓ 素材比例不齐：最矮的 merchant 0.7071 vs 最高的刺客 0.5970，相差 18.4%\n#   ✓ 其中 18 张是标准 2:3，另外 3 张是刺客/贵族/商人\n#   ✓ 不修复时最高的仍是刺客（244.6px）\n#   ✓ 不修复时最长与最短相差 38.1px（146px 宽的卡图框），就是用户看到的「其他牌偏短」\n#   ✓ 不修复时除刺客外每一张都比刺客短\n#   ✓ 霓虹主题定义了 --role-card-ratio\n#   ✓ --role-card-ratio（0.5970）等于最高的那张素材（0.5970）\n#   ✓ 统一比例不高于任何一张素材 → 没有任何一张会被纵向裁掉内容\n#   ✓ 找到 .char-card.neon-role-card .cc-art 规则\n#   ✓ 卡图框用 aspect-ratio:var(--role-card-ratio) 定高\n#   ✓ 卡图框只定比例、不写死宽高 → 固定尺寸的小卡（出局角色）仍按自己的宽高走\n#   ✓ 基类 .cc-art 有 overflow:hidden，出框部分被裁掉而不是溢出\n#   ✓ 找到卡图 img 规则\n#   ✓ 卡图 object-fit:cover 填满 → 不出现上下留白（对照：contain 会留边）\n#   ✓ 卡图 height:100% 撑满定高后的卡图框\n#   ✓ 修复后所有角色卡图框高度完全一致（244.6px）\n#   ✓ 统一高度等于原来最高那张（244.6px）→ 只有变长的、没有变短的\n#   ✓ 选角牌外层蓝框没有内边距，边框紧贴卡图\n#   ✓ 选角卡图撑满蓝框，并覆盖 PC 紧凑布局的 120px 高度上限\n#   ✓ 「本轮出局角色」小卡依旧是固定宽高（width/height 都写了 !important）\n#   ✓ 小卡的 .cc-art 显式 height:100% → 同时有宽有高时 aspect-ratio 自动失效，尺寸不受新规则影响\n#   ✓ 角色一览的角色卡图也套用同一比例\n#   ✓ 角色一览同样用 --role-card-ratio + cover\n#   ✓ 排除建筑卡图（建筑 30 张缩略图本来就统一 280×420，不需要也不应该被改）\n#   ✓ index.html 里 theme.css 带版本号（当前 v=11）\n# role-card-height: 27 项断言全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\role-card-height.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\role-card-height.test.js\n  ---\n  duration_ms: 240.5507\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 251.7038\n"
+  },
+  {
+    "file": "score-badge.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# == 分数徽章 ==\n#   ✓ 我的区域使用 score-badge 按钮\n#   ✓ 徽章含蓝色圆圈图标与数值节点\n#   ✓ index.html 无 score-btn 残留\n#   ✓ 旧 .score-btn 样式/代码全部移除\n#   ✓ score-icon 是圆形\n#   ✓ score-icon 使用蓝色渐变\n#   ✓ 对手面板渲染分数徽章并绑定交互\n#   ✓ 我的区域徽章数值随状态刷新\n#   ✓ 悬停计分组成提示函数存在\n#   ✓ 徽章悬停显示组成提示\n#   ✓ 提示里包含合计行\n#   ✓ 两处渲染入口都会收掉残留提示\n#   ✓ 霓虹主题适配徽章与提示浮层\n# == 手牌数圆圈移除 ==\n#   ✓ hand-count-number 不再是圆形\n#   ✓ hand-count-number 无圆形边框\n#   ✓ hand-count-number 无固定圆尺寸\n#   ✓ 移动端环形布局也不再给数字套圆圈\n#   ✓ 手牌数节点仍正常渲染（牌背 × 数字）\n# 分数徽章回归测试：通过 18，失败 0\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\score-badge.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\score-badge.test.js\n  ---\n  duration_ms: 218.4703\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 228.8435\n"
+  },
+  {
+    "file": "search-state-trim.test.js",
+    "status": 0,
+    "pass": 8,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   state JSON 29.5KB → 10.9KB（省 63%）\n# Subtest: cloneTrimmed 不修改源状态\nok 1 - cloneTrimmed 不修改源状态\n  ---\n  duration_ms: 39.4673\n  type: 'test'\n  ...\n# Subtest: cloneTrimmed 只丢掉 UI 字段，其余内容一致\nok 2 - cloneTrimmed 只丢掉 UI 字段，其余内容一致\n  ---\n  duration_ms: 22.7544\n  type: 'test'\n  ...\n# Subtest: cloneTrimmed 在源状态缺字段时不凭空插键\nok 3 - cloneTrimmed 在源状态缺字段时不凭空插键\n  ---\n  duration_ms: 0.2527\n  type: 'test'\n  ...\n# Subtest: trimInPlace 就地清空\nok 4 - trimInPlace 就地清空\n  ---\n  duration_ms: 0.1813\n  type: 'test'\n  ...\n# Subtest: 掐掉 log/notices 不改变合法动作集合\nok 5 - 掐掉 log/notices 不改变合法动作集合\n  ---\n  duration_ms: 267.3133\n  type: 'test'\n  ...\n# Subtest: 引擎在掐掉 UI 字段的快照上行为一致\nok 6 - 引擎在掐掉 UI 字段的快照上行为一致\n  ---\n  duration_ms: 259.6265\n  type: 'test'\n  ...\n# Subtest: MCTS 结果：掐 UI 字段 vs 全量深拷贝完全一致\nok 7 - MCTS 结果：掐 UI 字段 vs 全量深拷贝完全一致\n  ---\n  duration_ms: 62.2535\n  type: 'test'\n  ...\n# Subtest: 掐掉 UI 字段后真的变小了\nok 8 - 掐掉 UI 字段后真的变小了\n  ---\n  duration_ms: 81.1822\n  type: 'test'\n  ...\n1..8\n# tests 8\n# suites 0\n# pass 8\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1006.2938\n"
+  },
+  {
+    "file": "selfplay-pool-gpu.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   pool 转发：batchCalls=295 · 各批 forwardedStates=[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1] · totalForwarded=295\n# Subtest: SelfPlayPool 把 worker 的 forwardBatch 转发到主进程 batchForward\nok 1 - SelfPlayPool 把 worker 的 forwardBatch 转发到主进程 batchForward\n  ---\n  duration_ms: 4500.9158\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 4776.1133\n"
+  },
+  {
+    "file": "selfplay-pool.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# 并行自对弈池：2 个 worker 完成 2 局，用时 297ms\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\selfplay-pool.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\selfplay-pool.test.js\n  ---\n  duration_ms: 541.2983\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 551.7463\n"
+  },
+  {
+    "file": "sync-cards.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   ✓ 首次渲染产生 2 个节点\n#   ✓ 顺序为 a, b\n#   ✓ 顺序变化后仍是 2 个节点\n#   ✓ 同 uid 节点被复用（引用不变 → img 不重建 → 不闪）\n#   ✓ 增删后仍是 2 个节点\n#   ✓ b 仍被复用\n#   ✓ c 为新创建\n#   ✓ a 已被移除\n#   ✓ 空列表时所有卡片节点被移除\n# Results: 9 passed, 0 failed\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\sync-cards.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\sync-cards.test.js\n  ---\n  duration_ms: 206.3791\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 217.1911\n"
+  },
+  {
+    "file": "trading-post-score.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# 商栈费用与图示实时计分回归：全部断言通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\trading-post-score.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\trading-post-score.test.js\n  ---\n  duration_ms: 214.4149\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 224.9821\n"
+  },
+  {
+    "file": "training-log.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# 训练过程日志：8 组断言全部通过（共捕获 14 条事件）\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\training-log.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\training-log.test.js\n  ---\n  duration_ms: 7100.3226\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 7111.2667\n"
+  },
+  {
+    "file": "training-manager.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# 训练管理器：开始、进度同步、停止与 checkpoint 状态全部通过\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\training-manager.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\training-manager.test.js\n  ---\n  duration_ms: 269.5543\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 280.32\n"
+  },
+  {
+    "file": "undo.test.js",
+    "status": 0,
+    "pass": 9,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n#   集成层：真实对局 242 步、623 次 apply+undo 全部逐字节还原 ✓\n# Subtest: 机制层：对象赋值 / 新增键 / 嵌套改动 可精确撤销\nok 1 - 机制层：对象赋值 / 新增键 / 嵌套改动 可精确撤销\n  ---\n  duration_ms: 2.8471\n  type: 'test'\n  ...\n# Subtest: 机制层：数组 push（length 隐式增长）可精确撤销\nok 2 - 机制层：数组 push（length 隐式增长）可精确撤销\n  ---\n  duration_ms: 0.5047\n  type: 'test'\n  ...\n# Subtest: 机制层：数组 splice/shift（length 缩小、尾部被丢弃）可精确撤销\nok 3 - 机制层：数组 splice/shift（length 缩小、尾部被丢弃）可精确撤销\n  ---\n  duration_ms: 0.4676\n  type: 'test'\n  ...\n# Subtest: 机制层：越界索引赋值（length 隐式增长、留下稀疏空洞）可精确撤销\nok 4 - 机制层：越界索引赋值（length 隐式增长、留下稀疏空洞）可精确撤销\n  ---\n  duration_ms: 0.2145\n  type: 'test'\n  ...\n# Subtest: 机制层：delete 对象键 / delete 数组元素（造出空洞）可精确撤销\nok 5 - 机制层：delete 对象键 / delete 数组元素（造出空洞）可精确撤销\n  ---\n  duration_ms: 0.2447\n  type: 'test'\n  ...\n# Subtest: 机制层：原状态含稀疏空洞，填充空洞后撤销应重建空洞（不是 undefined）\nok 6 - 机制层：原状态含稀疏空洞，填充空洞后撤销应重建空洞（不是 undefined）\n  ---\n  duration_ms: 0.2812\n  type: 'test'\n  ...\n# Subtest: 机制层：原状态含稀疏空洞，push 后撤销应保持空洞形态\nok 7 - 机制层：原状态含稀疏空洞，push 后撤销应保持空洞形态\n  ---\n  duration_ms: 0.2195\n  type: 'test'\n  ...\n# Subtest: 集成层：真实对局各阶段 apply+undo 后 working 状态逐字节还原\nok 8 - 集成层：真实对局各阶段 apply+undo 后 working 状态逐字节还原\n  ---\n  duration_ms: 431.6085\n  type: 'test'\n  ...\n# Subtest: 集成层：二次 apply 与首次一致（working 状态无交叉污染）\nok 9 - 集成层：二次 apply 与首次一致（working 状态无交叉污染）\n  ---\n  duration_ms: 1.5162\n  type: 'test'\n  ...\n1..9\n# tests 9\n# suites 0\n# pass 9\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 710.6432\n"
+  },
+  {
+    "file": "witch-alchemist-refund.test.js",
+    "status": 0,
+    "pass": 1,
+    "fail": 0,
+    "ok": true,
+    "tail": "TAP version 13\n# [场景1] 女巫接管被施咒的炼金术士 → 女巫建造 → 回合末退款给女巫\n#   ✓ 女巫接管时可以建造\n#   ✓ 建造从女巫金币扣除（10 → 7）\n#   ✓ 建筑进入女巫自己的城区\n#   ✓ 结束回合成功\n#   ✓ 回合末女巫回收 3 枚建造花费（7 → 10）\n#   ✓ 日志记录了本次回收\n#   ✓ 日志标注了「女巫接管」\n# [场景2] 普通炼金术士回合：建造花费仍返还给本人（回归）\n#   ✓ 炼金术士建造成功\n#   ✓ 建造扣 2 金（8 → 6）\n#   ✓ 结束回合成功\n#   ✓ 回合末回收 2 枚（6 → 8）\n# [场景3] 被施咒的炼金术士本人：只能领资源，无法建造，也就无退款\n#   ✓ 被施咒者没有建造行动\n#   ✓ 被施咒者只能领取资源\n#   ✓ 被施咒者无「结束回合」（由女巫接管）\n# [场景4] 女巫接管但没建造 → 不应产生退款\n#   ✓ 结束回合成功\n#   ✓ 未建造则金币不变（仍为 5）\n# 结果：16 通过 / 0 失败\n# Subtest: C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\witch-alchemist-refund.test.js\nok 1 - C:\\\\Users\\\\Jiaming Qiu\\\\citadels\\\\test\\\\witch-alchemist-refund.test.js\n  ---\n  duration_ms: 228.1638\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 240.5617\n"
+  }
+]

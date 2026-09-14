@@ -452,6 +452,22 @@
         flyGoldIn(n.playerIdx, n.amount);
         return;
 
+      case 'noble_draw':
+        // 贵族：每有1栋皇家建筑抽1张建筑牌。飞行动画让玩家看清"谁抽了多少张"。
+        flyCardsToHand(n.playerIdx, n.amount);
+        if (isMe) {
+          const names = (n.cardNames && n.cardNames.length) ?
+            '：<b>' + n.cardNames.map(escapeHtml).join('、') + '</b>' : '';
+          queueEvent({
+            tone: 'good', icon: '▦', title: '贵族抽牌', hold: 4600,
+            text: '你凭<b>贵族</b>（' + n.amount + ' 栋皇家建筑）抽到 <b>' + n.amount +
+                  ' 张建筑牌</b>' + names + '。'
+          });
+        } else {
+          toast('▦ ' + n.playerName + ' 凭贵族抽到 ' + n.amount + ' 张建筑牌');
+        }
+        return;
+
       case 'monk_take':
         flyCoins(n.fromIdx, n.toIdx, n.amount || 1);
         return;
@@ -723,16 +739,27 @@
           if (App.leavingNetGame) break;
           App.state = m.state;
           if (m.state.you) App.myId = m.state.you;
-          if (m.state.phase === 'lobby') { renderLobbyRoom(m.state); showScreen('screen-lobby'); }
+          if (m.state.phase === 'lobby') { App.chatHistory = []; renderLobbyRoom(m.state); showScreen('screen-lobby'); }
           else {
             showScreen('screen-game'); render();
             if (m.state.phase === 'gameover') showOver(m.state);
           }
           break;
         case 'error': this.autoStart = false; toast('✗ ' + m.error); break;
-        case 'chat':
-          if (m.playerId && m.playerId !== App.myId) showPlayerChatBubble(m);
+        case 'chat': {
+          // 自己与对手的发言都在各自圆角矩形头顶弹出气泡（含自己）
+          if (m.playerId) showPlayerChatBubble(m);
+          if (m.playerId && m.text) {
+            if (!App.chatHistory) App.chatHistory = [];
+            App.chatHistory.push({ playerId: m.playerId, playerName: m.playerName, text: m.text, sentAt: m.sentAt });
+            const paneChat = $('#pane-chat');
+            if (paneChat && !paneChat.hidden) {
+              const box = $('#chat-log');
+              if (box) { box.appendChild(chatEntryNode(m)); box.scrollTop = box.scrollHeight; }
+            }
+          }
           break;
+        }
         case 'roomNotice': handleRoomNotice(m.notice); break;
       }
     },
@@ -1648,6 +1675,7 @@
       if (old.el && old.el.parentNode) old.el.parentNode.removeChild(old.el);
     }
     const bubble = el('div', 'player-chat-bubble');
+    if (message.playerId === App.myId) bubble.classList.add('self');
     bubble.setAttribute('role', 'status');
     const speaker = el('span', 'chat-speaker');
     const textNode = el('span', 'chat-text');
@@ -1801,6 +1829,43 @@
       from = { left: (window.innerWidth - w) / 2, top: 8, width: w, height: h };
     }
     coinFlight(from, to, amount);
+  }
+
+  /* 贵族抽牌：建筑牌从牌堆飞进该玩家的手牌区，直观提示"抽到了几张"。 */
+  function flyCardsToHand(seat, amount) {
+    if (seat == null || !(amount > 0)) return;
+    if (typeof document === 'undefined' || !document.body) return;
+    const to = rectOf(playerBox(seat));
+    if (!to) return;
+    // 起点优先用牌堆，退化到回合横幅（代表牌库），再退化到视口顶部居中
+    const bankEl = $('#deck') || $('#turn-banner') || $('#topbar') || $('#tb-deck');
+    let from = rectOf(bankEl);
+    if (!from) {
+      const w = 120, h = 40;
+      from = { left: (window.innerWidth - w) / 2, top: 8, width: w, height: h };
+    }
+    const n = Math.min(12, Math.max(3, Math.round(amount)));
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => fn();
+    for (let k = 0; k < n; k++) {
+      const c = document.createElement('div');
+      c.className = 'fly-card';
+      c.innerHTML = '<i class="card-back-icon" aria-hidden="true">▦</i>';
+      document.body.appendChild(c);
+      const sx = from.left + from.width / 2 + (Math.random() * 36 - 18);
+      const sy = from.top + from.height / 2 + (Math.random() * 26 - 13);
+      const ex = to.left + to.width / 2 + (Math.random() * 44 - 22);
+      const ey = to.top + to.height / 2 + (Math.random() * 30 - 15);
+      c.style.left = sx + 'px';
+      c.style.top = sy + 'px';
+      const dx = ex - sx, dy = ey - sy;
+      c.style.transitionDelay = (k * 60) + 'ms';   // 错峰起飞
+      raf(() => {
+        c.style.transform = 'translate(' + dx + 'px,' + dy + 'px) rotate(' +
+          (Math.random() * 16 - 8).toFixed(1) + 'deg) scale(.6)';
+        c.style.opacity = '0.15';
+      });
+      setTimeout(() => { if (c.parentNode) c.parentNode.removeChild(c); }, 1000 + k * 60);
+    }
   }
 
   /* 防抖动：每次 render() 都会重建棋盘 DOM，滚动容器（手机上是 .board-main，
@@ -2914,6 +2979,63 @@
     box.scrollTop = box.scrollHeight;
   }
 
+  /* ============================== 聊天记录侧栏 ============================== */
+  function chatTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, '0');
+    return p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function chatEntryNode(m) {
+    const row = el('div', 'chat-entry' + (m.playerId === App.myId ? ' self' : ''));
+    const name = el('span', 'name');
+    name.textContent = m.playerName || '玩家';
+    const text = el('span', 'text');
+    text.textContent = String(m.text || '');
+    const ts = el('span', 'ts');
+    ts.textContent = chatTime(m.sentAt);
+    row.appendChild(name); row.appendChild(text); row.appendChild(ts);
+    return row;
+  }
+  function renderChatLog() {
+    const box = $('#chat-log');
+    if (!box) return;
+    box.innerHTML = '';
+    const list = App.chatHistory || [];
+    if (!list.length) { box.appendChild(el('div', 'chat-empty', '还没有人发言')); return; }
+    list.forEach(m => box.appendChild(chatEntryNode(m)));
+    box.scrollTop = box.scrollHeight;
+  }
+  /* 统一控制侧栏：战报 / 聊天记录 各自的开关与「同时开启时的 Chrome 式标签页叠加」 */
+  function updateSidePanel() {
+    const sp = $('#side-panel');
+    if (!sp) return;
+    const gameScreen = $('#screen-game');
+    const both = App.logOpen && App.chatOpen;
+    const any = App.logOpen || App.chatOpen;
+    sp.classList.toggle('show', any);
+    // PC 端侧栏占用棋盘右侧宽度：让浮动菜单继续锚定战斗区域右下角
+    if (gameScreen) {
+      gameScreen.classList.toggle('log-panel-open', any);
+      if (any) {
+        gameScreen.style.setProperty('--desktop-log-width', Math.ceil(sp.getBoundingClientRect().width) + 'px');
+      } else {
+        gameScreen.style.removeProperty('--desktop-log-width');
+      }
+    }
+    const tabs = $('#side-tabs');
+    if (tabs) tabs.hidden = !both;
+    const active = both ? App.activeSideTab : (App.logOpen ? 'log' : 'chat');
+    const showLog = App.logOpen && (!both || active === 'log');
+    const showChat = App.chatOpen && (!both || active === 'chat');
+    const paneLog = $('#pane-log'); if (paneLog) paneLog.hidden = !showLog;
+    const paneChat = $('#pane-chat'); if (paneChat) paneChat.hidden = !showChat;
+    const tabLog = $('#tab-log'); if (tabLog) tabLog.classList.toggle('is-active', active === 'log');
+    const tabChat = $('#tab-chat'); if (tabChat) tabChat.classList.toggle('is-active', active === 'chat');
+    if (showLog && App.state) renderLog(App.state);
+    if (showChat) renderChatLog();
+  }
+
   /* ============================== 选角阶段 ============================== */
   function renderDraft(s) {
     const d = s.draft; if (!d) return;
@@ -3580,25 +3702,22 @@
     $('#btn-buildings').onclick = openBuildings;
     $('#btn-rules-top').onclick = openRules;
     $('#btn-log-toggle').onclick = () => {
-      const sp = $('#side-panel');
-      const willShow = !sp.classList.contains('show');
       // 竖屏下拉需从顶栏下沿开始：同步顶栏实际高度，避免盖住按钮也无法返回
       const tb = document.querySelector('.topbar');
       if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
-      sp.classList.toggle('show', willShow);
-      // PC 端战报会占用棋盘右侧宽度；让浮动菜单继续锚定在战斗区域右下角，
-      // 而不是盖到战报内容上。移动端由媒体查询维持原有定位。
-      if (gameScreen) {
-        gameScreen.classList.toggle('log-panel-open', willShow);
-        if (willShow) {
-          gameScreen.style.setProperty('--desktop-log-width',
-            Math.ceil(sp.getBoundingClientRect().width) + 'px');
-        } else {
-          gameScreen.style.removeProperty('--desktop-log-width');
-        }
-      }
-      if (willShow && App.state) renderLog(App.state);
+      App.logOpen = !App.logOpen;
+      if (App.logOpen && !App.chatOpen) App.activeSideTab = 'log';
+      else if (!App.logOpen && App.chatOpen) App.activeSideTab = 'chat';
+      updateSidePanel();
     };
+    $('#btn-chat-log-toggle').onclick = () => {
+      App.chatOpen = !App.chatOpen;
+      if (App.chatOpen && !App.logOpen) App.activeSideTab = 'chat';
+      else if (!App.chatOpen && App.logOpen) App.activeSideTab = 'log';
+      updateSidePanel();
+    };
+    $('#tab-log').onclick = () => { App.activeSideTab = 'log'; updateSidePanel(); };
+    $('#tab-chat').onclick = () => { App.activeSideTab = 'chat'; updateSidePanel(); };
     $('#btn-chat').onclick = openChatComposer;
     $('#chat-composer').onsubmit = e => {
       e.preventDefault();
