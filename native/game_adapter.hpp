@@ -35,15 +35,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       for (const auto& card : p->hand) {
         actions.push_back({ActionType::Build, card.uid, card.uid, {}});
       }
-      if (state.builds == 0) {
-        for (const auto& d : p->city) {
-          if (d.effect == "lab" && !state.used_lab && !p->hand.empty())
-            actions.push_back({ActionType::Lab, d.card.uid, {}, {}});
-          if (d.effect == "smithy" && !state.used_smithy && p->gold >= 2)
-            actions.push_back({ActionType::Smithy, d.card.uid, {}, {}});
-          if (d.effect == "museum" && !state.used_museum && !p->hand.empty())
-            actions.push_back({ActionType::Museum, d.card.uid, p->hand.front().uid, {}});
-        }
+      for (const auto& d : p->city) {
+        if (d.effect == "lab" && !state.used_lab && !p->hand.empty())
+          actions.push_back({ActionType::Lab, d.card.uid, {}, {}});
+        if (d.effect == "smithy" && !state.used_smithy && p->gold >= 2)
+          actions.push_back({ActionType::Smithy, d.card.uid, {}, {}});
+        if (d.effect == "museum" && !state.used_museum && !p->hand.empty())
+          actions.push_back({ActionType::Museum, d.card.uid, p->hand.front().uid, {}});
       }
       actions.push_back({ActionType::EndTurn});
     }
