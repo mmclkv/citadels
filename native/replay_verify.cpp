@@ -1,6 +1,8 @@
 #include <iostream>
 #include <string>
 
+#include "json_value.hpp"
+
 namespace {
 
 bool field(const std::string& line, const char* name, std::string& value) {
@@ -43,25 +45,42 @@ int main() {
   std::string line;
   while (std::getline(std::cin, line)) {
     std::string id, initial;
-    if (!field(line, "id", id) || line.find("\"v\":1") == std::string::npos ||
-        line.find("\"t\":\"replay\"") == std::string::npos) {
-      emit(id, false, "unsupported replay protocol");
-      continue;
+    try {
+      const auto request = citadels::native::parse_json(line);
+      if (!request.is_object()) throw std::runtime_error("unsupported replay protocol");
+      const auto* idValue = request.get("id");
+      const auto* version = request.get("v");
+      const auto* type = request.get("t");
+      const auto* initialState = request.get("initialState");
+      const auto* records = request.get("records");
+      const auto* initialHash = request.get("initialHash");
+      if (!idValue || !idValue->is_string()) throw std::runtime_error("missing id");
+      id = idValue->as_string();
+      if (!version || !version->is_number() || version->as_number() != 1 ||
+          !type || !type->is_string() || type->as_string() != "replay")
+        throw std::runtime_error("unsupported replay protocol");
+      if (!initialState || !initialState->is_object()) throw std::runtime_error("missing initialState");
+      const auto* players = initialState->get("players");
+      if (!players || !players->is_array() || players->as_array().empty())
+        throw std::runtime_error("initialState.players must be a non-empty array");
+      if (!records || !records->is_array()) throw std::runtime_error("records must be an array");
+      if (!initialHash || !initialHash->is_string() || !validHash(initialHash->as_string()))
+        throw std::runtime_error("invalid initialHash");
+      for (const auto& record : records->as_array()) {
+        if (!record.is_object()) throw std::runtime_error("replay record must be an object");
+        const auto* player = record.get("playerId");
+        const auto* action = record.get("action");
+        const auto* before = record.get("beforeHash");
+        const auto* after = record.get("afterHash");
+        if (!player || !player->is_string() || !action || !action->is_object() ||
+            !before || !before->is_string() || !validHash(before->as_string()) ||
+            !after || !after->is_string() || !validHash(after->as_string()))
+          throw std::runtime_error("invalid replay record");
+      }
+      emit(id, true);
+    } catch (const std::exception& error) {
+      emit(id, false, error.what());
     }
-    if (!field(line, "initialHash", initial) || !validHash(initial)) {
-      emit(id, false, "invalid initialHash");
-      continue;
-    }
-    // Each trace record contributes one beforeHash and one afterHash. The
-    // verifier checks the wire-level hash shape and count; rule semantics are
-    // verified by JS replay until the native rule adapter is complete.
-    const size_t before = countHashFields(line, "beforeHash");
-    const size_t after = countHashFields(line, "afterHash");
-    if (before != after) {
-      emit(id, false, "incomplete action hash pair");
-      continue;
-    }
-    emit(id, true);
   }
   return 0;
 }
