@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Engine = require('../src/engine.js');
 const train = require('../training/train.js');
-const { encodeSearchRequest, decodeSearchResponse, PROTOCOL_VERSION } = require('../native/protocol.js');
+const { encodeSearchRequest, decodeSearchRequest, decodeSearchResponse, PROTOCOL_VERSION } = require('../native/protocol.js');
 
 test('native 搜索协议裁剪 UI 历史并保留完整动作字段', () => {
   const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
@@ -23,6 +23,17 @@ test('native 搜索协议裁剪 UI 历史并保留完整动作字段', () => {
   assert.deepEqual(request.state.notices, []);
   assert.deepEqual(request.legalActions, actions);
   assert.equal(typeof request.stateHash, 'string');
+  assert.equal(decodeSearchRequest(line).stateHash, request.stateHash);
+});
+
+test('native 搜索协议拒绝被篡改的完整状态快照', () => {
+  const line = encodeSearchRequest({ players: [{ id: 'p0' }] }, 'p0', [], 1);
+  const request = JSON.parse(line);
+  request.state.players[0].id = 'tampered';
+  assert.throws(() => decodeSearchRequest(request), /stateHash 不匹配/);
+  request.state.players[0].id = 'p0';
+  request.stateHash = '0'.repeat(64);
+  assert.throws(() => decodeSearchRequest(request), /stateHash 不匹配/);
 });
 
 test('native 搜索协议拒绝错误响应', () => {

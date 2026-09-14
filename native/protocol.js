@@ -27,6 +27,34 @@ function encodeSearchRequest(state, rootPlayerId, legalActions, requestId) {
   }) + '\n';
 }
 
+function decodeSearchRequest(line) {
+  const request = typeof line === 'string' ? JSON.parse(line) : line;
+  if (!request || request.v !== PROTOCOL_VERSION || request.t !== 'search') {
+    throw new Error('native 搜索请求协议版本或类型不匹配');
+  }
+  if (request.id == null || request.id === '') throw new Error('native 搜索请求缺少 id');
+  if (!request.state || typeof request.state !== 'object' || Array.isArray(request.state)) {
+    throw new Error('native 搜索请求缺少完整 state');
+  }
+  if (typeof request.rootPlayerId !== 'string' || !request.rootPlayerId) {
+    throw new Error('native 搜索请求缺少 rootPlayerId');
+  }
+  if (!Array.isArray(request.legalActions)) throw new Error('native 搜索请求缺少 legalActions');
+  if (typeof request.stateHash !== 'string' || !/^[0-9a-f]{64}$/.test(request.stateHash)) {
+    throw new Error('native 搜索请求缺少有效 stateHash');
+  }
+  if (stableFingerprint(request.state) !== request.stateHash) {
+    throw new Error('native 搜索请求 stateHash 不匹配');
+  }
+  if (!request.state.players || !Array.isArray(request.state.players)) {
+    throw new Error('native 搜索请求 state 缺少 players');
+  }
+  if (!request.state.players.some(player => player && player.id === request.rootPlayerId)) {
+    throw new Error('native 搜索请求 rootPlayerId 不在 players 中');
+  }
+  return request;
+}
+
 function decodeSearchResponse(line) {
   const response = typeof line === 'string' ? JSON.parse(line) : line;
   if (!response || response.v !== PROTOCOL_VERSION || response.t !== 'search_result') {
@@ -36,4 +64,6 @@ function decodeSearchResponse(line) {
   return response;
 }
 
-module.exports = { PROTOCOL_VERSION, stableFingerprint, encodeSearchRequest, decodeSearchResponse };
+module.exports = {
+  PROTOCOL_VERSION, stableFingerprint, encodeSearchRequest, decodeSearchRequest, decodeSearchResponse
+};
