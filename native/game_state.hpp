@@ -48,6 +48,10 @@ struct NativeGameState {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;
     return &players[active_player];
   }
+  const NativePlayer* active() const {
+    if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;
+    return &players[active_player];
+  }
 
   bool take_gold() {
     auto* p = active();
