@@ -177,7 +177,8 @@ function renderLogs(status) {
   const log = $('training-log');
   ensureLogScrollTracking();
   const shouldFollow = logAutoFollow || isLogAtBottom(log);
-  log.textContent = lines.length ? lines.join('\n') : '训练进程运行正常，暂无事件。';
+  const visibleLines = lines.slice(-30);
+  log.textContent = visibleLines.length ? visibleLines.join('\n') : '训练进程运行正常，暂无事件。';
   if (shouldFollow) {
     log.scrollTop = log.scrollHeight;
     logAutoFollow = true;
