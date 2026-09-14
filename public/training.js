@@ -2,6 +2,9 @@
 
 const $ = id => document.getElementById(id);
 let latest = null;
+let logAutoFollow = true;
+let logScrollBound = false;
+const LOG_SCROLL_EPSILON = 4;
 
 function num(value, digits = 2) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
 function integer(value) { return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('zh-CN') : '0'; }
@@ -101,7 +104,8 @@ function render(status) {
   $('m-rounds').textContent = num(point.avgRounds, 1);
   $('m-score').textContent = num(point.avgScore, 1);
   $('m-fallbacks').textContent = integer(point.fallbacks);
-  $('loss-now').textContent = '总损失 ' + num(point.totalLoss, 4);
+  $('value-loss-now').textContent = '价值损失 ' + num(point.valueLoss, 4);
+  $('total-loss-now').textContent = '总损失 ' + num(point.totalLoss, 4);
   const policy = Number(point.policyLoss);
   $('policy-now').textContent = (Number.isFinite(policy) ? policy.toExponential(3) : '—') +
     ' · KL ' + num(point.approxKl, 5) + ' · 梯度 ' + num(point.gradientNorm, 3) + ' · 熵 ' + num(point.entropy, 3);
@@ -113,9 +117,11 @@ function render(status) {
   renderCheckpoints(status.checkpoints || []);
   renderLogs(status);
   const history = status.history || [];
-  drawLines($('loss-chart'), history, [
-    { key: 'valueLoss', color: '#ff4fc7', label: '价值' },
-    { key: 'totalLoss', color: '#ffd36a', label: '总计' }
+  drawLines($('value-loss-chart'), history, [
+    { key: 'valueLoss', color: '#ff4fc7', label: '价值损失' }
+  ]);
+  drawLines($('total-loss-chart'), history, [
+    { key: 'totalLoss', color: '#ffd36a', label: '总损失' }
   ]);
   drawLines($('policy-chart'), history, [
     { key: 'policyLoss', color: '#35dcff', label: '策略损失' }
@@ -168,8 +174,28 @@ function renderCheckpoints(list) {
 function renderLogs(status) {
   const lines = (status.logs || []).map(row => '[' + new Date(row.at).toLocaleTimeString() + '] ' + row.text);
   if (status.error && !lines.some(line => line.includes(status.error))) lines.push('[错误] ' + status.error);
-  $('training-log').textContent = lines.length ? lines.join('\n') : '训练进程运行正常，暂无事件。';
-  $('training-log').scrollTop = $('training-log').scrollHeight;
+  const log = $('training-log');
+  ensureLogScrollTracking();
+  const shouldFollow = logAutoFollow || isLogAtBottom(log);
+  log.textContent = lines.length ? lines.join('\n') : '训练进程运行正常，暂无事件。';
+  if (shouldFollow) {
+    log.scrollTop = log.scrollHeight;
+    logAutoFollow = true;
+  }
+}
+
+function isLogAtBottom(log) {
+  return log.scrollHeight - log.scrollTop - log.clientHeight <= LOG_SCROLL_EPSILON;
+}
+
+function ensureLogScrollTracking() {
+  if (logScrollBound) return;
+  const log = $('training-log');
+  if (!log) return;
+  log.addEventListener('scroll', () => {
+    logAutoFollow = isLogAtBottom(log);
+  }, { passive: true });
+  logScrollBound = true;
 }
 
 function updateCheckpointOptions(list) {
