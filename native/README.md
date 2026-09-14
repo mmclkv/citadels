@@ -7,7 +7,7 @@
 迁移顺序：
 
 1. 为 JS 引擎建立状态/动作序列化协议（`protocol.js`，NDJSON v1）；
-2. 实现 C++ 规则适配器，并用相同回放逐动作比对 JS 结果；
+2. 建立动作回放校验链路（`replay_protocol.js`、`replay_verify.cpp`），再实现 C++ 规则适配器，并用相同回放逐动作比对 JS 结果；
 3. 接入批量网络评估；
 4. 将训练器的自对弈 worker 切换到 native MCTS。
 
