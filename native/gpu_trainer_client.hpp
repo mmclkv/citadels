@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -241,3 +242,12 @@ inline BatchEvaluationResult GpuTrainerClient::evaluate(const std::vector<std::v
 inline void GpuTrainerClient::close() {}
 }  // namespace citadels::native
 #endif
+
+namespace citadels::native {
+inline BatchInferenceBackend make_gpu_batch_backend(
+    const std::shared_ptr<GpuTrainerClient>& client, std::string profile) {
+  return [client, profile = std::move(profile)](const auto& states, const auto& actions) {
+    return client->evaluate(states, actions, profile);
+  };
+}
+}  // namespace citadels::native
