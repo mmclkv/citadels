@@ -55,9 +55,19 @@ inline NativeDistrict load_city_card(const JsonValue& value) {
   return district;
 }
 
+inline NativePhase load_phase(const JsonValue& snapshot) {
+  const auto phase = string_field(snapshot, "phase");
+  if (phase == "lobby") return NativePhase::Lobby;
+  if (phase == "draft") return NativePhase::Draft;
+  if (phase == "action") return NativePhase::Action;
+  if (phase == "gameover") return NativePhase::GameOver;
+  return NativePhase::Unknown;
+}
+
 inline NativeGameState load_native_state(const JsonValue& snapshot) {
   if (!snapshot.is_object()) throw std::runtime_error("state 必须是对象");
   NativeGameState state;
+  state.phase = load_phase(snapshot);
   state.round = int_field(snapshot, "round", 1);
   state.rng = JsRng(static_cast<uint32_t>(int_field(snapshot, "rngState")));
   const auto* config = snapshot.get("config");
@@ -74,7 +84,10 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     player.has_crown = bool_field(value, "hasCrown");
     const auto* chars = value.get("chars");
     if (chars && chars->is_array()) {
-      for (const auto& role : chars->as_array()) if (role.is_string()) player.role_id = role.as_string();
+      for (const auto& role : chars->as_array()) if (role.is_string()) {
+        player.role_ids.push_back(role.as_string());
+        player.role_id = role.as_string();
+      }
     }
     const auto* hand = value.get("hand");
     if (hand) player.hand = load_cards(*hand);
@@ -99,6 +112,28 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     state.active_player = int_field(*turn, "playerIdx", -1);
     state.resources_taken = bool_field(*turn, "takenResources");
     state.builds = int_field(*turn, "builds");
+    const auto* pending = turn->get("pending");
+    if (pending && pending->is_object()) state.pending_kind = string_field(*pending, "kind");
+  }
+  const auto* draft = snapshot.get("draft");
+  if (draft && draft->is_object()) {
+    state.draft_step = int_field(*draft, "stepIdx", -1);
+    state.draft_total_steps = int_field(*draft, "totalSteps");
+    state.draft_current_player = -1;
+    const auto* current = draft->get("currentPlayer");
+    if (current && current->is_string()) for (size_t i = 0; i < state.players.size(); ++i)
+      if (state.players[i].id == current->as_string()) state.draft_current_player = static_cast<int>(i);
+    state.draft_sub = string_field(*draft, "sub");
+  }
+  const auto* reaction = snapshot.get("reaction");
+  if (reaction && reaction->is_object()) {
+    state.reaction_player = int_field(*reaction, "playerIdx", -1);
+    state.reaction_kind = string_field(*reaction, "kind");
+  }
+  const auto* round_confirm = snapshot.get("roundConfirm");
+  if (round_confirm && round_confirm->is_object()) {
+    const auto* confirmed = round_confirm->get("confirmed");
+    if (confirmed && confirmed->is_array()) state.round_confirm_count = static_cast<int>(confirmed->as_array().size());
   }
   if (state.active_player < 0 || state.active_player >= static_cast<int>(state.players.size()))
     state.active_player = 0;

@@ -14,6 +14,8 @@
 
 namespace citadels::native {
 
+enum class NativePhase { Lobby, Draft, Action, Reaction, RoundConfirm, GameOver, Unknown };
+
 struct NativeDistrict {
   DistrictCard card;
   std::string name;
@@ -28,9 +30,11 @@ struct NativePlayer {
   std::vector<DistrictCard> hand;
   std::vector<NativeDistrict> city;
   bool has_crown = false;
+  std::vector<std::string> role_ids;
 };
 
 struct NativeGameState {
+  NativePhase phase = NativePhase::Unknown;
   std::vector<NativePlayer> players;
   DeckMachine deck;
   JsRng rng;
@@ -44,6 +48,14 @@ struct NativeGameState {
   bool used_lab = false;
   bool used_smithy = false;
   bool used_museum = false;
+  int draft_step = -1;
+  int draft_total_steps = 0;
+  int draft_current_player = -1;
+  std::string draft_sub;
+  int reaction_player = -1;
+  std::string reaction_kind;
+  int round_confirm_count = 0;
+  std::string pending_kind;
 
   NativePlayer* active() {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

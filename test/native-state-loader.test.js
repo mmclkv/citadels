@@ -11,5 +11,5 @@ test('C++ 可以从完整 JS 快照初始化原生行动状态', () => {
     return;
   }
   const result = execFileSync(executable, { encoding: 'utf8' }).trim();
-  assert.equal(result, '1,1,graveyard,1,0,1');
+  assert.equal(result, '1,1,graveyard,1,0,1,2');
 });
