@@ -91,12 +91,15 @@ inline std::vector<float> parse_numbers(const std::string& text, size_t begin, s
 
 inline BatchEvaluationResult decode_batch_eval_response(const std::string& response,
                                                         const std::vector<size_t>& action_counts) {
-  if (response.find("\"ok\":true") == std::string::npos)
+  const size_t ok_key = response.find("\"ok\"");
+  const size_t ok_true = ok_key == std::string::npos ? std::string::npos
+                                                     : response.find("true", ok_key);
+  if (ok_key == std::string::npos || ok_true == std::string::npos)
     throw std::runtime_error("gpu_trainer batch_eval 返回失败: " + response);
-  const std::string policy_marker = "\"probsList\":[";
-  const size_t policy_begin = response.find(policy_marker);
-  if (policy_begin == std::string::npos) throw std::runtime_error("batch_eval 缺少 probsList");
-  const size_t outer_begin = policy_begin + policy_marker.size() - 1;
+  const size_t policy_key = response.find("\"probsList\"");
+  const size_t outer_begin = policy_key == std::string::npos
+      ? std::string::npos : response.find('[', policy_key);
+  if (outer_begin == std::string::npos) throw std::runtime_error("batch_eval 缺少 probsList");
   const size_t outer_end = find_json_array_end(response, outer_begin);
   BatchEvaluationResult result;
   size_t cursor = outer_begin + 1;
@@ -107,10 +110,10 @@ inline BatchEvaluationResult decode_batch_eval_response(const std::string& respo
     result.policies.push_back(parse_numbers(response, cursor + 1, row_end));
     cursor = row_end + 1;
   }
-  const std::string value_marker = "\"values\":[";
-  const size_t value_begin = response.find(value_marker);
-  if (value_begin == std::string::npos) throw std::runtime_error("batch_eval 缺少 values");
-  const size_t values_start = value_begin + value_marker.size() - 1;
+  const size_t value_key = response.find("\"values\"");
+  const size_t values_start = value_key == std::string::npos
+      ? std::string::npos : response.find('[', value_key);
+  if (values_start == std::string::npos) throw std::runtime_error("batch_eval 缺少 values");
   const size_t values_end = find_json_array_end(response, values_start);
   result.values = parse_numbers(response, values_start + 1, values_end);
   if (result.values.size() != action_counts.size() || result.policies.size() != action_counts.size())
