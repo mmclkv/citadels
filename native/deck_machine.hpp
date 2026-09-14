@@ -17,6 +17,12 @@ class DeckMachine {
                     std::make_move_iterator(cards.end()));
   }
 
+  void put_bottom(std::vector<DistrictCard> cards) {
+    deck_.insert(deck_.end(),
+                 std::make_move_iterator(cards.begin()),
+                 std::make_move_iterator(cards.end()));
+  }
+
   std::vector<DistrictCard> draw(int count, JsRng& rng) {
     std::vector<DistrictCard> result;
     for (int i = 0; i < count; ++i) {
