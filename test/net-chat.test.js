@@ -52,7 +52,7 @@ test('chat history sidebar: toggle, tabbed panes, and self-bubble are wired', ()
   const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 
   // 菜单里的「聊天记录」开关
-  assert.match(html, /id="btn-chat-log-toggle"[^>]*>\s*聊天\s*<\/button>/);
+  assert.match(html, /id="btn-chat-log-toggle"[^>]*>\s*聊天记录\s*<\/button>/);
   // 侧栏改为可切换的标签页结构（战报 / 聊天记录叠加）
   assert.match(html, /id="side-tabs"[^>]*>/);
   assert.match(html, /id="tab-log"[^>]*>战报<\/button>/);

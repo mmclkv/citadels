@@ -665,7 +665,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .player-chat-bubble .chat-speaker{display:block;margin-bottom:2px;color:var(--gold);font-size:11px;font-weight:800}
 /* 自己发言的气泡：用蓝调与对手区分，仍显示在「我的圆角矩形」头顶 */
 .player-chat-bubble.self{border-color:#2c5f9c;background:#eef4fb}
-.player-chat-bubble.self .chat-speaker{color:#2c5f9c}
+.player-chat-bubble.self{color:#16324a}
+.player-chat-bubble.self::after{background:#eef4fb;border-color:#2c5f9c}
+.player-chat-bubble.self .chat-speaker{color:#16324a}
 @keyframes chat-bubble-in{from{opacity:0;transform:translateY(5px) scale(.96)}to{opacity:1;transform:none}}
 
 /* ------------------------------ 结算 ------------------------------ */

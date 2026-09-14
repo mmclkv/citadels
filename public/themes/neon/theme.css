@@ -215,6 +215,27 @@ html[data-theme="neon"] .log .bad { color:var(--c-red-d); }
 html[data-theme="neon"] .log .magic { color:var(--c-purple-d); }
 html[data-theme="neon"] .log .build { color:var(--c-blue-d); }
 html[data-theme="neon"] .log .crown { color:var(--gold); }
+/* 侧栏在深色主题下保持明确的明暗层级：战报正文使用深色高对比文字，
+   标签和聊天记录使用浅色文字，避免沿用经典主题颜色导致不可读。 */
+html[data-theme="neon"] .side-tabs { background:rgba(9,16,27,.96); border-color:var(--line); }
+html[data-theme="neon"] .side-tab { color:#173447; background:rgba(234,247,255,.92); }
+html[data-theme="neon"] .side-tab.is-active { color:#102536; border-bottom-color:var(--gold); }
+html[data-theme="neon"] .side-tab:hover { color:#071722; }
+html[data-theme="neon"] .log { color:#173447; background:rgba(234,247,255,.92); }
+html[data-theme="neon"] .log .sys,
+html[data-theme="neon"] .log .good,
+html[data-theme="neon"] .log .bad,
+html[data-theme="neon"] .log .magic,
+html[data-theme="neon"] .log .build,
+html[data-theme="neon"] .log .crown,
+html[data-theme="neon"] .log .score { color:#173447; }
+html[data-theme="neon"] .log .round { color:#173447; background:rgba(240,188,69,.2); }
+html[data-theme="neon"] .chat-log { color:#eaf7ff; }
+html[data-theme="neon"] .chat-log .chat-entry .name,
+html[data-theme="neon"] .chat-log .chat-entry.self .name,
+html[data-theme="neon"] .chat-log .chat-entry .text { color:#eaf7ff; }
+html[data-theme="neon"] .chat-log .chat-entry .ts,
+html[data-theme="neon"] .chat-log .chat-empty { color:#b4c9d8; }
 html[data-theme="neon"] .turn-banner,
 html[data-theme="neon"] .city-row,
 html[data-theme="neon"] .hand-row,
