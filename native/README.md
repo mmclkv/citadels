@@ -12,6 +12,7 @@
 4. 用 `state_projection.js` / `state_codec.hpp` 固定搜索元状态，逐步接入 C++ 的状态变更实现；
 5. 已迁移选角状态机（`draft_machine.hpp`），下一步接入牌池和角色合法性规则；
 6. 已抽出行动阶段基础资源转移（`resource_machine.hpp`），下一步接入角色加成、牌库和建筑例外；
+7. 已复刻基本建筑牌堆 UID 与种子洗牌（`district_deck.hpp`），下一步接入抽牌/弃牌堆回收；
 3. 接入批量网络评估；
 4. 将训练器的自对弈 worker 切换到 native MCTS。
 
