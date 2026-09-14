@@ -9,6 +9,15 @@ const train = require('../training/train.js');
 const { recordAppliedAction } = require('../native/replay.js');
 const { encodeReplayTrace, decodeReplayResult } = require('../native/replay_protocol.js');
 
+test('native 回放协议携带完整初始状态而不是只有摘要哈希', () => {
+  const initial = { phase: 'action', players: [{ id: 'p0' }], log: [{ text: 'ui' }], notices: [{ kind: 'ui' }] };
+  const request = JSON.parse(encodeReplayTrace(initial, [], 'schema'));
+  assert.deepEqual(request.initialState.players, [{ id: 'p0' }]);
+  assert.deepEqual(request.initialState.log, []);
+  assert.deepEqual(request.initialState.notices, []);
+  assert.equal(typeof request.initialHash, 'string');
+});
+
 test('native 回放协议校验器接受 JS 真实回放记录', async t => {
   const executable = process.env.CITADELS_NATIVE_REPLAY_VERIFY;
   if (!executable || !fs.existsSync(executable)) {

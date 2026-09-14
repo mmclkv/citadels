@@ -1,6 +1,7 @@
 'use strict';
 
 const { snapshotHash } = require('./replay.js');
+const { cloneTrimmed } = require('../training/search-state.js');
 
 const REPLAY_PROTOCOL_VERSION = 1;
 
@@ -10,6 +11,8 @@ function encodeReplayTrace(initialState, records, traceId) {
     v: REPLAY_PROTOCOL_VERSION,
     t: 'replay',
     id: String(traceId),
+    // native 必须用与 JS 完全相同的初始局面执行第一步，只有 hash 无法初始化规则状态。
+    initialState: cloneTrimmed(initialState),
     initialHash: snapshotHash(initialState),
     records: normalized.map(record => ({
       playerId: record.playerId,
