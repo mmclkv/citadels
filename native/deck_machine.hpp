@@ -48,6 +48,11 @@ class DeckMachine {
   size_t deck_count() const { return deck_.size(); }
   size_t discard_count() const { return discard_.size(); }
 
+  void load(std::vector<DistrictCard> deck, std::vector<DistrictCard> discard) {
+    deck_ = std::move(deck);
+    discard_ = std::move(discard);
+  }
+
  private:
   void recycle(JsRng& rng) {
     if (discard_.empty()) return;
