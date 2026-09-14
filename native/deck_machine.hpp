@@ -23,6 +23,16 @@ class DeckMachine {
                  std::make_move_iterator(cards.end()));
   }
 
+  void return_and_shuffle(std::vector<DistrictCard> cards, JsRng& rng) {
+    deck_.insert(deck_.end(),
+                 std::make_move_iterator(cards.begin()),
+                 std::make_move_iterator(cards.end()));
+    for (size_t i = deck_.size() - 1; i > 0; --i) {
+      const size_t j = static_cast<size_t>(rng.next() * static_cast<double>(i + 1));
+      std::swap(deck_[i], deck_[j]);
+    }
+  }
+
   std::vector<DistrictCard> draw(int count, JsRng& rng) {
     std::vector<DistrictCard> result;
     for (int i = 0; i < count; ++i) {
