@@ -3,6 +3,8 @@
 #include <sstream>
 #include <string>
 
+#include "json_value.hpp"
+
 namespace {
 
 bool hasField(const std::string& line, const std::string& field,
@@ -55,25 +57,36 @@ int main() {
   std::string line;
   while (std::getline(std::cin, line)) {
     std::string id;
-    if (!readStringField(line, "id", id)) { emitError("", "missing id"); continue; }
-    if (line.find("\"v\":1") == std::string::npos ||
-        !hasField(line, "t", "search")) {
-      emitError(id, "unsupported protocol request");
-      continue;
+    try {
+      const auto request = citadels::native::parse_json(line);
+      if (!request.is_object()) throw std::runtime_error("请求必须是对象");
+      const auto* idValue = request.get("id");
+      const auto* version = request.get("v");
+      const auto* type = request.get("t");
+      const auto* state = request.get("state");
+      const auto* actions = request.get("legalActions");
+      const auto* hash = request.get("stateHash");
+      if (!idValue || !idValue->is_string()) throw std::runtime_error("missing id");
+      id = idValue->as_string();
+      if (!version || !version->is_number() || version->as_number() != 1 ||
+          !type || !type->is_string() || type->as_string() != "search")
+        throw std::runtime_error("unsupported protocol request");
+      if (!state || !state->is_object()) throw std::runtime_error("state must be a complete object");
+      const auto* players = state->get("players");
+      if (!players || !players->is_array()) throw std::runtime_error("state.players must be an array");
+      if (!actions || !actions->is_array()) throw std::runtime_error("legalActions must be an array");
+      if (!hash || !hash->is_string() || hash->as_string().size() != 64)
+        throw std::runtime_error("invalid stateHash");
+      std::cout << "{\"v\":1,\"t\":\"search_result\",\"id\":\"" << id
+                << "\",\"policy\":[";
+      for (size_t i = 0; i < actions->as_array().size(); ++i) {
+        if (i) std::cout << ',';
+        std::cout << (actions->as_array().empty() ? 0.0 : 1.0 / actions->as_array().size());
+      }
+      std::cout << "],\"value\":0,\"backend\":\"native-probe\"}\n" << std::flush;
+    } catch (const std::exception& error) {
+      emitError(id, error.what());
     }
-    std::string hash;
-    if (!readStringField(line, "stateHash", hash) || hash.size() != 64) {
-      emitError(id, "invalid stateHash");
-      continue;
-    }
-    const size_t actions = arraySize(line, "legalActions");
-    std::cout << "{\"v\":1,\"t\":\"search_result\",\"id\":\"" << id
-              << "\",\"policy\":[";
-    for (size_t i = 0; i < actions; ++i) {
-      if (i) std::cout << ',';
-      std::cout << (actions ? 1.0 / static_cast<double>(actions) : 0.0);
-    }
-    std::cout << "],\"value\":0,\"backend\":\"native-probe\"}\n" << std::flush;
   }
   return 0;
 }
