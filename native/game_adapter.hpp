@@ -22,7 +22,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
  public:
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
-    if (state.turn_ended || player != state.active_player) return {};
+    if (player != state.active_player) return {};
     const auto* p = player >= 0 && player < static_cast<int>(state.players.size())
                         ? &state.players[player] : nullptr;
     if (!p) return {};
@@ -68,8 +68,9 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   }
 
   bool terminal(const NativeGameState& state) const override {
-    return state.turn_ended || (state.active() &&
-           state.active()->city.size() >= static_cast<size_t>(state.end_districts));
+    return std::any_of(state.players.begin(), state.players.end(), [&](const NativePlayer& p) {
+      return p.city.size() >= static_cast<size_t>(state.end_districts);
+    });
   }
 
   float terminal_value(const NativeGameState& state, int root_player) const override {

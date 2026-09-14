@@ -35,11 +35,12 @@ struct NativeGameState {
   DeckMachine deck;
   JsRng rng;
   int active_player = -1;
+  int round = 1;
+  int turns_completed = 0;
   int end_districts = 8;
   int builds = 0;
   int spent_on_build = 0;
   bool resources_taken = false;
-  bool turn_ended = false;
   bool used_lab = false;
   bool used_smithy = false;
   bool used_museum = false;
@@ -141,12 +142,20 @@ struct NativeGameState {
   }
 
   bool end_turn() {
-    if (!active() || turn_ended) return false;
+    if (!active()) return false;
     TurnState turn{active()->role_id, false, active()->gold, spent_on_build,
                    0, 0, false};
     if (!citadels::native::end_turn(turn)) return false;
     active()->gold = turn.gold;
-    turn_ended = true;
+    ++turns_completed;
+    active_player = (active_player + 1) % static_cast<int>(players.size());
+    if (active_player == 0) ++round;
+    builds = 0;
+    spent_on_build = 0;
+    resources_taken = false;
+    used_lab = false;
+    used_smithy = false;
+    used_museum = false;
     return true;
   }
 };
