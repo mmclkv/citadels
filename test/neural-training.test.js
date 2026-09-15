@@ -36,6 +36,13 @@ const Train = require('../training/train.js');
   const loss = model.trainPPO(result.transitions.slice(0, 24), { epochs: 1, learningRate: 0.0003 });
   assert.ok(Object.values(loss).every(Number.isFinite), 'PPO 损失指标均为有限数值');
   assert.notStrictEqual(model.policyOut.w[0], before, 'PPO 反向传播更新网络参数');
+  const ceModel = new PolicyValueNetwork({ profile: 'fast', seed: 43 });
+  const ceTransitions = result.transitions.slice(0, 24).map(tr => ({ ...tr,
+    pi: tr.actions.map((_, index) => index === tr.chosen ? 1 : 0)
+  }));
+  const ceLoss = ceModel.trainPPO(ceTransitions, { epochs: 1, learningRate: 0.0003, policyLossMode: 'auto' });
+  assert.ok(Object.values(ceLoss).every(Number.isFinite), 'MCTS 访问分布交叉熵指标均为有限数值');
+  assert.strictEqual(ceLoss.clipFraction, 0, 'MCTS 交叉熵模式不使用 PPO 裁剪');
 
   const history = Array.from({ length: 1000 }, (_, i) => ({ game: (i + 1) * 4 }));
   const sampled = Train.sampleHistory(history, 100);
@@ -43,7 +50,7 @@ const Train = require('../training/train.js');
   assert.strictEqual(sampled[0].game, 4, '历史压缩保留横轴起点');
   assert.strictEqual(sampled[sampled.length - 1].game, 4000, '历史压缩保留横轴终点');
 
-  console.log('本地神经网络训练：参数档位、隐私、整局自对弈、推理与 PPO 更新全部通过');
+  console.log('本地神经网络训练：参数档位、隐私、整局自对弈、PPO 与 MCTS 交叉熵更新全部通过');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

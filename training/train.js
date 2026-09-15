@@ -348,7 +348,8 @@ function sanitizeConfig(input = {}) {
     mctsBatchSize: Math.max(1, Math.min(256, Number(input.mctsBatchSize) || 32)),
     // 0 是合法值，表示"不限制等待"（等满批或显式 flush 才发）；仅 undefined/NaN 取默认 1
     mctsMaxWaitMs: Math.max(0, Math.min(50, Number.isFinite(Number(input.mctsMaxWaitMs)) ? Number(input.mctsMaxWaitMs) : 1)),
-    mctsCacheSize: Math.max(0, Math.min(1048576, Number(input.mctsCacheSize) || 65536))
+    mctsCacheSize: Math.max(0, Math.min(1048576, Number(input.mctsCacheSize) || 65536)),
+    policyLossMode: ['auto', 'ppo', 'mcts_ce'].includes(input.policyLossMode) ? input.policyLossMode : 'auto'
   };
 }
 
@@ -423,7 +424,8 @@ async function train(rawConfig, hooks = {}) {
   // 启动横幅：让用户在事件日志里一眼确认配置与设备
   log('启动训练：profile=' + config.profile + ' · 玩家 ' + config.minPlayers + '-' + config.maxPlayers +
     ' · 目标 ' + config.targetGames + ' 局 · 每批 ' + config.batchGames + ' 局 · ' +
-    'workers=' + config.workers + ' · PPO epochs=' + config.ppoEpochs + ' · miniBatch=' + config.miniBatch +
+    'workers=' + config.workers + ' · 策略损失=' + (config.policyLossMode === 'auto' && config.mctsSimulations > 0 ? 'MCTS 交叉熵' : config.policyLossMode.toUpperCase()) +
+    ' · PPO epochs=' + config.ppoEpochs + ' · miniBatch=' + config.miniBatch +
     ' · lr=' + config.learningRate + ' · seed=' + config.seed);
   if (config.mctsSimulations > 0) {
     log('MCTS 已启用：每步 ' + config.mctsSimulations + ' 模拟 · c_puct=' + config.mctsC_puct +
@@ -513,10 +515,10 @@ async function train(rawConfig, hooks = {}) {
     let justTrained = false;
     if ((pool || completedGames % config.batchGames === 0) && rollout.length) {
       losses = torch ? await torch.train(rollout) :
-        model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs });
+        model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs, policyLossMode: config.policyLossMode });
       justTrained = true;
       // 打印最近一次 PPO 的指标摘要（每批一次），方便在事件日志里看趋势
-      log('PPO 更新：策略损失 ' + losses.policyLoss.toExponential(2) +
+      log('策略更新（' + (config.policyLossMode === 'auto' && config.mctsSimulations > 0 ? 'MCTS 交叉熵' : config.policyLossMode.toUpperCase()) + '）：策略损失 ' + losses.policyLoss.toExponential(2) +
         ' · 价值损失 ' + Number(losses.valueLoss).toFixed(4) +
         ' · 熵 ' + Number(losses.entropy).toFixed(3) +
         ' · 裁剪率 ' + (losses.clipFraction * 100).toFixed(1) + '%' +
@@ -571,7 +573,7 @@ async function train(rawConfig, hooks = {}) {
 
   if (rollout.length && !shouldStop()) {
     if (torch) await torch.train(rollout);
-    else model.trainPPO(rollout, { learningRate: config.learningRate, epochs: 1 });
+    else model.trainPPO(rollout, { learningRate: config.learningRate, epochs: 1, policyLossMode: config.policyLossMode });
   }
   const finalCheckpoint = completedGames > 0 ? saveCheckpoint(model, config, completedGames, history) : '';
   if (torch && finalCheckpoint) await torch.checkpoint(finalCheckpoint);

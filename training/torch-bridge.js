@@ -113,7 +113,8 @@ class TorchBridge {
     fs.writeFileSync(rolloutPath, zlib.gzipSync(JSON.stringify(serializable), { level: 1 }));
     try {
       const response = await this.request({ cmd: 'train', rolloutPath, modelPath: this.modelPath,
-        epochs: this.config.ppoEpochs, miniBatch: this.config.miniBatch });
+        epochs: this.config.ppoEpochs, miniBatch: this.config.miniBatch,
+        policyLossMode: this.config.policyLossMode || 'auto' });
       this.readModel();
       return response.metrics;
     } finally {

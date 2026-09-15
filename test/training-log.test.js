@@ -60,8 +60,8 @@ async function runAndCaptureLogs(config) {
   assert.ok(logs.some(l => l.includes('训练器：JavaScript CPU')), 'JS 模式应有设备行');
 
   // 4) PPO 更新行：每批一次
-  const ppoLog = logs.find(l => l.includes('PPO 更新：'));
-  assert.ok(ppoLog, '应有 PPO 更新日志');
+  const ppoLog = logs.find(l => l.includes('策略更新（'));
+  assert.ok(ppoLog, '应有策略更新日志');
   assert.ok(ppoLog.includes('策略损失'), 'PPO 日志应含策略损失');
   assert.ok(ppoLog.includes('价值损失'), 'PPO 日志应含价值损失');
   assert.ok(ppoLog.includes('熵'), 'PPO 日志应含熵');

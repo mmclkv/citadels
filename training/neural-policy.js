@@ -174,6 +174,7 @@ class PolicyValueNetwork {
     const lr = Number(options.learningRate) || 0.0003;
     const epochs = Math.max(1, Math.min(6, Number(options.epochs) || 2));
     const clip = Number(options.clip) || 0.2;
+    const policyLossMode = ['auto', 'ppo', 'mcts_ce'].includes(options.policyLossMode) ? options.policyLossMode : 'auto';
     const valueCoef = Number(options.valueCoef) || 0.5;
     const entropyCoef = Number(options.entropyCoef) || 0.01;
     const rawAdvantages = transitions.map(t => t.reward - t.oldValue);
@@ -189,6 +190,14 @@ class PolicyValueNetwork {
         const tr = transitions[k];
         const out = this.forward(tr.state, tr.actions, tr.temperature || 1);
         const selected = tr.chosen;
+        const useMctsCe = policyLossMode === 'mcts_ce' || (policyLossMode === 'auto' && Array.isArray(tr.pi));
+        const target = new Float32Array(out.probs.length);
+        if (useMctsCe && Array.isArray(tr.pi)) {
+          let total = 0;
+          for (let i = 0; i < target.length; i++) { target[i] = Math.max(0, Number(tr.pi[i]) || 0); total += target[i]; }
+          if (total > 0) for (let i = 0; i < target.length; i++) target[i] /= total;
+          else target[selected] = 1;
+        } else if (useMctsCe) target[selected] = 1;
         const prob = Math.max(1e-8, out.probs[selected]);
         const oldProb = Math.max(1e-8, tr.oldProb);
         const ratio = prob / oldProb;
@@ -196,8 +205,12 @@ class PolicyValueNetwork {
         const clippedRatio = Math.max(1 - clip, Math.min(1 + clip, ratio));
         const unclippedObjective = ratio * advantage;
         const clippedObjective = clippedRatio * advantage;
-        const isClipped = (advantage >= 0 && ratio > 1 + clip) || (advantage < 0 && ratio < 1 - clip);
-        totals.policyLoss += -Math.min(unclippedObjective, clippedObjective);
+        const isClipped = !useMctsCe && ((advantage >= 0 && ratio > 1 + clip) || (advantage < 0 && ratio < 1 - clip));
+        if (useMctsCe) {
+          for (let i = 0; i < out.probs.length; i++) if (target[i] > 0) totals.policyLoss -= target[i] * Math.log(Math.max(1e-8, out.probs[i]));
+        } else {
+          totals.policyLoss += -Math.min(unclippedObjective, clippedObjective);
+        }
         totals.clips += isClipped ? 1 : 0;
         const ent = entropy(out.probs);
         totals.entropy += ent;
@@ -207,7 +220,7 @@ class PolicyValueNetwork {
         for (let i = 0; i < out.probs.length; i++) entropyCommon += out.probs[i] * (Math.log(Math.max(1e-8, out.probs[i])) + 1);
         for (let i = 0; i < out.probs.length; i++) {
           const p = out.probs[i];
-          const policyGrad = policyScale * (p - (i === selected ? 1 : 0));
+          const policyGrad = useMctsCe ? (p - target[i]) : policyScale * (p - (i === selected ? 1 : 0));
           const entropyGrad = -entropyCoef * p * (entropyCommon - (Math.log(Math.max(1e-8, p)) + 1));
           gradLogits[i] = policyGrad + entropyGrad;
         }

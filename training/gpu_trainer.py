@@ -104,14 +104,20 @@ def load_rollout(filename):
         "temperatures": torch.tensor(temperatures, dtype=torch.float32),
     }
     if has_pi:
+        # 混合批次中若个别动作没有 MCTS 访问分布，用实际选择动作的一热分布补齐，
+        # 避免 auto 模式把该样本误当成全零目标而产生无效梯度。
+        for index, target in enumerate(pi_targets):
+            if sum(target) <= 0 and 0 <= chosen[index] < len(target):
+                target[chosen[index]] = 1.0
         result["pi"] = torch.tensor(pi_targets, dtype=torch.float32)
     return result
 
 
-def train_ppo(model, optimizer, device, data, epochs, batch_size=256):
+def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_loss_mode="auto"):
     total = {"policy": 0.0, "value": 0.0, "entropy": 0.0, "clip": 0.0,
              "kl": 0.0, "gradient": 0.0, "samples": 0}
     has_pi = "pi" in data
+    use_mcts_ce = policy_loss_mode == "mcts_ce" or (policy_loss_mode == "auto" and has_pi)
     size = len(data["rewards"])
     advantages = data["rewards"] - data["old_values"]
     advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
@@ -121,9 +127,15 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256):
             adv = advantages[indices].to(device, non_blocking=True)
             logits, values = model(batch["states"], batch["actions"], batch["masks"], batch["temperatures"])
             probs = torch.softmax(logits, dim=-1)
-            if has_pi:
+            if use_mcts_ce:
                 # AlphaZero 风格：用 MCTS 访问分布 π 当策略目标，纯交叉熵
-                pi = batch["pi"]
+                if "pi" in batch:
+                    pi = batch["pi"]
+                else:
+                    pi = torch.zeros_like(probs)
+                    pi.scatter_(1, batch["chosen"].unsqueeze(1), 1.0)
+                pi = pi.masked_fill(~batch["masks"], 0.0)
+                pi = pi / pi.sum(dim=-1, keepdim=True).clamp_min(1e-12)
                 # 取最低有效动作位置的截断，避免 mask=False 的零位被梯度拉低（已 mask 后在 -1e9）
                 masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
                 norm_probs = masked_probs / masked_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
@@ -131,7 +143,7 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256):
                 # 用当前策略在所选动作上的概率反推 KL 估计（旧/新在同一分布上比较即可，意义近似）
                 selected = norm_probs.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-12)
                 pi_selected = pi.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-12)
-                approx_kl = (pi_selected.log() - selected.log()).mean()
+                approx_kl = (pi.clamp_min(1e-12) * (pi.clamp_min(1e-12).log() - norm_probs.clamp_min(1e-12).log())).sum(dim=-1).mean()
                 clip_frac = torch.zeros((), device=device)
             else:
                 selected = probs.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-8)
@@ -205,7 +217,8 @@ def main():
                 reply({"ok": True})
             elif command["cmd"] == "train":
                 data = load_rollout(command["rolloutPath"])
-                metrics = train_ppo(model, optimizer, device, data, command["epochs"], command.get("miniBatch", 256))
+                metrics = train_ppo(model, optimizer, device, data, command["epochs"], command.get("miniBatch", 256),
+                                    command.get("policyLossMode", "auto"))
                 model.save_flat(command["modelPath"])
                 if device.type == "cuda":
                     metrics["gpuMemoryMB"] = torch.cuda.max_memory_allocated() / 1048576

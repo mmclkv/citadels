@@ -28,6 +28,7 @@
         <label><span>起始温度</span><input id="temperature-start" type="number" min="0.2" max="2" step="0.05" value="1.1"></label>
         <label><span>结束温度</span><input id="temperature-end" type="number" min="0.15" max="1.5" step="0.05" value="0.65"></label>
         <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" max="0.01" step="0.00001" value="0.0003"></label>
+        <label><span>策略损失</span><select id="policy-loss-mode"><option value="auto" selected>自动（有 MCTS 用访问分布交叉熵）</option><option value="mcts_ce">MCTS 访问分布交叉熵</option><option value="ppo">PPO</option></select><small>推荐自动：MCTS 训练使用访问分布作为策略目标</small></label>
         <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="32" value="4"></label>
         <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="4"></label>
         <label><span>PPO 训练轮数</span><input id="ppo-epochs" type="number" min="1" max="6" value="2"></label>

@@ -29,6 +29,7 @@ function formConfig() {
     profile: $('profile').value, backend: $('backend').value, nativeSearchWorker: $('native-search-worker').value.trim(),
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
     temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
+    policyLossMode: $('policy-loss-mode').value,
     learningRate: +$('learning-rate').value,
     batchGames: +$('batch-games').value, workers: +$('workers').value,
     ppoEpochs: +$('ppo-epochs').value, miniBatch: +$('mini-batch').value,
