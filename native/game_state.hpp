@@ -81,6 +81,7 @@ struct NativeGameState {
   int pending_target = -1;
   int pending_from_crown = -1;
   std::string pending_uid;
+  std::vector<DistrictCard> pending_cards;
 
   bool draft_remove(const std::string& id) {
     auto remove = [&](std::vector<std::string>& values) {
@@ -232,6 +233,23 @@ struct NativeGameState {
     auto drawn = deck.draw(cards, rng);
     active()->hand.insert(active()->hand.end(), std::make_move_iterator(drawn.begin()), std::make_move_iterator(drawn.end()));
     pending_kind.clear(); return true;
+  }
+
+  bool keep_pending_card(const std::string& uid) {
+    if (!active() || pending_cards.empty()) return false;
+    auto it = std::find_if(pending_cards.begin(), pending_cards.end(), [&](const DistrictCard& card) { return card.uid == uid; });
+    if (it == pending_cards.end()) return false;
+    DistrictCard chosen = *it;
+    std::vector<DistrictCard> rest;
+    for (const auto& card : pending_cards) if (card.uid != uid) rest.push_back(card);
+    active()->hand.push_back(std::move(chosen));
+    deck.return_and_shuffle(std::move(rest), rng);
+    if (active()->role_id == "architect" && !bonus_done) {
+      auto bonus = deck.draw(2, rng);
+      active()->hand.insert(active()->hand.end(), std::make_move_iterator(bonus.begin()), std::make_move_iterator(bonus.end()));
+      bonus_done = true;
+    }
+    pending_cards.clear(); pending_kind.clear(); return true;
   }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

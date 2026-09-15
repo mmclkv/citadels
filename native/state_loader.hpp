@@ -130,6 +130,9 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     state.active_player = int_field(*turn, "playerIdx", -1);
     state.resources_taken = bool_field(*turn, "takenResources");
     state.builds = int_field(*turn, "builds");
+    const auto turn_role = string_field(*turn, "charId");
+    if (!turn_role.empty() && state.active_player >= 0 && state.active_player < static_cast<int>(state.players.size()))
+      state.players[state.active_player].role_id = turn_role;
     state.bonus_done = bool_field(*turn, "bonusDone");
     const auto* pending = turn->get("pending");
     if (pending && pending->is_object()) {
@@ -137,6 +140,8 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       state.pending_target = int_field(*pending, "targetIdx", -1);
       state.pending_from_crown = int_field(*pending, "_fromCrownIdx", -1);
       state.pending_uid = string_field(*pending, "mineUid");
+      const auto* cards = pending->get("cards");
+      if (cards && cards->is_array()) state.pending_cards = load_cards(*cards);
     }
   }
   const auto* draft = snapshot.get("draft");

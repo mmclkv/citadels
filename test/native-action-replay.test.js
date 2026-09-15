@@ -275,3 +275,35 @@ test('C++ 原生状态可以回放航海家奖励和修士资源组合', async t
   assert.deepEqual(mon.result.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount })),
     mon.expected.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount })));
 });
+
+test('C++ 原生状态可以回放学者与抽牌保留选择', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过选牌回放检查'); return; }
+  async function one(kind, actionType) {
+    const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+    const initial = Engine.createGame({ seats, seed: kind === 'scholar_pick' ? 101 : 103, charSetMode: 'base' });
+    Engine.startGame(initial); initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+    initial.turn = { charId: kind === 'scholar_pick' ? 'scholar' : 'architect', num: 7, playerIdx: 0, phase: 'main',
+      takenResources: true, incomeTaken: true, abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false,
+      usedSmithy: false, usedMuseum: false, pending: { kind, cards: [
+        { uid: 'pending-a', name: '小屋', color: 'red', cost: 1 },
+        { uid: 'pending-b', name: '城堡', color: 'yellow', cost: 3 }
+      ] }, bonusDone: false };
+    const state = JSON.parse(JSON.stringify(initial));
+    const record = recordAppliedAction(state, 'p0', { type: actionType, uid: 'pending-b' }, Engine.applyAction);
+    assert.equal(record.ok, true);
+    const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const response = new Promise((resolve, reject) => {
+      let data = '';
+      child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+      child.on('error', reject);
+    });
+    child.stdin.write(encodeReplayTrace(initial, [record], kind + '-trace')); child.stdin.end();
+    const native = await response; child.kill();
+    assert.equal(native.ok, true, native.error || (kind + ' C++ 回放失败'));
+    assert.deepEqual(native.players.map(p => ({ id: p.id, handCount: p.handCount })),
+      record.afterSummary.players.map(p => ({ id: p.id, handCount: p.handCount })));
+  }
+  await one('scholar_pick', 'scholar_pick');
+  await one('draw_keep', 'draw_keep');
+});
