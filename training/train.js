@@ -205,7 +205,7 @@ function gameRewards(state) {
   return rewards;
 }
 
-async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evaluator = null) {
+async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evaluator = null, nativeSearch = null) {
   const playerCount = config.minPlayers + Math.floor(rng() * (config.maxPlayers - config.minPlayers + 1));
   const charSets = config.charSet === 'random' ? ['base', 'dark', 'mixed'] : [config.charSet];
   const charSet = charSets[Math.floor(rng() * charSets.length)];
@@ -235,7 +235,16 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     let decision;
     let piVector = null;
     let mctsValue = null;
-    if (config.mctsSimulations > 0) {
+    if (config.backend === 'native' && nativeSearch) {
+      const nativeResult = await nativeSearch.search(state, actor.id, legal);
+      piVector = nativeResult.policy;
+      mctsValue = nativeResult.value;
+      let r = rng();
+      let chosen = Math.max(0, piVector.length - 1);
+      for (let i = 0; i < piVector.length; i++) { r -= piVector[i]; if (r <= 0) { chosen = i; break; } }
+      decision = { chosen, probability: piVector[chosen], value: mctsValue,
+        entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
+    } else if (config.mctsSimulations > 0) {
       const mctsResult = await mcts.search({
         rootState: state,
         rootPlayerId: actor.id,
@@ -317,7 +326,7 @@ function sanitizeConfig(input = {}) {
     charSet: ['base', 'dark', 'mixed', 'random'].includes(input.charSet) ? input.charSet : 'random',
     endDistricts: [7, 8].includes(Number(input.endDistricts)) ? Number(input.endDistricts) : 8,
     profile: PROFILES[input.profile] ? input.profile : 'balanced',
-    backend: ['gpu', 'cpu', 'js'].includes(input.backend) ? input.backend : 'gpu',
+    backend: ['gpu', 'cpu', 'js', 'native'].includes(input.backend) ? input.backend : 'gpu',
     learningRate: Math.max(1e-6, Math.min(0.01, Number(input.learningRate) || 0.0003)),
     batchGames: Math.max(1, Math.min(32, Number(input.batchGames) || 4)),
     ppoEpochs: Math.max(1, Math.min(6, Number(input.ppoEpochs) || 2)),

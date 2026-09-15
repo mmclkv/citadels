@@ -5,6 +5,7 @@ const { parentPort, workerData } = require('worker_threads');
 const { PolicyValueNetwork, mulberry32 } = require('./neural-policy.js');
 const { runSelfPlayGame } = require('./train.js');
 const { BatchEvaluator } = require('./evaluator.js');
+const { NativeSearchClient } = require('./native-search.js');
 
 const model = new PolicyValueNetwork({ profile: workerData.config.profile,
   stateSize: 192, actionSize: 64, seed: workerData.config.seed ^ (workerData.workerId * 2654435761) });
@@ -31,6 +32,7 @@ function ipcForwardBatch(stateVectors, actionVectorsList) {
 }
 
 let mctsEvaluator = null;
+let nativeSearch = null;
 function getMctsEvaluator() {
   if (!mctsEvaluator) {
     mctsEvaluator = new BatchEvaluator({
@@ -54,6 +56,18 @@ function loadModel(filename) {
   model.importFlat(flat);
 }
 
+function getNativeSearch() {
+  if (!nativeSearch) nativeSearch = new NativeSearchClient({
+    root: require('node:path').join(__dirname, '..'),
+    executable: workerData.config.nativeSearchWorker,
+    simulations: workerData.config.mctsSimulations || 1,
+    maxDepth: workerData.config.mctsMaxDepth || 200,
+    cPuct: workerData.config.mctsC_puct || 1,
+    seed: workerData.config.seed ^ (workerData.workerId * 2654435761)
+  });
+  return nativeSearch;
+}
+
 parentPort.on('message', async message => {
   if (message.type === 'stop') { stopping = true; return; }
   if (message.type === 'forwardBatchResult') {
@@ -75,7 +89,8 @@ parentPort.on('message', async message => {
     }
     const rng = mulberry32(workerData.config.seed ^ (message.gameIndex * 2246822519));
     const evaluator = workerData.config.mctsEvaluator === 'gpu' ? getMctsEvaluator() : null;
-    const result = await runSelfPlayGame(model, workerData.config, message.gameIndex, rng, () => stopping, evaluator);
+    const nativeEvaluator = workerData.config.backend === 'native' ? getNativeSearch() : null;
+    const result = await runSelfPlayGame(model, workerData.config, message.gameIndex, rng, () => stopping, evaluator, nativeEvaluator);
     // 慢局（>10s）才往上推一条，避免淹没日志
     if (result && result.durationMs > 10000) {
       parentPort.postMessage({ type: 'log',
@@ -87,3 +102,5 @@ parentPort.on('message', async message => {
     parentPort.postMessage({ type: 'error', taskId: message.taskId, error: error.message, stack: error.stack });
   }
 });
+
+process.on('exit', () => { if (nativeSearch) nativeSearch.close(); });
