@@ -76,10 +76,9 @@ function currentActor(state) {
 
 function gameRewards(state) {
   const scores = (state.scores || []).slice();
-  const sorted = scores.slice().sort((a, b) => b.total - a.total);
   const rewards = new Map();
   scores.forEach(row => {
-    const rank = sorted.findIndex(x => x.playerIdx === row.playerIdx);
+    const rank = scores.reduce((count, other) => count + (other.total > row.total ? 1 : 0), 0);
     const rankTerm = scores.length === 1 ? 1 : 1 - 2 * rank / (scores.length - 1);
     rewards.set(state.players[row.playerIdx].id, rankTerm);
   });

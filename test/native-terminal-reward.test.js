@@ -43,6 +43,22 @@ test('JS 终局奖励只随排名变化，不随分差变化', () => {
   assert.deepEqual(original, state.scores.map(row => 1 - 2 * ranks.get(row.playerIdx) / 3));
 });
 
+test('并列名次共享奖励，且不按座位顺序拆分并列', t => {
+  const state = fixture(4);
+  state.firstToFinish = -1;
+  state.players = state.players.map((player, i) => ({
+    ...player, city: [card('tie-' + i, 'yellow', 1)]
+  }));
+  state.scores = Engine.computeScores(state);
+  const rewards = train.gameRewards(state);
+  assert.deepEqual(Array.from(rewards.values()), [1, 1, 1, 1]);
+  const executable = process.env.CITADELS_NATIVE_TERMINAL_REWARD_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_TERMINAL_REWARD_PROBE，跳过 C++ 并列名次检查'); return; }
+  const actual = execFileSync(executable, { input: JSON.stringify(state) + '\n', encoding: 'utf8' })
+    .trim().split(',').map(Number);
+  assert.deepEqual(actual, [1, 1, 1, 1]);
+});
+
 test('4/5/6 人无组队终局奖励与 C++ terminal_value 一致', t => {
   const executable = process.env.CITADELS_NATIVE_TERMINAL_REWARD_PROBE;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_TERMINAL_REWARD_PROBE，跳过跨语言终局奖励检查'); return; }

@@ -44,13 +44,13 @@ inline std::array<float, kValueSlots> native_terminal_reward_vector(
     else if (player.city.size() >= static_cast<size_t>(state.end_districts)) bonus += 2;
     scores.push_back({static_cast<int>(i), base + bonus});
   }
-  std::stable_sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) {
-    return a.total > b.total;
-  });
   for (size_t rel = 0; rel < scores.size() && rel < kValueSlots; ++rel) {
     const int player = (perspective_player + static_cast<int>(rel)) % static_cast<int>(state.players.size());
+    const float total = scores[static_cast<size_t>(player)].total;
+    // Competition ranking: equal totals share a rank; the next rank skips
+    // the tied places. This matches training/train.js exactly.
     size_t rank = 0;
-    for (; rank < scores.size(); ++rank) if (scores[rank].player == player) break;
+    for (const auto& other : scores) if (other.total > total) ++rank;
     result[rel] = scores.size() == 1
       ? 1.0f : 1.0f - 2.0f * static_cast<float>(rank) / static_cast<float>(scores.size() - 1);
   }
