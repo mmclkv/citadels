@@ -92,6 +92,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         card.uid, {}, {}, {}});
       return actions;
     }
+    if (state.pending_kind == "prophet_give") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& card : state.players[player].hand)
+        actions.push_back({ActionType::ProphetGive, card.uid});
+      return actions;
+    }
     if (state.pending_kind == "artist") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -239,6 +246,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (player != state.active_player) return false;
       return state.keep_pending_card(action.uid);
     }
+    if (action.type == ActionType::ProphetGive && state.pending_kind == "prophet_give")
+      return player == state.active_player && state.prophet_give(action.uid);
     if (action.type == ActionType::ChooseDistrict && state.pending_kind == "artist")
       return player == state.active_player && state.artist_select(action.uid);
     if (action.type == ActionType::ArtistDone && state.pending_kind == "artist")

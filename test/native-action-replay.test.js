@@ -138,6 +138,43 @@ test('C++ 原生状态可以回放实验室与博物馆的指定手牌动作', a
   assert.equal(museum.native.players[0].cityCount, museum.expected.players[0].cityCount);
 });
 
+test('C++ 原生状态可以回放预言家逐个归还手牌', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过预言家回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 113, charSetMode: 'base' });
+  Engine.startGame(initial);
+  initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+  const taken1 = initial.players[1].hand[0];
+  const taken2 = initial.players[2].hand[0];
+  initial.players[1].hand = initial.players[1].hand.slice(1);
+  initial.players[2].hand = initial.players[2].hand.slice(1);
+  initial.players[0].hand.push(taken1, taken2);
+  initial.turn = { charId: 'prophet', num: 2, playerIdx: 0, phase: 'main', takenResources: true,
+    incomeTaken: true, abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false,
+    usedSmithy: false, usedMuseum: false, pending: { kind: 'prophet_give', targetIdx: 1, queue: [1, 2] }, bonusDone: false };
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (const uid of [taken1.uid, taken2.uid]) {
+    const record = recordAppliedAction(state, 'p0', { type: 'prophet_give', uid }, Engine.applyAction);
+    assert.equal(record.ok, true, 'JS 应成功归还预言家抽到的手牌');
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'prophet-trace'));
+  child.stdin.end();
+  const native = await response; child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 预言家回放失败');
+  assert.deepEqual(native.players.map(p => ({ id: p.id, handCount: p.handCount })),
+    expected.players.map(p => ({ id: p.id, handCount: p.handCount })));
+});
+
 test('C++ 原生状态可以逐动作回放选角阶段', async t => {
   const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过选角回放检查'); return; }

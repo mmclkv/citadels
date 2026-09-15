@@ -83,6 +83,7 @@ struct NativeGameState {
   std::string pending_uid;
   std::vector<DistrictCard> pending_cards;
   std::vector<std::string> pending_selected;
+  std::vector<int> pending_queue;
 
   bool draft_remove(const std::string& id) {
     auto remove = [&](std::vector<std::string>& values) {
@@ -283,6 +284,42 @@ struct NativeGameState {
     }
     for (const auto& uid : uids) for (auto& district : active()->city) if (district.card.uid == uid) { district.beautified = true; --active()->gold; }
     pending_selected.clear(); pending_kind.clear(); return true;
+  }
+
+  bool prophet_collect() {
+    auto* p = active();
+    if (!p) return false;
+    pending_queue.clear();
+    for (size_t i = 0; i < players.size(); ++i) {
+      if (static_cast<int>(i) == active_player || players[i].hand.empty()) continue;
+      const size_t index = static_cast<size_t>(rng.next() * players[i].hand.size());
+      p->hand.push_back(std::move(players[i].hand[index]));
+      players[i].hand.erase(players[i].hand.begin() + static_cast<std::ptrdiff_t>(index));
+      pending_queue.push_back(static_cast<int>(i));
+    }
+    if (pending_queue.empty()) { pending_kind.clear(); return true; }
+    pending_kind = "prophet_give";
+    pending_target = pending_queue.front();
+    return true;
+  }
+
+  bool prophet_give(const std::string& uid) {
+    auto* p = active();
+    if (!p || pending_kind != "prophet_give" || pending_queue.empty() ||
+        pending_queue.front() != pending_target || pending_target < 0 ||
+        pending_target >= static_cast<int>(players.size())) return false;
+    auto it = std::find_if(p->hand.begin(), p->hand.end(),
+      [&](const DistrictCard& card) { return card.uid == uid; });
+    if (it == p->hand.end()) return false;
+    players[pending_target].hand.push_back(std::move(*it));
+    p->hand.erase(it);
+    pending_queue.erase(pending_queue.begin());
+    if (pending_queue.empty()) {
+      pending_target = -1; pending_kind.clear();
+    } else {
+      pending_target = pending_queue.front();
+    }
+    return true;
   }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

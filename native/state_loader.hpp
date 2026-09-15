@@ -150,6 +150,9 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       const auto* cards = pending->get("cards");
       if (cards && cards->is_array()) state.pending_cards = load_cards(*cards);
       state.pending_selected = string_array_field(*pending, "selected");
+      const auto* queue = pending->get("queue");
+      if (queue && queue->is_array()) for (const auto& value : queue->as_array())
+        if (value.is_number()) state.pending_queue.push_back(static_cast<int>(value.as_number()));
     }
   }
   const auto* draft = snapshot.get("draft");

@@ -119,6 +119,10 @@ int main() {
             string_field(action, "uid"), {}, {}, {}};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error(type + " 执行失败");
+        } else if (type == "prophet_give") {
+          NativeSearchAction chosen{ActionType::ProphetGive, string_field(action, "uid")};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("prophet_give 执行失败");
         } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {
