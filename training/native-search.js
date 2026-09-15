@@ -7,7 +7,8 @@ const { encodeSearchRequest, decodeSearchResponse } = require('../native/protoco
 class NativeSearchClient {
   constructor({ root, executable, simulations = 50, maxDepth = 200, batchSize = 32, cPuct = 1, seed = 1,
     gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda',
-    inferenceBackend = 'python-binary' }) {
+    inferenceBackend = 'python-binary', sharedMemoryName = '', sharedMemorySlots = 8,
+    sharedMemorySlotBytes = 8 * 1024 * 1024 }) {
     const binary = executable || process.env.CITADELS_NATIVE_SEARCH_WORKER;
     if (!binary) throw new Error('backend:native 需要 CITADELS_NATIVE_SEARCH_WORKER 指向已编译的 mcts_worker');
     const environment = { ...process.env };
@@ -27,6 +28,9 @@ class NativeSearchClient {
     this.profile = profile;
     this.device = device;
     this.inferenceBackend = inferenceBackend === 'libtorch' ? 'libtorch' : 'python-binary';
+    this.sharedMemoryName = sharedMemoryName || '';
+    this.sharedMemorySlots = Math.max(1, Number(sharedMemorySlots) || 8);
+    this.sharedMemorySlotBytes = Math.max(1024, Number(sharedMemorySlotBytes) || 8 * 1024 * 1024);
     this.modelPath = '';
     this.nextId = 1;
     this.pending = new Map();
@@ -80,6 +84,11 @@ class NativeSearchClient {
       request.inferenceBackend = this.inferenceBackend;
       request.modelPath = this.modelPath;
       request.modelVersion = modelVersion;
+      if (this.sharedMemoryName && this.inferenceBackend !== 'libtorch') {
+        request.sharedMemoryName = this.sharedMemoryName;
+        request.sharedMemorySlots = this.sharedMemorySlots;
+        request.sharedMemorySlotBytes = this.sharedMemorySlotBytes;
+      }
     }
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });

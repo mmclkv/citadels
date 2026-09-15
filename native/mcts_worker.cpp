@@ -11,6 +11,7 @@
 #include "json_value.hpp"
 #include "gpu_trainer_client.hpp"
 #include "neural_evaluator.hpp"
+#include "shared_memory_inference.hpp"
 #include "state_loader.hpp"
 #ifdef CITADELS_LIBTORCH
 #include "libtorch_evaluator.hpp"
@@ -67,6 +68,9 @@ int main() {
   std::shared_ptr<GpuTrainerClient> gpu;
   std::unique_ptr<BatchEvaluator> batch;
   std::unique_ptr<NativeNeuralBatchedEvaluator> neural;
+  std::unique_ptr<SharedMemoryInferenceClient> shared_inference;
+  std::unique_ptr<BatchEvaluator> shared_batch;
+  std::unique_ptr<NativeNeuralBatchedEvaluator> shared_neural;
 #ifdef CITADELS_LIBTORCH
   std::unique_ptr<LibTorchNeuralBatchedEvaluator> direct_neural;
 #endif
@@ -108,6 +112,16 @@ int main() {
 #else
           throw std::runtime_error("当前 mcts_worker 未编译 LibTorch 后端");
 #endif
+        } else if (!string_field(request, "sharedMemoryName").empty()) {
+          if (!shared_inference) {
+            shared_inference = std::make_unique<SharedMemoryInferenceClient>(
+              string_field(request, "sharedMemoryName"),
+              static_cast<uint32_t>(std::max(1, int_field(request, "sharedMemorySlots", 8))),
+              static_cast<uint32_t>(std::max(1024, int_field(request, "sharedMemorySlotBytes", 8 * 1024 * 1024))));
+            shared_batch = std::make_unique<BatchEvaluator>(make_shared_memory_batch_backend(*shared_inference));
+            shared_neural = std::make_unique<NativeNeuralBatchedEvaluator>(*shared_batch,
+              string_field(request, "profile", "balanced"));
+          }
         } else if (!gpu) {
           gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));
           gpu->start(string_field(request, "profile", "balanced"), model_path, 0.0003f,
@@ -155,9 +169,15 @@ int main() {
           if (direct_neural) {
             result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
               .search(state, root, batch_size);
+          } else if (shared_neural) {
+            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
+              .search(state, root, batch_size);
           } else if (neural) {
 #else
-          if (neural) {
+          if (shared_neural) {
+            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
+              .search(state, root, batch_size);
+          } else if (neural) {
 #endif
             result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
               .search(state, root, batch_size);

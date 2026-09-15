@@ -70,7 +70,10 @@ function getNativeSearch() {
     script: require('node:path').join(__dirname, 'gpu_trainer.py'),
     profile: workerData.config.profile,
     device: workerData.config.device || (workerData.config.backend === 'cpu' ? 'cpu' : 'cuda'),
-    inferenceBackend: workerData.config.nativeInferenceBackend || 'python-binary'
+    inferenceBackend: workerData.config.nativeInferenceBackend || 'python-binary',
+    sharedMemoryName: workerData.config.sharedMemoryName || '',
+    sharedMemorySlots: workerData.config.sharedMemorySlots || 8,
+    sharedMemorySlotBytes: workerData.config.sharedMemorySlotBytes || 8 * 1024 * 1024
   });
   return nativeSearch;
 }
