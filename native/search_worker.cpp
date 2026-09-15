@@ -32,8 +32,11 @@ NativeSearchAction decode_action(const JsonValue& value) {
   if (!value.is_object()) throw std::runtime_error("合法动作必须是对象");
   const auto type = string_field(value, "type");
   const auto parsed = action_type_from_string(type);
-  if (!parsed) throw std::runtime_error("未知动作类型: " + type);
-  return {*parsed, string_field(value, "uid"), string_field(value, "name"), string_field(value, "effect")};
+  // Draft/pending actions that are not yet executable by the native rules
+  // layer still pass through the protocol.  They deliberately produce the
+  // safe uniform fallback below instead of aborting the whole self-play game.
+  return {parsed.value_or(ActionType::EndTurn), string_field(value, "uid"),
+          string_field(value, "name"), string_field(value, "effect")};
 }
 
 void emit_error(const std::string& id, const std::string& message) {
