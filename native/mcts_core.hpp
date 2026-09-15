@@ -76,6 +76,8 @@ class Mcts {
   struct Config {
     int simulations = 50;
     int max_depth = 400;
+    // 防止高深度/高并发配置造成搜索树耗尽进程内存。
+    int max_nodes = 20000;
     float c_puct = 1.0f;
     uint32_t seed = 1;
   };
@@ -94,6 +96,7 @@ class Mcts {
 
   Result search(const State& root_state, int root_player) {
     expansions_ = 0;
+    node_count_ = 1;
     player_count_ = state_player_count(root_state, 0);
     Node root;
     root.player = root_player;
@@ -126,8 +129,14 @@ class Mcts {
           break;
         }
         if (!node->children[index]) {
+          if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
+            backup(path, node->value_vector);
+            backed_up = true;
+            break;
+          }
           const int player = game_.next_player(state);
           node->children[index] = std::make_unique<Node>();
+          ++node_count_;
           node->children[index]->player = player;
           node->children[index]->actions = game_.legal_actions(state, player);
         }
@@ -232,6 +241,7 @@ class Mcts {
   Config config_;
   std::mt19937 rng_;
   int expansions_ = 0;
+  size_t node_count_ = 0;
   size_t player_count_ = 0;
 };
 
@@ -250,6 +260,7 @@ class BatchedMcts {
   Result search(const State& root_state, int root_player, int batch_size) {
     if (batch_size < 1) batch_size = 1;
     player_count_ = state_player_count(root_state, 0);
+    node_count_ = 1;
     Node root;
     root.player = root_player;
     root.actions = game_.legal_actions(root_state, root_player);
@@ -286,7 +297,12 @@ class BatchedMcts {
             paths.push_back(std::move(path)); collected = true; break;
           }
           if (!node->children[index]) {
+            if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
+              terminal.push_back(true); terminal_values.push_back(node->value_vector);
+              paths.push_back(std::move(path)); collected = true; break;
+            }
             node->children[index] = std::make_unique<Node>();
+            ++node_count_;
             node->children[index]->player = game_.next_player(state);
             node->children[index]->actions = game_.legal_actions(state, node->children[index]->player);
           }
@@ -388,6 +404,7 @@ class BatchedMcts {
   }
   const GameAdapter<State, Action>& game_; BatchedEvaluator<State, Action>& evaluator_; Config config_;
   size_t player_count_ = 0;
+  size_t node_count_ = 0;
 };
 
 }  // namespace citadels::native

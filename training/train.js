@@ -590,8 +590,12 @@ async function train(rawConfig, hooks = {}) {
   let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0;
   let rollout = [];
   if (torch && !stopping) {
+    const nativeGpuSearch = config.mctsEngine === 'cpp' && config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu';
+    if (nativeGpuSearch && config.workers > 1) {
+      log('原生 GPU MCTS：为避免每个 worker 重复加载推理器，将自对弈 worker 限制为 1 个');
+    }
     const poolOpts = { root: ROOT, config,
-      size: Math.min(config.workers, config.batchGames), onLog: text => log(text) };
+      size: nativeGpuSearch ? 1 : Math.min(config.workers, config.batchGames), onLog: text => log(text) };
     if (config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu') {
       // MCTS 在 worker 里跑，但神经网络 forward 走 PyTorch 子进程：主进程把 IPC 转发给 torch.batchForward。
       // 多个 worker 会同时发起 forwardBatch，靠 selfplay-pool 内部按到达顺序代理，靠 torch-bridge 的
