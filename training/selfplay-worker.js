@@ -97,7 +97,7 @@ parentPort.on('message', async message => {
     if (nativeSearch) nativeSearch.setModelPath(message.modelPath);
     const rng = mulberry32(workerData.config.seed ^ (message.gameIndex * 2246822519));
     const evaluator = workerData.config.mctsEvaluator === 'gpu' ? getMctsEvaluator() : null;
-    const nativeEvaluator = workerData.config.backend === 'native' ? getNativeSearch() : null;
+    const nativeEvaluator = (workerData.config.mctsEngine === 'cpp' || workerData.config.backend === 'native') ? getNativeSearch() : null;
     workerData.config.modelVersion = message.modelVersion;
     const result = await runSelfPlayGame(model, workerData.config, message.gameIndex, rng, () => stopping, evaluator, nativeEvaluator);
     // 慢局（>10s）才往上推一条，避免淹没日志

@@ -23,11 +23,16 @@ async function api(path, options) {
 }
 
 function formConfig() {
+  const rulesEngine = $('rules-engine').value;
+  const mctsEngine = $('mcts-engine').value;
+  const neuralNetworkFramework = $('neural-network-framework').value;
   return {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
-    profile: $('profile').value, backend: $('backend').value, device: $('device').value,
-    nativeSearchWorker: $('native-search-worker').value.trim(), nativeInferenceBackend: $('native-inference-backend').value,
+    profile: $('profile').value, rulesEngine, mctsEngine, neuralNetworkFramework, device: $('device').value,
+    backend: mctsEngine === 'cpp' ? 'native' : 'gpu',
+    nativeSearchWorker: $('native-search-worker').value.trim(),
+    nativeInferenceBackend: neuralNetworkFramework === 'libtorch' ? 'libtorch' : 'python-binary',
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
     temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
     policyLossMode: $('policy-loss-mode').value,
@@ -66,19 +71,18 @@ function estimateMCTS() {
 
 function updateMctsEvaluatorUI() {
   const evaluator = $('mcts-evaluator').value;
-  const backend = $('backend').value;
-  const native = backend === 'native';
+  const mctsEngine = $('mcts-engine').value;
+  const framework = $('neural-network-framework').value;
+  const native = mctsEngine === 'cpp';
   document.querySelectorAll('.gpu-only').forEach(el => {
     el.style.display = evaluator === 'gpu' ? '' : 'none';
   });
-  $('mcts-evaluator-hint').textContent = backend === 'js'
-    ? '⚠ backend=js 时 GPU 评估器会被忽略（自对弈同步跑）'
-    : (evaluator === 'gpu' ? '✓ worker 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
+  $('mcts-evaluator-hint').textContent = native
+    ? (framework === 'libtorch' ? '✓ C++ MCTS 在搜索进程内使用 LibTorch 评估' : '✓ C++ MCTS 通过 PyTorch 桥评估网络')
+    : (evaluator === 'gpu' ? '✓ JS MCTS 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
   document.querySelectorAll('.native-only').forEach(el => { el.style.display = native ? '' : 'none'; });
-  $('device').disabled = backend === 'js';
-  if (native && $('native-inference-backend').value === 'libtorch') {
-    $('mcts-evaluator-hint').textContent = '✓ native 后端使用 C++ MCTS；LibTorch 在搜索进程内评估网络';
-  }
+  $('mcts-evaluator').disabled = native;
+  if (native) $('mcts-evaluator').value = 'gpu';
 }
 
 function setControls(status) {
@@ -159,6 +163,10 @@ function renderRuntime(status) {
     ['网络档位', c.profile || '—'], ['并行自对弈', c.workers ? c.workers + ' 个进程' : '—'],
     ['GPU 峰值显存', status.point && status.point.gpuMemoryMB ? num(status.point.gpuMemoryMB, 0) + ' MB' : '—'],
     ['玩家范围', c.minPlayers ? c.minPlayers + '–' + c.maxPlayers + ' 人' : '—'],
+    ['规则引擎', c.rulesEngine === 'cpp' ? 'C++' : (c.rulesEngine === 'js' ? 'JS' : '—')],
+    ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++' : (c.mctsEngine === 'js' ? 'JS' : '—')],
+    ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch（C++）' : (c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—')],
+    ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['MCTS', mctsLabel],
     ['日志文件', c.logFile || status.logFile || '—'],
     ['运行时间', status.startedAt ? duration(Date.now() - new Date(status.startedAt).getTime()) : '—']
@@ -315,9 +323,10 @@ $('stop-training').onclick = async () => {
   catch (error) { $('control-message').textContent = error.message; }
 };
 $('profile').onchange = () => { if (latest) render(latest); };
-$('backend').onchange = updateMctsEvaluatorUI;
+$('rules-engine').onchange = updateMctsEvaluatorUI;
+$('mcts-engine').onchange = updateMctsEvaluatorUI;
+$('neural-network-framework').onchange = updateMctsEvaluatorUI;
 $('device').onchange = updateMctsEvaluatorUI;
-$('native-inference-backend').onchange = updateMctsEvaluatorUI;
 $('mcts-evaluator').onchange = updateMctsEvaluatorUI;
 ['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth',
   'mcts-batch-size', 'mcts-max-wait', 'mcts-cache-size'].forEach(id => {

@@ -341,7 +341,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     let piVector = null;
     let mctsValue = null;
     let mctsValueVector = null;
-    if (config.backend === 'native' && nativeSearch) {
+    if ((config.mctsEngine === 'cpp' || config.backend === 'native') && nativeSearch) {
       const nativeResult = await nativeSearch.search(state, actor.id, legal, config.modelVersion || 0);
       piVector = nativeResult.policy;
       mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
@@ -435,18 +435,29 @@ function sanitizeConfig(input = {}) {
   const minPlayers = Math.max(2, Math.min(8, Number(input.minPlayers) || 4));
   const maxPlayers = Math.max(minPlayers, Math.min(8, Number(input.maxPlayers) || minPlayers));
   const mctsSimulations = Math.max(0, Math.min(10000, Number(input.mctsSimulations) || 0));
+  const hasSplitEngines = input.rulesEngine != null || input.mctsEngine != null || input.neuralNetworkFramework != null;
+  const rulesEngine = ['js', 'cpp'].includes(input.rulesEngine) ? input.rulesEngine : 'js';
+  const mctsEngine = ['js', 'cpp'].includes(input.mctsEngine)
+    ? input.mctsEngine : (input.backend === 'native' ? 'cpp' : 'js');
+  const neuralNetworkFramework = ['pytorch', 'libtorch'].includes(input.neuralNetworkFramework)
+    ? input.neuralNetworkFramework : (input.nativeInferenceBackend === 'libtorch' ? 'libtorch' : 'pytorch');
+  const effectiveBackend = hasSplitEngines
+    ? (mctsEngine === 'cpp' ? 'native' : 'gpu')
+    : (['gpu', 'cpu', 'js', 'native'].includes(input.backend) ? input.backend : 'gpu');
   return {
     targetGames: Math.max(1, Math.min(1000000, Number(input.targetGames) || 10000)),
     minPlayers, maxPlayers,
     charSet: ['base', 'dark', 'mixed', 'random'].includes(input.charSet) ? input.charSet : 'random',
     endDistricts: [7, 8].includes(Number(input.endDistricts)) ? Number(input.endDistricts) : 8,
     profile: PROFILES[input.profile] ? input.profile : 'balanced',
-    backend: ['gpu', 'cpu', 'js', 'native'].includes(input.backend) ? input.backend : 'gpu',
+    rulesEngine, mctsEngine, neuralNetworkFramework,
+    backend: effectiveBackend,
     device: ['cuda', 'cpu'].includes(input.device)
       ? input.device : (input.backend === 'cpu' ? 'cpu' : 'cuda'),
     nativeSearchWorker: input.nativeSearchWorker ? String(input.nativeSearchWorker) : '',
-    nativeInferenceBackend: ['python-binary', 'libtorch'].includes(input.nativeInferenceBackend)
-      ? input.nativeInferenceBackend : 'python-binary',
+    nativeInferenceBackend: hasSplitEngines
+      ? (neuralNetworkFramework === 'libtorch' ? 'libtorch' : 'python-binary')
+      : (['python-binary', 'libtorch'].includes(input.nativeInferenceBackend) ? input.nativeInferenceBackend : 'python-binary'),
     learningRate: Math.max(1e-6, Math.min(0.01, Number(input.learningRate) || 0.0003)),
     batchGames: Math.max(1, Math.min(32, Number(input.batchGames) || 4)),
     ppoEpochs: Math.max(1, Math.min(6, Number(input.ppoEpochs) || 2)),
@@ -463,7 +474,9 @@ function sanitizeConfig(input = {}) {
     mctsDirichletAlpha: Math.max(0, Math.min(1, Number(input.mctsDirichletAlpha) || 0.3)),
     mctsDirichletEpsilon: Math.max(0.001, Math.min(1, Number(input.mctsDirichletEpsilon) || 0.03)),
     mctsMaxDepth: Math.max(10, Math.min(2000, Number(input.mctsMaxDepth) || 200)),
-    mctsEvaluator: ['js', 'gpu'].includes(input.mctsEvaluator) ? input.mctsEvaluator : 'js',
+    mctsEvaluator: hasSplitEngines
+      ? (mctsEngine === 'cpp' || neuralNetworkFramework === 'pytorch' ? 'gpu' : 'js')
+      : (['js', 'gpu'].includes(input.mctsEvaluator) ? input.mctsEvaluator : 'js'),
     mctsBatchSize: Math.max(1, Math.min(256, Number(input.mctsBatchSize) || 32)),
     // 0 是合法值，表示"不限制等待"（等满批或显式 flush 才发）；仅 undefined/NaN 取默认 1
     mctsMaxWaitMs: Math.max(0, Math.min(50, Number.isFinite(Number(input.mctsMaxWaitMs)) ? Number(input.mctsMaxWaitMs) : 1)),
