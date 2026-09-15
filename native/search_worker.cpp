@@ -82,7 +82,12 @@ int main() {
         bool same_order = true;
         for (size_t i = 0; i < supplied.size(); ++i) {
           if (native_actions[i].type != supplied[i].type ||
-              (!supplied[i].uid.empty() && native_actions[i].uid != supplied[i].uid)) {
+              (!supplied[i].uid.empty() && native_actions[i].uid != supplied[i].uid) ||
+              (!supplied[i].target.empty() && native_actions[i].target != supplied[i].target) ||
+              (!supplied[i].secondary_uid.empty() &&
+               native_actions[i].secondary_uid != supplied[i].secondary_uid) ||
+              (!supplied[i].selected_uids.empty() &&
+               native_actions[i].selected_uids != supplied[i].selected_uids)) {
             same_order = false; break;
           }
         }
