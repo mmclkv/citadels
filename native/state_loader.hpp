@@ -149,6 +149,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       state.pending_uid = string_field(*pending, "mineUid");
       const auto* cards = pending->get("cards");
       if (cards && cards->is_array()) state.pending_cards = load_cards(*cards);
+      state.pending_selected = string_array_field(*pending, "selected");
     }
   }
   const auto* draft = snapshot.get("draft");

@@ -91,6 +91,15 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         card.uid, {}, {}, {}});
       return actions;
     }
+    if (state.pending_kind == "artist") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& district : state.players[player].city)
+        if (!district.beautified && std::find(state.pending_selected.begin(), state.pending_selected.end(), district.card.uid) == state.pending_selected.end())
+          actions.push_back({ActionType::ChooseDistrict, district.card.uid});
+      actions.push_back({ActionType::ArtistDone, {}, {}, {}, {}, state.pending_selected});
+      return actions;
+    }
     if (state.pending_kind == "diplomat_theirs") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -229,6 +238,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (player != state.active_player) return false;
       return state.keep_pending_card(action.uid);
     }
+    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "artist")
+      return player == state.active_player && state.artist_select(action.uid);
+    if (action.type == ActionType::ArtistDone && state.pending_kind == "artist")
+      return player == state.active_player && state.artist_done(action.selected_uids);
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {
       if (player != state.active_player) return false;

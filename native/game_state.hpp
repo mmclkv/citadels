@@ -82,6 +82,7 @@ struct NativeGameState {
   int pending_from_crown = -1;
   std::string pending_uid;
   std::vector<DistrictCard> pending_cards;
+  std::vector<std::string> pending_selected;
 
   bool draft_remove(const std::string& id) {
     auto remove = [&](std::vector<std::string>& values) {
@@ -264,6 +265,24 @@ struct NativeGameState {
     auto drawn = deck.draw(static_cast<int>(uids.size()), rng);
     active()->hand.insert(active()->hand.end(), std::make_move_iterator(drawn.begin()), std::make_move_iterator(drawn.end()));
     pending_kind.clear(); return drawn.size() == uids.size();
+  }
+
+  bool artist_select(const std::string& uid) {
+    if (!active() || pending_kind != "artist" || pending_selected.size() >= 2 ||
+        std::find(pending_selected.begin(), pending_selected.end(), uid) != pending_selected.end()) return false;
+    auto it = std::find_if(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) { return d.card.uid == uid && !d.beautified; });
+    if (it == active()->city.end() || active()->gold <= static_cast<int>(pending_selected.size())) return false;
+    pending_selected.push_back(uid); return true;
+  }
+
+  bool artist_done(const std::vector<std::string>& uids) {
+    if (!active() || pending_kind != "artist" || uids.size() > 2 || uids != pending_selected || active()->gold < static_cast<int>(uids.size())) return false;
+    for (const auto& uid : uids) {
+      auto it = std::find_if(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) { return d.card.uid == uid && !d.beautified; });
+      if (it == active()->city.end()) return false;
+    }
+    for (const auto& uid : uids) for (auto& district : active()->city) if (district.card.uid == uid) { district.beautified = true; --active()->gold; }
+    pending_selected.clear(); pending_kind.clear(); return true;
   }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

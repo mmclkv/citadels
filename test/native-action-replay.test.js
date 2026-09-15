@@ -332,3 +332,39 @@ test('C++ 原生状态可以回放魔术师弃牌重抽', async t => {
   assert.deepEqual(native.players.map(p => ({ id: p.id, handCount: p.handCount })),
     record.afterSummary.players.map(p => ({ id: p.id, handCount: p.handCount })));
 });
+
+test('C++ 原生状态可以回放艺术家选择并确认美化', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过艺术家回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 109, charSetMode: 'base' });
+  Engine.startGame(initial); initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+  initial.players[0].city = [
+    { uid: 'art-a', name: '小屋', color: 'red', cost: 1 },
+    { uid: 'art-b', name: '教堂', color: 'blue', cost: 2 }
+  ];
+  initial.turn = { charId: 'artist', num: 9, playerIdx: 0, phase: 'main', takenResources: true, incomeTaken: true,
+    abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false, usedSmithy: false, usedMuseum: false,
+    pending: { kind: 'artist', selected: [] }, bonusDone: false };
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (const action of [
+    { type: 'choose_district', target: 'p0', uid: 'art-a' },
+    { type: 'artist_done', uids: ['art-a'] }
+  ]) {
+    const record = recordAppliedAction(state, 'p0', action, Engine.applyAction);
+    assert.equal(record.ok, true);
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'artist-trace')); child.stdin.end();
+  const native = await response; child.kill();
+  assert.equal(native.ok, true, native.error || 'C++ 艺术家回放失败');
+  assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, cityCount: p.cityCount })),
+    records.at(-1).afterSummary.players.map(p => ({ id: p.id, gold: p.gold, cityCount: p.cityCount })));
+});

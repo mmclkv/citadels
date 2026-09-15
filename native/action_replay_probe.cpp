@@ -80,6 +80,10 @@ int main() {
           NativeSearchAction chosen{ActionType::ChooseCards, {}, {}, {}, {}, string_array_field(action, "uids")};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("choose_cards 执行失败");
+        } else if (type == "artist_done") {
+          NativeSearchAction chosen{ActionType::ArtistDone, {}, {}, {}, {}, string_array_field(action, "uids")};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("artist_done 执行失败");
         } else if (type == "emperor_crown") {
           NativeSearchAction chosen{ActionType::EmperorCrown, {}, {}, {}, string_field(action, "target")};
           NativeGameAdapter adapter;
