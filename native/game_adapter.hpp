@@ -160,6 +160,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       actions.push_back({ActionType::TakeGold});
       actions.push_back({ActionType::TakeCards});
     }
+    if (state.resources_taken && !state.income_taken) {
+      if (state.players[player].role_id == "king" || state.players[player].role_id == "noble" ||
+          state.players[player].role_id == "bishop" || state.players[player].role_id == "merchant" ||
+          state.players[player].role_id == "warlord" || state.players[player].role_id == "marshal")
+        actions.push_back({ActionType::Income});
+    }
+    if (state.resources_taken && state.income_taken && !state.monk_extra_taken &&
+        state.players[player].role_id == "monk") actions.push_back({ActionType::MonkTake});
     if (state.resources_taken) {
       for (const auto& card : p->hand) {
         actions.push_back({ActionType::Build, card.uid, card.name, {}});
@@ -284,6 +292,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     switch (action.type) {
       case ActionType::TakeGold: return state.take_gold();
       case ActionType::TakeCards: return state.take_cards();
+      case ActionType::Income: return state.income();
+      case ActionType::MonkTake: return state.monk_take();
       case ActionType::Build: return state.build(action.uid, action.name);
       case ActionType::Lab: return state.use_lab(action.uid, action.secondary_uid);
       case ActionType::Smithy: return state.use_smithy(action.uid);

@@ -56,6 +56,9 @@ struct NativeGameState {
   int builds = 0;
   int spent_on_build = 0;
   bool resources_taken = false;
+  bool income_taken = false;
+  bool monk_extra_taken = false;
+  bool ability_used = false;
   bool used_lab = false;
   bool used_smithy = false;
   bool used_museum = false;
@@ -346,6 +349,35 @@ struct NativeGameState {
     return true;
   }
 
+  bool income() {
+    auto* p = active();
+    if (!p || income_taken) return false;
+    std::string color;
+    if (p->role_id == "king" || p->role_id == "noble") color = "yellow";
+    else if (p->role_id == "bishop") color = "blue";
+    else if (p->role_id == "merchant") color = "green";
+    else if (p->role_id == "warlord" || p->role_id == "marshal") color = "red";
+    else return false;
+    const int amount = static_cast<int>(std::count_if(p->city.begin(), p->city.end(),
+      [&](const NativeDistrict& d) { return d.card.color == color; }));
+    p->gold += amount;
+    income_taken = true;
+    return true;
+  }
+
+  bool monk_take() {
+    auto* p = active();
+    if (!p || p->role_id != "monk" || !income_taken || monk_extra_taken) return false;
+    int richest = -1;
+    for (size_t i = 0; i < players.size(); ++i) {
+      if (static_cast<int>(i) == active_player) continue;
+      if (richest < 0 || players[i].gold > players[richest].gold) richest = static_cast<int>(i);
+    }
+    if (richest < 0 || players[richest].gold <= p->gold) return false;
+    --players[richest].gold; ++p->gold; monk_extra_taken = true;
+    return true;
+  }
+
   bool build(const std::string& uid, const std::string& name,
              const std::string& effect = {}) {
     auto* p = active();
@@ -427,6 +459,9 @@ struct NativeGameState {
     builds = 0;
     spent_on_build = 0;
     resources_taken = false;
+    income_taken = false;
+    monk_extra_taken = false;
+    ability_used = false;
     used_lab = false;
     used_smithy = false;
     used_museum = false;

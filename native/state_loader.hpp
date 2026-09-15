@@ -136,6 +136,9 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   if (turn && turn->is_object()) {
     state.active_player = int_field(*turn, "playerIdx", -1);
     state.resources_taken = bool_field(*turn, "takenResources");
+    state.income_taken = bool_field(*turn, "incomeTaken");
+    state.monk_extra_taken = bool_field(*turn, "monkExtraTaken");
+    state.ability_used = bool_field(*turn, "abilityUsed");
     state.builds = int_field(*turn, "builds");
     const auto turn_role = string_field(*turn, "charId");
     if (!turn_role.empty() && state.active_player >= 0 && state.active_player < static_cast<int>(state.players.size()))
