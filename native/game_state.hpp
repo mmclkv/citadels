@@ -464,12 +464,16 @@ struct NativeGameState {
   }
 
   static int role_number(const std::string& id) {
-    static const std::vector<std::string> ids = {
-      "assassin", "thief", "magician", "king", "bishop", "merchant", "architect", "warlord",
-      "witch", "emperor", "navigator", "scholar", "prophet", "artist", "marshal", "noble", "alchemist"
-    };
-    const auto it = std::find(ids.begin(), ids.end(), id);
-    return it == ids.end() ? -1 : static_cast<int>(it - ids.begin()) + 1;
+    if (id == "assassin" || id == "witch") return 1;
+    if (id == "thief") return 2;
+    if (id == "magician" || id == "prophet") return 3;
+    if (id == "king" || id == "emperor" || id == "noble") return 4;
+    if (id == "bishop" || id == "monk") return 5;
+    if (id == "merchant" || id == "alchemist" || id == "businessman") return 6;
+    if (id == "architect" || id == "navigator" || id == "scholar") return 7;
+    if (id == "warlord" || id == "diplomat" || id == "marshal") return 8;
+    if (id == "queen" || id == "artist") return 9;
+    return -1;
   }
 
   bool begin_next_round() {
@@ -624,6 +628,28 @@ struct NativeGameState {
         turn_phase = bewitched == entry.number ? "bewitched" : "main";
         resources_taken = false; income_taken = false; monk_extra_taken = false;
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
+        if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
+          for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
+        }
+        if (entry.char_id == "noble") {
+          const int count = static_cast<int>(std::count_if(players[entry.player].city.begin(), players[entry.player].city.end(),
+            [](const NativeDistrict& district) { return district.card.color == "yellow"; }));
+          auto cards = deck.draw(count, rng);
+          players[entry.player].hand.insert(players[entry.player].hand.end(),
+            std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
+          income_taken = true;
+        }
+        if (entry.char_id == "queen") {
+          int holder = -1;
+          for (size_t i = 0; i < players.size(); ++i)
+            if (std::any_of(players[i].role_ids.begin(), players[i].role_ids.end(), [&](const std::string& role) {
+              return role_number(role) == 4;
+            })) holder = static_cast<int>(i);
+          if (holder >= 0) {
+            const int distance = std::abs(entry.player - holder);
+            if (distance == 1 || distance == static_cast<int>(players.size()) - 1) players[entry.player].gold += 3;
+          }
+        }
         return true;
       }
       active_player = -1; turn_phase.clear(); phase = NativePhase::RoundConfirm;

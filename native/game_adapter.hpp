@@ -25,11 +25,16 @@ struct NativeSearchAction {
 class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearchAction> {
  public:
   static int char_number(const std::string& id) {
-    static const std::vector<std::string> ids = {
-      "assassin", "thief", "magician", "king", "bishop", "merchant", "architect", "warlord"
-    };
-    const auto it = std::find(ids.begin(), ids.end(), id);
-    return it == ids.end() ? -1 : static_cast<int>(it - ids.begin()) + 1;
+    if (id == "assassin" || id == "witch") return 1;
+    if (id == "thief") return 2;
+    if (id == "magician" || id == "prophet") return 3;
+    if (id == "king" || id == "emperor" || id == "noble") return 4;
+    if (id == "bishop" || id == "monk") return 5;
+    if (id == "merchant" || id == "alchemist" || id == "businessman") return 6;
+    if (id == "architect" || id == "navigator" || id == "scholar") return 7;
+    if (id == "warlord" || id == "diplomat" || id == "marshal") return 8;
+    if (id == "queen" || id == "artist") return 9;
+    return -1;
   }
 
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
