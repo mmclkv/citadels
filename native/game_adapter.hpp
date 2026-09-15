@@ -15,6 +15,7 @@ struct NativeSearchAction {
   std::string name;
   std::string effect;
   std::string target;
+  std::vector<std::string> selected_uids;
 };
 
 // 将统一原生状态接入通用 PUCT。这里的动作集合只暴露当前状态真正可执行的
@@ -47,6 +48,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       for (size_t i = 0; i < state.players.size(); ++i)
         if (static_cast<int>(i) != player) actions.push_back({ActionType::ChoosePlayer, {}, {}, {}, state.players[i].id});
       return actions;
+    }
+    if (state.pending_kind == "magician_redraw") {
+      if (player != state.active_player) return {};
+      return {{ActionType::ChooseCards}};
     }
     if (state.pending_kind == "emperor_crown") {
       if (player != state.active_player) return {};
@@ -179,6 +184,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       state.pending_kind.clear();
       return true;
     }
+    if (action.type == ActionType::ChooseCards && state.pending_kind == "magician_redraw")
+      return player == state.active_player && state.magician_redraw(action.selected_uids);
     if (action.type == ActionType::EmperorCrown && state.pending_kind == "emperor_crown") {
       if (player != state.active_player) return false;
       int target = -1;

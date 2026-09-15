@@ -251,6 +251,20 @@ struct NativeGameState {
     }
     pending_cards.clear(); pending_kind.clear(); return true;
   }
+
+  bool magician_redraw(const std::vector<std::string>& uids) {
+    if (!active() || pending_kind != "magician_redraw" || uids.size() > active()->hand.size()) return false;
+    std::vector<DistrictCard> discarded;
+    for (const auto& uid : uids) {
+      auto it = std::find_if(active()->hand.begin(), active()->hand.end(), [&](const DistrictCard& card) { return card.uid == uid; });
+      if (it == active()->hand.end()) return false;
+      discarded.push_back(*it); active()->hand.erase(it);
+    }
+    deck.put_bottom(std::move(discarded));
+    auto drawn = deck.draw(static_cast<int>(uids.size()), rng);
+    active()->hand.insert(active()->hand.end(), std::make_move_iterator(drawn.begin()), std::make_move_iterator(drawn.end()));
+    pending_kind.clear(); return drawn.size() == uids.size();
+  }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;
     return &players[active_player];

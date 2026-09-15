@@ -37,6 +37,13 @@ inline bool bool_field(const JsonValue& object, const char* name, bool fallback 
   return value && value->is_bool() ? value->as_bool() : fallback;
 }
 
+inline std::vector<std::string> string_array_field(const JsonValue& object, const char* name) {
+  std::vector<std::string> result;
+  const auto* value = object.get(name);
+  if (value && value->is_array()) for (const auto& item : value->as_array()) if (item.is_string()) result.push_back(item.as_string());
+  return result;
+}
+
 inline DistrictCard load_card(const JsonValue& value) {
   if (!value.is_object()) throw std::runtime_error("卡牌必须是对象");
   return {string_field(value, "uid"), string_field(value, "color"), int_field(value, "cost"),

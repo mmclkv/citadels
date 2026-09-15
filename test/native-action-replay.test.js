@@ -307,3 +307,28 @@ test('C++ 原生状态可以回放学者与抽牌保留选择', async t => {
   await one('scholar_pick', 'scholar_pick');
   await one('draw_keep', 'draw_keep');
 });
+
+test('C++ 原生状态可以回放魔术师弃牌重抽', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过魔术师重抽回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 107, charSetMode: 'base' });
+  Engine.startGame(initial); initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+  initial.turn = { charId: 'magician', num: 3, playerIdx: 0, phase: 'main', takenResources: true, incomeTaken: true,
+    abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false, usedSmithy: false, usedMuseum: false,
+    pending: { kind: 'magician_redraw', selected: [] }, bonusDone: false };
+  const state = JSON.parse(JSON.stringify(initial));
+  const record = recordAppliedAction(state, 'p0', { type: 'choose_cards', uids: [state.players[0].hand[0].uid] }, Engine.applyAction);
+  assert.equal(record.ok, true);
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, [record], 'magician-redraw-trace')); child.stdin.end();
+  const native = await response; child.kill();
+  assert.equal(native.ok, true, native.error || 'C++ 魔术师重抽回放失败');
+  assert.deepEqual(native.players.map(p => ({ id: p.id, handCount: p.handCount })),
+    record.afterSummary.players.map(p => ({ id: p.id, handCount: p.handCount })));
+});
