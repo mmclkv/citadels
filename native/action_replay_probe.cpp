@@ -37,28 +37,30 @@ int main() {
       const auto& records = required_item(request, "records");
       if (!records.is_array() || records.as_array().empty()) throw std::runtime_error("回放至少需要一条动作");
       NativeGameState state = load_native_state(initial);
-      const auto& record = records.as_array().front();
-      const auto& player_value = required_item(record, "playerId");
-      const auto& action = required_item(record, "action");
-      if (!player_value.is_string() || !action.is_object()) throw std::runtime_error("动作记录格式错误");
-      const auto type = string_field(action, "type");
-      int player = -1;
-      for (size_t i = 0; i < state.players.size(); ++i)
-        if (state.players[i].id == player_value.as_string()) player = static_cast<int>(i);
-      if (player < 0) throw std::runtime_error("动作玩家不存在");
-      if (type == "take_gold") {
-        if (state.active_player != player || !state.take_gold()) throw std::runtime_error("take_gold 执行失败");
-      } else if (type == "take_cards") {
-        if (state.active_player != player || !state.take_cards()) throw std::runtime_error("take_cards 执行失败");
-      } else if (type == "build") {
-        if (state.active_player != player) throw std::runtime_error("build 玩家不是当前行动者");
-        const auto uid = string_field(action, "uid");
-        const auto name = string_field(action, "name");
-        if (!state.build(uid, name)) throw std::runtime_error("build 执行失败");
-      } else if (type == "end_turn") {
-        if (state.active_player != player || !state.end_turn()) throw std::runtime_error("end_turn 执行失败");
-      } else {
-        throw std::runtime_error("当前 probe 尚未迁移动作: " + type);
+      for (const auto& record : records.as_array()) {
+        const auto& player_value = required_item(record, "playerId");
+        const auto& action = required_item(record, "action");
+        if (!player_value.is_string() || !action.is_object()) throw std::runtime_error("动作记录格式错误");
+        const auto type = string_field(action, "type");
+        int player = -1;
+        for (size_t i = 0; i < state.players.size(); ++i)
+          if (state.players[i].id == player_value.as_string()) player = static_cast<int>(i);
+        if (player < 0) throw std::runtime_error("动作玩家不存在");
+        if (state.active_player != player && type != "confirm_round")
+          throw std::runtime_error("动作玩家不是当前行动者: " + type);
+        if (type == "take_gold") {
+          if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
+        } else if (type == "take_cards") {
+          if (!state.take_cards()) throw std::runtime_error("take_cards 执行失败");
+        } else if (type == "build") {
+          const auto uid = string_field(action, "uid");
+          const auto name = string_field(action, "name");
+          if (!state.build(uid, name)) throw std::runtime_error("build 执行失败");
+        } else if (type == "end_turn") {
+          if (!state.end_turn()) throw std::runtime_error("end_turn 执行失败");
+        } else {
+          throw std::runtime_error("当前 probe 尚未迁移动作: " + type);
+        }
       }
       std::cout << "{\"ok\":true,\"phase\":\"" << phase_name(state.phase)
                 << "\",\"round\":" << state.round << ",\"players\":[";

@@ -47,3 +47,40 @@ test('C++ 原生状态可以执行并比对一条 JS 基础行动', async t => {
     cityCount: player.cityCount, hasCrown: player.hasCrown
   })));
 });
+
+test('C++ 原生状态可以按顺序执行多步基础行动', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过跨语言检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 41, charSetMode: 'base' });
+  Engine.startGame(initial);
+  finishDraft(initial);
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (const type of ['take_gold', 'end_turn']) {
+    const actor = train.currentActor(state);
+    const action = train.enumerateLegalActions(state, actor.id).find(item => item.type === type);
+    assert.ok(action, `应找到 ${type} 动作`);
+    const record = recordAppliedAction(state, actor.id, action, Engine.applyAction);
+    assert.equal(record.ok, true);
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'action-multi'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 多步动作执行失败');
+  assert.equal(native.phase, expected.phase);
+  assert.equal(native.round, expected.round);
+  assert.deepEqual(native.players, expected.players.map(player => ({
+    id: player.id, gold: player.gold, handCount: player.handCount,
+    cityCount: player.cityCount, hasCrown: player.hasCrown
+  })));
+});
