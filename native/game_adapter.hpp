@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "game_state.hpp"
+#include "magician_machine.hpp"
 #include "mcts_core.hpp"
 
 namespace citadels::native {
@@ -13,6 +14,7 @@ struct NativeSearchAction {
   std::string uid;
   std::string name;
   std::string effect;
+  std::string target;
 };
 
 // 将统一原生状态接入通用 PUCT。这里的动作集合只暴露当前状态真正可执行的
@@ -30,6 +32,18 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
+    if (state.pending_kind == "magician_choice") {
+      if (player != state.active_player) return {};
+      return {{ActionType::MagicianMode, {}, "swap", {}},
+              {ActionType::MagicianMode, {}, "redraw", {}}};
+    }
+    if (state.pending_kind == "magician_swap") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (size_t i = 0; i < state.players.size(); ++i)
+        if (static_cast<int>(i) != player) actions.push_back({ActionType::ChoosePlayer, {}, {}, {}, state.players[i].id});
+      return actions;
+    }
     if (state.pending_kind == "assassin" || state.pending_kind == "thief") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -79,6 +93,24 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   bool apply(NativeGameState& state, int player,
              const NativeSearchAction& action) const override {
+    if (action.type == ActionType::MagicianMode && state.pending_kind == "magician_choice") {
+      if (player != state.active_player || (action.name != "swap" && action.name != "redraw")) return false;
+      state.pending_kind = action.name == "swap" ? "magician_swap" : "magician_redraw";
+      return true;
+    }
+    if (action.type == ActionType::ChoosePlayer && state.pending_kind == "magician_swap") {
+      if (player != state.active_player) return false;
+      int target = -1;
+      for (size_t i = 0; i < state.players.size(); ++i)
+        if (state.players[i].id == action.target) target = static_cast<int>(i);
+      if (target < 0 || target == player) return false;
+      MagicianHands hands{std::move(state.players[player].hand), std::move(state.players[target].hand)};
+      magician_swap(hands);
+      state.players[player].hand = std::move(hands.mine);
+      state.players[target].hand = std::move(hands.target);
+      state.pending_kind.clear();
+      return true;
+    }
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {
       if (player != state.active_player) return false;

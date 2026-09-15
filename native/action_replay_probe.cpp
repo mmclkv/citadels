@@ -68,6 +68,14 @@ int main() {
           NativeSearchAction chosen{ActionType::ChooseChar, {}, std::to_string(int_field(action, "num")), {}};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("choose_char 执行失败");
+        } else if (type == "magician_mode") {
+          NativeSearchAction chosen{ActionType::MagicianMode, {}, string_field(action, "mode"), {}, {}};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("magician_mode 执行失败");
+        } else if (type == "choose_player") {
+          NativeSearchAction chosen{ActionType::ChoosePlayer, {}, {}, {}, string_field(action, "target")};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("choose_player 执行失败");
         } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {

@@ -36,7 +36,7 @@ NativeSearchAction decode_action(const JsonValue& value) {
   // layer still pass through the protocol.  They deliberately produce the
   // safe uniform fallback below instead of aborting the whole self-play game.
   return {parsed.value_or(ActionType::EndTurn), string_field(value, "uid"),
-          string_field(value, "name"), string_field(value, "effect")};
+          string_field(value, "name"), string_field(value, "effect"), string_field(value, "target")};
 }
 
 void emit_error(const std::string& id, const std::string& message) {
