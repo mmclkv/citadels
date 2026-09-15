@@ -40,7 +40,7 @@ class NativeSearchClient {
     this.child.stdout.on('data', chunk => this.#onData(chunk));
     this.child.on('error', error => this.#fail(error));
     this.child.on('exit', code => {
-      if (!this.closed && code !== 0) this.#fail(new Error('native search worker 异常退出 code=' + code));
+      if (!this.closed && code !== 0) this.#fail(new Error('native mcts_worker 异常退出 code=' + code));
     });
   }
 
@@ -67,7 +67,7 @@ class NativeSearchClient {
   }
 
   search(state, rootPlayerId, legalActions, modelVersion = 0) {
-    if (this.closed) return Promise.reject(new Error('native search worker 已关闭'));
+    if (this.closed) return Promise.reject(new Error('native mcts_worker 已关闭'));
     const id = String(this.nextId++);
     const request = JSON.parse(encodeSearchRequest(state, rootPlayerId, legalActions, id));
     request.simulations = this.simulations;
@@ -101,7 +101,7 @@ class NativeSearchClient {
   close() {
     if (this.closed) return;
     this.closed = true;
-    this.#fail(new Error('native search worker 已关闭'));
+    this.#fail(new Error('native mcts_worker 已关闭'));
     this.child.kill();
   }
 }
