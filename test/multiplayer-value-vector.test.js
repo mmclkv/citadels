@@ -40,7 +40,7 @@ test('4/5/6 人终局 reward vector 的 slot 0 是当前玩家奖励，其余 sl
       assert.equal(vector.mask.slice(count).every(value => value === 0), true);
       for (let rel = 0; rel < count; rel++) {
         const id = players[(players.indexOf(perspective) + rel) % count].id;
-        assert.equal(vector.values[rel], rewards.get(id));
+        assert.ok(Math.abs(vector.values[rel] - rewards.get(id)) < 1e-6);
       }
     }
   }

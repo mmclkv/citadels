@@ -47,9 +47,13 @@ inline std::vector<std::string> string_array_field(const JsonValue& object, cons
 inline DistrictCard load_card(const JsonValue& value) {
   if (!value.is_object()) throw std::runtime_error("卡牌必须是对象");
   const int cost = int_field(value, "cost");
-  return {string_field(value, "uid"), string_field(value, "color"), cost,
-          string_field(value, "name"), int_field(value, "scoreValue", cost),
-          string_field(value, "purpleEffect")};
+  DistrictCard card{string_field(value, "uid"), string_field(value, "color"), cost,
+                    string_field(value, "name"), int_field(value, "scoreValue", cost),
+                    string_field(value, "purpleEffect")};
+  const auto* purple = value.get("purple");
+  if (purple && purple->is_object())
+    card.purple_effect = string_field(*purple, "effect", card.purple_effect);
+  return card;
 }
 
 inline std::vector<DistrictCard> load_cards(const JsonValue& value) {
@@ -156,6 +160,9 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     state.monk_extra_taken = bool_field(*turn, "monkExtraTaken");
     state.ability_used = bool_field(*turn, "abilityUsed");
     state.builds = int_field(*turn, "builds");
+    state.used_lab = bool_field(*turn, "usedLab");
+    state.used_smithy = bool_field(*turn, "usedSmithy");
+    state.used_museum = bool_field(*turn, "usedMuseum");
     const auto turn_role = string_field(*turn, "charId");
     if (!turn_role.empty() && state.active_player >= 0 && state.active_player < static_cast<int>(state.players.size()))
       state.players[state.active_player].role_id = turn_role;
@@ -220,6 +227,8 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   }
   const auto* round_confirm = snapshot.get("roundConfirm");
   if (round_confirm && round_confirm->is_object()) {
+    state.phase = NativePhase::RoundConfirm;
+    state.active_player = -1;
     const auto* confirmed = round_confirm->get("confirmed");
     if (confirmed && confirmed->is_array()) {
       for (const auto& value : confirmed->as_array()) state.round_confirmed.push_back(value.is_bool() && value.as_bool());

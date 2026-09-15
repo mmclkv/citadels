@@ -199,8 +199,12 @@ struct NativeGameState {
     auto it = std::find_if(players[target].city.begin(), players[target].city.end(),
       [&](const NativeDistrict& d) { return d.card.uid == uid; });
     if (it == players[target].city.end() || it->fortress) return false;
+    const bool other_wall = std::any_of(players[target].city.begin(), players[target].city.end(),
+      [&](const NativeDistrict& other) {
+        return other.card.uid != it->card.uid && other.effect == "wallCost";
+      });
     MilitaryCard card{it->name, it->card.cost, it->fortress, it->beautified};
-    const int cost = destroy_cost(card, false);
+    const int cost = destroy_cost(card, other_wall);
     if (active()->gold < cost) return false;
     active()->gold -= cost;
     DistrictCard destroyed = it->card;
@@ -456,7 +460,7 @@ struct NativeGameState {
     if (p->role_id == "king" || p->role_id == "noble") color = "yellow";
     else if (p->role_id == "bishop") color = "blue";
     else if (p->role_id == "merchant") color = "green";
-    else if (p->role_id == "warlord" || p->role_id == "marshal") color = "red";
+    else if (p->role_id == "warlord" || p->role_id == "diplomat" || p->role_id == "marshal") color = "red";
     else return false;
     const int amount = static_cast<int>(std::count_if(p->city.begin(), p->city.end(),
       [&](const NativeDistrict& d) { return d.card.color == color; }));

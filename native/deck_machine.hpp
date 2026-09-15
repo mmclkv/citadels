@@ -28,6 +28,7 @@ class DeckMachine {
     deck_.insert(deck_.end(),
                  std::make_move_iterator(cards.begin()),
                  std::make_move_iterator(cards.end()));
+    if (deck_.size() < 2) return;
     for (size_t i = deck_.size() - 1; i > 0; --i) {
       const size_t j = static_cast<size_t>(rng.next() * static_cast<double>(i + 1));
       std::swap(deck_[i], deck_[j]);
@@ -58,6 +59,7 @@ class DeckMachine {
     if (discard_.empty()) return;
     deck_ = std::move(discard_);
     discard_.clear();
+    if (deck_.size() < 2) return;
     for (size_t i = deck_.size() - 1; i > 0; --i) {
       const size_t j = static_cast<size_t>(rng.next() * static_cast<double>(i + 1));
       std::swap(deck_[i], deck_[j]);

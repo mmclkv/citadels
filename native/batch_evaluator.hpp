@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 #include <functional>
 #include <vector>
 
@@ -14,6 +15,7 @@ struct BatchEvaluationRequest {
 struct BatchEvaluationResult {
   std::vector<std::vector<float>> policies;
   std::vector<float> values;
+  std::vector<std::array<float, 8>> value_vectors;
 };
 
 using BatchInferenceBackend = std::function<BatchEvaluationResult(
@@ -36,7 +38,9 @@ class BatchEvaluator {
       actions.push_back(request.actions);
     }
     auto result = backend_(states, actions);
-    if (result.policies.size() != requests.size() || result.values.size() != requests.size())
+    const bool has_vectors = result.value_vectors.size() == requests.size();
+    const bool has_scalars = result.values.size() == requests.size();
+    if (result.policies.size() != requests.size() || (!has_vectors && !has_scalars))
       return {};
     for (size_t i = 0; i < requests.size(); ++i) {
       if (result.policies[i].size() != requests[i].actions.size()) return {};
@@ -55,6 +59,7 @@ inline BatchInferenceBackend uniform_batch_backend() {
       result.policies.emplace_back(group.size(), group.empty() ? 0.0f
                                                                : 1.0f / group.size());
       result.values.push_back(0.0f);
+      result.value_vectors.push_back({});
     }
     return result;
   };

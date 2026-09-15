@@ -1,7 +1,10 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -12,6 +15,130 @@
 #include "batch_evaluator.hpp"
 
 namespace citadels::native {
+
+constexpr uint32_t kGpuBinaryMagic = 0x31425443;  // "CTB1" little-endian.
+constexpr uint32_t kGpuBinaryBatchEval = 1;
+constexpr uint32_t kGpuBinaryBatchResult = 2;
+constexpr uint32_t kGpuBinaryReload = 3;
+constexpr uint32_t kGpuBinaryClose = 4;
+constexpr uint32_t kGpuBinaryError = 0xffffffffu;
+
+inline void append_u32(std::vector<uint8_t>& output, uint32_t value) {
+  const size_t offset = output.size();
+  output.resize(offset + sizeof(value));
+  std::memcpy(output.data() + offset, &value, sizeof(value));
+}
+
+inline void append_bytes(std::vector<uint8_t>& output, const void* data, size_t size) {
+  const size_t offset = output.size();
+  output.resize(offset + size);
+  if (size) std::memcpy(output.data() + offset, data, size);
+}
+
+inline uint32_t read_u32(const std::vector<uint8_t>& input, size_t& offset) {
+  if (offset + sizeof(uint32_t) > input.size()) throw std::runtime_error("binary GPU response truncated");
+  uint32_t value = 0;
+  std::memcpy(&value, input.data() + offset, sizeof(value));
+  offset += sizeof(value);
+  return value;
+}
+
+inline float read_f32(const std::vector<uint8_t>& input, size_t& offset) {
+  if (offset + sizeof(float) > input.size()) throw std::runtime_error("binary GPU response truncated");
+  float value = 0.0f;
+  std::memcpy(&value, input.data() + offset, sizeof(value));
+  offset += sizeof(value);
+  return value;
+}
+
+inline std::vector<uint8_t> encode_binary_frame(const std::vector<uint8_t>& payload) {
+  std::vector<uint8_t> frame;
+  frame.reserve(8 + payload.size());
+  append_u32(frame, kGpuBinaryMagic);
+  append_u32(frame, static_cast<uint32_t>(payload.size()));
+  append_bytes(frame, payload.data(), payload.size());
+  return frame;
+}
+
+inline std::vector<uint8_t> encode_binary_batch_eval_request(
+    const std::vector<std::vector<float>>& states,
+    const std::vector<std::vector<std::vector<float>>>& actions) {
+  if (states.size() != actions.size()) throw std::invalid_argument("binary batch 状态和动作数量不一致");
+  if (states.empty()) throw std::invalid_argument("binary batch 不能为空");
+  const uint32_t state_size = static_cast<uint32_t>(states.front().size());
+  uint32_t action_size = 0;
+  for (const auto& state : states)
+    if (state.size() != state_size) throw std::invalid_argument("binary batch 状态维度不一致");
+  for (const auto& group : actions) for (const auto& action : group) {
+    if (action_size == 0) action_size = static_cast<uint32_t>(action.size());
+    if (action.size() != action_size) throw std::invalid_argument("binary batch 动作维度不一致");
+  }
+  if (action_size == 0) action_size = 64;
+  std::vector<uint8_t> payload;
+  append_u32(payload, kGpuBinaryBatchEval);
+  append_u32(payload, static_cast<uint32_t>(states.size()));
+  append_u32(payload, state_size);
+  append_u32(payload, action_size);
+  for (const auto& group : actions) append_u32(payload, static_cast<uint32_t>(group.size()));
+  for (const auto& state : states) append_bytes(payload, state.data(), state.size() * sizeof(float));
+  for (const auto& group : actions)
+    for (const auto& action : group) append_bytes(payload, action.data(), action.size() * sizeof(float));
+  return encode_binary_frame(payload);
+}
+
+inline std::vector<uint8_t> encode_binary_reload_request(const std::string& model_path) {
+  std::vector<uint8_t> payload;
+  append_u32(payload, kGpuBinaryReload);
+  append_u32(payload, static_cast<uint32_t>(model_path.size()));
+  append_bytes(payload, model_path.data(), model_path.size());
+  return encode_binary_frame(payload);
+}
+
+inline std::vector<uint8_t> encode_binary_close_request() {
+  std::vector<uint8_t> payload;
+  append_u32(payload, kGpuBinaryClose);
+  return encode_binary_frame(payload);
+}
+
+inline BatchEvaluationResult decode_binary_batch_eval_response(
+    const std::vector<uint8_t>& payload,
+    const std::vector<size_t>& action_counts) {
+  size_t offset = 0;
+  const uint32_t command = read_u32(payload, offset);
+  if (command == kGpuBinaryError) {
+    const uint32_t length = read_u32(payload, offset);
+    if (offset + length > payload.size()) throw std::runtime_error("binary GPU error truncated");
+    throw std::runtime_error("gpu_trainer binary batch_eval 失败: " +
+      std::string(reinterpret_cast<const char*>(payload.data() + offset), length));
+  }
+  if (command != kGpuBinaryBatchResult) throw std::runtime_error("binary GPU 返回类型错误");
+  const uint32_t count = read_u32(payload, offset);
+  if (count != action_counts.size()) throw std::runtime_error("binary GPU 批次大小不匹配");
+  BatchEvaluationResult result;
+  result.policies.reserve(count);
+  result.values.reserve(count);
+  result.value_vectors.reserve(count);
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint32_t action_count = read_u32(payload, offset);
+    if (action_count != action_counts[i]) throw std::runtime_error("binary GPU 动作数量不匹配");
+    std::vector<float> policy;
+    policy.reserve(action_count);
+    for (uint32_t j = 0; j < action_count; ++j) policy.push_back(read_f32(payload, offset));
+    result.policies.push_back(std::move(policy));
+    std::array<float, 8> values{};
+    const size_t remaining = static_cast<size_t>(count - i);
+    const bool has_vector_payload = payload.size() - offset >= remaining * 8 * sizeof(float);
+    if (has_vector_payload) {
+      for (float& value : values) value = read_f32(payload, offset);
+    } else {
+      values[0] = read_f32(payload, offset);
+    }
+    result.value_vectors.push_back(values);
+    result.values.push_back(values[0]);
+  }
+  if (offset != payload.size()) throw std::runtime_error("binary GPU 返回包含多余数据");
+  return result;
+}
 
 inline std::string json_escape(const std::string& value) {
   std::string out;
@@ -111,12 +238,33 @@ inline BatchEvaluationResult decode_batch_eval_response(const std::string& respo
     result.policies.push_back(parse_numbers(response, cursor + 1, row_end));
     cursor = row_end + 1;
   }
-  const size_t value_key = response.find("\"values\"");
-  const size_t values_start = value_key == std::string::npos
-      ? std::string::npos : response.find('[', value_key);
-  if (values_start == std::string::npos) throw std::runtime_error("batch_eval 缺少 values");
-  const size_t values_end = find_json_array_end(response, values_start);
-  result.values = parse_numbers(response, values_start + 1, values_end);
+  const size_t vector_key = response.find("\"valueVectors\"");
+  const size_t vectors_start = vector_key == std::string::npos
+      ? std::string::npos : response.find('[', vector_key);
+  if (vectors_start != std::string::npos) {
+    const size_t vectors_end = find_json_array_end(response, vectors_start);
+    size_t value_cursor = vectors_start + 1;
+    for (size_t row = 0; row < action_counts.size(); ++row) {
+      while (value_cursor < vectors_end && response[value_cursor] != '[') ++value_cursor;
+      if (value_cursor >= vectors_end) throw std::runtime_error("batch_eval valueVectors 行数不足");
+      const size_t row_end = find_json_array_end(response, value_cursor);
+      const auto numbers = parse_numbers(response, value_cursor + 1, row_end);
+      std::array<float, 8> values{};
+      for (size_t i = 0; i < numbers.size() && i < values.size(); ++i) values[i] = numbers[i];
+      result.value_vectors.push_back(values);
+      result.values.push_back(values[0]);
+      value_cursor = row_end + 1;
+    }
+  } else {
+    const size_t value_key = response.find("\"values\"");
+    const size_t values_start = value_key == std::string::npos
+        ? std::string::npos : response.find('[', value_key);
+    if (values_start == std::string::npos) throw std::runtime_error("batch_eval 缺少 values");
+    const size_t values_end = find_json_array_end(response, values_start);
+    result.values = parse_numbers(response, values_start + 1, values_end);
+    result.value_vectors.resize(result.values.size());
+    for (size_t i = 0; i < result.values.size(); ++i) result.value_vectors[i][0] = result.values[i];
+  }
   if (result.values.size() != action_counts.size() || result.policies.size() != action_counts.size())
     throw std::runtime_error("batch_eval 返回批次大小不匹配");
   for (size_t i = 0; i < action_counts.size(); ++i)
@@ -132,7 +280,8 @@ class GpuTrainerClient {
   ~GpuTrainerClient() { close(); }
 
   void start(const std::string& profile, const std::string& model_path,
-             float learning_rate, const std::string& device);
+             float learning_rate, const std::string& device,
+             const std::string& protocol = "json");
   BatchEvaluationResult evaluate(const std::vector<std::vector<float>>& states,
                                  const std::vector<std::vector<std::vector<float>>>& actions,
                                  const std::string& profile);
@@ -141,7 +290,9 @@ class GpuTrainerClient {
 
  private:
   std::string request(const std::string& line);
+  std::vector<uint8_t> request_binary(const std::vector<uint8_t>& frame);
   std::string python_, script_;
+  bool binary_protocol_ = false;
   bool running_ = false;
 #ifdef _WIN32
   void* stdin_write_ = nullptr;
@@ -167,7 +318,8 @@ inline std::wstring wide_path(const std::string& path) {
 }
 
 inline void GpuTrainerClient::start(const std::string& profile, const std::string& model_path,
-                                    float learning_rate, const std::string& device) {
+                                    float learning_rate, const std::string& device,
+                                    const std::string& protocol) {
   if (running_) return;
   SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
   HANDLE child_out_read = nullptr, child_out_write = nullptr;
@@ -192,9 +344,11 @@ inline void GpuTrainerClient::start(const std::string& profile, const std::strin
   stdout_read_ = child_out_read; stdin_write_ = child_in_write; process_ = process.hProcess;
   CloseHandle(process.hThread); running_ = true;
   std::ostringstream init;
+  binary_protocol_ = protocol == "binary";
   init << "{\"cmd\":\"init\",\"profile\":\"" << json_escape(profile)
        << "\",\"learningRate\":" << learning_rate << ",\"device\":\""
-       << json_escape(device) << "\",\"modelPath\":\"" << json_escape(model_path) << "\"}\n";
+       << json_escape(device) << "\",\"modelPath\":\"" << json_escape(model_path)
+       << "\"" << (binary_protocol_ ? ",\"protocol\":\"binary\"" : "") << "}\n";
   request(init.str());
 }
 
@@ -217,27 +371,81 @@ inline BatchEvaluationResult GpuTrainerClient::evaluate(
     const std::vector<std::vector<float>>& states,
     const std::vector<std::vector<std::vector<float>>>& actions,
     const std::string& profile) {
+  if (binary_protocol_) {
+    std::vector<size_t> counts;
+    counts.reserve(actions.size());
+    for (const auto& group : actions) counts.push_back(group.size());
+    return decode_binary_batch_eval_response(
+      request_binary(encode_binary_batch_eval_request(states, actions)), counts);
+  }
   std::vector<size_t> counts;
   for (const auto& group : actions) counts.push_back(group.size());
   return decode_batch_eval_response(request(encode_batch_eval_request(states, actions, profile)), counts);
 }
 
 inline void GpuTrainerClient::reload_model(const std::string& model_path) {
+  if (binary_protocol_) {
+    request_binary(encode_binary_reload_request(model_path));
+    return;
+  }
   request("{\"cmd\":\"reload\",\"modelPath\":\"" + json_escape(model_path) + "\"}\n");
 }
 
 inline void GpuTrainerClient::close() {
   if (!running_) return;
-  try { request("{\"cmd\":\"close\"}\n"); } catch (...) {}
+  try {
+    if (binary_protocol_) request_binary(encode_binary_close_request());
+    else request("{\"cmd\":\"close\"}\n");
+  } catch (...) {}
   CloseHandle(static_cast<HANDLE>(stdin_write_)); CloseHandle(static_cast<HANDLE>(stdout_read_));
   TerminateProcess(static_cast<HANDLE>(process_), 0); CloseHandle(static_cast<HANDLE>(process_));
   stdin_write_ = stdout_read_ = process_ = nullptr; running_ = false;
 }
 
+inline std::vector<uint8_t> GpuTrainerClient::request_binary(const std::vector<uint8_t>& frame) {
+  if (!running_) throw std::runtime_error("gpu_trainer 客户端未启动");
+  const HANDLE input = static_cast<HANDLE>(stdin_write_);
+  const HANDLE output = static_cast<HANDLE>(stdout_read_);
+  size_t written_total = 0;
+  while (written_total < frame.size()) {
+    DWORD written = 0;
+    const DWORD remaining = static_cast<DWORD>(std::min<size_t>(frame.size() - written_total, 1u << 20));
+    if (!WriteFile(input, frame.data() + written_total, remaining, &written, nullptr) || written == 0)
+      throw std::runtime_error("写入 gpu_trainer binary 请求失败");
+    written_total += written;
+  }
+  uint8_t header[8]{};
+  size_t read_total = 0;
+  while (read_total < sizeof(header)) {
+    DWORD read = 0;
+    if (!ReadFile(output, header + read_total, static_cast<DWORD>(sizeof(header) - read_total), &read, nullptr) || read == 0)
+      throw std::runtime_error("读取 gpu_trainer binary 响应失败");
+    read_total += read;
+  }
+  uint32_t magic = 0, size = 0;
+  std::memcpy(&magic, header, sizeof(magic));
+  std::memcpy(&size, header + sizeof(magic), sizeof(size));
+  if (magic != kGpuBinaryMagic || size > (1u << 28)) throw std::runtime_error("gpu_trainer binary 响应头错误");
+  std::vector<uint8_t> payload(size);
+  read_total = 0;
+  while (read_total < payload.size()) {
+    DWORD read = 0;
+    if (!ReadFile(output, payload.data() + read_total,
+                  static_cast<DWORD>(std::min<size_t>(payload.size() - read_total, 1u << 20)),
+                  &read, nullptr) || read == 0)
+      throw std::runtime_error("读取 gpu_trainer binary payload 失败");
+    read_total += read;
+  }
+  return payload;
+}
+
 }  // namespace citadels::native
 #else
 namespace citadels::native {
-inline void GpuTrainerClient::start(const std::string&, const std::string&, float, const std::string&) {
+inline std::vector<uint8_t> GpuTrainerClient::request_binary(const std::vector<uint8_t>&) {
+  throw std::runtime_error("当前平台尚未实现 gpu_trainer binary 双向进程管道");
+}
+inline void GpuTrainerClient::start(const std::string&, const std::string&, float, const std::string&, const std::string&) {
   throw std::runtime_error("当前平台尚未实现 gpu_trainer 双向进程管道");
 }
 inline BatchEvaluationResult GpuTrainerClient::evaluate(const std::vector<std::vector<float>>&,

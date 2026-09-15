@@ -5,13 +5,20 @@ const { spawn } = require('node:child_process');
 const { encodeSearchRequest, decodeSearchResponse } = require('../native/protocol.js');
 
 class NativeSearchClient {
-  constructor({ root, executable, simulations = 50, maxDepth = 200, cPuct = 1, seed = 1,
-    gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda' }) {
+  constructor({ root, executable, simulations = 50, maxDepth = 200, batchSize = 32, cPuct = 1, seed = 1,
+    gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda',
+    inferenceBackend = 'python-binary' }) {
     const binary = executable || process.env.CITADELS_NATIVE_SEARCH_WORKER;
     if (!binary) throw new Error('backend:native 需要 CITADELS_NATIVE_SEARCH_WORKER 指向已编译的 search_worker');
-    this.child = spawn(binary, [], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+    const environment = { ...process.env };
+    if (inferenceBackend === 'libtorch') {
+      const torchLib = path.join(root, '.python', 'Lib', 'site-packages', 'torch', 'lib');
+      environment.PATH = torchLib + path.delimiter + (environment.PATH || '');
+    }
+    this.child = spawn(binary, [], { cwd: root, env: environment, stdio: ['pipe', 'pipe', 'pipe'] });
     this.simulations = simulations;
     this.maxDepth = maxDepth;
+    this.batchSize = Math.max(1, Number(batchSize) || 32);
     this.cPuct = cPuct;
     this.seed = seed;
     this.gpuEvaluator = gpuEvaluator;
@@ -19,6 +26,7 @@ class NativeSearchClient {
     this.script = script;
     this.profile = profile;
     this.device = device;
+    this.inferenceBackend = inferenceBackend === 'libtorch' ? 'libtorch' : 'python-binary';
     this.modelPath = '';
     this.nextId = 1;
     this.pending = new Map();
@@ -60,6 +68,7 @@ class NativeSearchClient {
     const request = JSON.parse(encodeSearchRequest(state, rootPlayerId, legalActions, id));
     request.simulations = this.simulations;
     request.maxDepth = this.maxDepth;
+    request.batchSize = this.batchSize;
     request.cPuct = this.cPuct;
     request.seed = this.seed ^ this.nextId;
     request.gpuEvaluator = this.gpuEvaluator;
@@ -68,6 +77,7 @@ class NativeSearchClient {
       request.script = this.script;
       request.profile = this.profile;
       request.device = this.device;
+      request.inferenceBackend = this.inferenceBackend;
       request.modelPath = this.modelPath;
       request.modelVersion = modelVersion;
     }

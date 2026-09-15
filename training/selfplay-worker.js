@@ -62,13 +62,15 @@ function getNativeSearch() {
     executable: workerData.config.nativeSearchWorker,
     simulations: workerData.config.mctsSimulations || 1,
     maxDepth: workerData.config.mctsMaxDepth || 200,
+    batchSize: workerData.config.mctsBatchSize || 32,
     cPuct: workerData.config.mctsC_puct || 1,
     seed: workerData.config.seed ^ (workerData.workerId * 2654435761),
     gpuEvaluator: workerData.config.mctsEvaluator === 'gpu',
     python: require('node:path').join(__dirname, '..', '.python', 'python.exe'),
     script: require('node:path').join(__dirname, 'gpu_trainer.py'),
     profile: workerData.config.profile,
-    device: workerData.config.backend === 'cpu' ? 'cpu' : 'cuda'
+    device: workerData.config.backend === 'cpu' ? 'cpu' : 'cuda',
+    inferenceBackend: workerData.config.nativeInferenceBackend || 'python-binary'
   });
   return nativeSearch;
 }

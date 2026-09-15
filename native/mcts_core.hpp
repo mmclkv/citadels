@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +13,16 @@
 
 namespace citadels::native {
 
+constexpr size_t kValueSlots = 8;
+
+template <typename State>
+auto state_player_count(const State& state, int) -> decltype(state.players.size(), size_t()) {
+  return state.players.size();
+}
+
+template <typename State>
+size_t state_player_count(const State&, ...) { return 0; }
+
 template <typename State, typename Action>
 struct GameAdapter {
   virtual ~GameAdapter() = default;
@@ -20,11 +31,19 @@ struct GameAdapter {
   virtual int next_player(const State& state) const = 0;
   virtual bool terminal(const State& state) const = 0;
   virtual float terminal_value(const State& state, int root_player) const = 0;
+  virtual std::array<float, kValueSlots> terminal_value_vector(
+      const State& state, int player) const {
+    std::array<float, kValueSlots> result{};
+    result[0] = terminal_value(state, player);
+    return result;
+  }
 };
 
 struct Evaluation {
   std::vector<float> priors;
   float value = 0.0f;
+  std::array<float, kValueSlots> value_vector{};
+  bool has_value_vector = false;
 };
 
 template <typename State, typename Action>
@@ -64,6 +83,7 @@ class Mcts {
   struct Result {
     std::vector<float> policy;
     float value = 0.0f;
+    std::array<float, kValueSlots> value_vector{};
     int visits = 0;
     int expansions = 0;
   };
@@ -74,6 +94,7 @@ class Mcts {
 
   Result search(const State& root_state, int root_player) {
     expansions_ = 0;
+    player_count_ = state_player_count(root_state, 0);
     Node root;
     root.player = root_player;
     root.actions = game_.legal_actions(root_state, root_player);
@@ -87,20 +108,20 @@ class Mcts {
       bool backed_up = false;
       for (int depth = 0; depth < config_.max_depth; ++depth) {
         if (game_.terminal(state)) {
-          backup(path, game_.terminal_value(state, node->player), root_player);
+          backup(path, game_.terminal_value_vector(state, node->player));
           backed_up = true;
           break;
         }
         if (!node->expanded) {
           expand(*node, state);
-          backup(path, node->value, root_player);
+          backup(path, node->value_vector);
           backed_up = true;
           break;
         }
         const size_t index = select(*node);
         if (index >= node->actions.size() ||
             !game_.apply(state, node->player, node->actions[index])) {
-          backup(path, node->value, root_player);
+          backup(path, node->value_vector);
           backed_up = true;
           break;
         }
@@ -113,7 +134,7 @@ class Mcts {
         node = node->children[index].get();
         path.push_back(node);
       }
-      if (!backed_up) backup(path, node->value, root_player);
+      if (!backed_up) backup(path, node->value_vector);
     }
 
     Result result;
@@ -129,7 +150,10 @@ class Mcts {
     } else {
       for (float& value : result.policy) value /= static_cast<float>(result.visits);
     }
-    result.value = root.visits ? root.total / root.visits : root.value;
+    if (root.visits) {
+      for (size_t i = 0; i < kValueSlots; ++i) result.value_vector[i] = root.total[i] / root.visits;
+    } else result.value_vector = root.value_vector;
+    result.value = result.value_vector[0];
     result.expansions = expansions_;
     return result;
   }
@@ -140,7 +164,8 @@ class Mcts {
     std::vector<Action> actions;
     std::vector<float> priors;
     std::vector<std::unique_ptr<Node>> children;
-    float total = 0.0f;
+    std::array<float, kValueSlots> total{};
+    std::array<float, kValueSlots> value_vector{};
     float value = 0.0f;
     int visits = 0;
     bool expanded = false;
@@ -153,7 +178,9 @@ class Mcts {
     if (node.priors.size() != node.actions.size()) {
       node.priors.assign(node.actions.size(), 1.0f / node.actions.size());
     }
-    node.value = evaluation.value;
+    node.value_vector = evaluation.has_value_vector ? evaluation.value_vector : std::array<float, kValueSlots>{};
+    if (!evaluation.has_value_vector) node.value_vector[0] = evaluation.value;
+    node.value = node.value_vector[0];
     node.children.resize(node.actions.size());
     node.expanded = true;
     ++expansions_;
@@ -166,7 +193,8 @@ class Mcts {
     for (size_t i = 0; i < node.actions.size(); ++i) {
       const Node* child = node.children[i].get();
       const float visits = child ? static_cast<float>(child->visits) : 0.0f;
-      const float q = child && child->visits ? child->total / child->visits : 0.0f;
+      const size_t slot = child && player_count_ ? relative_slot(child->player, node.player) : 0;
+      const float q = child && child->visits ? child->total[slot] / child->visits : 0.0f;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       const float u = config_.c_puct * p * std::sqrt(parent) / (1.0f + visits);
       const float score = q + u + (visits == 0 ? 1e-5f * random_unit() : 0.0f);
@@ -175,9 +203,24 @@ class Mcts {
     return best;
   }
 
-  void backup(const std::vector<Node*>& path, float value, int root_player) {
+  size_t relative_slot(int perspective, int target) const {
+    if (!player_count_) return 0;
+    return (static_cast<size_t>((target - perspective + static_cast<int>(player_count_)) %
+                                static_cast<int>(player_count_))) % kValueSlots;
+  }
+
+  void backup(const std::vector<Node*>& path,
+              const std::array<float, kValueSlots>& value) {
+    const int leaf_player = path.back()->player;
     for (Node* node : path) {
-      node->total += value * (node->player == root_player ? 1.0f : -1.0f);
+      if (!player_count_) {
+        node->total[0] += value[0] * (node->player == leaf_player ? 1.0f : -1.0f);
+      } else {
+        for (size_t rel = 0; rel < kValueSlots && rel < player_count_; ++rel) {
+          const int target = (node->player + static_cast<int>(rel)) % static_cast<int>(player_count_);
+          node->total[rel] += value[relative_slot(leaf_player, target)];
+        }
+      }
       ++node->visits;
     }
   }
@@ -189,6 +232,7 @@ class Mcts {
   Config config_;
   std::mt19937 rng_;
   int expansions_ = 0;
+  size_t player_count_ = 0;
 };
 
 // 分批叶节点评估版本。每个 batch 先完成树上选择和状态复制，再调用一次
@@ -205,6 +249,7 @@ class BatchedMcts {
 
   Result search(const State& root_state, int root_player, int batch_size) {
     if (batch_size < 1) batch_size = 1;
+    player_count_ = state_player_count(root_state, 0);
     Node root;
     root.player = root_player;
     root.actions = game_.legal_actions(root_state, root_player);
@@ -216,7 +261,7 @@ class BatchedMcts {
       std::vector<int> players;
       std::vector<std::vector<Action>> actions;
       std::vector<std::vector<Node*>> paths;
-      std::vector<float> terminal_values;
+      std::vector<std::array<float, kValueSlots>> terminal_values;
       std::vector<bool> terminal;
       for (int i = 0; i < count; ++i) {
         State state = root_state;
@@ -225,11 +270,11 @@ class BatchedMcts {
         bool collected = false;
         for (int depth = 0; depth < config_.max_depth; ++depth) {
           if (game_.terminal(state)) {
-            terminal.push_back(true); terminal_values.push_back(game_.terminal_value(state, node->player));
+            terminal.push_back(true); terminal_values.push_back(game_.terminal_value_vector(state, node->player));
             paths.push_back(std::move(path)); collected = true; break;
           }
           if (!node->expanded) {
-            terminal.push_back(false); terminal_values.push_back(0.0f);
+            terminal.push_back(false); terminal_values.push_back({});
             states.push_back(std::move(state)); players.push_back(node->player);
             actions.push_back(node->actions); paths.push_back(std::move(path));
             collected = true; break;
@@ -237,7 +282,7 @@ class BatchedMcts {
           const size_t index = select(*node);
           if (index >= node->actions.size() ||
               !game_.apply(state, node->player, node->actions[index])) {
-            terminal.push_back(true); terminal_values.push_back(node->value);
+            terminal.push_back(true); terminal_values.push_back(node->value_vector);
             paths.push_back(std::move(path)); collected = true; break;
           }
           if (!node->children[index]) {
@@ -249,21 +294,29 @@ class BatchedMcts {
           path.push_back(node);
         }
         if (!collected) {
-          terminal.push_back(true); terminal_values.push_back(node->value);
+          terminal.push_back(true); terminal_values.push_back(node->value_vector);
           paths.push_back(std::move(path));
         }
+        // 批量收集叶节点期间先加临时访问次数，让同一 batch 内的后续
+        // simulation 能看到前面路径，避免所有叶节点都挤在同一条根分支。
+        // 真正 backup 前会撤销这些 virtual visits，再写入真实统计量。
+        for (Node* visited : paths.back()) ++visited->visits;
       }
+      for (const auto& path : paths)
+        for (Node* visited : path) --visited->visits;
       std::vector<Evaluation> evaluations;
       if (!states.empty()) evaluations = evaluator_.evaluate_batch(states, players, actions);
       size_t eval_index = 0;
       for (size_t i = 0; i < paths.size(); ++i) {
-        float value = terminal_values[i];
+        std::array<float, kValueSlots> value = terminal_values[i];
         if (!terminal[i] && eval_index < evaluations.size()) {
-          value = evaluations[eval_index].value;
+          value = evaluations[eval_index].has_value_vector
+              ? evaluations[eval_index].value_vector : std::array<float, kValueSlots>{};
+          if (!evaluations[eval_index].has_value_vector) value[0] = evaluations[eval_index].value;
           expand(*paths[i].back(), states[eval_index], evaluations[eval_index]);
           ++eval_index;
         }
-        backup(paths[i], value, root_player);
+        backup(paths[i], value);
       }
     }
     return result(root);
@@ -272,7 +325,10 @@ class BatchedMcts {
  private:
   struct Node {
     int player = 0; std::vector<Action> actions; std::vector<float> priors;
-    std::vector<std::unique_ptr<Node>> children; float total = 0; float value = 0;
+    std::vector<std::unique_ptr<Node>> children;
+    std::array<float, kValueSlots> total{};
+    std::array<float, kValueSlots> value_vector{};
+    float value = 0;
     int visits = 0; bool expanded = false;
   };
   void expand(Node& node, const State& state) {
@@ -283,7 +339,9 @@ class BatchedMcts {
     node.priors = evaluation.priors;
     if (node.priors.size() != node.actions.size())
       node.priors.assign(node.actions.size(), 1.0f / node.actions.size());
-    node.value = evaluation.value; node.children.resize(node.actions.size()); node.expanded = true;
+    node.value_vector = evaluation.has_value_vector ? evaluation.value_vector : std::array<float, kValueSlots>{};
+    if (!evaluation.has_value_vector) node.value_vector[0] = evaluation.value;
+    node.value = node.value_vector[0]; node.children.resize(node.actions.size()); node.expanded = true;
   }
   size_t select(const Node& node) const {
     size_t best = 0; float score_best = -std::numeric_limits<float>::infinity();
@@ -291,15 +349,30 @@ class BatchedMcts {
     for (size_t i = 0; i < node.actions.size(); ++i) {
       const Node* child = node.children[i].get();
       const float visits = child ? static_cast<float>(child->visits) : 0.0f;
-      const float q = child && child->visits ? child->total / child->visits : 0.0f;
+      const size_t slot = child && player_count_ ? relative_slot(child->player, node.player) : 0;
+      const float q = child && child->visits ? child->total[slot] / child->visits : 0.0f;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       const float score = q + config_.c_puct * p * std::sqrt(parent) / (1.0f + visits);
       if (score > score_best) { score_best = score; best = i; }
     }
     return best;
   }
-  void backup(const std::vector<Node*>& path, float value, int root_player) {
-    for (Node* node : path) { node->total += value * (node->player == root_player ? 1.0f : -1.0f); ++node->visits; }
+  size_t relative_slot(int perspective, int target) const {
+    if (!player_count_) return 0;
+    return (static_cast<size_t>((target - perspective + static_cast<int>(player_count_)) %
+                                static_cast<int>(player_count_))) % kValueSlots;
+  }
+  void backup(const std::vector<Node*>& path,
+              const std::array<float, kValueSlots>& value) {
+    const int leaf_player = path.back()->player;
+    for (Node* node : path) {
+      if (!player_count_) node->total[0] += value[0] * (node->player == leaf_player ? 1.0f : -1.0f);
+      else for (size_t rel = 0; rel < kValueSlots && rel < player_count_; ++rel) {
+        const int target = (node->player + static_cast<int>(rel)) % static_cast<int>(player_count_);
+        node->total[rel] += value[relative_slot(leaf_player, target)];
+      }
+      ++node->visits;
+    }
   }
   Result result(const Node& root) const {
     Result output; output.policy.resize(root.actions.size(), 0.0f);
@@ -308,10 +381,13 @@ class BatchedMcts {
     }
     if (output.visits) for (float& value : output.policy) value /= output.visits;
     else output.policy = root.priors;
-    output.value = root.visits ? root.total / root.visits : root.value;
+    if (root.visits) for (size_t i = 0; i < kValueSlots; ++i) output.value_vector[i] = root.total[i] / root.visits;
+    else output.value_vector = root.value_vector;
+    output.value = output.value_vector[0];
     return output;
   }
   const GameAdapter<State, Action>& game_; BatchedEvaluator<State, Action>& evaluator_; Config config_;
+  size_t player_count_ = 0;
 };
 
 }  // namespace citadels::native

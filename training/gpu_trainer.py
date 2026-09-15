@@ -3,6 +3,7 @@ import array
 import gzip
 import json
 import os
+import struct
 import sys
 
 import torch
@@ -14,6 +15,143 @@ PROFILES = {
     "balanced": (384, 256, 256, 128, 128),
     "large": (512, 384, 384, 192, 192),
 }
+VALUE_SLOTS = 8
+
+BINARY_MAGIC = 0x31425443  # "CTB1" little-endian.
+BINARY_BATCH_EVAL = 1
+BINARY_BATCH_RESULT = 2
+BINARY_RELOAD = 3
+BINARY_CLOSE = 4
+BINARY_ACK = 5
+BINARY_ERROR = 0xFFFFFFFF
+
+
+def read_exact(stream, size):
+    chunks = []
+    remaining = size
+    while remaining:
+        chunk = stream.read(remaining)
+        if not chunk:
+            raise EOFError("binary GPU stream closed")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def read_binary_frame(stream):
+    header = read_exact(stream, 8)
+    magic, size = struct.unpack("<II", header)
+    if magic != BINARY_MAGIC or size > (1 << 28):
+        raise ValueError("binary GPU frame header invalid")
+    return read_exact(stream, size)
+
+
+def write_binary_frame(stream, payload):
+    stream.write(struct.pack("<II", BINARY_MAGIC, len(payload)))
+    stream.write(payload)
+    stream.flush()
+
+
+def binary_error(message):
+    encoded = str(message).encode("utf-8", errors="replace")
+    return struct.pack("<II", BINARY_ERROR, len(encoded)) + encoded
+
+
+def binary_batch_eval(payload, model, device):
+    # Use a writable backing buffer so torch.frombuffer does not emit a warning
+    # on stderr; the native binary client expects stdout to contain frames only.
+    payload = bytearray(payload)
+    offset = 0
+
+    def take_u32():
+        nonlocal offset
+        if offset + 4 > len(payload):
+            raise ValueError("binary batch_eval payload truncated")
+        value = struct.unpack_from("<I", payload, offset)[0]
+        offset += 4
+        return value
+
+    command = take_u32()
+    if command != BINARY_BATCH_EVAL:
+        raise ValueError("binary GPU command is not batch_eval")
+    count = take_u32()
+    state_size = take_u32()
+    action_size = take_u32()
+    action_counts = [take_u32() for _ in range(count)]
+    if not count or not state_size or not action_size:
+        raise ValueError("binary batch_eval dimensions invalid")
+    state_bytes = count * state_size * 4
+    if offset + state_bytes > len(payload):
+        raise ValueError("binary batch_eval states truncated")
+    state_buffer = memoryview(payload)[offset:offset + state_bytes]
+    offset += state_bytes
+    states_cpu = torch.frombuffer(state_buffer, dtype=torch.float32).reshape(count, state_size).clone()
+
+    maximum = max(1, max(action_counts, default=1))
+    actions_cpu = torch.zeros((count, maximum, action_size), dtype=torch.float32)
+    for row, action_count in enumerate(action_counts):
+        byte_count = action_count * action_size * 4
+        if offset + byte_count > len(payload):
+            raise ValueError("binary batch_eval actions truncated")
+        if action_count:
+            source = memoryview(payload)[offset:offset + byte_count]
+            values = torch.frombuffer(source, dtype=torch.float32).reshape(action_count, action_size)
+            actions_cpu[row, :action_count].copy_(values)
+        offset += byte_count
+    if offset != len(payload):
+        raise ValueError("binary batch_eval payload has trailing bytes")
+
+    mask_cpu = torch.zeros((count, maximum), dtype=torch.bool)
+    for row, action_count in enumerate(action_counts):
+        mask_cpu[row, :action_count] = True
+    states = states_cpu.to(device)
+    actions = actions_cpu.to(device)
+    mask = mask_cpu.to(device)
+    temperatures = torch.ones(count, dtype=torch.float32, device=device)
+    with torch.inference_mode():
+        logits, values = model(states, actions, mask, temperatures)
+        probs = torch.softmax(logits, dim=-1).cpu().contiguous()
+        values = values.cpu().contiguous()
+
+    output = bytearray()
+    output.extend(struct.pack("<II", BINARY_BATCH_RESULT, count))
+    for row, action_count in enumerate(action_counts):
+        output.extend(struct.pack("<I", action_count))
+        if action_count:
+            output.extend(probs[row, :action_count].numpy().astype("<f4", copy=False).tobytes())
+        output.extend(values[row].numpy().astype("<f4", copy=False).tobytes())
+    return bytes(output)
+
+
+def run_binary_protocol(model, device):
+    stream = sys.stdin.buffer
+    output = sys.stdout.buffer
+    while True:
+        payload = read_binary_frame(stream)
+        try:
+            if len(payload) < 4:
+                raise ValueError("binary GPU command truncated")
+            command = struct.unpack_from("<I", payload, 0)[0]
+            if command == BINARY_BATCH_EVAL:
+                response = binary_batch_eval(payload, model, device)
+            elif command == BINARY_RELOAD:
+                if len(payload) < 8:
+                    raise ValueError("binary reload payload truncated")
+                length = struct.unpack_from("<I", payload, 4)[0]
+                if 8 + length != len(payload):
+                    raise ValueError("binary reload path length invalid")
+                model.load_flat(payload[8:8 + length].decode("utf-8"))
+                model.to(device)
+                response = struct.pack("<II", BINARY_ACK, BINARY_RELOAD)
+            elif command == BINARY_CLOSE:
+                response = struct.pack("<II", BINARY_ACK, BINARY_CLOSE)
+                write_binary_frame(output, response)
+                return
+            else:
+                raise ValueError("unknown binary GPU command")
+        except Exception as error:
+            response = binary_error(error)
+        write_binary_frame(output, response)
 
 
 class PolicyValueNet(nn.Module):
@@ -26,14 +164,14 @@ class PolicyValueNet(nn.Module):
         self.policy2 = nn.Linear(ph, pm)
         self.policy_out = nn.Linear(pm, 1)
         self.value1 = nn.Linear(latent, vh)
-        self.value_out = nn.Linear(vh, 1)
+        self.value_out = nn.Linear(vh, VALUE_SLOTS)
         self.ordered = [self.state1, self.state2, self.policy1, self.policy2,
                         self.policy_out, self.value1, self.value_out]
 
     def forward(self, states, actions, mask, temperatures):
         latent = torch.nn.functional.elu(self.state1(states))
         latent = torch.nn.functional.elu(self.state2(latent))
-        value = self.value_out(torch.nn.functional.elu(self.value1(latent))).squeeze(-1)
+        value = self.value_out(torch.nn.functional.elu(self.value1(latent)))
         expanded = latent.unsqueeze(1).expand(-1, actions.shape[1], -1)
         policy = torch.cat((expanded, actions), dim=-1)
         policy = torch.nn.functional.elu(self.policy1(policy))
@@ -74,7 +212,7 @@ def load_rollout(filename):
         rows = json.load(handle)
     maximum = max(len(row["actions"]) for row in rows)
     states, actions, masks = [], [], []
-    chosen, old_probs, old_values, rewards, temperatures = [], [], [], [], []
+    chosen, old_probs, old_values, rewards, value_masks, temperatures = [], [], [], [], [], []
     pi_targets = []
     has_pi = False
     for row in rows:
@@ -84,8 +222,9 @@ def load_rollout(filename):
         masks.append([True] * count + [False] * (maximum - count))
         chosen.append(row["chosen"])
         old_probs.append(row["oldProb"])
-        old_values.append(row["oldValue"])
-        rewards.append(row["reward"])
+        old_values.append((list(row.get("oldValueVector", [row.get("oldValue", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS])
+        rewards.append((list(row.get("rewardVector", [row.get("reward", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS])
+        value_masks.append((list(row.get("valueMask", [1.0])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS])
         temperatures.append(row.get("temperature", 1.0))
         if "pi" in row and row["pi"]:
             row_pi = list(row["pi"]) + [0.0] * (maximum - len(row["pi"]))
@@ -101,6 +240,7 @@ def load_rollout(filename):
         "old_probs": torch.tensor(old_probs, dtype=torch.float32),
         "old_values": torch.tensor(old_values, dtype=torch.float32),
         "rewards": torch.tensor(rewards, dtype=torch.float32),
+        "value_masks": torch.tensor(value_masks, dtype=torch.float32),
         "temperatures": torch.tensor(temperatures, dtype=torch.float32),
     }
     if has_pi:
@@ -119,7 +259,7 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_los
     has_pi = "pi" in data
     use_mcts_ce = policy_loss_mode == "mcts_ce" or (policy_loss_mode == "auto" and has_pi)
     size = len(data["rewards"])
-    advantages = data["rewards"] - data["old_values"]
+    advantages = data["rewards"][:, 0] - data["old_values"][:, 0]
     advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
     for _ in range(epochs):
         for indices in torch.randperm(size).split(batch_size):
@@ -153,7 +293,10 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_los
                 policy_loss = -torch.minimum(ratio * adv, clipped * adv).mean()
                 approx_kl = (old.log() - selected.log()).mean()
                 clip_frac = ((ratio - 1.0).abs() > 0.2).float().mean()
-            value_loss = torch.nn.functional.mse_loss(values, batch["rewards"])
+            squared_value_error = (values - batch["rewards"]) ** 2
+            value_mask = batch["value_masks"]
+            value_loss = ((squared_value_error * value_mask).sum(dim=-1) /
+                          value_mask.sum(dim=-1).clamp_min(1.0)).mean()
             masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
             entropy = -(masked_probs * masked_probs.log()).sum(dim=-1).mean()
             loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
@@ -191,8 +334,9 @@ def reply(value):
 
 def main():
     model = optimizer = device = None
-    for line in sys.stdin:
+    for raw_line in sys.stdin.buffer:
         try:
+            line = raw_line.decode("utf-8")
             command = json.loads(line)
             if command["cmd"] == "init":
                 requested = command.get("device", "auto")
@@ -203,17 +347,22 @@ def main():
                 model = PolicyValueNet(command["profile"])
                 model.load_flat(command["modelPath"])
                 model.to(device)
+                model.eval()
                 optimizer = torch.optim.Adam(model.parameters(), lr=command["learningRate"])
                 optimizer_path = command.get("optimizerPath")
                 if optimizer_path and os.path.exists(optimizer_path):
                     optimizer.load_state_dict(torch.load(optimizer_path, map_location=device, weights_only=True))
                 reply({"ok": True, "device": str(device), "torch": torch.__version__,
                        "cuda": torch.version.cuda, "gpu": torch.cuda.get_device_name(0) if use_cuda else ""})
+                if command.get("protocol") == "binary":
+                    run_binary_protocol(model, device)
+                    return
             elif command["cmd"] == "reload":
                 if model is None:
                     raise RuntimeError("GPU 训练器尚未 init")
                 model.load_flat(command["modelPath"])
                 model.to(device)
+                model.eval()
                 reply({"ok": True})
             elif command["cmd"] == "train":
                 data = load_rollout(command["rolloutPath"])
@@ -244,16 +393,17 @@ def main():
                 actions = torch.tensor(padded_actions, dtype=torch.float32, device=device)
                 mask = torch.tensor(masks, dtype=torch.bool, device=device)
                 temperatures = torch.ones(len(states), dtype=torch.float32, device=device)
-                with torch.no_grad():
+                with torch.inference_mode():
                     logits, values = model(states, actions, mask, temperatures)
                     probs = torch.softmax(logits, dim=-1)
                 probs_cpu = probs.cpu().tolist()
-                values_cpu = values.cpu().tolist()
+                value_vectors_cpu = values.cpu().tolist()
+                values_cpu = [row[0] for row in value_vectors_cpu]
                 # 截断到每个样本真实动作数（PyTorch 输出是 padding 后的固定宽度）
                 trimmed = [probs_cpu[i][:len(action_groups[i])] for i in range(len(probs_cpu))]
                 if device.type == "cuda":
                     torch.cuda.reset_peak_memory_stats()
-                reply({"ok": True, "probsList": trimmed, "values": values_cpu})
+                reply({"ok": True, "probsList": trimmed, "valueVectors": value_vectors_cpu, "values": values_cpu})
             elif command["cmd"] == "checkpoint":
                 torch.save(optimizer.state_dict(), command["optimizerPath"])
                 reply({"ok": True})

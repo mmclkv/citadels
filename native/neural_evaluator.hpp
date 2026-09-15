@@ -11,8 +11,8 @@
 
 namespace citadels::native {
 
-inline std::vector<float> encode_network_state(const NativeGameState& state) {
-  auto features = encode_features(state);
+inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1) {
+  auto features = encode_features(state, player);
   features.resize(192, 0.0f);
   return features;
 }
@@ -30,20 +30,21 @@ class NativeNeuralBatchedEvaluator final
   NativeNeuralBatchedEvaluator(BatchEvaluator& backend, std::string profile)
       : backend_(backend), profile_(std::move(profile)) {}
 
-  Evaluation evaluate(const NativeGameState& state, int,
+  Evaluation evaluate(const NativeGameState& state, int player,
                       const std::vector<NativeSearchAction>& actions) override {
-    const auto result = evaluate_batch({state}, {0}, {actions});
+    const auto result = evaluate_batch({state}, {player}, {actions});
     if (result.empty()) return {};
     return result.front();
   }
 
   std::vector<Evaluation> evaluate_batch(
-      const std::vector<NativeGameState>& states, const std::vector<int>&,
+      const std::vector<NativeGameState>& states, const std::vector<int>& players,
       const std::vector<std::vector<NativeSearchAction>>& actions) override {
     std::vector<std::vector<float>> state_vectors;
     std::vector<std::vector<std::vector<float>>> action_vectors;
     state_vectors.reserve(states.size()); action_vectors.reserve(actions.size());
-    for (const auto& state : states) state_vectors.push_back(encode_network_state(state));
+    for (size_t i = 0; i < states.size(); ++i)
+      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1));
     for (const auto& group : actions) {
       action_vectors.emplace_back();
       for (const auto& action : group) action_vectors.back().push_back(encode_network_action(action));
@@ -54,8 +55,19 @@ class NativeNeuralBatchedEvaluator final
     const auto result = backend_.evaluate(requests);
     std::vector<Evaluation> output;
     if (result.policies.size() != states.size()) return output;
-    for (size_t i = 0; i < states.size(); ++i)
-      output.push_back({result.policies[i], result.values[i]});
+    for (size_t i = 0; i < states.size(); ++i) {
+      Evaluation evaluation;
+      evaluation.priors = result.policies[i];
+      if (result.value_vectors.size() == states.size()) {
+        evaluation.value_vector = result.value_vectors[i];
+        evaluation.value = evaluation.value_vector[0];
+        evaluation.has_value_vector = true;
+      } else if (result.values.size() == states.size()) {
+        evaluation.value = result.values[i];
+        evaluation.value_vector[0] = evaluation.value;
+      }
+      output.push_back(std::move(evaluation));
+    }
     return output;
   }
 

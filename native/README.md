@@ -35,3 +35,20 @@
 
 当前文件不替换线上 JS 路径。完成规则适配和一致性测试后，才会启用 native
 路径，避免训练数据因规则差异失真。
+
+## 神经网络后端
+
+native search worker 的 GPU evaluator 有两种模式：
+
+- `python-binary`：默认模式。C++ 通过长驻 `gpu_trainer.py`，使用带长度帧的
+  float32 二进制批量协议，不再在每个 batch 上编码/解析 JSON。
+- `libtorch`：可选直连模式。C++ 直接加载项目 Python wheel 内的 LibTorch，绕过
+  Python 进程和 IPC。该模式需要用 C++20、`CITADELS_LIBTORCH` 以及 torch 的
+  include/lib 重新编译 `search_worker`；Node 侧配置
+  `nativeInferenceBackend: 'libtorch'` 后启用。
+
+两种模式都使用同一份 flat float32 权重文件，并保留 `modelVersion` 热加载逻辑。
+
+价值头固定输出 8 个玩家槽位。slot 0 是当前行动者，后续槽位按座位顺序循环排列；
+不足 8 人的槽位为无效 mask。search worker 返回 `valueVector`，同时保留
+`value = valueVector[0]` 供旧客户端兼容；GPU batch 协议也返回 8 个 float 的向量。

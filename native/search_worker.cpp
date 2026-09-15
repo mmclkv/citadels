@@ -1,6 +1,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <array>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -11,6 +12,9 @@
 #include "gpu_trainer_client.hpp"
 #include "neural_evaluator.hpp"
 #include "state_loader.hpp"
+#ifdef CITADELS_LIBTORCH
+#include "libtorch_evaluator.hpp"
+#endif
 
 using namespace citadels::native;
 
@@ -58,7 +62,9 @@ int main() {
   std::shared_ptr<GpuTrainerClient> gpu;
   std::unique_ptr<BatchEvaluator> batch;
   std::unique_ptr<NativeNeuralBatchedEvaluator> neural;
-  std::unique_ptr<NativeNeuralEvaluator> neural_single;
+#ifdef CITADELS_LIBTORCH
+  std::unique_ptr<LibTorchNeuralBatchedEvaluator> direct_neural;
+#endif
   std::string gpu_model_path;
   int gpu_model_version = -1;
   while (std::getline(std::cin, line)) {
@@ -81,23 +87,34 @@ int main() {
 
       NativeGameAdapter game;
       UniformNativeEvaluator evaluator;
+      const auto inference_backend = string_field(request, "inferenceBackend", "python-binary");
       if (bool_field(request, "gpuEvaluator") && !string_field(request, "modelPath").empty()) {
         const auto model_path = string_field(request, "modelPath");
         const int model_version = int_field(request, "modelVersion", 0);
-        if (!gpu) {
+        if (inference_backend == "libtorch") {
+#ifdef CITADELS_LIBTORCH
+          if (!direct_neural) {
+            direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
+              string_field(request, "profile", "balanced"), model_path,
+              string_field(request, "device", "cuda"));
+          } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
+            direct_neural->reload_model(model_path);
+          }
+#else
+          throw std::runtime_error("当前 search_worker 未编译 LibTorch 后端");
+#endif
+        } else if (!gpu) {
           gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));
           gpu->start(string_field(request, "profile", "balanced"), model_path, 0.0003f,
-                     string_field(request, "device", "cuda"));
+                     string_field(request, "device", "cuda"), "binary");
           batch = std::make_unique<BatchEvaluator>(make_gpu_batch_backend(gpu,
             string_field(request, "profile", "balanced")));
           neural = std::make_unique<NativeNeuralBatchedEvaluator>(*batch,
             string_field(request, "profile", "balanced"));
-          neural_single = std::make_unique<NativeNeuralEvaluator>(*neural);
-          gpu_model_path = model_path;
         } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
           gpu->reload_model(model_path);
-          gpu_model_path = model_path;
         }
+        gpu_model_path = model_path;
         gpu_model_version = model_version;
       }
       Mcts<NativeGameState, NativeSearchAction>::Config config;
@@ -105,12 +122,15 @@ int main() {
       config.max_depth = std::max(1, int_field(request, "maxDepth", 200));
       config.c_puct = static_cast<float>(number_field(request, "cPuct", 1.0));
       config.seed = static_cast<uint32_t>(int_field(request, "seed", 1));
+      const int batch_size = std::max(1, int_field(request, "batchSize", 32));
       const auto native_actions = game.legal_actions(state, root);
       std::vector<float> policy;
       float root_value = 0.0f;
+      std::array<float, kValueSlots> root_value_vector{};
       int visits = 0, expansions = 0;
-      if (native_actions.size() == supplied.size()) {
-        bool same_order = true;
+      bool actions_match = native_actions.size() == supplied.size();
+      int mismatch_index = actions_match ? -1 : 0;
+      if (actions_match) {
         for (size_t i = 0; i < supplied.size(); ++i) {
           if (native_actions[i].type != supplied[i].type ||
               (!supplied[i].uid.empty() && native_actions[i].uid != supplied[i].uid) ||
@@ -119,17 +139,30 @@ int main() {
                native_actions[i].secondary_uid != supplied[i].secondary_uid) ||
               (!supplied[i].selected_uids.empty() &&
                native_actions[i].selected_uids != supplied[i].selected_uids)) {
-            same_order = false; break;
+            actions_match = false;
+            mismatch_index = static_cast<int>(i);
+            break;
           }
         }
-        if (same_order) {
-          auto* selected_evaluator = neural_single
-            ? static_cast<Evaluator<NativeGameState, NativeSearchAction>*>(neural_single.get())
-            : static_cast<Evaluator<NativeGameState, NativeSearchAction>*>(&evaluator);
-          const auto result = Mcts<NativeGameState, NativeSearchAction>(game, *selected_evaluator, config)
-            .search(state, root);
+        if (actions_match) {
+          Mcts<NativeGameState, NativeSearchAction>::Result result;
+#ifdef CITADELS_LIBTORCH
+          if (direct_neural) {
+            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
+              .search(state, root, batch_size);
+          } else if (neural) {
+#else
+          if (neural) {
+#endif
+            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
+              .search(state, root, batch_size);
+          } else {
+            result = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
+              .search(state, root);
+          }
           policy = result.policy; visits = result.visits; expansions = result.expansions;
           root_value = result.value;
+          root_value_vector = result.value_vector;
         }
       }
       if (policy.size() != supplied.size()) policy.assign(supplied.size(), 1.0f / supplied.size());
@@ -139,9 +172,27 @@ int main() {
         if (i) std::cout << ',';
         std::cout << policy[i];
       }
+      std::cout << "],\"valueVector\":[";
+      for (size_t i = 0; i < kValueSlots; ++i) {
+        if (i) std::cout << ',';
+        std::cout << root_value_vector[i];
+      }
       std::cout << "],\"value\":" << root_value << ",\"visits\":" << visits
                 << ",\"expansions\":" << expansions
-                << ",\"backend\":\"native-mcts\"}\n" << std::flush;
+                << ",\"fallback\":" << (actions_match ? "false" : "true")
+                << ",\"nativeActionCount\":" << native_actions.size()
+                << ",\"mismatchIndex\":" << mismatch_index
+                << ",\"nativeActionTypes\":[";
+      for (size_t i = 0; i < native_actions.size(); ++i) {
+        if (i) std::cout << ',';
+        std::cout << '"' << action_type_name(native_actions[i].type) << '"';
+      }
+      std::cout << "],\"suppliedActionTypes\":[";
+      for (size_t i = 0; i < supplied.size(); ++i) {
+        if (i) std::cout << ',';
+        std::cout << '"' << action_type_name(supplied[i].type) << '"';
+      }
+      std::cout << "],\"backend\":\"native-mcts\"}\n" << std::flush;
     } catch (const std::exception& error) {
       emit_error(id, error.what());
     }
