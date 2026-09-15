@@ -138,6 +138,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   const auto* turn = snapshot.get("turn");
   if (turn && turn->is_object()) {
     state.active_player = int_field(*turn, "playerIdx", -1);
+    state.turn_phase = string_field(*turn, "phase", "main");
     state.resources_taken = bool_field(*turn, "takenResources");
     state.income_taken = bool_field(*turn, "incomeTaken");
     state.monk_extra_taken = bool_field(*turn, "monkExtraTaken");

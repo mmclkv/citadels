@@ -50,6 +50,7 @@ struct NativeGameState {
   DeckMachine deck;
   JsRng rng;
   int active_player = -1;
+  std::string turn_phase;
   int round = 1;
   int turns_completed = 0;
   int end_districts = 8;
@@ -340,7 +341,8 @@ struct NativeGameState {
   bool take_gold() {
     auto* p = active();
     if (!p || resources_taken) return false;
-    p->gold += plan_take_gold(p->role_id, ResourcePhase::Main).gold;
+    p->gold += plan_take_gold(p->role_id,
+      turn_phase == "witch_resume" ? ResourcePhase::WitchResume : ResourcePhase::Main).gold;
     resources_taken = true;
     after_resources();
     return true;
@@ -353,7 +355,8 @@ struct NativeGameState {
       [](const NativeDistrict& d) { return d.effect == "keepBoth"; });
     const bool draw_three = !keep_both && std::any_of(p->city.begin(), p->city.end(),
       [](const NativeDistrict& d) { return d.effect == "draw3keep1"; });
-    const auto plan = plan_take_cards(p->role_id, ResourcePhase::Main,
+    const auto plan = plan_take_cards(p->role_id,
+      turn_phase == "witch_resume" ? ResourcePhase::WitchResume : ResourcePhase::Main,
       draw_three ? DistrictDrawEffect::Observatory : (keep_both ? DistrictDrawEffect::Library : effect));
     auto cards = deck.draw(plan.drawn, rng);
     p->gold += plan.gold;
@@ -371,7 +374,7 @@ struct NativeGameState {
 
   void after_resources() {
     auto* p = active();
-    if (!p || ability_used || !pending_kind.empty()) return;
+    if (!p || turn_phase == "witch_resume" || ability_used || !pending_kind.empty()) return;
     if (p->role_id == "navigator") { pending_kind = "navigator_bonus"; return; }
     if (p->role_id == "scholar") {
       pending_cards = deck.draw(7, rng);
@@ -523,7 +526,7 @@ struct NativeGameState {
       if (d.effect == "quarry") ++quarry;
     }
     BuildCard card{resolved_name, it->color, it->cost};
-    BuildContext context{p->role_id, false, p->gold, builds, 1, same, quarry};
+    BuildContext context{p->role_id, turn_phase == "witch_resume", p->gold, builds, 1, same, quarry};
     if (!can_build(card, context)) return false;
     p->gold -= it->cost;
     spent_on_build += it->cost;
