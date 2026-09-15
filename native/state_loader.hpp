@@ -77,6 +77,7 @@ inline NativePhase load_phase(const JsonValue& snapshot) {
   if (phase == "lobby") return NativePhase::Lobby;
   if (phase == "draft") return NativePhase::Draft;
   if (phase == "action") return NativePhase::Action;
+  if (phase == "roundConfirm") return NativePhase::RoundConfirm;
   if (phase == "gameover") return NativePhase::GameOver;
   return NativePhase::Unknown;
 }
@@ -202,7 +203,10 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   const auto* round_confirm = snapshot.get("roundConfirm");
   if (round_confirm && round_confirm->is_object()) {
     const auto* confirmed = round_confirm->get("confirmed");
-    if (confirmed && confirmed->is_array()) state.round_confirm_count = static_cast<int>(confirmed->as_array().size());
+    if (confirmed && confirmed->is_array()) {
+      for (const auto& value : confirmed->as_array()) state.round_confirmed.push_back(value.is_bool() && value.as_bool());
+      state.round_confirm_count = static_cast<int>(std::count(state.round_confirmed.begin(), state.round_confirmed.end(), true));
+    }
   }
   if (state.active_player < 0 || state.active_player >= static_cast<int>(state.players.size()))
     state.active_player = 0;

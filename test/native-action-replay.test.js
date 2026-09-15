@@ -175,6 +175,38 @@ test('C++ 原生状态可以回放预言家逐个归还手牌', async t => {
     expected.players.map(p => ({ id: p.id, handCount: p.handCount })));
 });
 
+test('C++ 原生状态可以回放轮末确认并初始化下一轮选角', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过轮末确认回放检查'); return; }
+  const seats = [0, 1].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 131, charSetMode: 'base' });
+  Engine.startGame(initial);
+  initial.phase = 'roundConfirm'; initial.turn = null; initial.draft = null; initial.reaction = null;
+  initial.roundConfirm = { round: initial.round, confirmed: [false, false] };
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (const playerId of ['p0', 'p1']) {
+    const record = recordAppliedAction(state, playerId, { type: 'confirm_round' }, Engine.applyAction);
+    assert.equal(record.ok, true, 'JS 应成功确认轮末战果');
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'round-confirm-trace'));
+  child.stdin.end();
+  const native = await response; child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 轮末确认回放失败');
+  assert.equal(native.phase, expected.phase);
+  assert.equal(native.round, expected.round);
+  assert.deepEqual(native.players.map(p => ({ id: p.id, chars: p.chars })),
+    expected.players.map(p => ({ id: p.id, chars: p.chars })));
+});
+
 test('C++ 原生状态可以逐动作回放选角阶段', async t => {
   const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过选角回放检查'); return; }

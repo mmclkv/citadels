@@ -77,6 +77,7 @@ struct NativeGameState {
   DistrictCard reaction_card;
   bool has_reaction_card = false;
   int round_confirm_count = 0;
+  std::vector<bool> round_confirmed;
   std::string pending_kind;
   std::vector<std::string> char_deck;
   int assassinated = -1;
@@ -403,6 +404,75 @@ struct NativeGameState {
     }
     if (p->role_id == "prophet") return prophet_collect();
     return false;
+  }
+
+  static int role_number(const std::string& id) {
+    static const std::vector<std::string> ids = {
+      "assassin", "thief", "magician", "king", "bishop", "merchant", "architect", "warlord",
+      "witch", "emperor", "navigator", "scholar", "prophet", "artist", "marshal", "noble", "alchemist"
+    };
+    const auto it = std::find(ids.begin(), ids.end(), id);
+    return it == ids.end() ? -1 : static_cast<int>(it - ids.begin()) + 1;
+  }
+
+  bool begin_next_round() {
+    if (players.size() < 2 || char_deck.empty()) return false;
+    ++round;
+    for (auto& player : players) { player.role_ids.clear(); player.role_id.clear(); }
+    pending_kind.clear(); pending_queue.clear(); pending_cards.clear(); pending_selected.clear();
+    reaction_kind.clear(); reaction_queue.clear(); has_reaction_card = false; reaction_player = -1;
+    std::vector<std::string> pool = char_deck;
+    for (size_t i = pool.size(); i > 1; --i) {
+      const size_t j = static_cast<size_t>(rng.next() * static_cast<double>(i));
+      std::swap(pool[i - 1], pool[j]);
+    }
+    draft_pool.clear(); draft_face_up.clear(); draft_face_down.clear(); draft_steps.clear();
+    const int n = static_cast<int>(players.size());
+    int crown = 0;
+    for (size_t i = 0; i < players.size(); ++i) if (players[i].has_crown) crown = static_cast<int>(i);
+    std::vector<int> order;
+    for (int k = 0; k < n; ++k) order.push_back((crown + k) % n);
+    if (n == 2) {
+      if (!pool.empty()) { draft_face_down.push_back(pool.front()); pool.erase(pool.begin()); }
+      draft_steps = {{order[0], 1, 0, false}, {order[1], 1, 1, false},
+                     {order[0], 1, 1, false}, {order[1], 1, 0, false}};
+    } else if (n == 3) {
+      if (!pool.empty()) { draft_face_down.push_back(pool.front()); pool.erase(pool.begin()); }
+      for (int k = 0; k < 6; ++k) draft_steps.push_back({order[k % 3], 1, 0, false});
+    } else {
+      const int up = std::max(0, static_cast<int>(pool.size()) - n - 2);
+      for (int k = 0; k < up && !pool.empty(); ++k) {
+        int picked = -1;
+        for (int tries = 0; tries < 50; ++tries) {
+          const int candidate = static_cast<int>(rng.next() * pool.size());
+          if (role_number(pool[candidate]) != 4) { picked = candidate; break; }
+        }
+        if (picked < 0) picked = static_cast<int>(rng.next() * pool.size());
+        draft_face_up.push_back(pool[picked]);
+        pool.erase(pool.begin() + picked);
+      }
+      if (!pool.empty()) {
+        const size_t picked = static_cast<size_t>(rng.next() * pool.size());
+        draft_face_down.push_back(pool[picked]); pool.erase(pool.begin() + picked);
+      }
+      for (int k = 0; k < n; ++k) draft_steps.push_back({order[k], 1, 0, false});
+      if (n >= 7 && !draft_steps.empty()) draft_steps.back().from_face_down = true;
+    }
+    draft_pool = std::move(pool); draft_step = 0; draft_total_steps = static_cast<int>(draft_steps.size());
+    draft_current_player = draft_steps.empty() ? -1 : draft_steps.front().player;
+    draft_sub = "pick"; phase = NativePhase::Draft; active_player = -1;
+    round_confirm_count = 0; round_confirmed.assign(players.size(), false);
+    return true;
+  }
+
+  bool confirm_round(int player) {
+    if (phase != NativePhase::RoundConfirm || player < 0 || player >= static_cast<int>(players.size())) return false;
+    if (round_confirmed.size() != players.size()) round_confirmed.assign(players.size(), false);
+    if (round_confirmed[player]) return false;
+    round_confirmed[player] = true;
+    round_confirm_count = static_cast<int>(std::count(round_confirmed.begin(), round_confirmed.end(), true));
+    if (round_confirm_count == static_cast<int>(players.size())) return begin_next_round();
+    return true;
   }
 
   bool build(const std::string& uid, const std::string& name,
