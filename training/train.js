@@ -532,7 +532,7 @@ function loadCheckpoint(model, name) {
 
 function send(message) { if (process.send) process.send(message); else console.log(JSON.stringify(message)); }
 // 训练过程中各阶段产出的人读日志。事件流：
-//   启动横幅 / 设备 / resume / worker 池 / 进度点 / PPO 更新 / 存档 / 异常 / 收尾
+//   启动横幅 / 设备 / resume / worker 池 / 进度点 / 策略更新 / 存档 / 异常 / 收尾
 // 通过 {type:'log'} 推到 training-manager → UI 右下「事件与错误」面板，
 // 同时附加在父进程 stdout 上，方便命令行直接看。
 function log(text) {
@@ -558,7 +558,7 @@ async function train(rawConfig, hooks = {}) {
   log('启动训练：profile=' + config.profile + ' · 玩家 ' + config.minPlayers + '-' + config.maxPlayers +
     ' · 目标 ' + config.targetGames + ' 局 · 每批 ' + config.batchGames + ' 局 · ' +
     'workers=' + config.workers + ' · 策略损失=' + (config.policyLossMode === 'auto' && config.mctsSimulations > 0 ? 'MCTS 交叉熵' : config.policyLossMode.toUpperCase()) +
-    ' · PPO epochs=' + config.ppoEpochs + ' · miniBatch=' + config.miniBatch +
+    ' · epochs=' + config.ppoEpochs + ' · miniBatch=' + config.miniBatch +
     ' · lr=' + config.learningRate + ' · seed=' + config.seed);
   if (config.mctsSimulations > 0) {
     log('MCTS 已启用：每步 ' + config.mctsSimulations + ' 模拟 · c_puct=' + config.mctsC_puct +
@@ -669,11 +669,10 @@ async function train(rawConfig, hooks = {}) {
       losses = torch ? await torch.train(rollout) :
         model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs, policyLossMode: config.policyLossMode });
       justTrained = true;
-      // 打印最近一次 PPO 的指标摘要（每批一次），方便在事件日志里看趋势
+      // 打印最近一次策略更新的指标摘要（每批一次），方便在事件日志里看趋势
       log('策略更新（' + (config.policyLossMode === 'auto' && config.mctsSimulations > 0 ? 'MCTS 交叉熵' : config.policyLossMode.toUpperCase()) + '）：策略损失 ' + losses.policyLoss.toExponential(2) +
         ' · 价值损失 ' + Number(losses.valueLoss).toFixed(4) +
         ' · 熵 ' + Number(losses.entropy).toFixed(3) +
-        ' · 裁剪率 ' + (losses.clipFraction * 100).toFixed(1) + '%' +
         ' · KL ' + Number(losses.approxKl || 0).toFixed(4) +
         ' · 梯度 ' + Number(losses.gradientNorm || 0).toFixed(3) +
         (losses.gpuMemoryMB ? ' · 显存 ' + losses.gpuMemoryMB + ' MB' : ''));

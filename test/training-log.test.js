@@ -59,12 +59,14 @@ async function runAndCaptureLogs(config) {
   // 3) 设备行（JS 模式）
   assert.ok(logs.some(l => l.includes('训练器：JavaScript CPU')), 'JS 模式应有设备行');
 
-  // 4) PPO 更新行：每批一次
+  // 4) 策略更新行：每批一次（PPO 已弃用，日志里不应再出现 PPO 字样或裁剪率）
   const ppoLog = logs.find(l => l.includes('策略更新（'));
   assert.ok(ppoLog, '应有策略更新日志');
-  assert.ok(ppoLog.includes('策略损失'), 'PPO 日志应含策略损失');
-  assert.ok(ppoLog.includes('价值损失'), 'PPO 日志应含价值损失');
-  assert.ok(ppoLog.includes('熵'), 'PPO 日志应含熵');
+  assert.ok(ppoLog.includes('策略损失'), '策略更新日志应含策略损失');
+  assert.ok(ppoLog.includes('价值损失'), '策略更新日志应含价值损失');
+  assert.ok(ppoLog.includes('熵'), '策略更新日志应含熵');
+  assert.ok(!ppoLog.includes('裁剪率'), '策略更新日志不应再含 PPO 裁剪率');
+  assert.ok(!logs.some(l => l.includes('PPO')), '训练日志不应再出现 PPO 字样');
 
   // 5) 进度行：每批一次
   const progressLog = logs.find(l => l.includes('进度 4/4 局'));
