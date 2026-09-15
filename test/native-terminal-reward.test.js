@@ -32,6 +32,17 @@ function fixture(playerCount) {
   };
 }
 
+test('JS 终局奖励只随排名变化，不随分差变化', () => {
+  const state = fixture(4);
+  state.scores = Engine.computeScores(state);
+  const original = Array.from(train.gameRewards(state).values());
+  const sorted = state.scores.slice().sort((a, b) => b.total - a.total);
+  const ranks = new Map(sorted.map((row, rank) => [row.playerIdx, rank]));
+  state.scores = state.scores.map(row => ({ ...row, total: 100 - ranks.get(row.playerIdx) * 10 }));
+  assert.deepEqual(Array.from(train.gameRewards(state).values()), original);
+  assert.deepEqual(original, state.scores.map(row => 1 - 2 * ranks.get(row.playerIdx) / 3));
+});
+
 test('4/5/6 人无组队终局奖励与 C++ terminal_value 一致', t => {
   const executable = process.env.CITADELS_NATIVE_TERMINAL_REWARD_PROBE;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_TERMINAL_REWARD_PROBE，跳过跨语言终局奖励检查'); return; }
@@ -39,11 +50,16 @@ test('4/5/6 人无组队终局奖励与 C++ terminal_value 一致', t => {
     const state = fixture(playerCount);
     state.scores = Engine.computeScores(state);
     const expected = train.gameRewards(state);
+    const sorted = state.scores.slice().sort((a, b) => b.total - a.total);
     const actual = execFileSync(executable, { input: JSON.stringify(state) + '\n', encoding: 'utf8' })
       .trim().split(',').map(Number);
     assert.equal(actual.length, playerCount);
-    for (let i = 0; i < playerCount; i++)
+    for (let i = 0; i < playerCount; i++) {
+      const rank = sorted.findIndex(row => row.playerIdx === i);
+      const rankOnly = 1 - 2 * rank / (playerCount - 1);
+      assert.equal(expected.get('p' + i), rankOnly);
       assert.ok(Math.abs(actual[i] - expected.get('p' + i)) < 1e-5,
         `player ${playerCount}/${i}: native=${actual[i]} js=${expected.get('p' + i)}`);
+    }
   }
 });

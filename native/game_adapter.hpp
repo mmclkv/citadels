@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <string>
 #include <vector>
 
@@ -43,13 +42,6 @@ inline float native_terminal_reward(const NativeGameState& state, int player_ind
     else if (player.city.size() >= static_cast<size_t>(state.end_districts)) bonus += 2;
     scores.push_back({static_cast<int>(i), base + bonus});
   }
-  float mean = 0.0f;
-  for (const auto& score : scores) mean += score.total;
-  mean /= static_cast<float>(std::max<size_t>(1, scores.size()));
-  float variance = 0.0f;
-  for (const auto& score : scores) variance += (score.total - mean) * (score.total - mean);
-  variance /= static_cast<float>(std::max<size_t>(1, scores.size()));
-  const float standard_deviation = std::sqrt(variance + 1.0f);
   std::stable_sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) {
     return a.total > b.total;
   });
@@ -57,8 +49,7 @@ inline float native_terminal_reward(const NativeGameState& state, int player_ind
   for (; rank < scores.size(); ++rank) if (scores[rank].player == player_index) break;
   const float rank_term = scores.size() == 1
     ? 1.0f : 1.0f - 2.0f * static_cast<float>(rank) / static_cast<float>(scores.size() - 1);
-  const float score_term = scores.empty() ? 0.0f : (scores[rank].total - mean) / standard_deviation;
-  return std::max(-2.0f, std::min(2.0f, 0.65f * score_term + 0.35f * rank_term));
+  return rank_term;
 }
 
 struct NativeSearchAction {

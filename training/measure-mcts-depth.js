@@ -76,17 +76,12 @@ function currentActor(state) {
 
 function gameRewards(state) {
   const scores = (state.scores || []).slice();
-  const totals = scores.map(row => row.total);
-  const mean = totals.reduce((a, b) => a + b, 0) / Math.max(1, totals.length);
-  const variance = totals.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, totals.length);
-  const std = Math.sqrt(variance + 1);
   const sorted = scores.slice().sort((a, b) => b.total - a.total);
   const rewards = new Map();
   scores.forEach(row => {
     const rank = sorted.findIndex(x => x.playerIdx === row.playerIdx);
     const rankTerm = scores.length === 1 ? 1 : 1 - 2 * rank / (scores.length - 1);
-    const scoreTerm = (row.total - mean) / std;
-    rewards.set(state.players[row.playerIdx].id, Math.max(-2, Math.min(2, 0.65 * scoreTerm + 0.35 * rankTerm)));
+    rewards.set(state.players[row.playerIdx].id, rankTerm);
   });
   return rewards;
 }
