@@ -46,9 +46,24 @@ int main() {
         for (size_t i = 0; i < state.players.size(); ++i)
           if (state.players[i].id == player_value.as_string()) player = static_cast<int>(i);
         if (player < 0) throw std::runtime_error("动作玩家不存在");
-        if (state.active_player != player && type != "confirm_round")
+        const int expected_player = state.phase == NativePhase::Draft
+          ? state.draft_current_player : state.active_player;
+        if (expected_player != player && type != "confirm_round")
           throw std::runtime_error("动作玩家不是当前行动者: " + type);
-        if (type == "take_gold") {
+        if (type == "draft_pick") {
+          if (state.phase != NativePhase::Draft || state.draft_sub != "pick" || !state.draft_remove(string_field(action, "charId")))
+            throw std::runtime_error("draft_pick 执行失败");
+          const auto char_id = string_field(action, "charId");
+          state.players[player].role_ids.push_back(char_id);
+          state.players[player].role_id = char_id;
+          if (!state.advance_draft()) throw std::runtime_error("draft_pick 无法推进选角");
+        } else if (type == "draft_discard") {
+          const auto char_id = string_field(action, "charId");
+          if (state.phase != NativePhase::Draft || state.draft_sub != "discard" || !state.draft_remove(char_id))
+            throw std::runtime_error("draft_discard 执行失败");
+          state.draft_face_down.push_back(char_id);
+          if (!state.advance_draft()) throw std::runtime_error("draft_discard 无法推进选角");
+        } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {
           if (!state.take_cards()) throw std::runtime_error("take_cards 执行失败");
@@ -70,7 +85,12 @@ int main() {
         std::cout << "{\"id\":\"" << p.id << "\",\"gold\":" << p.gold
                   << ",\"handCount\":" << p.hand.size()
                   << ",\"cityCount\":" << p.city.size()
-                  << ",\"hasCrown\":" << (p.has_crown ? "true" : "false") << "}";
+                  << ",\"hasCrown\":" << (p.has_crown ? "true" : "false") << ",\"chars\":[";
+        for (size_t j = 0; j < p.role_ids.size(); ++j) {
+          if (j) std::cout << ',';
+          std::cout << '"' << p.role_ids[j] << '"';
+        }
+        std::cout << "]}";
       }
       std::cout << "]}\n" << std::flush;
     } catch (const std::exception& error) {
