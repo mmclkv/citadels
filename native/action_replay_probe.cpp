@@ -47,8 +47,8 @@ int main() {
         for (size_t i = 0; i < state.players.size(); ++i)
           if (state.players[i].id == player_value.as_string()) player = static_cast<int>(i);
         if (player < 0) throw std::runtime_error("动作玩家不存在");
-        const int expected_player = state.phase == NativePhase::Draft
-          ? state.draft_current_player : state.active_player;
+        const int expected_player = state.reaction_kind == "graveyard" ? state.reaction_player :
+          (state.phase == NativePhase::Draft ? state.draft_current_player : state.active_player);
         if (expected_player != player && type != "confirm_round")
           throw std::runtime_error("动作玩家不是当前行动者: " + type);
         if (type == "draft_pick") {
@@ -88,6 +88,10 @@ int main() {
           NativeSearchAction chosen{ActionType::ChooseDistrict, string_field(action, "uid"), {}, {}, string_field(action, "target")};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("choose_district 执行失败");
+        } else if (type == "reaction") {
+          NativeSearchAction chosen{ActionType::Reaction, {}, bool_field(action, "use") ? "use" : "skip", {}, {}};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("reaction 执行失败");
         } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {

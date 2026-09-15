@@ -195,3 +195,44 @@ test('C++ 原生状态可以回放外交官两阶段建筑交换', async t => {
   assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, cityCount: p.cityCount })),
     expected.players.map(p => ({ id: p.id, gold: p.gold, cityCount: p.cityCount })));
 });
+
+test('C++ 原生状态可以回放领主摧毁后的墓地响应', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过墓地回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 89, charSetMode: 'base' });
+  Engine.startGame(initial);
+  initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+  initial.players[1].city = [{ uid: 'target1', name: '小屋', color: 'red', cost: 1 }];
+  initial.players[2].city = [{ uid: 'grave1', name: '墓地', color: 'purple', cost: 2, purple: { effect: 'graveyard' } }];
+  initial.turn = { charId: 'warlord', num: 8, playerIdx: 0, phase: 'main', takenResources: true,
+    incomeTaken: true, abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false,
+    usedSmithy: false, usedMuseum: false, pending: { kind: 'warlord_destroy' }, bonusDone: false };
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (const action of [
+    { type: 'choose_district', target: 'p1', uid: 'target1' },
+    { type: 'reaction', use: false }
+  ]) {
+    const player = action.type === 'reaction' ? 'p2' : 'p0';
+    const record = recordAppliedAction(state, player, action, Engine.applyAction);
+    assert.equal(record.ok, true);
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'graveyard-trace'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 墓地回放失败');
+  assert.equal(native.phase, expected.phase);
+  assert.equal(native.round, expected.round);
+  assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount, cityCount: p.cityCount })),
+    expected.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount, cityCount: p.cityCount })));
+});

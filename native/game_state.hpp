@@ -69,6 +69,9 @@ struct NativeGameState {
   std::vector<NativeDraftStep> draft_steps;
   int reaction_player = -1;
   std::string reaction_kind;
+  std::vector<int> reaction_queue;
+  DistrictCard reaction_card;
+  bool has_reaction_card = false;
   int round_confirm_count = 0;
   std::string pending_kind;
   std::vector<std::string> char_deck;
@@ -165,8 +168,16 @@ struct NativeGameState {
     const int cost = destroy_cost(card, false);
     if (active()->gold < cost) return false;
     active()->gold -= cost;
-    deck.put_bottom({it->card});
+    DistrictCard destroyed = it->card;
     players[target].city.erase(it);
+    reaction_card = destroyed; has_reaction_card = true;
+    reaction_queue.clear();
+    for (size_t i = 0; i < players.size(); ++i)
+      if (static_cast<int>(i) != active_player && players[i].gold >= 1 &&
+          std::any_of(players[i].city.begin(), players[i].city.end(), [](const NativeDistrict& d) { return d.effect == "graveyard"; }))
+        reaction_queue.push_back(static_cast<int>(i));
+    if (reaction_queue.empty()) { deck.discard({destroyed}); has_reaction_card = false; }
+    else { reaction_player = reaction_queue.front(); reaction_kind = "graveyard"; }
     pending_kind.clear();
     return true;
   }
@@ -184,6 +195,22 @@ struct NativeGameState {
     NativeDistrict seized = std::move(*it);
     players[target].city.erase(it); active()->city.push_back(std::move(seized));
     pending_kind.clear();
+    return true;
+  }
+
+  bool reaction(bool use) {
+    if (reaction_kind != "graveyard" || !has_reaction_card || reaction_player < 0 || reaction_player >= static_cast<int>(players.size())) return false;
+    auto& responder = players[reaction_player];
+    if (use) {
+      if (responder.gold < 1) return false;
+      --responder.gold; responder.hand.push_back(reaction_card);
+      reaction_queue.clear(); reaction_kind.clear(); reaction_player = -1; has_reaction_card = false;
+      return true;
+    }
+    if (!reaction_queue.empty() && reaction_queue.front() == reaction_player) reaction_queue.erase(reaction_queue.begin());
+    if (!reaction_queue.empty()) { reaction_player = reaction_queue.front(); return true; }
+    deck.discard({reaction_card});
+    reaction_kind.clear(); reaction_player = -1; has_reaction_card = false;
     return true;
   }
   const NativePlayer* active() const {

@@ -167,6 +167,15 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   if (reaction && reaction->is_object()) {
     state.reaction_player = int_field(*reaction, "playerIdx", -1);
     state.reaction_kind = string_field(*reaction, "kind");
+    const auto* queue = reaction->get("queue");
+    if (queue && queue->is_array()) for (const auto& value : queue->as_array()) if (value.is_number()) state.reaction_queue.push_back(static_cast<int>(value.as_number()));
+    const auto* card = reaction->get("card");
+    if (card && card->is_object()) { state.reaction_card = load_card(*card); state.has_reaction_card = true; }
+  }
+  const auto* pending_destroy = snapshot.get("pendingDestroy");
+  if (pending_destroy && pending_destroy->is_object()) {
+    const auto* card = pending_destroy->get("card");
+    if (card && card->is_object()) { state.reaction_card = load_card(*card); state.has_reaction_card = true; }
   }
   const auto* round_confirm = snapshot.get("roundConfirm");
   if (round_confirm && round_confirm->is_object()) {

@@ -32,6 +32,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
+    if (state.reaction_kind == "graveyard") {
+      if (player != state.reaction_player) return {};
+      return {{ActionType::Reaction, {}, "use", {}}, {ActionType::Reaction, {}, "skip", {}}};
+    }
     if (state.pending_kind == "magician_choice") {
       if (player != state.active_player) return {};
       return {{ActionType::MagicianMode, {}, "swap", {}},
@@ -133,6 +137,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   bool apply(NativeGameState& state, int player,
              const NativeSearchAction& action) const override {
+    if (action.type == ActionType::Reaction && state.reaction_kind == "graveyard") {
+      if (player != state.reaction_player) return false;
+      return state.reaction(action.name == "use");
+    }
     if (action.type == ActionType::MagicianMode && state.pending_kind == "magician_choice") {
       if (player != state.active_player || (action.name != "swap" && action.name != "redraw")) return false;
       state.pending_kind = action.name == "swap" ? "magician_swap" : "magician_redraw";
