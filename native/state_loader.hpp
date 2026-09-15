@@ -78,6 +78,14 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   state.rng = JsRng(static_cast<uint32_t>(int_field(snapshot, "rngState")));
   const auto* config = snapshot.get("config");
   if (config && config->is_object()) state.end_districts = int_field(*config, "endDistricts", 8);
+  const auto* char_deck = snapshot.get("charDeck");
+  if (char_deck && char_deck->is_array()) for (const auto& id : char_deck->as_array())
+    if (id.is_string()) state.char_deck.push_back(id.as_string());
+  const auto* effects = snapshot.get("effects");
+  if (effects && effects->is_object()) {
+    state.assassinated = int_field(*effects, "assassinated", -1);
+    state.thief_target = int_field(*effects, "thief", -1);
+  }
 
   const auto& players = required_field(snapshot, "players");
   if (!players.is_array() || players.as_array().empty()) throw std::runtime_error("state.players 不能为空");

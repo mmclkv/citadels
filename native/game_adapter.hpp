@@ -20,8 +20,25 @@ struct NativeSearchAction {
 // 继续沿用同一接口扩展，不在搜索核心里硬编码规则。
 class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearchAction> {
  public:
+  static int char_number(const std::string& id) {
+    static const std::vector<std::string> ids = {
+      "assassin", "thief", "magician", "king", "bishop", "merchant", "architect", "warlord"
+    };
+    const auto it = std::find(ids.begin(), ids.end(), id);
+    return it == ids.end() ? -1 : static_cast<int>(it - ids.begin()) + 1;
+  }
+
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
+    if (state.pending_kind == "assassin" || state.pending_kind == "thief") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& id : state.char_deck) {
+        const int number = char_number(id);
+        if (number > 0) actions.push_back({ActionType::ChooseChar, {}, std::to_string(number), {}});
+      }
+      return actions;
+    }
     if (state.phase == NativePhase::Draft) {
       if (player != state.draft_current_player || state.draft_step < 0 ||
           state.draft_step >= static_cast<int>(state.draft_steps.size())) return {};
@@ -62,6 +79,19 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   bool apply(NativeGameState& state, int player,
              const NativeSearchAction& action) const override {
+    if (action.type == ActionType::ChooseChar &&
+        (state.pending_kind == "assassin" || state.pending_kind == "thief")) {
+      if (player != state.active_player) return false;
+      int number = -1;
+      try { number = std::stoi(action.name); } catch (...) { return false; }
+      bool known = false;
+      for (const auto& id : state.char_deck) if (char_number(id) == number) known = true;
+      if (!known || number < 1 || number > 8) return false;
+      if (state.pending_kind == "assassin") state.assassinated = number;
+      else state.thief_target = number;
+      state.pending_kind.clear();
+      return true;
+    }
     if (state.phase == NativePhase::Draft) {
       if (player != state.draft_current_player) return false;
       if (action.type == ActionType::DraftPick && state.draft_sub == "pick") {

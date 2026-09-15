@@ -67,6 +67,9 @@ struct NativeGameState {
   std::string reaction_kind;
   int round_confirm_count = 0;
   std::string pending_kind;
+  std::vector<std::string> char_deck;
+  int assassinated = -1;
+  int thief_target = -1;
 
   bool draft_remove(const std::string& id) {
     auto remove = [&](std::vector<std::string>& values) {

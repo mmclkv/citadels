@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "game_adapter.hpp"
 #include "state_loader.hpp"
 
 using namespace citadels::native;
@@ -63,6 +64,10 @@ int main() {
             throw std::runtime_error("draft_discard 执行失败");
           state.draft_face_down.push_back(char_id);
           if (!state.advance_draft()) throw std::runtime_error("draft_discard 无法推进选角");
+        } else if (type == "choose_char") {
+          NativeSearchAction chosen{ActionType::ChooseChar, {}, std::to_string(int_field(action, "num")), {}};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("choose_char 执行失败");
         } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {
