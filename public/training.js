@@ -26,7 +26,10 @@ function formConfig() {
   return {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
-    profile: $('profile').value, backend: $('backend').value, learningRate: +$('learning-rate').value,
+    profile: $('profile').value, backend: $('backend').value, nativeSearchWorker: $('native-search-worker').value.trim(),
+    endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
+    temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
+    learningRate: +$('learning-rate').value,
     batchGames: +$('batch-games').value, workers: +$('workers').value,
     ppoEpochs: +$('ppo-epochs').value, miniBatch: +$('mini-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
@@ -68,6 +71,7 @@ function updateMctsEvaluatorUI() {
   $('mcts-evaluator-hint').textContent = backend === 'js'
     ? '⚠ backend=js 时 GPU 评估器会被忽略（自对弈同步跑）'
     : (evaluator === 'gpu' ? '✓ worker 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
+  document.querySelectorAll('.native-only').forEach(el => { el.style.display = backend === 'native' ? '' : 'none'; });
 }
 
 function setControls(status) {

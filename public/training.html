@@ -21,7 +21,12 @@
         <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option></select></label>
         <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
-        <label><span>训练设备</span><select id="backend"><option value="gpu" selected>CUDA GPU</option><option value="cpu">PyTorch CPU</option><option value="js">兼容 JS CPU</option></select></label>
+        <label><span>训练后端</span><select id="backend"><option value="gpu" selected>PyTorch GPU</option><option value="cpu">PyTorch CPU</option><option value="native">C++ 逻辑 + C++ MCTS + GPU</option><option value="js">兼容 JS CPU</option></select></label>
+        <label class="native-only" style="display:none"><span>C++ 搜索进程</span><input id="native-search-worker" type="text" placeholder="自动使用环境变量或 search_worker.exe"><small>原生后端必填；也可由服务环境变量提供</small></label>
+        <label><span>结束建筑数</span><select id="end-districts"><option value="7">7 栋</option><option value="8" selected>8 栋</option></select></label>
+        <label><span>单局最大步数</span><input id="max-steps" type="number" min="1000" max="100000" step="1000" value="60000"></label>
+        <label><span>起始温度</span><input id="temperature-start" type="number" min="0.2" max="2" step="0.05" value="1.1"></label>
+        <label><span>结束温度</span><input id="temperature-end" type="number" min="0.15" max="1.5" step="0.05" value="0.65"></label>
         <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" max="0.01" step="0.00001" value="0.0003"></label>
         <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="32" value="4"></label>
         <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="4"></label>
@@ -86,6 +91,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=8"></script>
+  <script src="./training.js?v=9"></script>
 </body>
 </html>
