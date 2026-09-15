@@ -8,13 +8,14 @@ test('C++ 客户端可从真实 gpu_trainer/PyTorch 获取批量策略和值', {
   const script = process.env.CITADELS_GPU_TRAINER_SCRIPT;
   const model = process.env.CITADELS_GPU_MODEL;
   if (!exe || !python || !script || !model) return;
-  const [batch, first, second, values, probability, value] = execFileSync(
+  const [batch, first, second, values, valueSlots, probability, value] = execFileSync(
     exe, [python, script, model], { encoding: 'utf8', timeout: 110000 }
   ).trim().split(',').map(Number);
   assert.equal(batch, 2);
   assert.equal(first, 2);
   assert.equal(second, 1);
   assert.equal(values, 2);
+  assert.equal(valueSlots, 8);
   assert.ok(Number.isFinite(probability) && probability >= 0 && probability <= 1);
   assert.ok(Number.isFinite(value));
 });

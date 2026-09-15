@@ -16,7 +16,8 @@ int main(int argc, char** argv) {
   const auto result = client.evaluate(states, actions, "large");
   std::cout << result.policies.size() << ',' << result.policies[0].size() << ','
             << result.policies[1].size() << ',' << result.values.size() << ','
-            << result.policies[0][0] << ',' << result.values[0] << '\n';
+            << result.value_vectors[0].size() << ',' << result.policies[0][0] << ','
+            << result.values[0] << '\n';
   client.close();
   return 0;
 }
