@@ -56,8 +56,12 @@ inline NativeDistrict load_city_card(const JsonValue& value) {
   NativeDistrict district;
   district.card = load_card(value);
   district.name = string_field(value, "name");
+  district.beautified = bool_field(value, "beautified");
   const auto* purple = value.get("purple");
-  if (purple && purple->is_object()) district.effect = string_field(*purple, "effect");
+  if (purple && purple->is_object()) {
+    district.effect = string_field(*purple, "effect");
+    district.fortress = district.effect == "immune";
+  }
   return district;
 }
 
@@ -131,6 +135,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       state.pending_kind = string_field(*pending, "kind");
       state.pending_target = int_field(*pending, "targetIdx", -1);
       state.pending_from_crown = int_field(*pending, "_fromCrownIdx", -1);
+      state.pending_uid = string_field(*pending, "mineUid");
     }
   }
   const auto* draft = snapshot.get("draft");

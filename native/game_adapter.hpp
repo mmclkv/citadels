@@ -55,6 +55,21 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (player != state.active_player) return {};
       return {{ActionType::EmperorTake, {}, "gold", {}}, {ActionType::EmperorTake, {}, "card", {}}};
     }
+    if (state.pending_kind == "diplomat_mine") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& district : state.players[player].city)
+        if (!district.fortress) actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[player].id});
+      return actions;
+    }
+    if (state.pending_kind == "diplomat_theirs") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player)
+        for (const auto& district : state.players[i].city) if (!district.fortress)
+          actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[i].id});
+      return actions;
+    }
     if (state.pending_kind == "assassin" || state.pending_kind == "thief") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -136,6 +151,18 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         (action.name == "card" ? state.emperor_take_card() : false);
       if (ok) state.pending_kind.clear();
       return ok;
+    }
+    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "diplomat_mine") {
+      if (player != state.active_player) return false;
+      const auto it = std::find_if(state.players[player].city.begin(), state.players[player].city.end(),
+        [&](const NativeDistrict& d) { return d.card.uid == action.uid && !d.fortress; });
+      if (it == state.players[player].city.end()) return false;
+      state.pending_uid = action.uid; state.pending_kind = "diplomat_theirs";
+      return true;
+    }
+    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "diplomat_theirs") {
+      if (player != state.active_player) return false;
+      return state.diplomat_swap(action.target, action.uid);
     }
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {

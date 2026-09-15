@@ -22,6 +22,8 @@ struct NativeDistrict {
   std::string name;
   std::string effect;
   std::vector<DistrictCard> museum_cards;
+  bool fortress = false;
+  bool beautified = false;
 };
 
 struct NativePlayer {
@@ -73,6 +75,7 @@ struct NativeGameState {
   int thief_target = -1;
   int pending_target = -1;
   int pending_from_crown = -1;
+  std::string pending_uid;
 
   bool draft_remove(const std::string& id) {
     auto remove = [&](std::vector<std::string>& values) {
@@ -117,6 +120,26 @@ struct NativeGameState {
   bool emperor_take_card() {
     if (!active() || pending_target < 0 || pending_target >= static_cast<int>(players.size())) return false;
     return ::citadels::native::emperor_take_card(active()->hand, players[pending_target].hand, rng);
+  }
+
+  bool diplomat_swap(const std::string& target_id, const std::string& target_uid) {
+    if (!active() || pending_uid.empty()) return false;
+    int target = -1;
+    for (size_t i = 0; i < players.size(); ++i)
+      if (players[i].id == target_id) target = static_cast<int>(i);
+    if (target < 0 || target == active_player || players[target].city.size() >= static_cast<size_t>(end_districts)) return false;
+    auto own_it = std::find_if(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) { return d.card.uid == pending_uid; });
+    auto their_it = std::find_if(players[target].city.begin(), players[target].city.end(), [&](const NativeDistrict& d) { return d.card.uid == target_uid; });
+    if (own_it == active()->city.end() || their_it == players[target].city.end() || own_it->fortress || their_it->fortress) return false;
+    if (std::any_of(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) {
+      return d.name == their_it->name && d.card.uid != pending_uid;
+    })) return false;
+    const int difference = std::max(0, their_it->card.cost - own_it->card.cost);
+    if (difference > active()->gold) return false;
+    active()->gold -= difference; players[target].gold += difference;
+    std::swap(*own_it, *their_it);
+    pending_uid.clear(); pending_target = -1; pending_kind.clear();
+    return true;
   }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

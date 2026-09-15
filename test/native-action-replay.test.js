@@ -157,3 +157,41 @@ test('C++ 原生状态可以回放皇帝转移皇冠并拿金币', async t => {
   assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, hasCrown: p.hasCrown })),
     expected.players.map(p => ({ id: p.id, gold: p.gold, hasCrown: p.hasCrown })));
 });
+
+test('C++ 原生状态可以回放外交官两阶段建筑交换', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过外交官回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 83, charSetMode: 'base' });
+  Engine.startGame(initial);
+  initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+  initial.players[0].city = [{ uid: 'mine1', name: '小屋', color: 'red', cost: 1 }];
+  initial.players[1].city = [{ uid: 'target1', name: '城堡', color: 'yellow', cost: 3 }];
+  initial.turn = { charId: 'diplomat', num: 6, playerIdx: 0, phase: 'main', takenResources: true,
+    incomeTaken: true, abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false,
+    usedSmithy: false, usedMuseum: false, pending: { kind: 'diplomat_mine' }, bonusDone: false };
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (const action of [
+    { type: 'choose_district', target: 'p0', uid: 'mine1' },
+    { type: 'choose_district', target: 'p1', uid: 'target1' }
+  ]) {
+    const record = recordAppliedAction(state, 'p0', action, Engine.applyAction);
+    assert.equal(record.ok, true);
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'diplomat-trace'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 外交官回放失败');
+  assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, cityCount: p.cityCount })),
+    expected.players.map(p => ({ id: p.id, gold: p.gold, cityCount: p.cityCount })));
+});
