@@ -76,6 +76,14 @@ int main() {
           NativeSearchAction chosen{ActionType::ChoosePlayer, {}, {}, {}, string_field(action, "target")};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("choose_player 执行失败");
+        } else if (type == "emperor_crown") {
+          NativeSearchAction chosen{ActionType::EmperorCrown, {}, {}, {}, string_field(action, "target")};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("emperor_crown 执行失败");
+        } else if (type == "emperor_take") {
+          NativeSearchAction chosen{ActionType::EmperorTake, {}, string_field(action, "mode"), {}, {}};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("emperor_take 执行失败");
         } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {

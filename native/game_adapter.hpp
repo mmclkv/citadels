@@ -44,6 +44,17 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         if (static_cast<int>(i) != player) actions.push_back({ActionType::ChoosePlayer, {}, {}, {}, state.players[i].id});
       return actions;
     }
+    if (state.pending_kind == "emperor_crown") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (size_t i = 0; i < state.players.size(); ++i)
+        if (static_cast<int>(i) != player) actions.push_back({ActionType::EmperorCrown, {}, {}, {}, state.players[i].id});
+      return actions;
+    }
+    if (state.pending_kind == "emperor_take") {
+      if (player != state.active_player) return {};
+      return {{ActionType::EmperorTake, {}, "gold", {}}, {ActionType::EmperorTake, {}, "card", {}}};
+    }
     if (state.pending_kind == "assassin" || state.pending_kind == "thief") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -110,6 +121,21 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       state.players[target].hand = std::move(hands.target);
       state.pending_kind.clear();
       return true;
+    }
+    if (action.type == ActionType::EmperorCrown && state.pending_kind == "emperor_crown") {
+      if (player != state.active_player) return false;
+      int target = -1;
+      for (size_t i = 0; i < state.players.size(); ++i)
+        if (state.players[i].id == action.target) target = static_cast<int>(i);
+      if (!state.transfer_crown(target)) return false;
+      state.pending_kind = "emperor_take";
+      return true;
+    }
+    if (action.type == ActionType::EmperorTake && state.pending_kind == "emperor_take") {
+      const bool ok = action.name == "gold" ? state.emperor_take_gold() :
+        (action.name == "card" ? state.emperor_take_card() : false);
+      if (ok) state.pending_kind.clear();
+      return ok;
     }
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {

@@ -127,7 +127,11 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     state.resources_taken = bool_field(*turn, "takenResources");
     state.builds = int_field(*turn, "builds");
     const auto* pending = turn->get("pending");
-    if (pending && pending->is_object()) state.pending_kind = string_field(*pending, "kind");
+    if (pending && pending->is_object()) {
+      state.pending_kind = string_field(*pending, "kind");
+      state.pending_target = int_field(*pending, "targetIdx", -1);
+      state.pending_from_crown = int_field(*pending, "_fromCrownIdx", -1);
+    }
   }
   const auto* draft = snapshot.get("draft");
   if (draft && draft->is_object()) {
