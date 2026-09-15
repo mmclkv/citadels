@@ -94,17 +94,19 @@ struct NativeGameState {
       return c.uid == uid;
     });
     if (it == p->hand.end()) return false;
+    const std::string resolved_name = name.empty() ? it->name : name;
+    if (resolved_name.empty()) return false;
     int same = 0, quarry = 0;
     for (const auto& d : p->city) {
-      if (d.name == name) ++same;
+      if (d.name == resolved_name) ++same;
       if (d.effect == "quarry") ++quarry;
     }
-    BuildCard card{name, it->color, it->cost};
+    BuildCard card{resolved_name, it->color, it->cost};
     BuildContext context{p->role_id, false, p->gold, builds, 1, same, quarry};
     if (!can_build(card, context)) return false;
     p->gold -= it->cost;
     spent_on_build += it->cost;
-    p->city.push_back({*it, name, effect, {}});
+    p->city.push_back({*it, resolved_name, effect, {}});
     p->hand.erase(it);
     ++builds;
     return true;

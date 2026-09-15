@@ -34,7 +34,8 @@ inline bool bool_field(const JsonValue& object, const char* name, bool fallback 
 
 inline DistrictCard load_card(const JsonValue& value) {
   if (!value.is_object()) throw std::runtime_error("卡牌必须是对象");
-  return {string_field(value, "uid"), string_field(value, "color"), int_field(value, "cost")};
+  return {string_field(value, "uid"), string_field(value, "color"), int_field(value, "cost"),
+          string_field(value, "name")};
 }
 
 inline std::vector<DistrictCard> load_cards(const JsonValue& value) {

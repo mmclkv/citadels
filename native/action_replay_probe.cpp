@@ -48,6 +48,15 @@ int main() {
       if (player < 0) throw std::runtime_error("动作玩家不存在");
       if (type == "take_gold") {
         if (state.active_player != player || !state.take_gold()) throw std::runtime_error("take_gold 执行失败");
+      } else if (type == "take_cards") {
+        if (state.active_player != player || !state.take_cards()) throw std::runtime_error("take_cards 执行失败");
+      } else if (type == "build") {
+        if (state.active_player != player) throw std::runtime_error("build 玩家不是当前行动者");
+        const auto uid = string_field(action, "uid");
+        const auto name = string_field(action, "name");
+        if (!state.build(uid, name)) throw std::runtime_error("build 执行失败");
+      } else if (type == "end_turn") {
+        if (state.active_player != player || !state.end_turn()) throw std::runtime_error("end_turn 执行失败");
       } else {
         throw std::runtime_error("当前 probe 尚未迁移动作: " + type);
       }

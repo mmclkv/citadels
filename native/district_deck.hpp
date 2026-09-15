@@ -11,6 +11,9 @@ struct DistrictCard {
   std::string uid;
   std::string color;
   int cost = 0;
+  // Loaded game snapshots carry the localized card name.  Keeping it after
+  // the existing fields preserves aggregate initialization of the built-in deck.
+  std::string name;
 };
 
 inline std::vector<DistrictCard> build_base_district_deck(uint32_t seed) {
