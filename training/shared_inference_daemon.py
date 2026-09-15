@@ -1,11 +1,14 @@
 """Single GPU inference daemon backed by a fixed-slot named shared memory ring."""
 import argparse
+import os
 import struct
 import sys
 import time
-import os
 from multiprocessing import shared_memory
 
+# The bundled Python uses an isolated sys.path, so the script directory is not
+# automatically importable when launched by Node with an absolute script path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gpu_trainer import PolicyValueNet, binary_batch_eval
 import torch
 
@@ -74,6 +77,11 @@ def main():
 
     print("READY", flush=True)
     try:
+        try:
+            stat = os.stat(args.model)
+            model_stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            pass
         while True:
             maybe_reload_model()
             handled = False
@@ -102,8 +110,12 @@ def main():
             if not handled:
                 time.sleep(0.0005)
     finally:
+        del buf
         shm.close()
-        shm.unlink()
+        try:
+            shm.unlink()
+        except FileNotFoundError:
+            pass
 
 
 if __name__ == "__main__":

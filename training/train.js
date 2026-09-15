@@ -611,12 +611,14 @@ async function train(rawConfig, hooks = {}) {
     const poolOpts = { root: ROOT, config,
       size: Math.min(config.workers, config.batchGames), onLog: text => log(text) };
     if (config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu') {
-      // MCTS 在 worker 里跑，但神经网络 forward 走 PyTorch 子进程：主进程把 IPC 转发给 torch.batchForward。
-      // 多个 worker 会同时发起 forwardBatch，靠 selfplay-pool 内部按到达顺序代理，靠 torch-bridge 的
-      // FIFO 串行发给 Python；不会出现响应错位。
-      poolOpts.batchForward = (stateVectors, actionVectorsList) =>
-        torch.batchForward({ stateVectors, actionVectorsList });
-      log('MCTS 评估：worker 把批量 forward 转发给主进程 → torch.batchForward（PyTorch）');
+      if (!nativeGpuSearch) {
+        // JS MCTS 的 worker 把批量 forward 转发给训练主进程，再由 PyTorch 桥串行消费。
+        poolOpts.batchForward = (stateVectors, actionVectorsList) =>
+          torch.batchForward({ stateVectors, actionVectorsList });
+        log('MCTS 评估：worker → torch.batchForward（PyTorch）');
+      } else {
+        log('MCTS 评估：C++ worker → 共享内存队列 → 独立 PyTorch/GPU daemon');
+      }
     } else if (config.mctsSimulations > 0) {
       log('MCTS 评估：worker 内本地 JS 网络 forward（mctsEvaluator=js）');
     }
