@@ -27,6 +27,11 @@ inline int int_field(const JsonValue& object, const char* name, int fallback = 0
   return value && value->is_number() ? static_cast<int>(value->as_number()) : fallback;
 }
 
+inline double number_field(const JsonValue& object, const char* name, double fallback = 0.0) {
+  const auto* value = object.get(name);
+  return value && value->is_number() ? value->as_number() : fallback;
+}
+
 inline bool bool_field(const JsonValue& object, const char* name, bool fallback = false) {
   const auto* value = object.get(name);
   return value && value->is_bool() ? value->as_bool() : fallback;

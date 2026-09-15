@@ -71,10 +71,11 @@ int main() {
       Mcts<NativeGameState, NativeSearchAction>::Config config;
       config.simulations = std::max(1, int_field(request, "simulations", 50));
       config.max_depth = std::max(1, int_field(request, "maxDepth", 200));
-      config.c_puct = static_cast<float>(int_field(request, "cPuct", 1));
+      config.c_puct = static_cast<float>(number_field(request, "cPuct", 1.0));
       config.seed = static_cast<uint32_t>(int_field(request, "seed", 1));
       const auto native_actions = game.legal_actions(state, root);
       std::vector<float> policy;
+      int visits = 0, expansions = 0;
       if (native_actions.size() == supplied.size()) {
         bool same_order = true;
         for (size_t i = 0; i < supplied.size(); ++i) {
@@ -83,8 +84,11 @@ int main() {
             same_order = false; break;
           }
         }
-        if (same_order) policy = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
-          .search(state, root).policy;
+        if (same_order) {
+          const auto result = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
+            .search(state, root);
+          policy = result.policy; visits = result.visits; expansions = result.expansions;
+        }
       }
       if (policy.size() != supplied.size()) policy.assign(supplied.size(), 1.0f / supplied.size());
       std::cout << "{\"v\":1,\"t\":\"search_result\",\"id\":\"" << escape(id)
@@ -93,7 +97,9 @@ int main() {
         if (i) std::cout << ',';
         std::cout << policy[i];
       }
-      std::cout << "],\"value\":0,\"backend\":\"native-mcts\"}\n" << std::flush;
+      std::cout << "],\"value\":0,\"visits\":" << visits
+                << ",\"expansions\":" << expansions
+                << ",\"backend\":\"native-mcts\"}\n" << std::flush;
     } catch (const std::exception& error) {
       emit_error(id, error.what());
     }
