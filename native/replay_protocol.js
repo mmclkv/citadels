@@ -20,7 +20,9 @@ function encodeReplayTrace(initialState, records, traceId) {
       beforeHash: record.beforeHash,
       afterHash: record.afterHash,
       phaseBefore: record.phaseBefore,
-      phaseAfter: record.phaseAfter
+      phaseAfter: record.phaseAfter,
+      beforeSummary: record.beforeSummary,
+      afterSummary: record.afterSummary
     }))
   }) + '\n';
 }

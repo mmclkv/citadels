@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const Engine = require('../src/engine.js');
 const train = require('../training/train.js');
-const { recordAppliedAction } = require('../native/replay.js');
+const { recordAppliedAction, stateSummary } = require('../native/replay.js');
 const { encodeReplayTrace, decodeReplayResult } = require('../native/replay_protocol.js');
 
 test('native 回放协议携带完整初始状态而不是只有摘要哈希', () => {
@@ -16,6 +16,16 @@ test('native 回放协议携带完整初始状态而不是只有摘要哈希', (
   assert.deepEqual(request.initialState.log, []);
   assert.deepEqual(request.initialState.notices, []);
   assert.equal(typeof request.initialHash, 'string');
+});
+
+test('native 回放记录包含逐动作状态摘要', () => {
+  const state = { phase: 'action', round: 2, rngState: 9, deck: [], discard: [],
+    players: [{ id: 'p0', gold: 2, hand: [], city: [], chars: ['king'], hasCrown: true }], turn: null };
+  const record = recordAppliedAction(state, 'p0', { type: 'end_turn' }, () => ({ ok: true }));
+  assert.deepEqual(record.beforeSummary, record.afterSummary);
+  const request = JSON.parse(encodeReplayTrace(state, [record], 'summary'));
+  assert.equal(request.records[0].afterSummary.players[0].gold, 2);
+  assert.deepEqual(request.records[0].afterSummary, stateSummary(state));
 });
 
 test('native 回放协议校验器接受 JS 真实回放记录', async t => {
