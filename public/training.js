@@ -49,18 +49,27 @@ function formConfig() {
     mctsDirichletAlpha: +$('mcts-dirichlet').value,
     mctsDirichletEpsilon: +$('mcts-diri-eps').value,
     mctsMaxDepth: +$('mcts-max-depth').value,
-    mctsEvaluator: $('mcts-evaluator').value,
+    mctsEvaluator: resolveMctsEvaluator(),
     mctsBatchSize: +$('mcts-batch-size').value,
     mctsMaxWaitMs: +$('mcts-max-wait').value,
     mctsCacheSize: +$('mcts-cache-size').value
   };
 }
 
+// 不再单独提供「神经网络评估器」选项：其值由「神经网络框架」推导，
+// 推导规则与 training/train.js 的 sanitizeConfig 保持一致：
+//   PyTorch  → gpu（经 PyTorch 桥批量 forward）
+//   LibTorch + JS MCTS → js（worker 内本地 forward）
+//   C++ MCTS 恒为 gpu（走进程内原生搜索，不经 JS 评估器）
+function resolveMctsEvaluator() {
+  return ($('mcts-engine').value === 'cpp' || $('neural-network-framework').value === 'pytorch') ? 'gpu' : 'js';
+}
+
 function estimateMCTS() {
   const sims = +$('mcts-simulations').value || 0;
   const out = $('mcts-time-estimate');
   if (!sims) { out.textContent = '关闭'; return; }
-  const evaluator = $('mcts-evaluator').value;
+  const evaluator = resolveMctsEvaluator();
   const perStepHint = evaluator === 'gpu'
     ? 'GPU 批量 forward 实测取决于模拟数和批大小'
     : '单步 ~' + (sims * 0.87 / 1000).toFixed(2) + ' 秒（JS CPU forward 估算）';
@@ -73,17 +82,17 @@ function estimateMCTS() {
 }
 
 function updateMctsEvaluatorUI() {
-  const evaluator = $('mcts-evaluator').value;
   const mctsEngine = $('mcts-engine').value;
   const framework = $('neural-network-framework').value;
   const native = mctsEngine === 'cpp';
-  document.querySelectorAll('.gpu-only').forEach(el => { el.style.display = ''; });
-  $('mcts-evaluator-hint').textContent = native
+  const evaluator = resolveMctsEvaluator();
+  // 评估器不再是独立选项，提示改挂在「神经网络框架」下面，说明它会推导出什么
+  $('neural-framework-hint').textContent = native
     ? (framework === 'libtorch' ? '✓ C++ MCTS 在搜索进程内使用 LibTorch 评估' : '✓ C++ MCTS 通过 PyTorch 桥评估网络')
     : (evaluator === 'gpu' ? '✓ JS MCTS 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
   document.querySelectorAll('.native-only').forEach(el => { el.style.display = native ? '' : 'none'; });
-  $('mcts-evaluator').disabled = native;
-  if (native) $('mcts-evaluator').value = 'gpu';
+  // 切换框架会改变推导出的评估器，单步耗时估算要跟着刷新
+  estimateMCTS();
 }
 
 function setControls(status) {
@@ -405,7 +414,6 @@ $('rules-engine').onchange = updateMctsEvaluatorUI;
 $('mcts-engine').onchange = updateMctsEvaluatorUI;
 $('neural-network-framework').onchange = updateMctsEvaluatorUI;
 $('device').onchange = updateMctsEvaluatorUI;
-$('mcts-evaluator').onchange = updateMctsEvaluatorUI;
 ['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth',
   'mcts-batch-size', 'mcts-max-wait', 'mcts-cache-size'].forEach(id => {
   $(id).oninput = estimateMCTS;
