@@ -55,6 +55,10 @@ int main() {
           NativeSearchAction chosen{ActionType::ConfirmRound};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("confirm_round 执行失败");
+        } else if (type == "ability_skip") {
+          NativeSearchAction chosen{ActionType::AbilitySkip};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("ability_skip 执行失败");
         } else if (type == "draft_pick") {
           if (state.phase != NativePhase::Draft || state.draft_sub != "pick" || !state.draft_remove(string_field(action, "charId")))
             throw std::runtime_error("draft_pick 执行失败");

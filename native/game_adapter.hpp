@@ -75,6 +75,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       std::vector<NativeSearchAction> actions;
       for (const auto& district : state.players[player].city)
         if (!district.fortress) actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[player].id});
+      if (actions.empty()) actions.push_back({ActionType::AbilitySkip});
       return actions;
     }
     if (state.pending_kind == "navigator_bonus") {
@@ -119,6 +120,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player)
         for (const auto& district : state.players[i].city) if (!district.fortress)
           actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[i].id});
+      if (actions.empty()) actions.push_back({ActionType::AbilitySkip});
       return actions;
     }
     if (state.pending_kind == "warlord_destroy" || state.pending_kind == "marshal_seize") {
@@ -133,6 +135,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[i].id});
         }
       }
+      if (actions.empty()) actions.push_back({ActionType::AbilitySkip});
       return actions;
     }
     if (state.pending_kind == "assassin" || state.pending_kind == "thief") {
@@ -211,6 +214,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
              const NativeSearchAction& action) const override {
     if (action.type == ActionType::ConfirmRound)
       return state.confirm_round(player);
+    if (action.type == ActionType::AbilitySkip) {
+      if (player != state.active_player || state.pending_kind.empty()) return false;
+      state.pending_kind.clear(); state.pending_queue.clear(); state.pending_cards.clear();
+      state.pending_selected.clear(); state.pending_target = -1; state.pending_uid.clear();
+      state.ability_used = true;
+      return true;
+    }
     if (action.type == ActionType::Reaction && state.reaction_kind == "graveyard") {
       if (player != state.reaction_player) return false;
       return state.reaction(action.name == "use");
