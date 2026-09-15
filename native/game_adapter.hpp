@@ -139,6 +139,16 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       }
       return actions;
     }
+    if (state.pending_kind == "witch_target") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& id : state.char_deck) {
+        const int number = char_number(id);
+        if (number > 0 && number != 1 && number != char_number(state.players[player].role_id))
+          actions.push_back({ActionType::ChooseChar, {}, std::to_string(number), {}});
+      }
+      return actions;
+    }
     if (state.phase == NativePhase::Draft) {
       if (player != state.draft_current_player || state.draft_step < 0 ||
           state.draft_step >= static_cast<int>(state.draft_steps.size())) return {};
@@ -299,6 +309,17 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       else state.thief_target = number;
       state.pending_kind.clear();
       state.ability_used = true;
+      return true;
+    }
+    if (action.type == ActionType::ChooseChar && state.pending_kind == "witch_target") {
+      if (player != state.active_player) return false;
+      int number = -1;
+      try { number = std::stoi(action.name); } catch (...) { return false; }
+      bool known = false;
+      for (const auto& id : state.char_deck) if (char_number(id) == number) known = true;
+      if (!known || number <= 1 || number == char_number(state.players[player].role_id)) return false;
+      state.bewitched = number; state.witch_player = player;
+      state.pending_kind.clear(); state.ability_used = true;
       return true;
     }
     if (state.phase == NativePhase::Draft) {

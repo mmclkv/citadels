@@ -81,6 +81,8 @@ struct NativeGameState {
   std::vector<std::string> char_deck;
   int assassinated = -1;
   int thief_target = -1;
+  int bewitched = -1;
+  int witch_player = -1;
   int pending_target = -1;
   int pending_from_crown = -1;
   std::string pending_uid;

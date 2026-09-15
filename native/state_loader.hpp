@@ -96,6 +96,8 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   if (effects && effects->is_object()) {
     state.assassinated = int_field(*effects, "assassinated", -1);
     state.thief_target = int_field(*effects, "thief", -1);
+    state.bewitched = int_field(*effects, "bewitched", -1);
+    state.witch_player = int_field(*effects, "witchBy", -1);
   }
 
   const auto& players = required_field(snapshot, "players");
