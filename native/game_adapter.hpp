@@ -70,6 +70,20 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[i].id});
       return actions;
     }
+    if (state.pending_kind == "warlord_destroy" || state.pending_kind == "marshal_seize") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (size_t i = 0; i < state.players.size(); ++i) {
+        if (state.pending_kind == "marshal_seize" && static_cast<int>(i) == player) continue;
+        if (state.players[i].city.size() >= static_cast<size_t>(state.end_districts)) continue;
+        if (static_cast<int>(i) != player && state.pending_kind == "warlord_destroy" && state.players[i].role_id == "bishop") continue;
+        for (const auto& district : state.players[i].city) {
+          if (district.fortress || (state.pending_kind == "marshal_seize" && district.card.cost > 3)) continue;
+          actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[i].id});
+        }
+      }
+      return actions;
+    }
     if (state.pending_kind == "assassin" || state.pending_kind == "thief") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -164,6 +178,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (player != state.active_player) return false;
       return state.diplomat_swap(action.target, action.uid);
     }
+    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "warlord_destroy")
+      return state.warlord_destroy(action.target, action.uid);
+    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "marshal_seize")
+      return state.marshal_seize(action.target, action.uid);
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {
       if (player != state.active_player) return false;

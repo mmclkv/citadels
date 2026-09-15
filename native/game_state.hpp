@@ -9,6 +9,7 @@
 #include "city_machine.hpp"
 #include "deck_machine.hpp"
 #include "emperor_machine.hpp"
+#include "military_machine.hpp"
 #include "resource_rules.hpp"
 #include "special_buildings.hpp"
 #include "turn_machine.hpp"
@@ -137,8 +138,52 @@ struct NativeGameState {
     const int difference = std::max(0, their_it->card.cost - own_it->card.cost);
     if (difference > active()->gold) return false;
     active()->gold -= difference; players[target].gold += difference;
-    std::swap(*own_it, *their_it);
+    NativeDistrict own = std::move(*own_it);
+    NativeDistrict theirs = std::move(*their_it);
+    active()->city.erase(own_it);
+    players[target].city.erase(their_it);
+    active()->city.push_back(std::move(theirs));
+    players[target].city.push_back(std::move(own));
     pending_uid.clear(); pending_target = -1; pending_kind.clear();
+    return true;
+  }
+
+  int find_player(const std::string& id) const {
+    for (size_t i = 0; i < players.size(); ++i) if (players[i].id == id) return static_cast<int>(i);
+    return -1;
+  }
+
+  bool warlord_destroy(const std::string& target_id, const std::string& uid) {
+    if (!active()) return false;
+    const int target = find_player(target_id);
+    if (target < 0 || players[target].city.size() >= static_cast<size_t>(end_districts) ||
+        (target != active_player && players[target].role_id == "bishop")) return false;
+    auto it = std::find_if(players[target].city.begin(), players[target].city.end(),
+      [&](const NativeDistrict& d) { return d.card.uid == uid; });
+    if (it == players[target].city.end() || it->fortress) return false;
+    MilitaryCard card{it->name, it->card.cost, it->fortress, it->beautified};
+    const int cost = destroy_cost(card, false);
+    if (active()->gold < cost) return false;
+    active()->gold -= cost;
+    deck.put_bottom({it->card});
+    players[target].city.erase(it);
+    pending_kind.clear();
+    return true;
+  }
+
+  bool marshal_seize(const std::string& target_id, const std::string& uid) {
+    if (!active()) return false;
+    const int target = find_player(target_id);
+    if (target < 0 || target == active_player || players[target].city.size() >= static_cast<size_t>(end_districts)) return false;
+    auto it = std::find_if(players[target].city.begin(), players[target].city.end(),
+      [&](const NativeDistrict& d) { return d.card.uid == uid; });
+    if (it == players[target].city.end() || it->fortress || it->card.cost > 3 || active()->gold < it->card.cost) return false;
+    if (std::count_if(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) { return d.name == it->name; }) > 0) return false;
+    const int cost = it->card.cost;
+    active()->gold -= cost; players[target].gold += cost;
+    NativeDistrict seized = std::move(*it);
+    players[target].city.erase(it); active()->city.push_back(std::move(seized));
+    pending_kind.clear();
     return true;
   }
   const NativePlayer* active() const {
