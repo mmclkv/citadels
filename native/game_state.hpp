@@ -117,7 +117,20 @@ struct NativeGameState {
     ++draft_step; draft_sub = "pick";
     if (draft_step >= static_cast<int>(draft_steps.size())) {
       phase = NativePhase::Action;
-      active_player = 0;
+      call_queue.clear();
+      for (size_t i = 0; i < players.size(); ++i) for (const auto& role : players[i].role_ids)
+        call_queue.push_back({role, role_number(role), static_cast<int>(i)});
+      std::stable_sort(call_queue.begin(), call_queue.end(),
+        [](const NativeCallEntry& left, const NativeCallEntry& right) { return left.number < right.number; });
+      call_index = 0;
+      if (call_queue.empty()) active_player = -1;
+      else {
+        active_player = call_queue.front().player;
+        players[active_player].role_id = call_queue.front().char_id;
+        turn_phase = "main";
+        resources_taken = false; income_taken = false; monk_extra_taken = false;
+        builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
+      }
     } else draft_current_player = draft_steps[draft_step].player;
     return true;
   }
