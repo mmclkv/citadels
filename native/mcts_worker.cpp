@@ -106,7 +106,7 @@ int main() {
             direct_neural->reload_model(model_path);
           }
 #else
-          throw std::runtime_error("当前 search_worker 未编译 LibTorch 后端");
+          throw std::runtime_error("当前 mcts_worker 未编译 LibTorch 后端");
 #endif
         } else if (!gpu) {
           gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));

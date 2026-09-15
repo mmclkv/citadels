@@ -44,7 +44,7 @@ native search worker 的 GPU evaluator 有两种模式：
   float32 二进制批量协议，不再在每个 batch 上编码/解析 JSON。
 - `libtorch`：可选直连模式。C++ 直接加载项目 Python wheel 内的 LibTorch，绕过
   Python 进程和 IPC。该模式需要用 C++20、`CITADELS_LIBTORCH` 以及 torch 的
-  include/lib 重新编译 `search_worker`；Node 侧配置
+  include/lib 重新编译 `mcts_worker`；Node 侧配置
   `nativeInferenceBackend: 'libtorch'` 后启用。
 
 两种模式都使用同一份 flat float32 权重文件，并保留 `modelVersion` 热加载逻辑。

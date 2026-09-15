@@ -9,7 +9,7 @@ class NativeSearchClient {
     gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda',
     inferenceBackend = 'python-binary' }) {
     const binary = executable || process.env.CITADELS_NATIVE_SEARCH_WORKER;
-    if (!binary) throw new Error('backend:native 需要 CITADELS_NATIVE_SEARCH_WORKER 指向已编译的 search_worker');
+    if (!binary) throw new Error('backend:native 需要 CITADELS_NATIVE_SEARCH_WORKER 指向已编译的 mcts_worker');
     const environment = { ...process.env };
     if (inferenceBackend === 'libtorch') {
       const torchLib = path.join(root, '.python', 'Lib', 'site-packages', 'torch', 'lib');
