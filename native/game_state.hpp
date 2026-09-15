@@ -251,14 +251,18 @@ struct NativeGameState {
     std::vector<DistrictCard> rest;
     for (const auto& card : pending_cards) if (card.uid != uid) rest.push_back(card);
     active()->hand.push_back(std::move(chosen));
-    if (pending_kind == "draw_keep") deck.put_bottom(std::move(rest));
+    const bool draw_keep = pending_kind == "draw_keep";
+    if (draw_keep) deck.put_bottom(std::move(rest));
     else deck.return_and_shuffle(std::move(rest), rng);
     if (active()->role_id == "architect" && !bonus_done) {
       auto bonus = deck.draw(2, rng);
       active()->hand.insert(active()->hand.end(), std::make_move_iterator(bonus.begin()), std::make_move_iterator(bonus.end()));
       bonus_done = true;
     }
-    pending_cards.clear(); pending_kind.clear(); return true;
+    pending_cards.clear(); pending_kind.clear();
+    if (!draw_keep) ability_used = true;
+    after_resources();
+    return true;
   }
 
   bool magician_redraw(const std::vector<std::string>& uids) {
@@ -338,6 +342,7 @@ struct NativeGameState {
     if (!p || resources_taken) return false;
     p->gold += plan_take_gold(p->role_id, ResourcePhase::Main).gold;
     resources_taken = true;
+    after_resources();
     return true;
   }
 
@@ -360,7 +365,23 @@ struct NativeGameState {
       pending_cards = std::move(cards);
       pending_kind = "draw_keep";
     }
+    if (pending_kind.empty()) after_resources();
     return true;
+  }
+
+  void after_resources() {
+    auto* p = active();
+    if (!p || ability_used || !pending_kind.empty()) return;
+    if (p->role_id == "navigator") { pending_kind = "navigator_bonus"; return; }
+    if (p->role_id == "scholar") {
+      pending_cards = deck.draw(7, rng);
+      if (pending_cards.empty()) ability_used = true;
+      else pending_kind = "scholar_pick";
+      return;
+    }
+    if (p->role_id == "witch") { pending_kind = "witch_target"; return; }
+    if (p->role_id == "monk" && !income_taken) { pending_kind = "monk_declare"; return; }
+    if (p->role_id == "prophet") { prophet_collect(); return; }
   }
 
   bool income() {
