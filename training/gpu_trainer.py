@@ -197,6 +197,12 @@ def main():
                     optimizer.load_state_dict(torch.load(optimizer_path, map_location=device, weights_only=True))
                 reply({"ok": True, "device": str(device), "torch": torch.__version__,
                        "cuda": torch.version.cuda, "gpu": torch.cuda.get_device_name(0) if use_cuda else ""})
+            elif command["cmd"] == "reload":
+                if model is None:
+                    raise RuntimeError("GPU 训练器尚未 init")
+                model.load_flat(command["modelPath"])
+                model.to(device)
+                reply({"ok": True})
             elif command["cmd"] == "train":
                 data = load_rollout(command["rolloutPath"])
                 metrics = train_ppo(model, optimizer, device, data, command["epochs"], command.get("miniBatch", 256))

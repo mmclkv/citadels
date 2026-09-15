@@ -136,6 +136,7 @@ class GpuTrainerClient {
   BatchEvaluationResult evaluate(const std::vector<std::vector<float>>& states,
                                  const std::vector<std::vector<std::vector<float>>>& actions,
                                  const std::string& profile);
+  void reload_model(const std::string& model_path);
   void close();
 
  private:
@@ -221,6 +222,10 @@ inline BatchEvaluationResult GpuTrainerClient::evaluate(
   return decode_batch_eval_response(request(encode_batch_eval_request(states, actions, profile)), counts);
 }
 
+inline void GpuTrainerClient::reload_model(const std::string& model_path) {
+  request("{\"cmd\":\"reload\",\"modelPath\":\"" + json_escape(model_path) + "\"}\n");
+}
+
 inline void GpuTrainerClient::close() {
   if (!running_) return;
   try { request("{\"cmd\":\"close\"}\n"); } catch (...) {}
@@ -237,6 +242,9 @@ inline void GpuTrainerClient::start(const std::string&, const std::string&, floa
 }
 inline BatchEvaluationResult GpuTrainerClient::evaluate(const std::vector<std::vector<float>>&,
     const std::vector<std::vector<std::vector<float>>>&, const std::string&) {
+  throw std::runtime_error("当前平台尚未实现 gpu_trainer 双向进程管道");
+}
+inline void GpuTrainerClient::reload_model(const std::string&) {
   throw std::runtime_error("当前平台尚未实现 gpu_trainer 双向进程管道");
 }
 inline void GpuTrainerClient::close() {}

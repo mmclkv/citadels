@@ -63,7 +63,12 @@ function getNativeSearch() {
     simulations: workerData.config.mctsSimulations || 1,
     maxDepth: workerData.config.mctsMaxDepth || 200,
     cPuct: workerData.config.mctsC_puct || 1,
-    seed: workerData.config.seed ^ (workerData.workerId * 2654435761)
+    seed: workerData.config.seed ^ (workerData.workerId * 2654435761),
+    gpuEvaluator: workerData.config.mctsEvaluator === 'gpu',
+    python: require('node:path').join(__dirname, '..', '.python', 'python.exe'),
+    script: require('node:path').join(__dirname, 'gpu_trainer.py'),
+    profile: workerData.config.profile,
+    device: workerData.config.backend === 'cpu' ? 'cpu' : 'cuda'
   });
   return nativeSearch;
 }
@@ -87,9 +92,11 @@ parentPort.on('message', async message => {
       // 缓存键是状态向量 hash，不随权重变；但权重变了，相同状态的 (P, V) 变了 → 旧缓存无效
       if (mctsEvaluator) mctsEvaluator.reset();
     }
+    if (nativeSearch) nativeSearch.setModelPath(message.modelPath);
     const rng = mulberry32(workerData.config.seed ^ (message.gameIndex * 2246822519));
     const evaluator = workerData.config.mctsEvaluator === 'gpu' ? getMctsEvaluator() : null;
     const nativeEvaluator = workerData.config.backend === 'native' ? getNativeSearch() : null;
+    workerData.config.modelVersion = message.modelVersion;
     const result = await runSelfPlayGame(model, workerData.config, message.gameIndex, rng, () => stopping, evaluator, nativeEvaluator);
     // 慢局（>10s）才往上推一条，避免淹没日志
     if (result && result.durationMs > 10000) {

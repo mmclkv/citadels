@@ -64,4 +64,15 @@ class NativeNeuralBatchedEvaluator final
   std::string profile_;
 };
 
+class NativeNeuralEvaluator final : public Evaluator<NativeGameState, NativeSearchAction> {
+ public:
+  explicit NativeNeuralEvaluator(NativeNeuralBatchedEvaluator& backend) : backend_(backend) {}
+  Evaluation evaluate(const NativeGameState& state, int player,
+                      const std::vector<NativeSearchAction>& actions) override {
+    return backend_.evaluate(state, player, actions);
+  }
+ private:
+  NativeNeuralBatchedEvaluator& backend_;
+};
+
 }  // namespace citadels::native

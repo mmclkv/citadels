@@ -236,7 +236,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     let piVector = null;
     let mctsValue = null;
     if (config.backend === 'native' && nativeSearch) {
-      const nativeResult = await nativeSearch.search(state, actor.id, legal);
+      const nativeResult = await nativeSearch.search(state, actor.id, legal, config.modelVersion || 0);
       piVector = nativeResult.policy;
       mctsValue = nativeResult.value;
       let r = rng();

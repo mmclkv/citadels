@@ -5,7 +5,8 @@ const { spawn } = require('node:child_process');
 const { encodeSearchRequest, decodeSearchResponse } = require('../native/protocol.js');
 
 class NativeSearchClient {
-  constructor({ root, executable, simulations = 50, maxDepth = 200, cPuct = 1, seed = 1 }) {
+  constructor({ root, executable, simulations = 50, maxDepth = 200, cPuct = 1, seed = 1,
+    gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda' }) {
     const binary = executable || process.env.CITADELS_NATIVE_SEARCH_WORKER;
     if (!binary) throw new Error('backend:native 需要 CITADELS_NATIVE_SEARCH_WORKER 指向已编译的 search_worker');
     this.child = spawn(binary, [], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -13,6 +14,12 @@ class NativeSearchClient {
     this.maxDepth = maxDepth;
     this.cPuct = cPuct;
     this.seed = seed;
+    this.gpuEvaluator = gpuEvaluator;
+    this.python = python;
+    this.script = script;
+    this.profile = profile;
+    this.device = device;
+    this.modelPath = '';
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = '';
@@ -47,7 +54,7 @@ class NativeSearchClient {
     this.pending.clear();
   }
 
-  search(state, rootPlayerId, legalActions) {
+  search(state, rootPlayerId, legalActions, modelVersion = 0) {
     if (this.closed) return Promise.reject(new Error('native search worker 已关闭'));
     const id = String(this.nextId++);
     const request = JSON.parse(encodeSearchRequest(state, rootPlayerId, legalActions, id));
@@ -55,11 +62,22 @@ class NativeSearchClient {
     request.maxDepth = this.maxDepth;
     request.cPuct = this.cPuct;
     request.seed = this.seed ^ this.nextId;
+    request.gpuEvaluator = this.gpuEvaluator;
+    if (this.gpuEvaluator) {
+      request.python = this.python;
+      request.script = this.script;
+      request.profile = this.profile;
+      request.device = this.device;
+      request.modelPath = this.modelPath;
+      request.modelVersion = modelVersion;
+    }
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.child.stdin.write(JSON.stringify(request) + '\n', error => { if (error) reject(error); });
     });
   }
+
+  setModelPath(modelPath) { this.modelPath = modelPath || ''; }
 
   close() {
     if (this.closed) return;

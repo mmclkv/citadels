@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -5,6 +8,8 @@
 
 #include "game_adapter.hpp"
 #include "json_value.hpp"
+#include "gpu_trainer_client.hpp"
+#include "neural_evaluator.hpp"
 #include "state_loader.hpp"
 
 using namespace citadels::native;
@@ -50,6 +55,12 @@ void emit_error(const std::string& id, const std::string& message) {
 
 int main() {
   std::string line;
+  std::shared_ptr<GpuTrainerClient> gpu;
+  std::unique_ptr<BatchEvaluator> batch;
+  std::unique_ptr<NativeNeuralBatchedEvaluator> neural;
+  std::unique_ptr<NativeNeuralEvaluator> neural_single;
+  std::string gpu_model_path;
+  int gpu_model_version = -1;
   while (std::getline(std::cin, line)) {
     std::string id;
     try {
@@ -70,6 +81,25 @@ int main() {
 
       NativeGameAdapter game;
       UniformNativeEvaluator evaluator;
+      if (bool_field(request, "gpuEvaluator") && !string_field(request, "modelPath").empty()) {
+        const auto model_path = string_field(request, "modelPath");
+        const int model_version = int_field(request, "modelVersion", 0);
+        if (!gpu) {
+          gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));
+          gpu->start(string_field(request, "profile", "balanced"), model_path, 0.0003f,
+                     string_field(request, "device", "cuda"));
+          batch = std::make_unique<BatchEvaluator>(make_gpu_batch_backend(gpu,
+            string_field(request, "profile", "balanced")));
+          neural = std::make_unique<NativeNeuralBatchedEvaluator>(*batch,
+            string_field(request, "profile", "balanced"));
+          neural_single = std::make_unique<NativeNeuralEvaluator>(*neural);
+          gpu_model_path = model_path;
+        } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
+          gpu->reload_model(model_path);
+          gpu_model_path = model_path;
+        }
+        gpu_model_version = model_version;
+      }
       Mcts<NativeGameState, NativeSearchAction>::Config config;
       config.simulations = std::max(1, int_field(request, "simulations", 50));
       config.max_depth = std::max(1, int_field(request, "maxDepth", 200));
@@ -92,7 +122,10 @@ int main() {
           }
         }
         if (same_order) {
-          const auto result = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
+          auto* selected_evaluator = neural_single
+            ? static_cast<Evaluator<NativeGameState, NativeSearchAction>*>(neural_single.get())
+            : static_cast<Evaluator<NativeGameState, NativeSearchAction>*>(&evaluator);
+          const auto result = Mcts<NativeGameState, NativeSearchAction>(game, *selected_evaluator, config)
             .search(state, root);
           policy = result.policy; visits = result.visits; expansions = result.expansions;
         }
