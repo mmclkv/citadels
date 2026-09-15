@@ -78,6 +78,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       for (int gold = 0; gold <= blue; ++gold) actions.push_back({ActionType::MonkResource, {}, std::to_string(gold), std::to_string(blue - gold)});
       return actions;
     }
+    if (state.pending_kind == "scholar_pick" || state.pending_kind == "draw_keep") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& card : state.pending_cards) actions.push_back({
+        state.pending_kind == "scholar_pick" ? ActionType::ScholarPick : ActionType::DrawKeep,
+        card.uid, {}, {}, {}});
+      return actions;
+    }
     if (state.pending_kind == "diplomat_theirs") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -208,6 +216,11 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       int gold = -1, cards = -1;
       try { gold = std::stoi(action.name); cards = std::stoi(action.effect); } catch (...) { return false; }
       return state.monk_resource(gold, cards);
+    }
+    if ((action.type == ActionType::ScholarPick && state.pending_kind == "scholar_pick") ||
+        (action.type == ActionType::DrawKeep && state.pending_kind == "draw_keep")) {
+      if (player != state.active_player) return false;
+      return state.keep_pending_card(action.uid);
     }
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {

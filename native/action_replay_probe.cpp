@@ -100,6 +100,11 @@ int main() {
           NativeSearchAction chosen{ActionType::MonkResource, {}, std::to_string(int_field(action, "gold")), std::to_string(int_field(action, "cards")), {}};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("monk_resource 执行失败");
+        } else if (type == "scholar_pick" || type == "draw_keep") {
+          NativeSearchAction chosen{type == "scholar_pick" ? ActionType::ScholarPick : ActionType::DrawKeep,
+            string_field(action, "uid"), {}, {}, {}};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error(type + " 执行失败");
         } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {
