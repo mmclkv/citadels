@@ -90,6 +90,7 @@ inline NativePhase load_phase(const JsonValue& snapshot) {
   if (phase == "lobby") return NativePhase::Lobby;
   if (phase == "draft") return NativePhase::Draft;
   if (phase == "action") return NativePhase::Action;
+  if (phase == "reaction") return NativePhase::Reaction;
   if (phase == "roundConfirm") return NativePhase::RoundConfirm;
   if (phase == "gameover") return NativePhase::GameOver;
   return NativePhase::Unknown;
@@ -102,6 +103,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   state.round = int_field(snapshot, "round", 1);
   state.first_to_finish = int_field(snapshot, "firstToFinish", -1);
   state.call_index = int_field(snapshot, "callIdx", 0);
+  state.turns_completed = int_field(snapshot, "turnsCompleted", 0);
   state.rng = JsRng(static_cast<uint32_t>(int_field(snapshot, "rngState")));
   const auto* config = snapshot.get("config");
   if (config && config->is_object()) state.end_districts = int_field(*config, "endDistricts", 8);
@@ -124,8 +126,13 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (!value.is_object()) throw std::runtime_error("玩家必须是对象");
     NativePlayer player;
     player.id = string_field(value, "id");
+    player.seat = int_field(value, "seat", 0);
     player.gold = int_field(value, "gold");
+    player.hand_count = int_field(value, "handCount", 0);
     player.has_crown = bool_field(value, "hasCrown");
+    player.is_bot = bool_field(value, "isBot");
+    player.connected = bool_field(value, "connected", true);
+    player.played = string_array_field(value, "played");
     const auto* chars = value.get("chars");
     if (chars && chars->is_array()) {
       for (const auto& role : chars->as_array()) if (role.is_string()) {
@@ -135,6 +142,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     }
     const auto* hand = value.get("hand");
     if (hand) player.hand = load_cards(*hand);
+    if (player.hand_count == 0 && !player.hand.empty()) player.hand_count = static_cast<int>(player.hand.size());
     const auto* city = value.get("city");
     if (city && city->is_array()) {
       player.city.reserve(city->as_array().size());
@@ -153,6 +161,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
 
   const auto* turn = snapshot.get("turn");
   if (turn && turn->is_object()) {
+    state.has_turn = true;
     state.active_player = int_field(*turn, "playerIdx", -1);
     state.turn_phase = string_field(*turn, "phase", "main");
     state.resources_taken = bool_field(*turn, "takenResources");
@@ -160,6 +169,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     state.monk_extra_taken = bool_field(*turn, "monkExtraTaken");
     state.ability_used = bool_field(*turn, "abilityUsed");
     state.builds = int_field(*turn, "builds");
+    state.spent_on_build = int_field(*turn, "spentOnBuild");
     state.used_lab = bool_field(*turn, "usedLab");
     state.used_smithy = bool_field(*turn, "usedSmithy");
     state.used_museum = bool_field(*turn, "usedMuseum");
@@ -202,6 +212,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       state.draft_steps.push_back({int_field(value, "player", -1), int_field(value, "keep", 1),
         int_field(value, "discard", 0), bool_field(value, "fromFaceDown")});
     }
+    if (state.draft_total_steps == 0) state.draft_total_steps = static_cast<int>(state.draft_steps.size());
     if (state.draft_current_player < 0 && state.draft_step >= 0 &&
         state.draft_step < static_cast<int>(state.draft_steps.size()))
       state.draft_current_player = state.draft_steps[state.draft_step].player;

@@ -17,6 +17,25 @@ const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
 const STATE_SIZE = 192;
 const ACTION_SIZE = 64;
+const STATE_ENCODING_VERSION = 2;
+const ACTION_ENCODING_VERSION = 2;
+const PHASE_CODES = { lobby: 0, draft: 1, action: 2, reaction: 3, roundConfirm: 4, gameover: 5 };
+const TURN_PHASE_CODES = { main: 0, witch_resume: 1, draw_keep: 2, scholar_pick: 3 };
+const PENDING_CODES = {
+  assassin: 1, thief: 2, witch_target: 3, magician_choice: 4, magician_swap: 5,
+  magician_redraw: 6, warlord_destroy: 7, marshal_seize: 8, artist: 9,
+  navigator_bonus: 10, monk_declare: 11, emperor_crown: 12, emperor_take: 13,
+  prophet_give: 14, draw_keep: 15, scholar_pick: 16, diplomat_mine: 17,
+  diplomat_theirs: 18
+};
+const ACTION_TYPES = [
+  'ability_skip', 'ability', 'artist_done', 'build', 'choose_cards', 'choose_char',
+  'choose_district', 'choose_player', 'confirm_round', 'draft_discard', 'draft_pick',
+  'draw_keep', 'emperor_crown', 'emperor_take', 'end_turn', 'income', 'lab',
+  'magician_mode', 'monk_resource', 'monk_take', 'museum', 'navigator_bonus',
+  'pending_back', 'prophet_give', 'reaction', 'scholar_pick', 'smithy',
+  'take_cards', 'take_gold'
+];
 const IGNORE_KEYS = new Set(['log', 'notices', 'available', 'roomName', 'name', 'label', 'desc', 'resumeToken']);
 
 function hash32(text) {
@@ -77,34 +96,104 @@ function observationContext(view, playerId) {
 function encodeState(view, playerId) {
   const vector = new Float32Array(STATE_SIZE);
   const context = observationContext(view, playerId);
-  addFeature(vector, 'bias');
-  addFeature(vector, 'players', Math.tanh((view.players || []).length / 8));
   const players = view.players || [];
-  for (let rel = 0; rel < players.length; rel++) {
-    const p = players[(context.meIndex + rel) % players.length];
-    walkFeatures(vector, p, 'player[' + rel + ']', context);
+  const count = Math.min(8, players.length);
+  const rel = value => value == null || value < 0 || !players.length ? 0 : (value - context.meIndex + players.length) % players.length;
+  const phase = PHASE_CODES[view.phase] == null ? 6 : PHASE_CODES[view.phase];
+  const turn = view.turn || {};
+  const draft = view.draft || {};
+  const reaction = view.reaction || {};
+  const roundConfirm = view.roundConfirm || {};
+  const active = turn.playerIdx != null ? turn.playerIdx :
+    reaction.playerIdx != null ? reaction.playerIdx :
+    draft.currentPlayer ? players.findIndex(p => p.id === draft.currentPlayer) : -1;
+  vector[0] = STATE_ENCODING_VERSION;
+  vector[1] = players.length / 8;
+  vector[2] = phase / 6;
+  vector[3] = (Number(view.round) || 0) / 100;
+  vector[4] = rel(active) / 8;
+  vector[5] = (Number(view.endDistricts || (view.config && view.config.endDistricts)) || 8) / 12;
+  vector[6] = (view.firstToFinish == null || view.firstToFinish < 0) ? 0 : (rel(view.firstToFinish) + 1) / 9;
+  vector[7] = (Number(view.deckCount) || 0) / 100;
+  vector[8] = (Number(view.discardCount) || 0) / 100;
+  vector[9] = (Array.isArray(view.charDeck) ? view.charDeck.length : 0) / 8;
+  vector[10] = (Number(view.callIdx) || 0) / 16;
+  vector[11] = (Number(draft.stepIdx) || 0) / 32;
+  vector[12] = (Number(draft.totalSteps) || 0) / 32;
+  vector[13] = draft.currentPlayer ? (rel(players.findIndex(p => p.id === draft.currentPlayer)) + 1) / 9 : 0;
+  vector[14] = reaction.playerIdx == null ? 0 : (rel(reaction.playerIdx) + 1) / 9;
+  vector[15] = (Array.isArray(roundConfirm.confirmed) ? roundConfirm.confirmed.filter(Boolean).length : 0) / 8;
+  vector[16] = turn.pending && turn.pending.targetIdx != null ? (rel(turn.pending.targetIdx) + 1) / 9 : 0;
+  vector[17] = turn.pending && turn.pending.fromCrownIdx != null ? (rel(turn.pending.fromCrownIdx) + 1) / 9 : 0;
+  vector[18] = turn.pending && PENDING_CODES[turn.pending.kind] ? PENDING_CODES[turn.pending.kind] / 32 : 0;
+  vector[19] = (TURN_PHASE_CODES[turn.phase] == null ? 4 : TURN_PHASE_CODES[turn.phase]) / 4;
+  vector[20] = (Number(view.turnsCompleted) || 0) / 100;
+  vector[21] = turn.takenResources ? 1 : 0;
+  vector[22] = turn.incomeTaken ? 1 : 0;
+  vector[23] = turn.monkExtraTaken ? 1 : 0;
+  vector[24] = turn.abilityUsed ? 1 : 0;
+  vector[25] = turn.usedLab ? 1 : 0;
+  vector[26] = turn.usedSmithy ? 1 : 0;
+  vector[27] = turn.usedMuseum ? 1 : 0;
+  vector[28] = turn.bonusDone ? 1 : 0;
+  vector[29] = turn.pending && Number(turn.pending.count) ? Number(turn.pending.count) / 8 : 0;
+  vector[30] = Number(turn.builds) / 4 || 0;
+  vector[31] = Number(turn.spentOnBuild) / 20 || 0;
+  for (let r = 0; r < 8; r++) {
+    const p = r < count ? players[(context.meIndex + r) % players.length] : null;
+    const base = 32 + r * 20;
+    if (!p) continue;
+    const city = p.city || [];
+    const colors = new Set(city.map(c => c.color));
+    vector[base] = (Number(p.gold) || 0) / 20;
+    vector[base + 1] = (Number(p.handCount) || (p.hand || []).length || 0) / 20;
+    vector[base + 2] = city.length / Math.max(1, Number(view.endDistricts || (view.config && view.config.endDistricts)) || 8);
+    vector[base + 3] = p.hasCrown ? 1 : 0;
+    vector[base + 4] = ((context.meIndex + r) % players.length) === active ? 1 : 0;
+    vector[base + 5] = p.hasChosen ? 1 : 0;
+    vector[base + 6] = p.draftComplete ? 1 : 0;
+    vector[base + 7] = p.revealedCharNum == null ? 0 : (Number(p.revealedCharNum) + 1) / 21;
+    vector[base + 8] = (p.played || []).length / 3;
+    vector[base + 9] = city.reduce((sum, c) => sum + (Number(c.scoreValue) || Number(c.cost) || 0), 0) / 100;
+    vector[base + 10] = city.reduce((sum, c) => sum + (Number(c.cost) || 0), 0) / 100;
+    vector[base + 11] = colors.size / 5;
+    vector[base + 12] = city.filter(c => c.purpleEffect).length / 10;
+    vector[base + 13] = city.reduce((sum, c) => sum + (Number(c.museumCount) || 0), 0) / 10;
+    vector[base + 14] = city.reduce((sum, c) => sum + (Number(c.beautified) || 0), 0) / 10;
+    vector[base + 15] = (p.chars || []).length / 3;
+    vector[base + 16] = p.connected === false ? 0 : 1;
+    vector[base + 17] = p.isBot ? 1 : 0;
+    vector[base + 18] = (Number(p.seat) || 0) / 8;
+    vector[base + 19] = ((context.meIndex + r) % players.length) === active && turn.pending && Number(turn.pending.count)
+      ? Number(turn.pending.count) / 8 : 0;
   }
-  const global = {};
-  Object.keys(view).forEach(k => { if (k !== 'players' && !IGNORE_KEYS.has(k)) global[k] = view[k]; });
-  walkFeatures(vector, global, 'game', context);
-  normalizeVector(vector);
   return { vector, context };
 }
 
 function encodeAction(action, context) {
   const vector = new Float32Array(ACTION_SIZE);
-  addFeature(vector, 'bias');
-  const normalized = {};
-  Object.keys(action || {}).forEach(key => {
-    if (key === 'label') return;
-    const value = action[key];
-    if ((key === 'uid' || key === 'discardUid' || key === 'cardUid') && context.cardIds.has(value)) {
-      normalized[key] = 'card:' + context.cardIds.get(value);
-    } else if (key === 'uids' && Array.isArray(value)) {
-      normalized.uids = value.map(uid => 'card:' + (context.cardIds.get(uid) || 'unknown'));
-    } else normalized[key] = value;
+  vector[0] = ACTION_ENCODING_VERSION;
+  const type = String(action && action.type || '');
+  const typeIndex = ACTION_TYPES.indexOf(type);
+  if (typeIndex >= 0) vector[1 + typeIndex] = 1;
+  const hash = (text, salt) => {
+    let h = 2166136261 >>> 0;
+    const value = String(text == null ? '' : text);
+    for (let i = 0; i < value.length; i++) h = Math.imul(h ^ value.charCodeAt(i), 16777619) >>> 0;
+    const index = 32 + ((h ^ (salt * 2654435761)) >>> 0) % 32;
+    vector[index] += (h & 0x80000000) ? -1 : 1;
+  };
+  const canonicalFields = [
+    ['uid', action && action.uid],
+    ['target', action && action.target],
+    ['name', action && (action.name != null ? action.name : (action.charId != null ? action.charId : action.mode))],
+    ['effect', action && (action.effect != null ? action.effect : (action.use != null ? (action.use ? 'use' : 'skip') : null))],
+    ['secondaryUid', action && (action.secondaryUid != null ? action.secondaryUid : (action.discardUid != null ? action.discardUid : action.cardUid))]
+  ];
+  canonicalFields.forEach(([key, value], i) => {
+    if (value != null) hash(key + '=' + value, i);
   });
-  walkFeatures(vector, normalized, 'action', context);
+  if (action && Array.isArray(action.uids)) action.uids.forEach((uid, i) => hash('uids[' + i + ']=' + uid, i + 16));
   normalizeVector(vector);
   return vector;
 }
@@ -637,6 +726,7 @@ if (require.main === module) {
 
 module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
+  STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR

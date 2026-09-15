@@ -1,6 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,10 +20,36 @@ inline std::vector<float> encode_network_state(const NativeGameState& state, int
   return features;
 }
 
+inline void add_action_hash(std::vector<float>& vector, const std::string& text, uint32_t salt) {
+  uint32_t hash = 2166136261u;
+  for (unsigned char character : text) {
+    hash ^= character;
+    hash *= 16777619u;
+  }
+  const size_t index = 32u + ((hash ^ (salt * 2654435761u)) % 32u);
+  vector[index] += (hash & 0x80000000u) ? -1.0f : 1.0f;
+}
+
+inline void normalize_action_vector(std::vector<float>& vector) {
+  float norm = 0.0f;
+  for (float value : vector) norm += value * value;
+  norm = std::sqrt(norm);
+  if (norm > 1.0f) for (float& value : vector) value /= norm;
+}
+
 inline std::vector<float> encode_network_action(const NativeSearchAction& action) {
   std::vector<float> result(64, 0.0f);
-  result[static_cast<size_t>(action.type) % result.size()] = 1.0f;
-  result[63] = static_cast<float>(std::hash<std::string>{}(action.uid) % 997) / 997.0f;
+  result[0] = static_cast<float>(kActionEncodingVersion);
+  result[1 + static_cast<size_t>(action.type)] = 1.0f;
+  const std::array<std::pair<const char*, const std::string*>, 5> fields = {{
+    {"uid", &action.uid}, {"target", &action.target}, {"name", &action.name},
+    {"effect", &action.effect}, {"secondaryUid", &action.secondary_uid}
+  }};
+  for (size_t i = 0; i < fields.size(); ++i)
+    if (!fields[i].second->empty()) add_action_hash(result, std::string(fields[i].first) + "=" + *fields[i].second, static_cast<uint32_t>(i));
+  for (size_t i = 0; i < action.selected_uids.size(); ++i)
+    add_action_hash(result, "uids[" + std::to_string(i) + "]=" + action.selected_uids[i], static_cast<uint32_t>(i + 16));
+  normalize_action_vector(result);
   return result;
 }
 

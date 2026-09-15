@@ -44,8 +44,13 @@ NativeSearchAction decode_action(const JsonValue& value) {
   // Draft/pending actions that are not yet executable by the native rules
   // layer still pass through the protocol.  They deliberately produce the
   // safe uniform fallback below instead of aborting the whole self-play game.
+  auto name = string_field(value, "name");
+  if (name.empty()) name = string_field(value, "charId");
+  if (name.empty()) name = string_field(value, "mode");
+  auto effect = string_field(value, "effect");
+  if (effect.empty() && value.get("use")) effect = bool_field(value, "use") ? "use" : "skip";
   return {parsed.value_or(ActionType::EndTurn), string_field(value, "uid"),
-          string_field(value, "name"), string_field(value, "effect"), string_field(value, "target"),
+          name, effect, string_field(value, "target"),
           string_array_field(value, "uids"), string_field(value, "discardUid").empty()
             ? string_field(value, "cardUid") : string_field(value, "discardUid")};
 }

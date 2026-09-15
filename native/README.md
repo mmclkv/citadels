@@ -52,3 +52,16 @@ native search worker 的 GPU evaluator 有两种模式：
 价值头固定输出 8 个玩家槽位。slot 0 是当前行动者，后续槽位按座位顺序循环排列；
 不足 8 人的槽位为无效 mask。search worker 返回 `valueVector`，同时保留
 `value = valueVector[0]` 供旧客户端兼容；GPU batch 协议也返回 8 个 float 的向量。
+
+## JS/C++ 输入编码协议 v2
+
+`training/train.js` 与 `native/state_features.hpp` 共用版本化的 192 维状态编码：
+前 32 维是全局回合/阶段/待决动作字段，随后是从当前玩家视角开始的 8 个座位，
+每个座位 20 维。对手手牌使用公开的 `handCount`，角色只使用公开的 `played` 与
+回合角色编号；因此同一原始状态在不同玩家视角下不会泄漏隐藏信息。动作编码为
+64 维：第 0 维是协议版本，第 1--30 维是动作类型 one-hot，其余维度使用相同的
+FNV-1a 字段哈希与归一化规则。`state_features_probe` 和 `action_features_probe`
+用于逐元素跨语言回归检查。
+
+终局价值只由竞争排名决定：并列玩家共享同一名次，下一名跳过并列名次；绝对分数
+与分差不进入奖励。JS 训练目标、JS MCTS 终局值、C++ MCTS/worker 终局值使用同一规则。

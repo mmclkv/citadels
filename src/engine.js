@@ -1819,6 +1819,8 @@
       }),
       deckCount: state.deck.length,
       discardCount: state.discard.length,
+      callIdx: state.callIdx || 0,
+      turnsCompleted: state.turnsCompleted || 0,
       charDeck: state.charDeck.map(cid => ({ id: cid, num: charOf(cid).num,
         name: charOf(cid).name, en: charOf(cid).en, desc: charOf(cid).desc })),
       effects: {
@@ -1871,6 +1873,14 @@
         charId: t.charId, charName: c.name, charNum: t.num,
         phase: t.phase,
         takenResources: t.takenResources,
+        incomeTaken: t.incomeTaken,
+        monkExtraTaken: t.monkExtraTaken,
+        abilityUsed: t.abilityUsed,
+        spentOnBuild: t.spentOnBuild,
+        usedLab: t.usedLab,
+        usedSmithy: t.usedSmithy,
+        usedMuseum: t.usedMuseum,
+        bonusDone: t.bonusDone,
         buildLimit: buildLimitFor(state, t),
         builds: t.builds,
         // 只有当前行动者本人能拿到 pending 的具体牌面（抽牌/学者选牌属隐藏信息）
@@ -1890,13 +1900,16 @@
       case 'draw_keep':
       case 'scholar_pick':
         // 具体牌面只给正在选择的玩家；其他人只知道「正在选牌」和牌的数量。
-        return { kind: pd.kind, prompt: pd.prompt, count: (pd.cards || []).length,
+        return { kind: pd.kind, prompt: pd.prompt, targetIdx: pd.targetIdx ?? null,
+          fromCrownIdx: pd._fromCrownIdx ?? null, count: (pd.cards || []).length,
           cards: isActor ? (pd.cards || []).map(c => ({
             uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost, desc: c.desc })) : [] };
       case 'artist':
-        return { kind: pd.kind, selected: pd.selected || [] };
+        return { kind: pd.kind, targetIdx: pd.targetIdx ?? null,
+          fromCrownIdx: pd._fromCrownIdx ?? null, selected: pd.selected || [] };
       default:
-        return { kind: pd.kind, prompt: pendingPrompt(pd.kind) };
+        return { kind: pd.kind, prompt: pendingPrompt(pd.kind), targetIdx: pd.targetIdx ?? null,
+          fromCrownIdx: pd._fromCrownIdx ?? null };
     }
   }
   function pendingPrompt(kind) {

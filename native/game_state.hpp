@@ -36,6 +36,11 @@ struct NativePlayer {
   std::vector<NativeDistrict> city;
   bool has_crown = false;
   std::vector<std::string> role_ids;
+  int seat = 0;
+  int hand_count = 0;
+  bool is_bot = false;
+  bool connected = true;
+  std::vector<std::string> played;
 };
 
 struct NativeDraftStep {
@@ -57,6 +62,7 @@ struct NativeGameState {
   DeckMachine deck;
   JsRng rng;
   int active_player = -1;
+  bool has_turn = false;
   std::string turn_phase;
   int round = 1;
   int turns_completed = 0;

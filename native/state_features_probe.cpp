@@ -1,18 +1,27 @@
+#include <cstdlib>
+#include <iomanip>
 #include <iostream>
 
-#include "state_features.hpp"
+#include "json_value.hpp"
+#include "neural_evaluator.hpp"
+#include "state_loader.hpp"
 
-using namespace citadels::native;
-
-int main() {
-  NativeGameState state;
-  state.deck = DeckMachine(build_base_district_deck(31));
-  state.active_player = 1;
-  state.round = 3;
-  state.players.push_back({"p0", "merchant", 5, {}, {}, false});
-  state.players.push_back({"p1", "architect", 2, {{"h1", "blue", 1}}, {}, true});
-  const auto features = encode_features(state);
-  std::cout << features.size() << ',' << features[0] << ',' << features[4]
-            << ',' << features[16];
-  return 0;
+int main(int argc, char** argv) {
+  const int perspective = argc > 1 ? std::atoi(argv[1]) : 0;
+  std::string line;
+  if (!std::getline(std::cin, line)) return 2;
+  try {
+    const auto state = citadels::native::load_native_state(citadels::native::parse_json(line));
+    const auto vector = citadels::native::encode_network_state(state, perspective);
+    std::cout << std::setprecision(9);
+    for (size_t i = 0; i < vector.size(); ++i) {
+      if (i) std::cout << ',';
+      std::cout << vector[i];
+    }
+    std::cout << '\n';
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << error.what() << '\n';
+    return 1;
+  }
 }
