@@ -9,9 +9,9 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 2;
-constexpr int kStateFeatureSize = 192;
-constexpr int kActionEncodingVersion = 2;
+constexpr int kStateEncodingVersion = 3;
+constexpr int kStateFeatureSize = 512;
+constexpr int kActionEncodingVersion = 3;
 
 inline int state_phase_code(NativePhase phase) {
   switch (phase) {
@@ -112,10 +112,11 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[30] = static_cast<float>(state.builds) / 4.0f;
   features[31] = static_cast<float>(state.spent_on_build) / 20.0f;
   constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
+  constexpr std::array<const char*, 5> city_colors = {"yellow", "blue", "green", "red", "purple"};
   for (int r = 0; r < 8 && r < player_count; ++r) {
     const int absolute = (me + r) % player_count;
     const auto& p = state.players[absolute];
-    const size_t base = static_cast<size_t>(32 + r * 20);
+    const size_t base = static_cast<size_t>(32 + r * 60);
     int city_score = 0, city_cost = 0, purple = 0, museum = 0, beautified = 0;
     std::array<bool, 5> have{};
     for (const auto& district : p.city) {
@@ -155,6 +156,23 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     features[base + 17] = p.is_bot ? 1.0f : 0.0f;
     features[base + 18] = static_cast<float>(p.seat) / 8.0f;
     features[base + 19] = absolute == active ? static_cast<float>(state.pending_cards.size()) / 8.0f : 0.0f;
+    if (revealed >= 1 && revealed <= 9) features[base + 19 + static_cast<size_t>(revealed)] = 1.0f;
+    for (size_t i = 0; i < p.city.size() && i < 8; ++i) {
+      const auto& card = p.city[i].card;
+      const size_t slot = base + 29 + i * 3;
+      features[slot] = std::min(1.0f, std::max(0.0f, static_cast<float>(card.cost) / 8.0f));
+      int color = 0;
+      for (size_t c = 0; c < city_colors.size(); ++c)
+        if (card.color == city_colors[c]) { color = static_cast<int>(c) + 1; break; }
+      features[slot + 1] = static_cast<float>(color) / 5.0f;
+      const int score = card.score_value > 0 ? card.score_value : card.cost;
+      features[slot + 2] = std::min(1.0f, std::max(0.0f, static_cast<float>(score) / 10.0f));
+    }
+    for (int cost = 0; cost <= 6; ++cost) {
+      int count = 0;
+      for (const auto& district : p.city) if (district.card.cost == cost) ++count;
+      features[base + 53 + static_cast<size_t>(cost)] = static_cast<float>(count) / 8.0f;
+    }
   }
   return features;
 }

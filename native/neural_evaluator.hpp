@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,18 +17,8 @@ namespace citadels::native {
 
 inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1) {
   auto features = encode_features(state, player);
-  features.resize(192, 0.0f);
+  features.resize(kStateFeatureSize, 0.0f);
   return features;
-}
-
-inline void add_action_hash(std::vector<float>& vector, const std::string& text, uint32_t salt) {
-  uint32_t hash = 2166136261u;
-  for (unsigned char character : text) {
-    hash ^= character;
-    hash *= 16777619u;
-  }
-  const size_t index = 32u + ((hash ^ (salt * 2654435761u)) % 32u);
-  vector[index] += (hash & 0x80000000u) ? -1.0f : 1.0f;
 }
 
 inline void normalize_action_vector(std::vector<float>& vector) {
@@ -37,18 +28,46 @@ inline void normalize_action_vector(std::vector<float>& vector) {
   if (norm > 1.0f) for (float& value : vector) value /= norm;
 }
 
-inline std::vector<float> encode_network_action(const NativeSearchAction& action) {
-  std::vector<float> result(64, 0.0f);
+inline float uid_reference(const std::string& uid) {
+  size_t end = uid.size();
+  while (end > 0 && uid[end - 1] >= '0' && uid[end - 1] <= '9') --end;
+  if (end == uid.size()) return 0.0f;
+  int number = 0;
+  for (size_t i = end; i < uid.size(); ++i) number = std::min(64, number * 10 + uid[i] - '0');
+  return static_cast<float>(number) / 64.0f;
+}
+
+inline int role_number_for_action(const std::string& id) {
+  const int numeric = id.empty() ? 0 : std::atoi(id.c_str());
+  return numeric > 0 ? numeric : role_number(id);
+}
+
+inline std::vector<float> encode_network_action(const NativeSearchAction& action,
+                                                const NativeGameState* state = nullptr,
+                                                int perspective_player = -1) {
+  std::vector<float> result(256, 0.0f);
   result[0] = static_cast<float>(kActionEncodingVersion);
   result[1 + static_cast<size_t>(action.type)] = 1.0f;
-  const std::array<std::pair<const char*, const std::string*>, 5> fields = {{
-    {"uid", &action.uid}, {"target", &action.target}, {"name", &action.name},
-    {"effect", &action.effect}, {"secondaryUid", &action.secondary_uid}
-  }};
-  for (size_t i = 0; i < fields.size(); ++i)
-    if (!fields[i].second->empty()) add_action_hash(result, std::string(fields[i].first) + "=" + *fields[i].second, static_cast<uint32_t>(i));
-  for (size_t i = 0; i < action.selected_uids.size(); ++i)
-    add_action_hash(result, "uids[" + std::to_string(i) + "]=" + action.selected_uids[i], static_cast<uint32_t>(i + 16));
+  if (state && perspective_player >= 0 && perspective_player < static_cast<int>(state->players.size())) {
+    const int count = static_cast<int>(state->players.size());
+    for (int i = 0; i < count; ++i) if (state->players[i].id == action.target) {
+      const int relative = (i - perspective_player + count) % count;
+      if (relative < 8) result[32 + relative] = 1.0f;
+      break;
+    }
+  }
+  const int role = role_number_for_action(action.name);
+  if (role >= 1 && role <= 9) result[40 + role - 1] = 1.0f;
+  const std::string mode = !action.name.empty() ? action.name : action.effect;
+  static const std::array<const char*, 9> modes = {"gold", "cards", "card", "swap", "redraw", "use", "skip", "take", "destroy"};
+  for (size_t i = 0; i < modes.size(); ++i) if (mode == modes[i]) { result[50 + i] = 1.0f; break; }
+  result[68] = std::min(1.0f, static_cast<float>(action.selected_uids.size()) / 8.0f);
+  result[69] = action.uid.empty() ? 0.0f : 1.0f;
+  result[70] = action.secondary_uid.empty() ? 0.0f : 1.0f;
+  result[71] = uid_reference(action.uid);
+  result[72] = uid_reference(action.secondary_uid);
+  for (size_t i = 0; i < action.selected_uids.size() && i < 8; ++i)
+    result[80 + i] = uid_reference(action.selected_uids[i]);
   normalize_action_vector(result);
   return result;
 }
@@ -76,7 +95,9 @@ class NativeNeuralBatchedEvaluator final
       state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1));
     for (const auto& group : actions) {
       action_vectors.emplace_back();
-      for (const auto& action : group) action_vectors.back().push_back(encode_network_action(action));
+      for (const auto& action : group)
+        action_vectors.back().push_back(encode_network_action(action, &states[action_vectors.size() - 1],
+                                                              action_vectors.size() - 1 < players.size() ? players[action_vectors.size() - 1] : -1));
     }
     // 直接调用统一后端接口，避免把 GPU/CPU 设备逻辑复制到规则适配器。
     std::vector<BatchEvaluationRequest> requests;

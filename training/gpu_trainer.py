@@ -16,6 +16,8 @@ PROFILES = {
     "large": (512, 384, 384, 192, 192),
 }
 VALUE_SLOTS = 8
+STATE_SIZE = 512
+ACTION_SIZE = 256
 
 BINARY_MAGIC = 0x31425443  # "CTB1" little-endian.
 BINARY_BATCH_EVAL = 1
@@ -155,7 +157,7 @@ def run_binary_protocol(model, device):
 
 
 class PolicyValueNet(nn.Module):
-    def __init__(self, profile, state_size=192, action_size=64):
+    def __init__(self, profile, state_size=512, action_size=256):
         super().__init__()
         sh, latent, ph, pm, vh = PROFILES[profile]
         self.state1 = nn.Linear(state_size, sh)
@@ -230,7 +232,7 @@ def load_rollout(filename):
     for row in rows:
         count = len(row["actions"])
         states.append(row["state"])
-        actions.append(row["actions"] + [[0.0] * 64 for _ in range(maximum - count)])
+        actions.append(row["actions"] + [[0.0] * ACTION_SIZE for _ in range(maximum - count)])
         masks.append([True] * count + [False] * (maximum - count))
         chosen.append(row["chosen"])
         old_probs.append(row["oldProb"])
@@ -398,7 +400,7 @@ def main():
                 padded_actions = []
                 masks = []
                 for group in action_groups:
-                    padded = list(group) + [[0.0] * 64 for _ in range(maximum - len(group))]
+                    padded = list(group) + [[0.0] * ACTION_SIZE for _ in range(maximum - len(group))]
                     padded_actions.append(padded)
                     masks.append([True] * len(group) + [False] * (maximum - len(group)))
                 states = torch.tensor(state_vectors, dtype=torch.float32, device=device)

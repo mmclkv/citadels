@@ -110,11 +110,12 @@ function concat(a, b) {
 }
 
 class PolicyValueNetwork {
-  constructor({ profile = 'balanced', stateSize = 192, actionSize = 64, seed = 2026 } = {}) {
+  constructor({ profile = 'balanced', stateSize = 512, actionSize = 256, seed = 2026, encodingVersion = 3 } = {}) {
     this.profileName = PROFILES[profile] ? profile : 'balanced';
     this.profile = PROFILES[this.profileName];
     this.stateSize = stateSize;
     this.actionSize = actionSize;
+    this.encodingVersion = encodingVersion;
     this.rng = mulberry32(seed);
     const p = this.profile;
     this.state1 = new Dense(stateSize, p.stateHidden, this.rng);
@@ -300,11 +301,15 @@ class PolicyValueNetwork {
   export() {
     return {
       version: 1, profile: this.profileName, stateSize: this.stateSize, actionSize: this.actionSize,
+      encodingVersion: this.encodingVersion,
       optimizerStep: this.optimizerStep, layers: this.layers.map(l => l.export())
     };
   }
   import(data) {
-    if (!data || data.version !== 1 || data.profile !== this.profileName || data.layers.length !== this.layers.length) {
+    if (!data || data.version !== 1 || data.profile !== this.profileName ||
+        data.stateSize !== this.stateSize || data.actionSize !== this.actionSize ||
+        (data.encodingVersion != null && data.encodingVersion !== this.encodingVersion) ||
+        data.layers.length !== this.layers.length) {
       throw new Error('不兼容的 checkpoint');
     }
     this.layers.forEach((layer, i) => {

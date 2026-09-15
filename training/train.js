@@ -15,10 +15,10 @@ const mcts = require('./mcts.js');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
-const STATE_SIZE = 192;
-const ACTION_SIZE = 64;
-const STATE_ENCODING_VERSION = 2;
-const ACTION_ENCODING_VERSION = 2;
+const STATE_SIZE = 512;
+const ACTION_SIZE = 256;
+const STATE_ENCODING_VERSION = 3;
+const ACTION_ENCODING_VERSION = 3;
 const PHASE_CODES = { lobby: 0, draft: 1, action: 2, reaction: 3, roundConfirm: 4, gameover: 5 };
 const TURN_PHASE_CODES = { main: 0, witch_resume: 1, draw_keep: 2, scholar_pick: 3 };
 const PENDING_CODES = {
@@ -38,59 +38,24 @@ const ACTION_TYPES = [
 ];
 const IGNORE_KEYS = new Set(['log', 'notices', 'available', 'roomName', 'name', 'label', 'desc', 'resumeToken']);
 
-function hash32(text) {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return h >>> 0;
-}
-
-function addFeature(vector, token, value = 1) {
-  if (!Number.isFinite(value) || value === 0) return;
-  const h = hash32(token);
-  const index = h % vector.length;
-  vector[index] += (h & 0x80000000 ? -1 : 1) * Math.max(-3, Math.min(3, value));
-}
-
-function walkFeatures(vector, value, pathName, context, depth = 0) {
-  if (depth > 7 || value == null) return;
-  if (typeof value === 'number') {
-    addFeature(vector, pathName + ':number', Math.tanh(value / 10));
-    addFeature(vector, pathName + ':bucket:' + Math.round(Math.max(-50, Math.min(50, value))));
-    return;
-  }
-  if (typeof value === 'boolean') { addFeature(vector, pathName + ':' + value); return; }
-  if (typeof value === 'string') {
-    const mapped = context.playerIds.get(value);
-    addFeature(vector, pathName + ':' + (mapped == null ? value.slice(0, 48) : 'player-rel-' + mapped));
-    return;
-  }
-  if (Array.isArray(value)) {
-    addFeature(vector, pathName + ':length', Math.tanh(value.length / 8));
-    value.forEach((item, i) => walkFeatures(vector, item, pathName + '[' + Math.min(i, 15) + ']', context, depth + 1));
-    return;
-  }
-  if (typeof value === 'object') {
-    Object.keys(value).sort().forEach(key => {
-      if (IGNORE_KEYS.has(key) || key === 'uid') return;
-      walkFeatures(vector, value[key], pathName + '.' + key, context, depth + 1);
-    });
-  }
-}
-
 function observationContext(view, playerId) {
   const players = view.players || [];
   const meIndex = Math.max(0, players.findIndex(p => p.id === playerId));
   const playerIds = new Map();
   players.forEach((p, i) => playerIds.set(p.id, (i - meIndex + players.length) % players.length));
   const cardIds = new Map();
+  const cards = new Map();
   const collect = value => {
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) { value.forEach(collect); return; }
-    if (value.uid) cardIds.set(value.uid, value.id || value.en || value.name || (value.color + ':' + value.cost));
+    if (value.uid) {
+      cardIds.set(value.uid, value.id || value.en || value.name || (value.color + ':' + value.cost));
+      cards.set(value.uid, value);
+    }
     Object.keys(value).forEach(k => { if (!IGNORE_KEYS.has(k)) collect(value[k]); });
   };
   collect(view);
-  return { meIndex, playerIds, cardIds };
+  return { meIndex, playerIds, cardIds, cards };
 }
 
 function encodeState(view, playerId) {
@@ -139,9 +104,11 @@ function encodeState(view, playerId) {
   vector[29] = turn.pending && Number(turn.pending.count) ? Number(turn.pending.count) / 8 : 0;
   vector[30] = Number(turn.builds) / 4 || 0;
   vector[31] = Number(turn.spentOnBuild) / 20 || 0;
+  // Entity layout: global[0..31], then 8 player slots x 60 dimensions.
+  // Every slot is relative to the observing player; missing slots stay zero.
   for (let r = 0; r < 8; r++) {
     const p = r < count ? players[(context.meIndex + r) % players.length] : null;
-    const base = 32 + r * 20;
+    const base = 32 + r * 60;
     if (!p) continue;
     const city = p.city || [];
     const colors = new Set(city.map(c => c.color));
@@ -166,6 +133,19 @@ function encodeState(view, playerId) {
     vector[base + 18] = (Number(p.seat) || 0) / 8;
     vector[base + 19] = ((context.meIndex + r) % players.length) === active && turn.pending && Number(turn.pending.count)
       ? Number(turn.pending.count) / 8 : 0;
+    const revealed = Number(p.revealedCharNum);
+    if (revealed >= 1 && revealed <= 9) vector[base + 19 + revealed] = 1;
+    const colorIndex = { yellow: 0, blue: 1, green: 2, red: 3, purple: 4 };
+    city.forEach((card, i) => {
+      if (i >= 8) return;
+      const slot = base + 29 + i * 3;
+      vector[slot] = Math.min(1, Math.max(0, Number(card.cost) || 0) / 8);
+      vector[slot + 1] = colorIndex[card.color] == null ? 0 : (colorIndex[card.color] + 1) / 5;
+      vector[slot + 2] = Math.min(1, Math.max(0, Number(card.scoreValue) || Number(card.cost) || 0) / 10);
+    });
+    for (let cost = 0; cost <= 7; cost++) {
+      vector[base + 53 + cost] = city.filter(card => Number(card.cost) === cost).length / 8;
+    }
   }
   return { vector, context };
 }
@@ -176,24 +156,33 @@ function encodeAction(action, context) {
   const type = String(action && action.type || '');
   const typeIndex = ACTION_TYPES.indexOf(type);
   if (typeIndex >= 0) vector[1 + typeIndex] = 1;
-  const hash = (text, salt) => {
-    let h = 2166136261 >>> 0;
-    const value = String(text == null ? '' : text);
-    for (let i = 0; i < value.length; i++) h = Math.imul(h ^ value.charCodeAt(i), 16777619) >>> 0;
-    const index = 32 + ((h ^ (salt * 2654435761)) >>> 0) % 32;
-    vector[index] += (h & 0x80000000) ? -1 : 1;
+  const targetRel = context && context.playerIds ? context.playerIds.get(action && action.target) : null;
+  if (targetRel != null && targetRel >= 0 && targetRel < 8) vector[32 + targetRel] = 1;
+  const role = String(action && (action.charId != null ? action.charId : action.name) || '');
+  const roleNum = Number(action && action.num) || { assassin: 1, witch: 1, thief: 2, magician: 3, prophet: 3, king: 4, emperor: 4,
+    noble: 4, bishop: 5, monk: 5, merchant: 6, alchemist: 6, businessman: 6,
+    architect: 7, navigator: 7, scholar: 7, warlord: 8, diplomat: 8, marshal: 8,
+    queen: 9, artist: 9 }[role];
+  if (roleNum) vector[40 + roleNum - 1] = 1;
+  const mode = String(action && (action.mode != null ? action.mode : action.effect != null ? action.effect : action.use != null ? (action.use ? 'use' : 'skip') : '') || '');
+  const modes = ['gold', 'cards', 'card', 'swap', 'redraw', 'use', 'skip', 'take', 'destroy'];
+  const modeIndex = modes.indexOf(mode);
+  if (modeIndex >= 0) vector[50 + modeIndex] = 1;
+  const card = context && context.cards ? context.cards.get(action && action.uid) : null;
+  const cost = card ? Number(card.cost) : NaN;
+  if (Number.isFinite(cost) && cost >= 0 && cost <= 7) vector[60 + cost] = 1;
+  const selected = Array.isArray(action && action.uids) ? action.uids : [];
+  vector[68] = Math.min(1, selected.length / 8);
+  vector[69] = action && action.uid ? 1 : 0;
+  vector[70] = action && (action.secondaryUid || action.discardUid || action.cardUid) ? 1 : 0;
+  // Stable entity-reference slots preserve card identity without hashing arbitrary JSON.
+  const uidNumber = uid => {
+    const match = String(uid || '').match(/(\d+)$/);
+    return match ? Math.min(1, Number(match[1]) / 64) : 0;
   };
-  const canonicalFields = [
-    ['uid', action && action.uid],
-    ['target', action && action.target],
-    ['name', action && (action.name != null ? action.name : (action.charId != null ? action.charId : action.mode))],
-    ['effect', action && (action.effect != null ? action.effect : (action.use != null ? (action.use ? 'use' : 'skip') : null))],
-    ['secondaryUid', action && (action.secondaryUid != null ? action.secondaryUid : (action.discardUid != null ? action.discardUid : action.cardUid))]
-  ];
-  canonicalFields.forEach(([key, value], i) => {
-    if (value != null) hash(key + '=' + value, i);
-  });
-  if (action && Array.isArray(action.uids)) action.uids.forEach((uid, i) => hash('uids[' + i + ']=' + uid, i + 16));
+  vector[71] = uidNumber(action && action.uid);
+  vector[72] = uidNumber(action && (action.secondaryUid || action.discardUid || action.cardUid));
+  selected.slice(0, 8).forEach((uid, i) => { vector[80 + i] = uidNumber(uid); });
   normalizeVector(vector);
   return vector;
 }

@@ -30,7 +30,7 @@ function resultValueVector(result) {
  * 立刻填进 node 并返回。同步实现 (JsEvaluator) 把 forward 跑在主线程的 microtask 里；
  * 异步实现把 forward 推迟到 GPU 批次满 / 显式 flush。
  *
- * 缓存键：base64-style 192 维 float32 数组的 FNV-1a hash（去重 + 跨节点命中）。
+ * 缓存键：实体化状态向量的 FNV-1a hash（去重 + 跨节点命中）。
  */
 
 function fnv1a64(bytes) {

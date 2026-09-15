@@ -71,7 +71,7 @@ class LibTorchNeuralBatchedEvaluator final
                                  std::string device)
       : profile_(std::move(profile)), device_name_(std::move(device)) {
     const auto dims = profile_dimensions(profile_);
-    model_ = LibTorchPolicyValueNet(192, 64, dims[0], dims[1], dims[2], dims[3], dims[4]);
+  model_ = LibTorchPolicyValueNet(512, 256, dims[0], dims[1], dims[2], dims[3], dims[4]);
     if (device_name_ == "cuda") {
 #ifdef _WIN32
       ensure_libtorch_cuda_loaded();
@@ -95,8 +95,8 @@ class LibTorchNeuralBatchedEvaluator final
       const std::vector<NativeGameState>& states, const std::vector<int>& players,
       const std::vector<std::vector<NativeSearchAction>>& actions) override {
     if (states.empty() || states.size() != actions.size()) return {};
-    constexpr size_t state_size = 192;
-    constexpr size_t action_size = 64;
+    constexpr size_t state_size = 512;
+    constexpr size_t action_size = 256;
     const size_t batch = states.size();
     size_t maximum = 1;
     std::vector<std::vector<float>> state_vectors;

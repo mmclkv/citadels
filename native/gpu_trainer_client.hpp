@@ -73,7 +73,7 @@ inline std::vector<uint8_t> encode_binary_batch_eval_request(
     if (action_size == 0) action_size = static_cast<uint32_t>(action.size());
     if (action.size() != action_size) throw std::invalid_argument("binary batch 动作维度不一致");
   }
-  if (action_size == 0) action_size = 64;
+  if (action_size == 0) action_size = 256;
   std::vector<uint8_t> payload;
   append_u32(payload, kGpuBinaryBatchEval);
   append_u32(payload, static_cast<uint32_t>(states.size()));
