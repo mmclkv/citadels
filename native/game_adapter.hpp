@@ -16,6 +16,7 @@ struct NativeSearchAction {
   std::string effect;
   std::string target;
   std::vector<std::string> selected_uids;
+  std::string secondary_uid;
 };
 
 // 将统一原生状态接入通用 PUCT。这里的动作集合只暴露当前状态真正可执行的
@@ -157,12 +158,12 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         actions.push_back({ActionType::Build, card.uid, card.name, {}});
       }
       for (const auto& d : p->city) {
-        if (d.effect == "lab" && !state.used_lab && !p->hand.empty())
-          actions.push_back({ActionType::Lab, d.card.uid, {}, {}});
+        if (d.effect == "lab" && !state.used_lab)
+          for (const auto& card : p->hand) actions.push_back({ActionType::Lab, d.card.uid, {}, {}, {}, {}, card.uid});
         if (d.effect == "smithy" && !state.used_smithy && p->gold >= 2)
           actions.push_back({ActionType::Smithy, d.card.uid, {}, {}});
-        if (d.effect == "museum" && !state.used_museum && !p->hand.empty())
-          actions.push_back({ActionType::Museum, d.card.uid, p->hand.front().uid, {}});
+        if (d.effect == "museum" && !state.used_museum)
+          for (const auto& card : p->hand) actions.push_back({ActionType::Museum, d.card.uid, {}, {}, {}, {}, card.uid});
       }
       actions.push_back({ActionType::EndTurn});
     }
@@ -275,9 +276,9 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       case ActionType::TakeGold: return state.take_gold();
       case ActionType::TakeCards: return state.take_cards();
       case ActionType::Build: return state.build(action.uid, action.name);
-      case ActionType::Lab: return state.use_lab(action.uid, state.players[player].hand.front().uid);
+      case ActionType::Lab: return state.use_lab(action.uid, action.secondary_uid);
       case ActionType::Smithy: return state.use_smithy(action.uid);
-      case ActionType::Museum: return state.use_museum(action.uid, action.name);
+      case ActionType::Museum: return state.use_museum(action.uid, action.secondary_uid);
       case ActionType::EndTurn: return state.end_turn();
       default: return false;
     }

@@ -84,6 +84,12 @@ int main() {
           NativeSearchAction chosen{ActionType::ArtistDone, {}, {}, {}, {}, string_array_field(action, "uids")};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("artist_done 执行失败");
+        } else if (type == "lab" || type == "smithy" || type == "museum") {
+          const auto parsed = action_type_from_string(type);
+          NativeSearchAction chosen{parsed.value(), string_field(action, "uid"), {}, {}, {}, {},
+            type == "lab" ? string_field(action, "discardUid") : string_field(action, "cardUid")};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error(type + " 执行失败");
         } else if (type == "emperor_crown") {
           NativeSearchAction chosen{ActionType::EmperorCrown, {}, {}, {}, string_field(action, "target")};
           NativeGameAdapter adapter;

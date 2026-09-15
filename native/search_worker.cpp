@@ -37,7 +37,8 @@ NativeSearchAction decode_action(const JsonValue& value) {
   // safe uniform fallback below instead of aborting the whole self-play game.
   return {parsed.value_or(ActionType::EndTurn), string_field(value, "uid"),
           string_field(value, "name"), string_field(value, "effect"), string_field(value, "target"),
-          string_array_field(value, "uids")};
+          string_array_field(value, "uids"), string_field(value, "discardUid").empty()
+            ? string_field(value, "cardUid") : string_field(value, "discardUid")};
 }
 
 void emit_error(const std::string& id, const std::string& message) {

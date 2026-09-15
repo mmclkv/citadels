@@ -85,6 +85,59 @@ test('C++ 原生状态可以按顺序执行多步基础行动', async t => {
   })));
 });
 
+test('C++ 原生状态可以回放实验室与博物馆的指定手牌动作', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过紫色建筑回放检查'); return; }
+
+  async function replay(initial, action) {
+    const state = JSON.parse(JSON.stringify(initial));
+    const actor = state.players[0].id;
+    const record = recordAppliedAction(state, actor, action, Engine.applyAction);
+    assert.equal(record.ok, true, `${action.type} 应由 JS 执行成功`);
+    const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const response = new Promise((resolve, reject) => {
+      let data = '';
+      child.stdout.on('data', chunk => {
+        data += chunk;
+        const line = data.split(/\r?\n/)[0];
+        if (line) resolve(JSON.parse(line));
+      });
+      child.on('error', reject);
+    });
+    child.stdin.write(encodeReplayTrace(initial, [record], `${action.type}-trace`));
+    child.stdin.end();
+    const native = await response;
+    child.kill();
+    assert.equal(native.ok, true, native.error || `${action.type} C++ 回放失败`);
+    return { native, expected: record.afterSummary };
+  }
+
+  function makeInitial(effect) {
+    const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+    const initial = Engine.createGame({ seats, seed: effect === 'lab' ? 107 : 109, charSetMode: 'base' });
+    Engine.startGame(initial);
+    initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+    initial.players[0].city = [{ uid: `${effect}-building`, name: effect === 'lab' ? '实验室' : '博物馆',
+      color: 'purple', cost: 4, purple: { effect }, ...(effect === 'museum' ? { museum: [] } : {}) }];
+    initial.turn = { charId: 'architect', num: 7, playerIdx: 0, phase: 'main', takenResources: true,
+      incomeTaken: true, abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false,
+      usedSmithy: false, usedMuseum: false, pending: null, bonusDone: false };
+    return initial;
+  }
+
+  const labInitial = makeInitial('lab');
+  const labCard = labInitial.players[0].hand[1];
+  const lab = await replay(labInitial, { type: 'lab', uid: 'lab-building', discardUid: labCard.uid });
+  assert.equal(lab.native.players[0].handCount, lab.expected.players[0].handCount);
+  assert.equal(lab.native.players[0].gold, lab.expected.players[0].gold);
+
+  const museumInitial = makeInitial('museum');
+  const museumCard = museumInitial.players[0].hand[1];
+  const museum = await replay(museumInitial, { type: 'museum', uid: 'museum-building', cardUid: museumCard.uid });
+  assert.equal(museum.native.players[0].handCount, museum.expected.players[0].handCount);
+  assert.equal(museum.native.players[0].cityCount, museum.expected.players[0].cityCount);
+});
+
 test('C++ 原生状态可以逐动作回放选角阶段', async t => {
   const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过选角回放检查'); return; }
