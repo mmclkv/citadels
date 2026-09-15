@@ -16,3 +16,11 @@ Thumbs.db
 # 本地神经网络训练输出（checkpoint、状态与指标）
 training-data/
 .python/
+
+# C++ 原生 worker 编译产物（源码在 native/，产物由本机构建，不入库）
+native/*.exe
+native/*.lib
+native/*.obj
+native/*.pdb
+native/*.exp
+native/*.dll

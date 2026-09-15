@@ -125,7 +125,8 @@ function render(status) {
   $('total-loss-now').textContent = '总损失 ' + num(point.totalLoss, 4);
   const policy = Number(point.policyLoss);
   $('policy-now').textContent = (Number.isFinite(policy) ? policy.toExponential(3) : '—') +
-    ' · KL ' + num(point.approxKl, 5) + ' · 梯度 ' + num(point.gradientNorm, 3) + ' · 熵 ' + num(point.entropy, 3);
+    ' · 梯度 ' + num(point.gradientNorm, 3) + ' · 熵 ' + num(point.entropy, 3);
+  $('approx-kl-now').textContent = 'KL ' + num(point.approxKl, 5);
   $('speed-now').textContent = num(point.avgGameMs / 1000, 2) + ' 秒/局';
   $('control-message').textContent = status.error || (status.checkpoint ? '最近存档：' + status.checkpoint : '');
   const profiles = status.profiles || {};
@@ -143,6 +144,10 @@ function render(status) {
   drawLines($('policy-chart'), history, [
     { key: 'policyLoss', color: '#35dcff', label: '策略损失' }
   ]);
+  // KL 量级很小（常见 0.0x），刻度需要 4 位小数才看得出变化；且恒为正，下界锚到 0
+  drawLines($('approx-kl-chart'), history, [
+    { key: 'approxKl', color: '#9d7bff', label: 'KL 散度' }
+  ], { digits: 4, zeroBased: true });
   drawLines($('speed-chart'), history, [
     { key: 'avgGameMs', color: '#35dcff', label: '整局毫秒', scale: .001 },
     { key: 'avgInferenceMs', color: '#ff4fc7', label: '单步毫秒' }
@@ -314,7 +319,10 @@ function movingAverage(rows, key, windowSize, scale = 1) {
   });
 }
 
-function drawLines(canvas, history, series) {
+function drawLines(canvas, history, series, options) {
+  const opts = options || {};
+  // digits：Y 轴刻度小数位。KL 这类量级很小的指标需要更高精度，否则刻度会被压成同一个数。
+  const digits = Number.isFinite(opts.digits) ? opts.digits : 2;
   const { ctx, width, height } = prepareCanvas(canvas), pad = { l: 48, r: 16, t: 22, b: 38 };
   const plotWidth = width - pad.l - pad.r, plotHeight = height - pad.t - pad.b;
   ctx.clearRect(0, 0, width, height); ctx.strokeStyle = '#174861'; ctx.lineWidth = 1;
@@ -322,6 +330,8 @@ function drawLines(canvas, history, series) {
   const values = [];
   history.forEach(row => series.forEach(s => { const v = Number(row[s.key]) * (s.scale || 1); if (Number.isFinite(v)) values.push(v); }));
   let min = values.length ? Math.min(...values) : 0, max = values.length ? Math.max(...values) : 1;
+  // zeroBased：恒正指标（如 KL）把下界锚到 0，避免基线悬空、看不出绝对值大小
+  if (opts.zeroBased && min > 0) min = 0;
   if (min === max) { min -= .5; max += .5; }
   const games = history.map((row, index) => Number.isFinite(Number(row.game)) ? Number(row.game) : index);
   const firstGame = games.length ? games[0] : 0, lastGame = games.length ? games[games.length - 1] : 0;
@@ -329,7 +339,7 @@ function drawLines(canvas, history, series) {
   const xFor = (row, index) => pad.l + ((games[index] - firstGame) / gameSpan) * plotWidth;
   const yFor = value => pad.t + (max - value) / (max - min) * plotHeight;
   ctx.font = '10px system-ui'; ctx.fillStyle = '#8aaaba';
-  ctx.fillText(max.toFixed(2), 3, pad.t + 3); ctx.fillText(min.toFixed(2), 3, height - pad.b);
+  ctx.fillText(max.toFixed(digits), 3, pad.t + 3); ctx.fillText(min.toFixed(digits), 3, height - pad.b);
   ctx.strokeStyle = '#34708d'; ctx.beginPath(); ctx.moveTo(pad.l, height - pad.b); ctx.lineTo(width - pad.r, height - pad.b); ctx.stroke();
   const tickCount = width < 420 ? 4 : 6;
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';

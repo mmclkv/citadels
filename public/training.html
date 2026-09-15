@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=6">
+  <link rel="stylesheet" href="./training.css?v=7">
 </head>
 <body>
   <header class="train-header">
@@ -82,6 +82,7 @@
       <article class="panel chart-panel"><div class="section-title"><div><h2>价值损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="value-loss-now">—</span></div><canvas id="value-loss-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>总损失</h2><p>训练目标的总损失变化趋势</p></div><span id="total-loss-now">—</span></div><canvas id="total-loss-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>KL 散度</h2><p>MCTS 策略与网络策略的近似散度，突升代表更新过猛</p></div><span id="approx-kl-now">—</span></div><canvas id="approx-kl-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>座位胜局</h2><p>用于观察先后手与座位偏差</p></div></div><canvas id="seat-chart"></canvas></article>
     </section>
@@ -92,6 +93,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=10"></script>
+  <script src="./training.js?v=11"></script>
 </body>
 </html>
