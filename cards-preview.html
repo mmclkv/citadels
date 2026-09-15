@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>富饶之城 · 卡面预览</title>
+<style>
+  :root{
+    --bg:#f4ece0; --paper:#fdf8ef; --ink:#33291f; --dim:#7d6f5d; --line:#e0d3bd;
+    --gold:#c8952b;
+    --c-yellow:#e3ae33; --c-yellow-d:#a97c15;
+    --c-blue:#4a86cc;   --c-blue-d:#2c5f9c;
+    --c-green:#48a86f;  --c-green-d:#2f7a4c;
+    --c-red:#d2584a;    --c-red-d:#a53b30;
+    --c-purple:#8f63c9; --c-purple-d:#653fa0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;padding:20px}
+  header{max-width:1200px;margin:0 auto 16px}
+  h1{font-size:20px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:13px;line-height:1.6}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0 6px}
+  button{font:inherit;font-size:13px;padding:7px 14px;border-radius:8px;cursor:pointer;
+         border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+  button.on{background:var(--gold);border-color:var(--gold);color:#fff;font-weight:600}
+  .stat{font-size:13px;color:var(--dim);margin-left:auto}
+  .stat b{color:var(--gold);font-size:16px}
+  h2{font-size:15px;margin:22px 0 10px;padding-left:9px;border-left:4px solid var(--gold)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:14px;max-width:1200px;margin:0 auto}
+  .wrap{display:flex;flex-direction:column;align-items:center;gap:5px}
+
+  /* ---- 建筑牌：与游戏内同款卡框，加插画 ---- */
+  .card{position:relative;width:120px;height:168px;border-radius:9px;overflow:hidden;
+        border:1px solid var(--line);background:var(--paper);
+        display:flex;flex-direction:column;
+        box-shadow:0 3px 10px rgba(60,45,25,.16)}
+  .card .c-top{height:5px;flex:0 0 auto;z-index:2}
+  .card .c-art{position:absolute;inset:5px 0 0 0;z-index:0}
+  .card .c-art img{width:100%;height:100%;object-fit:cover;display:block}
+  .card .c-art.noimg{display:flex;align-items:center;justify-content:center;
+        background:repeating-linear-gradient(45deg,#efe6d5,#efe6d5 7px,#e8ddc8 7px,#e8ddc8 14px);
+        color:#b8a98e;font-size:11px}
+  .card .c-scrim{position:absolute;left:0;right:0;bottom:0;height:62%;z-index:1;
+        background:linear-gradient(to top,rgba(253,248,239,.97) 26%,rgba(253,248,239,.86) 52%,rgba(253,248,239,0) 100%)}
+  .card .c-cost{position:absolute;top:10px;left:7px;width:24px;height:24px;border-radius:50%;
+        background:var(--gold);color:#fff;font-weight:700;font-size:13px;
+        display:flex;align-items:center;justify-content:center;z-index:3;
+        box-shadow:0 1px 4px rgba(0,0,0,.3)}
+  .card .c-body{position:relative;z-index:3;margin-top:auto;padding:8px 6px 7px;text-align:center}
+  .card .c-name{font-weight:700;font-size:14px;letter-spacing:.5px}
+  .card .c-en{font-size:8.5px;color:var(--dim);margin-top:2px;line-height:1.2}
+  .card .c-purple-tag{position:absolute;top:11px;right:7px;z-index:3;font-size:9px;
+        background:#8f63c9;color:#fff;padding:2px 5px;border-radius:4px}
+  .c-yellow .c-top{background:var(--c-yellow)} .c-yellow .c-name{color:var(--c-yellow-d)}
+  .c-blue   .c-top{background:var(--c-blue)}   .c-blue   .c-name{color:var(--c-blue-d)}
+  .c-green  .c-top{background:var(--c-green)}  .c-green  .c-name{color:var(--c-green-d)}
+  .c-red    .c-top{background:var(--c-red)}    .c-red    .c-name{color:var(--c-red-d)}
+  .c-purple .c-top{background:var(--c-purple)} .c-purple .c-name{color:var(--c-purple-d)}
+
+  /* ---- 角色牌 ---- */
+  .char-card{position:relative;width:120px;height:168px;border-radius:9px;overflow:hidden;
+        border:1px solid var(--line);background:var(--paper);
+        box-shadow:0 3px 10px rgba(60,45,25,.16)}
+  .char-card .c-art{position:absolute;inset:0;z-index:0}
+  .char-card .c-art img{width:100%;height:100%;object-fit:cover;display:block}
+  .char-card .c-art.noimg{display:flex;align-items:center;justify-content:center;
+        background:repeating-linear-gradient(45deg,#efe6d5,#efe6d5 7px,#e8ddc8 7px,#e8ddc8 14px);
+        color:#b8a98e;font-size:11px}
+  .char-card .c-scrim{position:absolute;left:0;right:0;bottom:0;height:56%;z-index:1;
+        background:linear-gradient(to top,rgba(253,248,239,.97) 30%,rgba(253,248,239,.82) 56%,rgba(253,248,239,0) 100%)}
+  .char-card .cc-num{position:absolute;top:9px;left:8px;width:26px;height:26px;border-radius:50%;
+        background:var(--gold);color:#fff;font-weight:700;font-size:14px;
+        display:flex;align-items:center;justify-content:center;z-index:3;
+        box-shadow:0 1px 4px rgba(0,0,0,.3)}
+  .char-card .c-body{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:8px 7px 8px;text-align:center}
+  .char-card .cc-name{font-weight:700;font-size:15px}
+  .char-card .cc-en{font-size:8.5px;color:var(--dim);margin-top:1px}
+
+  .file{font-size:9.5px;color:#a2937c;font-family:Consolas,monospace;text-align:center;
+        word-break:break-all;line-height:1.3;max-width:120px}
+  .file.ok{color:var(--c-green-d)}
+  .missing{margin:24px auto 0;max-width:1200px;background:var(--paper);border:1px solid var(--line);
+        border-radius:10px;padding:12px 14px;font-size:12px;color:var(--dim);line-height:1.8}
+  .missing code{background:#f0e7d6;padding:1px 5px;border-radius:4px;font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>富饶之城 · 卡面插画预览</h1>
+  <div class="sub">
+    这里用游戏内<b>真实的卡框</b>渲染插画，方便判断插画放进牌面后的实际效果。<br>
+    插画按 <code>district_英文名</code> / <code>char_角色id</code> 命名，放在 <code>public/img/cards_webp/</code>。缺图时显示斜纹占位。
+  </div>
+  <div class="bar">
+    <button id="btn-all" class="on">全部</button>
+    <button id="btn-done">只看已完成</button>
+    <button id="btn-todo">只看缺图</button>
+    <span class="stat">已完成 <b id="stat-done">0</b> / <b id="stat-total">0</b></span>
+  </div>
+</header>
+
+<h2 id="h-char">角色牌</h2>
+<div class="grid" id="grid-char"></div>
+<h2 id="h-dist">建筑牌</h2>
+<div class="grid" id="grid-dist"></div>
+
+<div class="missing" id="missing"></div>
+
+<script>
+/* 依次尝试几个路径加载 cards.js：
+   - 通过游戏服务器打开（http://localhost:8787/cards-preview.html）→ /src/cards.js
+   - 直接双击文件打开 → ../src/cards.js
+   都失败时页面顶部会给出提示。 */
+(function () {
+  var SRC = ['/src/cards.js', '../src/cards.js', './cards.js'];
+  var i = 0;
+  (function next() {
+    if (i >= SRC.length) {
+      var b = document.createElement('div');
+      b.style.cssText = 'max-width:1200px;margin:10px auto;padding:10px 14px;border-radius:8px;' +
+        'background:#fdeceb;color:#a53b30;font-size:13px;line-height:1.6';
+      b.innerHTML = '未能加载卡牌数据 src/cards.js。请通过游戏服务器打开本页：' +
+        '<b>http://localhost:8787/cards-preview.html</b>';
+      document.body.insertBefore(b, document.body.firstChild);
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = SRC[i++];
+    s.onload = function () { if (window.CitCards) window.__cardsReady(); };
+    s.onerror = next;
+    document.head.appendChild(s);
+  })();
+})();
+</script>
+<script>
+window.__cardsReady = function(){
+  var BASE = 'img/cards_webp/';
+  var COLOR_NAME = {yellow:'黄色 · 贵族', blue:'蓝色 · 宗教', green:'绿色 · 商业',
+                    red:'红色 · 军事', purple:'紫色 · 独特'};
+  var COLOR_ORDER = ['yellow','blue','green','red','purple'];
+
+  function slug(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,''); }
+
+  var CC = window.CitCards || window.CitadelsCards || window.Cards || {};
+  var chars = CC.CHARACTERS || [];
+  var dists = CC.DISTRICTS || [];
+
+  // 角色（同名不同版本只画一次）
+  var seenChar = {};
+  var charList = chars.filter(function(c){ var k=c.name; if(seenChar[k])return false; seenChar[k]=1; return true; });
+  var seenDist = {};
+  var distList = dists.filter(function(d){ if(seenDist[d.name])return false; seenDist[d.name]=1; return true; });
+
+  var IMG = {};      // file -> true
+  var probe = {};    // file -> loaded?
+  var pending = 0;
+
+  function check(file, cb){
+    pending++;
+    var im = new Image();
+    im.onload = function(){ IMG[file]=true; pending--; cb && cb(); };
+    im.onerror = function(){ pending--; cb && cb(); };
+    im.src = BASE + file + '.webp';
+  }
+
+  function cardChar(c){
+    var f = 'char_' + c.id;
+    var el = document.createElement('div'); el.className='wrap'; el.dataset.file=f;
+    el.innerHTML =
+      '<div class="char-card">' +
+        '<div class="c-art' + (IMG[f]?'':' noimg') + '">' +
+          (IMG[f] ? '<img src="'+BASE+f+'.webp" alt="">' : '<span>暂无插画</span>') +
+        '</div>' +
+        '<div class="c-scrim"></div>' +
+        '<div class="cc-num">'+c.num+'</div>' +
+        '<div class="c-body"><div class="cc-name">'+c.name+'</div>' +
+        '<div class="cc-en">'+(c.en||'')+'</div></div>' +
+      '</div>' +
+      '<div class="file'+(IMG[f]?' ok':'')+'">'+f+'.webp</div>';
+    return el;
+  }
+
+  function cardDist(d){
+    var f = 'district_' + slug(d.en || d.name);
+    var el = document.createElement('div'); el.className='wrap'; el.dataset.file=f;
+    el.innerHTML =
+      '<div class="card c-'+d.color+'">' +
+        '<div class="c-top"></div>' +
+        '<div class="c-art' + (IMG[f]?'':' noimg') + '">' +
+          (IMG[f] ? '<img src="'+BASE+f+'.webp" alt="">' : '<span>暂无插画</span>') +
+        '</div>' +
+        '<div class="c-scrim"></div>' +
+        '<div class="c-cost">'+d.cost+'</div>' +
+        (d.purple ? '<div class="c-purple-tag">特殊</div>' : '') +
+        '<div class="c-body"><div class="c-name">'+d.name+'</div>' +
+        '<div class="c-en">'+(d.en||'')+'</div></div>' +
+      '</div>' +
+      '<div class="file'+(IMG[f]?' ok':'')+'">'+f+'.webp</div>';
+    return el;
+  }
+
+  var files = [];
+  charList.forEach(function(c){ files.push('char_'+c.id); });
+  distList.forEach(function(d){ files.push('district_'+slug(d.en||d.name)); });
+
+  var done = 0;
+  function paint(){
+    var gc = document.getElementById('grid-char');
+    var gd = document.getElementById('grid-dist');
+    gc.innerHTML=''; gd.innerHTML='';
+    gc.appendChild(document.createTextNode(''));
+    charList.forEach(function(c){ gc.appendChild(cardChar(c)); });
+    COLOR_ORDER.forEach(function(col){
+      distList.filter(function(d){return d.color===col;})
+              .forEach(function(d){ gd.appendChild(cardDist(d)); });
+    });
+    var n = files.filter(function(f){return IMG[f];}).length;
+    document.getElementById('stat-done').textContent = n;
+    document.getElementById('stat-total').textContent = files.length;
+    var miss = files.filter(function(f){return !IMG[f];});
+    document.getElementById('missing').innerHTML =
+      '<b>还缺 ' + miss.length + ' 张：</b><br>' +
+      (miss.length ? miss.map(function(f){return '<code>'+f+'</code>';}).join(' ') : '（全部完成）');
+    applyFilter();
+  }
+
+  var mode = 'all';
+  function applyFilter(){
+    var all = document.querySelectorAll('.wrap');
+    for (var i=0;i<all.length;i++){
+      var has = IMG[all[i].dataset.file];
+      var show = mode==='all' || (mode==='done'&&has) || (mode==='todo'&&!has);
+      all[i].style.display = show ? '' : 'none';
+    }
+    // 空标题隐藏
+  }
+  document.getElementById('btn-all').onclick  = function(){ mode='all';  setBtn(this); applyFilter(); };
+  document.getElementById('btn-done').onclick = function(){ mode='done'; setBtn(this); applyFilter(); };
+  document.getElementById('btn-todo').onclick = function(){ mode='todo'; setBtn(this); applyFilter(); };
+  function setBtn(b){
+    ['btn-all','btn-done','btn-todo'].forEach(function(id){
+      document.getElementById(id).classList.toggle('on', document.getElementById(id)===b);
+    });
+  }
+
+  var left = files.length;
+  files.forEach(function(f){
+    check(f, function(){ left--; if(left===0) paint(); });
+  });
+  // 兜底：图片探测超时也画出来
+  setTimeout(function(){ if(!document.getElementById('grid-char').children.length) paint(); }, 3000);
+};
+</script>
+</body>
+</html>
