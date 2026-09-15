@@ -2,9 +2,14 @@
 
 const $ = id => document.getElementById(id);
 let latest = null;
-let logAutoFollow = true;
-let logScrollBound = false;
-const LOG_SCROLL_EPSILON = 4;
+const LOG_SCROLL_EPSILON = 4;   // 判断「是否贴底」的容差（px）
+const LOG_MAX_LINES = 400;      // 前端最多保留的日志行数，超出从顶部淘汰
+const LOG_PLACEHOLDER = '训练进程运行正常，暂无事件。';
+let lastLogSeq = 0;             // 已渲染到的最大日志序号
+let logInitialized = false;
+let logPlaceholder = false;
+let logErrorEl = null;
+let logErrorText = '';
 
 function num(value, digits = 2) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
 function integer(value) { return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('zh-CN') : '0'; }
@@ -188,32 +193,98 @@ function renderCheckpoints(list) {
     '</div>').join('');
 }
 
-function renderLogs(status) {
-  const lines = (status.logs || []).map(row => '[' + new Date(row.at).toLocaleTimeString() + '] ' + row.text);
-  if (status.error && !lines.some(line => line.includes(status.error))) lines.push('[错误] ' + status.error);
-  const log = $('training-log');
-  ensureLogScrollTracking();
-  const shouldFollow = logAutoFollow || isLogAtBottom(log);
-  const visibleLines = lines.slice(-30);
-  log.textContent = visibleLines.length ? visibleLines.join('\n') : '训练进程运行正常，暂无事件。';
-  if (shouldFollow) {
-    log.scrollTop = log.scrollHeight;
-    logAutoFollow = true;
-  }
-}
-
 function isLogAtBottom(log) {
   return log.scrollHeight - log.scrollTop - log.clientHeight <= LOG_SCROLL_EPSILON;
 }
 
-function ensureLogScrollTracking() {
-  if (logScrollBound) return;
+function logRowText(row) {
+  return '[' + new Date(row.at).toLocaleTimeString() + '] ' + row.text;
+}
+
+function appendLogLine(log, text, className) {
+  const line = document.createElement('div');
+  line.className = className ? 'log-line ' + className : 'log-line';
+  line.textContent = text;
+  log.appendChild(line);
+  return line;
+}
+
+// 淘汰顶部旧行：把被移除的高度从 scrollTop 里扣掉，
+// 这样用户正在看的那几行在视觉上不会往上跳。
+function trimLogLines(log, keepAtBottom) {
+  const lines = log.querySelectorAll('.log-line');
+  const overflow = lines.length - LOG_MAX_LINES;
+  if (overflow <= 0) return;
+  let removedHeight = 0;
+  for (let i = 0; i < overflow; i++) {
+    removedHeight += lines[i].offsetHeight;
+    lines[i].remove();
+  }
+  if (!keepAtBottom) log.scrollTop = Math.max(0, log.scrollTop - removedHeight);
+}
+
+function syncLogError(log, errorText, atBottom) {
+  if (errorText === logErrorText) return;
+  if (!errorText) {
+    if (logErrorEl) { logErrorEl.remove(); logErrorEl = null; }
+    logErrorText = '';
+    return;
+  }
+  if (logErrorEl && !logErrorEl.isConnected) logErrorEl = null;
+  if (!logErrorEl) logErrorEl = appendLogLine(log, errorText, 'log-error');
+  else { logErrorEl.textContent = errorText; logErrorEl.className = 'log-line log-error'; }
+  logErrorText = errorText;
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function renderLogs(status) {
   const log = $('training-log');
   if (!log) return;
-  log.addEventListener('scroll', () => {
-    logAutoFollow = isLogAtBottom(log);
-  }, { passive: true });
-  logScrollBound = true;
+  const rows = (status.logs || []).filter(row => row && Number.isFinite(Number(row.seq)));
+  const seqOf = row => Number(row.seq);
+  const maxSeq = rows.length ? seqOf(rows[rows.length - 1]) : 0;
+  const errorText = status.error ? '[错误] ' + status.error : '';
+  const restarted = maxSeq < lastLogSeq;   // 训练重启后序号回退：整框重画
+
+  // 首次渲染 / 训练重启：清空重建，并落到最新一条
+  if (!logInitialized || restarted) {
+    log.textContent = '';
+    logErrorEl = null;
+    logErrorText = '';
+    lastLogSeq = 0;
+    if (rows.length) {
+      rows.forEach(row => appendLogLine(log, logRowText(row)));
+      logPlaceholder = false;
+    } else {
+      appendLogLine(log, LOG_PLACEHOLDER, 'log-placeholder');
+      logPlaceholder = true;
+    }
+    logInitialized = true;
+    lastLogSeq = maxSeq;
+    syncLogError(log, errorText, true);
+    log.scrollTop = log.scrollHeight;
+    return;
+  }
+
+  const fresh = rows.filter(row => seqOf(row) > lastLogSeq);
+  if (logPlaceholder && fresh.length) { log.textContent = ''; logErrorEl = null; logPlaceholder = false; }
+  const atBottom = isLogAtBottom(log);
+  if (fresh.length) {
+    // 只把新行挂到末尾：已有内容一个字节都不动，滚动位置自然停在当前这条日志上
+    const frag = document.createDocumentFragment();
+    fresh.forEach(row => {
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = logRowText(row);
+      frag.appendChild(line);
+    });
+    log.appendChild(frag);
+    lastLogSeq = maxSeq;
+    trimLogLines(log, atBottom);
+  }
+  syncLogError(log, errorText, atBottom);
+  // 只有本来就贴在底部时才继续贴底；用户一旦往上翻，就停在他看的位置
+  if (atBottom) log.scrollTop = log.scrollHeight;
 }
 
 function updateCheckpointOptions(list) {
