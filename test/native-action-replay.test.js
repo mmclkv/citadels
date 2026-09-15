@@ -126,6 +126,52 @@ test('C++ 原生状态可以回放真实抽牌并保留一张的两步链路', a
     expected.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount, cityCount: p.cityCount })));
 });
 
+test('C++ 原生状态可以回放女巫在被施咒者领取资源后接管回合', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过女巫接管回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 47, charSetMode: 'base' });
+  Engine.startGame(initial);
+  initial.phase = 'action'; initial.draft = null; initial.roundConfirm = null; initial.reaction = null;
+  initial.callQueue = [
+    { charId: 'king', num: 4, playerIdx: 1 },
+    { charId: 'witch', num: 1, playerIdx: 0 }
+  ];
+  initial.callIdx = 0;
+  initial.effects = { assassinated: null, thief: null, bewitched: 4, witchBy: 0, thiefBy: null };
+  initial.turn = { charId: 'king', num: 4, playerIdx: 1, phase: 'bewitched', takenResources: false,
+    incomeTaken: false, abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false,
+    usedSmithy: false, usedMuseum: false, pending: null, bonusDone: false };
+  initial.players.forEach((player, index) => { player.hasCrown = index === 2; });
+  const state = JSON.parse(JSON.stringify(initial));
+  const actor = state.players[1].id;
+  const record = recordAppliedAction(state, actor, { type: 'take_gold' }, Engine.applyAction);
+  assert.equal(record.ok, true);
+  assert.equal(state.turn.phase, 'witch_resume');
+  assert.equal(state.turn.playerIdx, 0);
+
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => {
+      data += chunk;
+      const line = data.split(/\r?\n/)[0];
+      if (line) resolve(JSON.parse(line));
+    });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, [record], 'bewitched-trace'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  assert.equal(native.ok, true, native.error || 'C++ 女巫接管回放失败');
+  assert.equal(native.activePlayer, 0);
+  assert.equal(native.turnPhase, 'witch_resume');
+  assert.equal(native.callIndex, 0);
+  assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, hasCrown: p.hasCrown })),
+    state.players.map(p => ({ id: p.id, gold: p.gold, hasCrown: p.hasCrown })));
+});
+
 test('C++ 原生状态可以回放实验室与博物馆的指定手牌动作', async t => {
   const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过紫色建筑回放检查'); return; }

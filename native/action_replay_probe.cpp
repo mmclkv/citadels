@@ -146,7 +146,11 @@ int main() {
         }
       }
       std::cout << "{\"ok\":true,\"phase\":\"" << phase_name(state.phase)
-                << "\",\"round\":" << state.round << ",\"players\":[";
+                << "\",\"round\":" << state.round
+                << ",\"activePlayer\":" << state.active_player
+                << ",\"turnPhase\":\"" << state.turn_phase
+                << "\",\"callIndex\":" << state.call_index
+                << ",\"players\":[";
       for (size_t i = 0; i < state.players.size(); ++i) {
         if (i) std::cout << ',';
         const auto& p = state.players[i];

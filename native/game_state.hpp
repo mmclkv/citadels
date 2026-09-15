@@ -284,6 +284,7 @@ struct NativeGameState {
     }
     pending_cards.clear(); pending_kind.clear();
     if (!draw_keep) ability_used = true;
+    if (turn_phase == "bewitched") return finish_bewitched_turn();
     after_resources();
     return true;
   }
@@ -360,12 +361,48 @@ struct NativeGameState {
     return &players[active_player];
   }
 
+  bool finish_bewitched_turn() {
+    if (turn_phase != "bewitched" || witch_player < 0 || witch_player >= static_cast<int>(players.size()) ||
+        call_index < 0 || call_index >= static_cast<int>(call_queue.size())) return false;
+    const auto& entry = call_queue[call_index];
+    active_player = witch_player;
+    players[active_player].role_id = entry.char_id;
+    turn_phase = "witch_resume";
+    resources_taken = true;
+    income_taken = false;
+    monk_extra_taken = false;
+    builds = 0;
+    spent_on_build = 0;
+    used_lab = false;
+    used_smithy = false;
+    used_museum = false;
+    ability_used = false;
+    bonus_done = true;
+    pending_kind.clear();
+    pending_cards.clear();
+    pending_queue.clear();
+    pending_target = -1;
+    if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
+      for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
+    }
+    if (entry.char_id == "noble" && entry.player >= 0 && entry.player < static_cast<int>(players.size())) {
+      const int count = static_cast<int>(std::count_if(players[entry.player].city.begin(), players[entry.player].city.end(),
+        [](const NativeDistrict& district) { return district.card.color == "yellow"; }));
+      auto cards = deck.draw(count, rng);
+      players[entry.player].hand.insert(players[entry.player].hand.end(),
+        std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
+      income_taken = true;
+    }
+    return true;
+  }
+
   bool take_gold() {
     auto* p = active();
     if (!p || resources_taken) return false;
     p->gold += plan_take_gold(p->role_id,
       turn_phase == "witch_resume" ? ResourcePhase::WitchResume : ResourcePhase::Main).gold;
     resources_taken = true;
+    if (turn_phase == "bewitched") return finish_bewitched_turn();
     after_resources();
     return true;
   }
@@ -390,6 +427,7 @@ struct NativeGameState {
       pending_cards = std::move(cards);
       pending_kind = "draw_keep";
     }
+    if (turn_phase == "bewitched" && pending_kind.empty()) return finish_bewitched_turn();
     if (pending_kind.empty()) after_resources();
     return true;
   }
