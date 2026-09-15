@@ -85,6 +85,47 @@ test('C++ 原生状态可以按顺序执行多步基础行动', async t => {
   })));
 });
 
+test('C++ 原生状态可以回放真实抽牌并保留一张的两步链路', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过抽牌保留回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 43, charSetMode: 'base' });
+  Engine.startGame(initial);
+  finishDraft(initial);
+  const state = JSON.parse(JSON.stringify(initial));
+  const actor = train.currentActor(state);
+  const take = train.enumerateLegalActions(state, actor.id).find(item => item.type === 'take_cards');
+  assert.ok(take, '应找到抽取建筑牌动作');
+  const records = [recordAppliedAction(state, actor.id, take, Engine.applyAction)];
+  assert.equal(records[0].ok, true);
+  assert.equal(state.turn.pending?.kind, 'draw_keep');
+  const keep = train.enumerateLegalActions(state, actor.id).find(item => item.type === 'draw_keep');
+  assert.ok(keep, '抽牌后应找到保留一张动作');
+  records.push(recordAppliedAction(state, actor.id, keep, Engine.applyAction));
+  assert.equal(records[1].ok, true);
+  assert.equal(state.turn.pending, null);
+
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => {
+      data += chunk;
+      const line = data.split(/\r?\n/)[0];
+      if (line) resolve(JSON.parse(line));
+    });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'draw-keep-trace'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 抽牌保留回放失败');
+  assert.equal(native.phase, expected.phase);
+  assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount, cityCount: p.cityCount })),
+    expected.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount, cityCount: p.cityCount })));
+});
+
 test('C++ 原生状态可以回放实验室与博物馆的指定手牌动作', async t => {
   const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过紫色建筑回放检查'); return; }
