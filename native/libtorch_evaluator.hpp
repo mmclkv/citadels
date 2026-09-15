@@ -165,6 +165,16 @@ class LibTorchNeuralBatchedEvaluator final
     auto tensor = torch::from_blob(flat.data(), {static_cast<int64_t>(flat.size())},
                                    torch::TensorOptions().dtype(torch::kFloat32));
     torch::NoGradGuard guard;
+    size_t expected = 0;
+    for (const auto& layer : {model_->state1, model_->state2, model_->policy1,
+                              model_->policy2, model_->policy_out, model_->value1,
+                              model_->value_out})
+      expected += layer->weight.numel() + layer->bias.numel();
+    const size_t legacy_value_head_size = model_->value_out->in_features() * (kValueSlots - 1) +
+                                           (kValueSlots - 1);
+    const bool legacy = flat.size() == expected - legacy_value_head_size;
+    if (!legacy && flat.size() != expected)
+      throw std::runtime_error("LibTorch 模型参数数量不匹配");
     size_t offset = 0;
     auto copy_layer = [&](torch::nn::Linear& layer) {
       const size_t weight_count = layer->weight.numel();
@@ -180,7 +190,16 @@ class LibTorchNeuralBatchedEvaluator final
     };
     copy_layer(model_->state1); copy_layer(model_->state2);
     copy_layer(model_->policy1); copy_layer(model_->policy2); copy_layer(model_->policy_out);
-    copy_layer(model_->value1); copy_layer(model_->value_out);
+    copy_layer(model_->value1);
+    if (legacy) {
+      model_->value_out->weight.zero_(); model_->value_out->bias.zero_();
+      const size_t old_weight_count = model_->value_out->in_features();
+      model_->value_out->weight[0].copy_(tensor.slice(0, static_cast<int64_t>(offset),
+          static_cast<int64_t>(offset + old_weight_count)));
+      offset += old_weight_count;
+      model_->value_out->bias[0].copy_(tensor[offset]);
+      offset += 1;
+    } else copy_layer(model_->value_out);
     if (offset != flat.size()) throw std::runtime_error("LibTorch 模型参数数量不匹配");
     model_->to(device_);
     model_->eval();

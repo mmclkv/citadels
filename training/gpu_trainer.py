@@ -184,15 +184,27 @@ class PolicyValueNet(nn.Module):
         values = array.array("f")
         with open(filename, "rb") as handle:
             values.fromfile(handle, os.path.getsize(filename) // values.itemsize)
+        legacy_value_head_size = self.value_out.in_features * (VALUE_SLOTS - 1) + (VALUE_SLOTS - 1)
+        legacy = len(values) == sum(layer.weight.numel() + layer.bias.numel() for layer in self.ordered) - legacy_value_head_size
+        if not legacy and len(values) != sum(layer.weight.numel() + layer.bias.numel() for layer in self.ordered):
+            raise ValueError("模型二进制参数数量不匹配")
         cursor = 0
         with torch.no_grad():
             for layer in self.ordered:
                 count = layer.weight.numel()
-                layer.weight.copy_(torch.tensor(values[cursor:cursor + count]).reshape_as(layer.weight))
-                cursor += count
-                count = layer.bias.numel()
-                layer.bias.copy_(torch.tensor(values[cursor:cursor + count]).reshape_as(layer.bias))
-                cursor += count
+                if legacy and layer is self.value_out:
+                    layer.weight.zero_(); layer.bias.zero_()
+                    old_weight_count = layer.in_features
+                    layer.weight[0].copy_(torch.tensor(values[cursor:cursor + old_weight_count]))
+                    cursor += old_weight_count
+                    layer.bias[0] = values[cursor]
+                    cursor += 1
+                else:
+                    layer.weight.copy_(torch.tensor(values[cursor:cursor + count]).reshape_as(layer.weight))
+                    cursor += count
+                    count = layer.bias.numel()
+                    layer.bias.copy_(torch.tensor(values[cursor:cursor + count]).reshape_as(layer.bias))
+                    cursor += count
         if cursor != len(values):
             raise ValueError("模型二进制参数数量不匹配")
 

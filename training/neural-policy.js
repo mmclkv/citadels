@@ -139,11 +139,20 @@ class PolicyValueNetwork {
   }
 
   importFlat(flat) {
-    if (!flat || flat.length !== this.parameterCount) throw new Error('模型二进制参数数量不匹配');
+    const legacyValueHeadSize = this.profile.valueHidden * (VALUE_SLOTS - 1) + (VALUE_SLOTS - 1);
+    const legacy = flat && flat.length === this.parameterCount - legacyValueHeadSize;
+    if (!flat || (flat.length !== this.parameterCount && !legacy)) throw new Error('模型二进制参数数量不匹配');
     let offset = 0;
     for (const layer of this.layers) {
-      layer.w.set(flat.subarray(offset, offset + layer.w.length)); offset += layer.w.length;
-      layer.b.set(flat.subarray(offset, offset + layer.b.length)); offset += layer.b.length;
+      if (legacy && layer === this.valueOut) {
+        layer.w.fill(0); layer.b.fill(0);
+        for (let i = 0; i < layer.inputSize; i++) layer.w[i] = flat[offset + i];
+        layer.b[0] = flat[offset + layer.inputSize];
+        offset += layer.inputSize + 1;
+      } else {
+        layer.w.set(flat.subarray(offset, offset + layer.w.length)); offset += layer.w.length;
+        layer.b.set(flat.subarray(offset, offset + layer.b.length)); offset += layer.b.length;
+      }
     }
   }
 
@@ -298,7 +307,14 @@ class PolicyValueNetwork {
     if (!data || data.version !== 1 || data.profile !== this.profileName || data.layers.length !== this.layers.length) {
       throw new Error('不兼容的 checkpoint');
     }
-    this.layers.forEach((layer, i) => layer.import(data.layers[i]));
+    this.layers.forEach((layer, i) => {
+      const source = data.layers[i];
+      if (layer === this.valueOut && source && source.out === 1 && source.in === layer.inputSize) {
+        layer.w.fill(0); layer.b.fill(0);
+        for (let input = 0; input < layer.inputSize; input++) layer.w[input] = source.w[input];
+        layer.b[0] = source.b[0];
+      } else layer.import(source);
+    });
     this.optimizerStep = Number(data.optimizerStep) || 0;
   }
   get parameterCount() { return this.layers.reduce((sum, l) => sum + l.parameterCount, 0); }
