@@ -1,5 +1,7 @@
 'use strict';
 
+const VALUE_SLOTS = 8;
+
 const PROFILES = {
   fast: { label: '快速', stateHidden: 256, latent: 128, policyHidden: 128, policyMid: 64, valueHidden: 64 },
   balanced: { label: '均衡', stateHidden: 384, latent: 256, policyHidden: 256, policyMid: 128, valueHidden: 128 },
@@ -121,7 +123,7 @@ class PolicyValueNetwork {
     this.policy2 = new Dense(p.policyHidden, p.policyMid, this.rng);
     this.policyOut = new Dense(p.policyMid, 1, this.rng);
     this.value1 = new Dense(p.latent, p.valueHidden, this.rng);
-    this.valueOut = new Dense(p.valueHidden, 1, this.rng);
+    this.valueOut = new Dense(p.valueHidden, VALUE_SLOTS, this.rng);
     this.layers = [this.state1, this.state2, this.policy1, this.policy2, this.policyOut, this.value1, this.valueOut];
     this.optimizerStep = 0;
   }
@@ -159,14 +161,22 @@ class PolicyValueNetwork {
       logits[i] = po.output[0];
       policies.push({ p1, p2, po });
     }
-    return { stateCaches: { s1, s2, v1, vo }, policies, logits, probs: softmax(logits, temperature), value: vo.output[0] };
+    return {
+      stateCaches: { s1, s2, v1, vo }, policies, logits,
+      probs: softmax(logits, temperature),
+      valueVector: vo.output,
+      value: vo.output[0]
+    };
   }
 
   choose(state, actions, temperature = 1) {
     const out = this.forward(state, actions, temperature);
     let r = this.rng(), chosen = actions.length - 1;
     for (let i = 0; i < out.probs.length; i++) { r -= out.probs[i]; if (r <= 0) { chosen = i; break; } }
-    return { chosen, probability: out.probs[chosen], value: out.value, entropy: entropy(out.probs) };
+    return {
+      chosen, probability: out.probs[chosen], valueVector: out.valueVector,
+      value: out.value, entropy: entropy(out.probs)
+    };
   }
 
   trainPPO(transitions, options = {}) {
@@ -177,7 +187,11 @@ class PolicyValueNetwork {
     const policyLossMode = ['auto', 'ppo', 'mcts_ce'].includes(options.policyLossMode) ? options.policyLossMode : 'auto';
     const valueCoef = Number(options.valueCoef) || 0.5;
     const entropyCoef = Number(options.entropyCoef) || 0.01;
-    const rawAdvantages = transitions.map(t => t.reward - t.oldValue);
+    const rawAdvantages = transitions.map(t => {
+      const reward = t.rewardVector && t.rewardVector.length ? t.rewardVector[0] : t.reward;
+      const oldValue = t.oldValueVector && t.oldValueVector.length ? t.oldValueVector[0] : t.oldValue;
+      return (Number(reward) || 0) - (Number(oldValue) || 0);
+    });
     const mean = rawAdvantages.reduce((a, b) => a + b, 0) / rawAdvantages.length;
     const variance = rawAdvantages.reduce((a, b) => a + (b - mean) ** 2, 0) / rawAdvantages.length;
     const std = Math.sqrt(variance + 1e-8);
@@ -234,9 +248,25 @@ class PolicyValueNetwork {
           for (let j = 0; j < gradLatent.length; j++) gradLatent[j] += gi[j];
         }
 
-        const valueError = out.value - tr.reward;
-        totals.valueLoss += valueError * valueError;
-        const gv0 = new Float32Array([2 * valueCoef * valueError]);
+        const targetVector = tr.rewardVector && tr.rewardVector.length
+          ? tr.rewardVector : [Number(tr.reward) || 0];
+        const mask = tr.valueMask && tr.valueMask.length
+          ? tr.valueMask : [1];
+        let valid = 0;
+        for (let i = 0; i < Math.min(VALUE_SLOTS, mask.length); i++) {
+          if (Number(mask[i]) > 0) valid += 1;
+        }
+        valid = Math.max(1, valid);
+        const gv0 = new Float32Array(VALUE_SLOTS);
+        let sampleValueLoss = 0;
+        for (let i = 0; i < VALUE_SLOTS; i++) {
+          const targetValue = Number(targetVector[i]) || 0;
+          const active = Number(mask[i]) > 0 ? 1 : 0;
+          const error = out.valueVector[i] - targetValue;
+          sampleValueLoss += active * error * error / valid;
+          gv0[i] = 2 * valueCoef * active * error / valid;
+        }
+        totals.valueLoss += sampleValueLoss;
         const gv1 = this.valueOut.backward(out.stateCaches.vo, gv0);
         const gvs = this.value1.backward(out.stateCaches.v1, gv1);
         for (let j = 0; j < gradLatent.length; j++) gradLatent[j] += gvs[j];
@@ -280,4 +310,4 @@ function entropy(probs) {
   return value;
 }
 
-module.exports = { PolicyValueNetwork, PROFILES, mulberry32, softmax };
+module.exports = { PolicyValueNetwork, PROFILES, VALUE_SLOTS, mulberry32, softmax };

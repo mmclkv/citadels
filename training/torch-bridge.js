@@ -105,9 +105,13 @@ class TorchBridge {
         chosen: row.chosen, oldProb: row.oldProb, oldValue: row.oldValue,
         reward: row.reward, temperature: row.temperature || 1
       };
+      if (row.oldValueVector) out.oldValueVector = row.oldValueVector;
+      if (row.rewardVector) out.rewardVector = row.rewardVector;
+      if (row.valueMask) out.valueMask = row.valueMask;
       // MCTS 模式：把访问分布 π 一起序列化，让 GPU 训练侧用交叉熵替代比例裁剪
       if (row.pi) out.pi = row.pi;
       if (row.mctsValue != null) out.mctsValue = row.mctsValue;
+      if (row.mctsValueVector) out.mctsValueVector = row.mctsValueVector;
       return out;
     });
     fs.writeFileSync(rolloutPath, zlib.gzipSync(JSON.stringify(serializable), { level: 1 }));

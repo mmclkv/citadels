@@ -38,5 +38,8 @@ test('native 搜索协议拒绝被篡改的完整状态快照', () => {
 
 test('native 搜索协议拒绝错误响应', () => {
   assert.throws(() => decodeSearchResponse(JSON.stringify({ v: 0, t: 'search_result', policy: [] })), /协议版本/);
-  assert.deepEqual(decodeSearchResponse(JSON.stringify({ v: 1, t: 'search_result', policy: [1], value: 0 })).policy, [1]);
+  const legacy = decodeSearchResponse(JSON.stringify({ v: 1, t: 'search_result', policy: [1], value: 0 }));
+  assert.deepEqual(legacy.policy, [1]);
+  assert.deepEqual(legacy.valueVector, [0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.throws(() => decodeSearchResponse(JSON.stringify({ v: 1, t: 'search_result', policy: [1], valueVector: [1] })), /valueVector/);
 });

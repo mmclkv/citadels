@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const Engine = require('../src/engine.js');
 const train = require('../training/train.js');
+const { mulberry32 } = require('../training/neural-policy.js');
+const { NativeSearchClient } = require('../training/native-search.js');
 const { encodeSearchRequest, decodeSearchResponse } = require('../native/protocol.js');
 
 function finishDraft(state) {
@@ -82,5 +84,43 @@ test('原生搜索 worker 协议返回非零终局 root value', async t => {
   assert.equal(result.id, 'worker-value-1');
   assert.equal(result.policy.length, legal.length);
   assert.ok(Number.isFinite(result.value));
+  assert.equal(result.valueVector.length, 8, 'native worker 必须返回固定 8 维 valueVector');
+  assert.ok(Math.abs(result.valueVector[0] - result.value) < 1e-5,
+    '旧 value 字段必须与根玩家 slot 0 兼容');
   assert.ok(Math.abs(result.value) > 1e-6, `expected non-zero terminal root value, got ${result.value}`);
+});
+
+test('6 人 mixed 完整对局中 native 与 JS 合法动作列表不发生 fallback', async t => {
+  const executable = process.env.CITADELS_NATIVE_SEARCH_WORKER;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_SEARCH_WORKER，跳过完整动作对齐检查'); return; }
+  const config = {
+    targetGames: 3, minPlayers: 6, maxPlayers: 6, charSet: 'mixed', endDistricts: 8,
+    backend: 'native', seed: 20260915, maxSteps: 2000,
+    mctsSimulations: 1, mctsMaxDepth: 8, mctsC_puct: 1, modelVersion: 0
+  };
+  const client = new NativeSearchClient({ root: require('node:path').join(__dirname, '..'),
+    executable, simulations: 1, maxDepth: 8, cPuct: 1, seed: config.seed });
+  const fallbacks = [];
+  const search = client.search.bind(client);
+  client.search = async (...args) => {
+    const result = await search(...args);
+    if (result.fallback) fallbacks.push({
+      nativeActionCount: result.nativeActionCount,
+      suppliedActionCount: result.suppliedActionTypes && result.suppliedActionTypes.length,
+      mismatchIndex: result.mismatchIndex
+    });
+    return result;
+  };
+  try {
+    for (let game = 0; game < config.targetGames; game++) {
+      const result = await train.runSelfPlayGame({}, config, game,
+        mulberry32(config.seed ^ (game * 2246822519)), () => false, null, client);
+      assert.equal(result.stopped, undefined);
+      assert.ok(result.steps > 0);
+      assert.ok(result.rounds > 0);
+    }
+  } finally {
+    await client.close();
+  }
+  assert.deepEqual(fallbacks, []);
 });

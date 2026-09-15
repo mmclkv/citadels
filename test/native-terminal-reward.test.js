@@ -63,3 +63,24 @@ test('4/5/6 人无组队终局奖励与 C++ terminal_value 一致', t => {
     }
   }
 });
+
+test('4/5/6 人 C++/JS 终局 valueVector 按相对座位一致', t => {
+  const executable = process.env.CITADELS_NATIVE_TERMINAL_REWARD_VECTOR_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_TERMINAL_REWARD_VECTOR_PROBE，跳过跨语言向量检查'); return; }
+  for (const playerCount of [4, 5, 6]) {
+    const state = fixture(playerCount);
+    state.scores = Engine.computeScores(state);
+    const rewards = train.gameRewards(state);
+    const actual = execFileSync(executable, { input: JSON.stringify(state) + '\n', encoding: 'utf8' })
+      .trim().split(';').map(row => row.split(',').map(Number));
+    assert.equal(actual.length, playerCount);
+    for (let perspective = 0; perspective < playerCount; perspective++) {
+      const expected = train.relativeRewardVector(state, 'p' + perspective, rewards);
+      assert.equal(actual[perspective].length, 8);
+      for (let slot = 0; slot < 8; slot++) {
+        assert.ok(Math.abs(actual[perspective][slot] - expected.values[slot]) < 1e-5,
+          `player ${playerCount}/${perspective}/${slot}: native=${actual[perspective][slot]} js=${expected.values[slot]}`);
+      }
+    }
+  }
+});

@@ -1,5 +1,15 @@
 'use strict';
 
+const VALUE_SLOTS = 8;
+
+function asValueVector(value, scalar = 0) {
+  const out = new Float32Array(VALUE_SLOTS);
+  if (value && typeof value.length === 'number') {
+    for (let i = 0; i < Math.min(VALUE_SLOTS, value.length); i++) out[i] = Number(value[i]) || 0;
+  } else out[0] = Number(value == null ? scalar : value) || 0;
+  return out;
+}
+
 /**
  * AlphaZero 风格蒙特卡洛树搜索（MCST/MCTS）。
  *
@@ -99,8 +109,10 @@ function makeNode(playerId, legalActions) {
     legalActions,             // 由调用方注入；为同一引用，便于复用
     P: null,                  // Float32Array(legalActions.length)
     W: 0,
+    WVector: new Float64Array(VALUE_SLOTS),
     N: 0,
-    value: 0,                 // 神经网络的 from-this-player 价值估值
+    value: 0,                 // 兼容字段：valueVector[0]
+    valueVector: new Float32Array(VALUE_SLOTS),
     expanded: false,
     children: new Map(),      // actionIndex (整型) -> Node
     incomingAction: null,     // 走到本节点的动作（根节点为 null）；MCTS 靠重放它还原状态
@@ -137,6 +149,8 @@ class Search {
     this.simOther = 0;          // 无合法动作 / 落子失败等兜底
     // 根节点玩家（"我"）：backup 的视角换算以他为基准，在 search() 开始时注入
     this.rootPlayerId = null;
+    this.playerOrder = [];
+    this.vectorMode = false;
     // evaluator 抽象层：默认 JsEvaluator 包装当前 model，行为与旧实现一致
     if (opts.evaluator) {
       this.evaluator = opts.evaluator;
@@ -152,6 +166,11 @@ class Search {
   async expand(node, state) {
     if (node.expanded) return;
     const result = await this.evaluator.evaluate(node, state);
+    if (result && result.valueVector && typeof result.valueVector.length === 'number') {
+      node.valueVector = asValueVector(result.valueVector);
+      node.value = node.valueVector[0];
+      this.vectorMode = true;
+    }
     this.expansions++;
     return result;
   }
@@ -168,7 +187,8 @@ class Search {
         const p = node.P ? node.P[i] : 0;
         score = this.cPuct * p * Math.sqrt(Math.max(parentVisit, 1) / (1 + 0)) * (1 + this.rng() * 1e-3);
       } else {
-        const q = child.W / child.N;
+        const slot = this.vectorMode ? this.relativeSlot(child.playerId, node.playerId) : 0;
+        const q = this.vectorMode ? child.WVector[slot] / child.N : child.W / child.N;
         const p = node.P ? node.P[i] : 0;
         const u = this.cPuct * p * Math.sqrt(parentVisit) / (1 + child.N);
         score = q + u;
@@ -192,6 +212,42 @@ class Search {
     }
   }
 
+  terminalValueVector(state, playerId) {
+    const out = new Float32Array(VALUE_SLOTS);
+    if (!this.rewardFn) return out;
+    try {
+      const rewards = this.rewardFn(state);
+      if (!rewards) return out;
+      const players = state && state.players && state.players.length ? state.players : null;
+      const order = players ? players.map(player => player.id) : (this.playerOrder || []);
+      if (!order.length) {
+        out[0] = this.terminalValue(state, playerId);
+        return out;
+      }
+      const me = order.indexOf(playerId);
+      if (me < 0) return out;
+      for (let rel = 0; rel < Math.min(VALUE_SLOTS, order.length); rel++) {
+        const id = order[(me + rel) % order.length];
+        const value = typeof rewards.get === 'function' ? rewards.get(id) : rewards[id];
+        out[rel] = Number.isFinite(Number(value)) ? Number(value) : 0;
+      }
+    } catch (_) { /* malformed reward function remains a zero vector */ }
+    return out;
+  }
+
+  relativeSlot(perspectiveId, targetId) {
+    const n = this.playerOrder.length;
+    if (!n) return targetId === perspectiveId ? 0 : 0;
+    const perspective = this.playerOrder.indexOf(perspectiveId);
+    const target = this.playerOrder.indexOf(targetId);
+    if (perspective < 0 || target < 0) return targetId === perspectiveId ? 0 : 0;
+    return (target - perspective + n) % n;
+  }
+
+  currentValue(node) {
+    return this.vectorMode ? node.valueVector : node.value;
+  }
+
   backup(path, value) {
     // path: 从根节点到叶子（含根节点）
     //
@@ -201,6 +257,33 @@ class Search {
     //   - 两个不同对手之间不翻转（paranoid 假设：其余玩家是一个联合阵营）
     // 旧实现是「每上一层就 value = -value」，在多人局与回合内多步的情况下都会
     // 把符号搞反。
+    if (!this.vectorMode || !value || typeof value.length !== 'number') {
+      const rootId = this.rootPlayerId;
+      const side = playerId => (playerId === rootId ? 1 : -1);
+      const leaf = path[path.length - 1];
+      const rootValue = Number(value && typeof value.length === 'number' ? value[0] : value) || 0;
+      for (let i = path.length - 1; i >= 0; i--) {
+        const node = path[i];
+        node.W += rootValue * side(leaf.playerId) * side(node.playerId);
+        node.N += 1;
+      }
+      return;
+    }
+    const leaf = path[path.length - 1];
+    for (let i = path.length - 1; i >= 0; i--) {
+      const node = path[i];
+      for (let rel = 0; rel < Math.min(VALUE_SLOTS, this.playerOrder.length || VALUE_SLOTS); rel++) {
+        const targetId = this.playerOrder.length ? this.playerOrder[(this.playerOrder.indexOf(node.playerId) + rel + this.playerOrder.length) % this.playerOrder.length] : node.playerId;
+        const leafSlot = this.relativeSlot(leaf.playerId, targetId);
+        node.WVector[rel] += Number(value[leafSlot]) || 0;
+      }
+      node.N += 1;
+      node.W = node.WVector[0];
+    }
+  }
+
+  /* legacy scalar backup body retained above; vector path returns before this */
+  backupLegacyUnused(path, value) {
     const rootId = this.rootPlayerId;
     const side = playerId => (playerId === rootId ? 1 : -1);
     const leaf = path[path.length - 1];
@@ -230,18 +313,18 @@ class Search {
       // 终局判定要放在扩展之前：真实胜负是唯一有监督信号的量，优先级高于网络估值。
       if (working.phase === 'gameover') {
         this.simTerminal++;
-        this.backup(path, this.terminalValue(working, current.playerId));
+        this.backup(path, this.terminalValueVector(working, current.playerId));
         return;
       }
       if (!current.expanded) {
         await this.expand(current, working);
         this.simLeaf++;
-        this.backup(path, current.value);
+        this.backup(path, this.currentValue(current));
         return;
       }
       if (!current.legalActions.length) {
         this.simOther++;
-        this.backup(path, current.value);
+        this.backup(path, this.currentValue(current));
         return;
       }
       const actionIdx = this.selectUCB(current, current.N);
@@ -252,7 +335,7 @@ class Search {
         const { ok, undo } = applyRecorded(working, current.playerId, current.legalActions[actionIdx]);
         if (!ok) {
           this.simOther++;
-          this.backup(path, current.value);
+          this.backup(path, this.currentValue(current));
           return;
         }
         const actor = this.nextActor(working);
@@ -270,7 +353,7 @@ class Search {
     }
     // 走完最大深度还没展开：用当前节点价值兜底
     this.simDepthCapped++;
-    this.backup(path, current.value);
+    this.backup(path, this.currentValue(current));
   }
 
   // 当前行动方：引擎未导出 currentActor，这里沿用与旧实现一致的逻辑
@@ -286,9 +369,11 @@ class Search {
 
   async search(rootState, rootPlayerId) {
     this.rootPlayerId = rootPlayerId;
+    this.playerOrder = (rootState.players || []).map(player => player.id);
+    this.vectorMode = false;
     const rootLegal = this.legalFn(rootState, rootPlayerId);
     if (!rootLegal.length) {
-      return { pi: null, value: 0, visits: 0, fallback: true, expansions: 0 };
+      return { pi: null, value: 0, valueVector: new Float32Array(VALUE_SLOTS), visits: 0, fallback: true, expansions: 0 };
     }
     const root = makeNode(rootPlayerId, rootLegal);
     root.state = rootState;
@@ -319,13 +404,18 @@ class Search {
       // 走到这只能是 simul=0：直接用网络的 P 当作访问分布
       if (root.P) pi.set(root.P); else { for (let i = 0; i < pi.length; i++) pi[i] = 1 / pi.length; }
     }
+    const valueVector = new Float32Array(VALUE_SLOTS);
+    if (this.vectorMode) {
+      for (let i = 0; i < VALUE_SLOTS; i++) valueVector[i] = root.WVector[i] / Math.max(1, root.N);
+    } else valueVector[0] = root.W / Math.max(1, root.N);
     return {
       pi,
-      value: root.W / Math.max(1, root.N),
+      value: valueVector[0],
+      valueVector,
       visits: total,
       expansions: this.expansions,
       fallback: false,
-      rootQ: root.W / Math.max(1, root.N),
+      rootQ: valueVector[0],
       rootVisitDistribution: Array.from(pi),
       simTerminal: this.simTerminal,
       simDepthCapped: this.simDepthCapped,

@@ -1,5 +1,24 @@
 'use strict';
 
+const VALUE_SLOTS = 8;
+
+function normalizeValueVector(valueVector, scalar) {
+  const out = new Float32Array(VALUE_SLOTS);
+  if (valueVector && typeof valueVector.length === 'number') {
+    for (let i = 0; i < Math.min(VALUE_SLOTS, valueVector.length); i++) {
+      out[i] = Number(valueVector[i]) || 0;
+    }
+  } else {
+    out[0] = Number(scalar) || 0;
+  }
+  return out;
+}
+
+function resultValueVector(result) {
+  return normalizeValueVector(result && (result.valueVector || result.Vv || result.values),
+    result && (result.value != null ? result.value : result.V));
+}
+
 /**
  * Evaluator 抽象层 — 把"神经网络对 (state, legalActions) 的前向评估"做成可替换组件，
  * 让 MCTS 能在不同后端间切换：
@@ -56,7 +75,7 @@ class JsEvaluator extends Evaluator {
   }
 
   async evaluate(node, state) {
-    if (node.expanded) return { P: node.P, V: node.value };
+    if (node.expanded) return { P: node.P, V: node.value, valueVector: node.valueVector };
     // 兼容旧调用方式：未显式传 state 时回退到 node.state（测试桩节点通常带 .state）
     if (state === undefined) state = node && node.state;
     const view = this.sanitize(state, node.playerId);
@@ -64,9 +83,10 @@ class JsEvaluator extends Evaluator {
     const actionVectors = node.legalActions.map(action => this.encodeAction(action, encoded.context));
     const out = this.model.forward(encoded.vector, actionVectors, 1.0);
     node.P = out.probs;
-    node.value = out.value;
+    node.valueVector = normalizeValueVector(out.valueVector, out.value);
+    node.value = Number.isFinite(Number(out.value)) ? out.value : node.valueVector[0];
     node.expanded = true;
-    return { P: out.probs, V: out.value };
+    return { P: out.probs, V: node.value, valueVector: node.valueVector };
   }
 
   async evaluateMany(nodes) {
@@ -99,7 +119,7 @@ class BatchEvaluator extends Evaluator {
   }
 
   async evaluate(node, state) {
-    if (node.expanded) return { P: node.P, V: node.value };
+    if (node.expanded) return { P: node.P, V: node.value, valueVector: node.valueVector };
     // 兼容旧调用方式：未显式传 state 时回退到 node.state（测试桩节点通常带 .state）
     if (state === undefined) state = node && node.state;
     this.stats.calls++;
@@ -112,7 +132,8 @@ class BatchEvaluator extends Evaluator {
       const cached = this.cache.get(cacheKey);
       if (cached) {
         node.P = cached.P;
-        node.value = cached.V;
+        node.valueVector = new Float32Array(cached.valueVector || normalizeValueVector(null, cached.V));
+        node.value = node.valueVector[0];
         node.expanded = true;
         this.stats.cacheHits++;
         return cached;
@@ -169,8 +190,10 @@ class BatchEvaluator extends Evaluator {
         }
         const forwardNeeded = uniqueOrder.length;
         if (forwardNeeded === 0) continue;
-        const { probsList, values } = await this.forwardBatch(stateVectors, actionVectorsList);
-        if (probsList.length !== forwardNeeded || values.length !== forwardNeeded) {
+        const batchResult = await this.forwardBatch(stateVectors, actionVectorsList);
+        const probsList = batchResult.probsList;
+        const valueVectors = batchResult.valueVectors || batchResult.values;
+        if (probsList.length !== forwardNeeded || valueVectors.length !== forwardNeeded) {
           throw new Error('forwardBatch 返回长度与 batch 不一致');
         }
         this.stats.forwardBatches++;
@@ -178,11 +201,12 @@ class BatchEvaluator extends Evaluator {
         const uniqueResults = new Array(uniqueOrder.length);
         for (let u = 0; u < uniqueOrder.length; u++) {
           const P = new Float32Array(probsList[u]);
-          const V = values[u];
-          uniqueResults[u] = { P, V };
+          const valueVector = resultValueVector({ valueVector: valueVectors[u], value: valueVectors[u] });
+          const V = valueVector[0];
+          uniqueResults[u] = { P, V, valueVector };
           const key = batch[uniqueOrder[u]].cacheKey;
           if (this.cacheSize > 0) {
-            this.cache.set(key, { P, V });
+            this.cache.set(key, { P, V, valueVector });
             if (this.cache.size > this.cacheSize) {
               const firstKey = this.cache.keys().next().value;
               this.cache.delete(firstKey);
@@ -192,14 +216,15 @@ class BatchEvaluator extends Evaluator {
         for (let i = 0; i < batch.length; i++) {
           const item = batch[i];
           const u = seenKeyIndex.get(item.cacheKey);
-          const { P, V } = uniqueResults[u];
+          const { P, V, valueVector } = uniqueResults[u];
           // 同一 hash 共享 buffer — 复制一份给原始 node，避免后续覆盖影响兄弟
           const Pclone = new Float32Array(P);
           item.node.P = Pclone;
+          item.node.valueVector = new Float32Array(valueVector);
           item.node.value = V;
           item.node.expanded = true;
           this.stats.expansions++;
-          item.resolve({ P: Pclone, V });
+          item.resolve({ P: Pclone, V, valueVector: item.node.valueVector });
         }
       } catch (error) {
         for (const item of batch) item.reject(error);

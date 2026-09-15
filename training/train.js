@@ -6,7 +6,7 @@ const zlib = require('zlib');
 const os = require('os');
 const Engine = require('../src/engine.js');
 const HeuristicAI = require('../src/ai.js');
-const { PolicyValueNetwork, PROFILES, mulberry32 } = require('./neural-policy.js');
+const { PolicyValueNetwork, PROFILES, VALUE_SLOTS, mulberry32 } = require('./neural-policy.js');
 const { TorchBridge } = require('./torch-bridge.js');
 const { SelfPlayPool } = require('./selfplay-pool.js');
 const { cloneTrimmed } = require('./search-state.js');
@@ -200,6 +200,30 @@ function gameRewards(state) {
   return rewards;
 }
 
+function relativeRewardVector(state, perspectiveId, rewards) {
+  const out = new Float32Array(VALUE_SLOTS);
+  const mask = new Float32Array(VALUE_SLOTS);
+  const players = state.players || [];
+  const me = players.findIndex(player => player.id === perspectiveId);
+  if (me < 0 || !players.length) return { values: out, mask };
+  const count = Math.min(VALUE_SLOTS, players.length);
+  for (let rel = 0; rel < count; rel++) {
+    const player = players[(me + rel) % players.length];
+    const value = typeof rewards.get === 'function' ? rewards.get(player.id) : rewards[player.id];
+    out[rel] = Number.isFinite(Number(value)) ? Number(value) : 0;
+    mask[rel] = 1;
+  }
+  return { values: out, mask };
+}
+
+function normalizeValueVector(valueVector, scalar = 0) {
+  const out = new Float32Array(VALUE_SLOTS);
+  if (valueVector && typeof valueVector.length === 'number') {
+    for (let i = 0; i < Math.min(VALUE_SLOTS, valueVector.length); i++) out[i] = Number(valueVector[i]) || 0;
+  } else out[0] = Number(scalar) || 0;
+  return out;
+}
+
 async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evaluator = null, nativeSearch = null) {
   const playerCount = config.minPlayers + Math.floor(rng() * (config.maxPlayers - config.minPlayers + 1));
   const charSets = config.charSet === 'random' ? ['base', 'dark', 'mixed'] : [config.charSet];
@@ -230,14 +254,16 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     let decision;
     let piVector = null;
     let mctsValue = null;
+    let mctsValueVector = null;
     if (config.backend === 'native' && nativeSearch) {
       const nativeResult = await nativeSearch.search(state, actor.id, legal, config.modelVersion || 0);
       piVector = nativeResult.policy;
-      mctsValue = nativeResult.value;
+      mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
+      mctsValue = mctsValueVector[0];
       let r = rng();
       let chosen = Math.max(0, piVector.length - 1);
       for (let i = 0; i < piVector.length; i++) { r -= piVector[i]; if (r <= 0) { chosen = i; break; } }
-      decision = { chosen, probability: piVector[chosen], value: mctsValue,
+      decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue,
         entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
     } else if (config.mctsSimulations > 0) {
       const mctsResult = await mcts.search({
@@ -259,7 +285,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         evaluator
       });
       piVector = mctsResult.pi;
-      mctsValue = mctsResult.value;
+      mctsValueVector = normalizeValueVector(mctsResult.valueVector, mctsResult.value);
+      mctsValue = mctsValueVector[0];
       // 按访问分布比例抽样；既然分布已含 Dirichlet 噪声，这里不再额外加 temperature
       let r = rng();
       let chosen = Math.max(0, piVector.length - 1);
@@ -267,7 +294,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         r -= piVector[i];
         if (r <= 0) { chosen = i; break; }
       }
-      decision = { chosen, probability: piVector[chosen], value: mctsValue, entropy: 0,
+      decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue, entropy: 0,
         mctsVisits: mctsResult.visits, mctsExpansions: mctsResult.expansions };
     } else {
       decision = model.choose(encoded.vector, actionVectors, temperature);
@@ -276,12 +303,14 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     if (legal.length > 1) {
       const transition = {
         playerId: actor.id, state: encoded.vector, actions: actionVectors, chosen: decision.chosen,
-        oldProb: decision.probability, oldValue: decision.value, temperature
+        oldProb: decision.probability, oldValue: decision.value,
+        oldValueVector: Array.from(normalizeValueVector(decision.valueVector, decision.value)), temperature
       };
       if (piVector) {
         // 序列化为普通数组以便后续 JSON 序列化（MCTS 模式向 GPU 训练侧暴露 π 目标）
         transition.pi = Array.from(piVector);
         transition.mctsValue = mctsValue;
+        transition.mctsValueVector = Array.from(normalizeValueVector(mctsValueVector, mctsValue));
       }
       transitions.push(transition);
     }
@@ -302,7 +331,12 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     throw new Error('游戏超过最大步数 ' + config.maxSteps);
   }
   const rewards = gameRewards(state);
-  transitions.forEach(tr => { tr.reward = rewards.get(tr.playerId) || 0; });
+  transitions.forEach(tr => {
+    const target = relativeRewardVector(state, tr.playerId, rewards);
+    tr.rewardVector = Array.from(target.values);
+    tr.valueMask = Array.from(target.mask);
+    tr.reward = target.values[0];
+  });
   const winning = state.winner == null ? [] : [state.winner];
   return {
     transitions, steps, rounds: state.round, durationMs: Date.now() - startedAt,
@@ -323,6 +357,8 @@ function sanitizeConfig(input = {}) {
     profile: PROFILES[input.profile] ? input.profile : 'balanced',
     backend: ['gpu', 'cpu', 'js', 'native'].includes(input.backend) ? input.backend : 'gpu',
     nativeSearchWorker: input.nativeSearchWorker ? String(input.nativeSearchWorker) : '',
+    nativeInferenceBackend: ['python-binary', 'libtorch'].includes(input.nativeInferenceBackend)
+      ? input.nativeInferenceBackend : 'python-binary',
     learningRate: Math.max(1e-6, Math.min(0.01, Number(input.learningRate) || 0.0003)),
     batchGames: Math.max(1, Math.min(32, Number(input.batchGames) || 4)),
     ppoEpochs: Math.max(1, Math.min(6, Number(input.ppoEpochs) || 2)),
@@ -601,6 +637,7 @@ if (require.main === module) {
 
 module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
-  enumerateLegalActions, currentActor, gameRewards, sampleHistory, redrawCandidates,
-  cloneTrimmed, STATE_SIZE, ACTION_SIZE, DATA_DIR
+  enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
+  sampleHistory, redrawCandidates,
+  cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR
 };

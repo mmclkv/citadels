@@ -61,6 +61,13 @@ function decodeSearchResponse(line) {
     throw new Error('native 搜索响应协议版本或类型不匹配');
   }
   if (!Array.isArray(response.policy)) throw new Error('native 搜索响应缺少 policy');
+  if (response.valueVector == null) {
+    const value = Number(response.value) || 0;
+    response.valueVector = [value, 0, 0, 0, 0, 0, 0, 0];
+  } else if (!Array.isArray(response.valueVector) || response.valueVector.length !== 8) {
+    throw new Error('native 搜索响应 valueVector 必须为 8 维');
+  }
+  if (response.value == null) response.value = response.valueVector[0];
   return response;
 }
 
