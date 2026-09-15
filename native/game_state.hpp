@@ -326,7 +326,7 @@ struct NativeGameState {
     p->hand.erase(it);
     pending_queue.erase(pending_queue.begin());
     if (pending_queue.empty()) {
-      pending_target = -1; pending_kind.clear();
+      pending_target = -1; pending_kind.clear(); ability_used = true;
     } else {
       pending_target = pending_queue.front();
     }

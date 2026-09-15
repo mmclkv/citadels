@@ -292,7 +292,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         (action.type == ActionType::DrawKeep && state.pending_kind == "draw_keep")) {
       if (player != state.active_player) return false;
       const bool ok = state.keep_pending_card(action.uid);
-      if (ok) state.ability_used = true;
+      if (ok && action.type == ActionType::ScholarPick) state.ability_used = true;
       return ok;
     }
     if (action.type == ActionType::ProphetGive && state.pending_kind == "prophet_give")
