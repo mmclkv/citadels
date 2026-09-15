@@ -251,7 +251,8 @@ struct NativeGameState {
     std::vector<DistrictCard> rest;
     for (const auto& card : pending_cards) if (card.uid != uid) rest.push_back(card);
     active()->hand.push_back(std::move(chosen));
-    deck.return_and_shuffle(std::move(rest), rng);
+    if (pending_kind == "draw_keep") deck.put_bottom(std::move(rest));
+    else deck.return_and_shuffle(std::move(rest), rng);
     if (active()->role_id == "architect" && !bonus_done) {
       auto bonus = deck.draw(2, rng);
       active()->hand.insert(active()->hand.end(), std::make_move_iterator(bonus.begin()), std::make_move_iterator(bonus.end()));
@@ -343,12 +344,22 @@ struct NativeGameState {
   bool take_cards(DistrictDrawEffect effect = DistrictDrawEffect::None) {
     auto* p = active();
     if (!p || resources_taken) return false;
-    const auto plan = plan_take_cards(p->role_id, ResourcePhase::Main, effect);
+    const bool keep_both = std::any_of(p->city.begin(), p->city.end(),
+      [](const NativeDistrict& d) { return d.effect == "keepBoth"; });
+    const bool draw_three = !keep_both && std::any_of(p->city.begin(), p->city.end(),
+      [](const NativeDistrict& d) { return d.effect == "draw3keep1"; });
+    const auto plan = plan_take_cards(p->role_id, ResourcePhase::Main,
+      draw_three ? DistrictDrawEffect::Observatory : (keep_both ? DistrictDrawEffect::Library : effect));
     auto cards = deck.draw(plan.drawn, rng);
-    p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()),
-                   std::make_move_iterator(cards.end()));
     p->gold += plan.gold;
     resources_taken = true;
+    if (plan.keep_all || cards.empty()) {
+      p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()),
+                     std::make_move_iterator(cards.end()));
+    } else {
+      pending_cards = std::move(cards);
+      pending_kind = "draw_keep";
+    }
     return true;
   }
 
