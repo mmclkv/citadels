@@ -1777,6 +1777,8 @@
             scoreValue: districtScoreValue(c),
             beautified: c.beautified || 0,
             museumCount: c.museum ? c.museum.length : 0,
+            builtRound: c.builtRound || 0,
+            purpleEffect: c.purple && c.purple.effect ? c.purple.effect : '',
             desc: c.desc || ''
           })),
           cityCount: p.city.length,
@@ -1802,6 +1804,8 @@
         if (i === idx) {
           o.hand = p.hand.map(c => ({
             uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost,
+            scoreValue: districtScoreValue(c),
+            purpleEffect: c.purple && c.purple.effect ? c.purple.effect : '',
             desc: c.desc || '', canBuild: state.turn ? canBuildCard(state, p, c, state.turn) : false
           }));
           o.chars = p.chars.map(cid => ({ id: cid, num: charOf(cid).num, name: charOf(cid).name,

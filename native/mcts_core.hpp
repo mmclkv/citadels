@@ -87,7 +87,7 @@ class Mcts {
       bool backed_up = false;
       for (int depth = 0; depth < config_.max_depth; ++depth) {
         if (game_.terminal(state)) {
-          backup(path, game_.terminal_value(state, root_player), root_player);
+          backup(path, game_.terminal_value(state, node->player), root_player);
           backed_up = true;
           break;
         }
@@ -225,7 +225,7 @@ class BatchedMcts {
         bool collected = false;
         for (int depth = 0; depth < config_.max_depth; ++depth) {
           if (game_.terminal(state)) {
-            terminal.push_back(true); terminal_values.push_back(game_.terminal_value(state, root_player));
+            terminal.push_back(true); terminal_values.push_back(game_.terminal_value(state, node->player));
             paths.push_back(std::move(path)); collected = true; break;
           }
           if (!node->expanded) {

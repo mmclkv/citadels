@@ -25,6 +25,7 @@ struct NativeDistrict {
   std::vector<DistrictCard> museum_cards;
   bool fortress = false;
   bool beautified = false;
+  int built_round = 0;
 };
 
 struct NativePlayer {
@@ -62,6 +63,7 @@ struct NativeGameState {
   std::vector<NativeCallEntry> call_queue;
   int call_index = 0;
   int end_districts = 8;
+  int first_to_finish = -1;
   int builds = 0;
   int spent_on_build = 0;
   bool resources_taken = false;
@@ -594,9 +596,12 @@ struct NativeGameState {
     if (!can_build(card, context)) return false;
     p->gold -= it->cost;
     spent_on_build += it->cost;
-    p->city.push_back({*it, resolved_name, effect, {}});
+    const std::string resolved_effect = effect.empty() ? it->purple_effect : effect;
+    p->city.push_back({*it, resolved_name, resolved_effect, {}, false, false, round});
     p->hand.erase(it);
     ++builds;
+    if (first_to_finish < 0 && p->city.size() >= static_cast<size_t>(end_districts))
+      first_to_finish = active_player;
     return true;
   }
 

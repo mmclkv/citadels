@@ -46,8 +46,10 @@ inline std::vector<std::string> string_array_field(const JsonValue& object, cons
 
 inline DistrictCard load_card(const JsonValue& value) {
   if (!value.is_object()) throw std::runtime_error("卡牌必须是对象");
-  return {string_field(value, "uid"), string_field(value, "color"), int_field(value, "cost"),
-          string_field(value, "name")};
+  const int cost = int_field(value, "cost");
+  return {string_field(value, "uid"), string_field(value, "color"), cost,
+          string_field(value, "name"), int_field(value, "scoreValue", cost),
+          string_field(value, "purpleEffect")};
 }
 
 inline std::vector<DistrictCard> load_cards(const JsonValue& value) {
@@ -62,13 +64,20 @@ inline NativeDistrict load_city_card(const JsonValue& value) {
   if (!value.is_object()) throw std::runtime_error("城市建筑必须是对象");
   NativeDistrict district;
   district.card = load_card(value);
+  district.card.cost = int_field(value, "cost", district.card.cost);
+  district.card.score_value = int_field(value, "scoreValue", district.card.cost);
   district.name = string_field(value, "name");
   district.beautified = bool_field(value, "beautified");
+  district.built_round = int_field(value, "builtRound", 0);
+  const int museum_count = int_field(value, "museumCount", 0);
+  for (int i = 0; i < museum_count; ++i) district.museum_cards.push_back({});
   const auto* purple = value.get("purple");
   if (purple && purple->is_object()) {
     district.effect = string_field(*purple, "effect");
     district.fortress = district.effect == "immune";
   }
+  if (district.effect.empty()) district.effect = string_field(value, "purpleEffect");
+  district.fortress = district.fortress || district.effect == "immune";
   return district;
 }
 
@@ -87,6 +96,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   NativeGameState state;
   state.phase = load_phase(snapshot);
   state.round = int_field(snapshot, "round", 1);
+  state.first_to_finish = int_field(snapshot, "firstToFinish", -1);
   state.call_index = int_field(snapshot, "callIdx", 0);
   state.rng = JsRng(static_cast<uint32_t>(int_field(snapshot, "rngState")));
   const auto* config = snapshot.get("config");

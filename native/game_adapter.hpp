@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -8,6 +11,55 @@
 #include "mcts_core.hpp"
 
 namespace citadels::native {
+
+// Keep terminal rewards equivalent to training/train.js: scoreValue/cost
+// building points, museum and beautification points, five-color bonus (with
+// last-round ghost-town exclusion), and completion bonuses.
+inline float native_terminal_reward(const NativeGameState& state, int player_index) {
+  if (player_index < 0 || player_index >= static_cast<int>(state.players.size())) return 0.0f;
+  struct Score { int player = -1; float total = 0.0f; };
+  std::vector<Score> scores;
+  scores.reserve(state.players.size());
+  constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
+  for (size_t i = 0; i < state.players.size(); ++i) {
+    const auto& player = state.players[i];
+    float base = 0.0f;
+    int museum = 0, beautified = 0, usable_ghosts = 0;
+    std::array<bool, 5> have{};
+    for (const auto& district : player.city) {
+      base += district.card.score_value > 0 ? district.card.score_value : district.card.cost;
+      for (size_t color = 0; color < colors.size(); ++color)
+        if (district.card.color == colors[color]) have[color] = true;
+      museum += static_cast<int>(district.museum_cards.size());
+      if (district.beautified) ++beautified;
+      if (district.effect == "anyColorScore" && district.built_round != state.round)
+        ++usable_ghosts;
+    }
+    int missing = 0;
+    for (bool present : have) if (!present) ++missing;
+    int bonus = museum + beautified;
+    if (missing == 0 || missing <= usable_ghosts) bonus += 3;
+    if (state.first_to_finish == static_cast<int>(i)) bonus += 4;
+    else if (player.city.size() >= static_cast<size_t>(state.end_districts)) bonus += 2;
+    scores.push_back({static_cast<int>(i), base + bonus});
+  }
+  float mean = 0.0f;
+  for (const auto& score : scores) mean += score.total;
+  mean /= static_cast<float>(std::max<size_t>(1, scores.size()));
+  float variance = 0.0f;
+  for (const auto& score : scores) variance += (score.total - mean) * (score.total - mean);
+  variance /= static_cast<float>(std::max<size_t>(1, scores.size()));
+  const float standard_deviation = std::sqrt(variance + 1.0f);
+  std::stable_sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) {
+    return a.total > b.total;
+  });
+  size_t rank = 0;
+  for (; rank < scores.size(); ++rank) if (scores[rank].player == player_index) break;
+  const float rank_term = scores.size() == 1
+    ? 1.0f : 1.0f - 2.0f * static_cast<float>(rank) / static_cast<float>(scores.size() - 1);
+  const float score_term = scores.empty() ? 0.0f : (scores[rank].total - mean) / standard_deviation;
+  return std::max(-2.0f, std::min(2.0f, 0.65f * score_term + 0.35f * rank_term));
+}
 
 struct NativeSearchAction {
   ActionType type = ActionType::EndTurn;
@@ -200,7 +252,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         state.players[player].role_id == "monk") actions.push_back({ActionType::MonkTake});
     if (state.resources_taken) {
       for (const auto& card : p->hand) {
-        actions.push_back({ActionType::Build, card.uid, card.name, {}});
+        actions.push_back({ActionType::Build, card.uid, card.name, card.purple_effect});
       }
       for (const auto& d : p->city) {
         if (d.effect == "lab" && !state.used_lab)
@@ -385,10 +437,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     });
   }
 
-  float terminal_value(const NativeGameState& state, int root_player) const override {
-    if (root_player < 0 || root_player >= static_cast<int>(state.players.size())) return 0.0f;
-    return state.players[root_player].city.size() >= static_cast<size_t>(state.end_districts)
-             ? 1.0f : 0.0f;
+  float terminal_value(const NativeGameState& state, int player) const override {
+    return native_terminal_reward(state, player);
   }
 };
 
