@@ -26,7 +26,8 @@ function formConfig() {
   return {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
-    profile: $('profile').value, backend: $('backend').value, nativeSearchWorker: $('native-search-worker').value.trim(),
+    profile: $('profile').value, backend: $('backend').value, device: $('device').value,
+    nativeSearchWorker: $('native-search-worker').value.trim(), nativeInferenceBackend: $('native-inference-backend').value,
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
     temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
     policyLossMode: $('policy-loss-mode').value,
@@ -34,7 +35,7 @@ function formConfig() {
     batchGames: +$('batch-games').value, workers: +$('workers').value,
     ppoEpochs: +$('ppo-epochs').value, miniBatch: +$('mini-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
-    resumeCheckpoint: $('resume-checkpoint').value, endDistricts: 8,
+    resumeCheckpoint: $('resume-checkpoint').value,
     mctsSimulations: +$('mcts-simulations').value,
     mctsC_puct: +$('mcts-cpuct').value,
     mctsDirichletAlpha: +$('mcts-dirichlet').value,
@@ -66,13 +67,18 @@ function estimateMCTS() {
 function updateMctsEvaluatorUI() {
   const evaluator = $('mcts-evaluator').value;
   const backend = $('backend').value;
+  const native = backend === 'native';
   document.querySelectorAll('.gpu-only').forEach(el => {
     el.style.display = evaluator === 'gpu' ? '' : 'none';
   });
   $('mcts-evaluator-hint').textContent = backend === 'js'
     ? '⚠ backend=js 时 GPU 评估器会被忽略（自对弈同步跑）'
     : (evaluator === 'gpu' ? '✓ worker 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
-  document.querySelectorAll('.native-only').forEach(el => { el.style.display = backend === 'native' ? '' : 'none'; });
+  document.querySelectorAll('.native-only').forEach(el => { el.style.display = native ? '' : 'none'; });
+  $('device').disabled = backend === 'js';
+  if (native && $('native-inference-backend').value === 'libtorch') {
+    $('mcts-evaluator-hint').textContent = '✓ native 后端使用 C++ MCTS；LibTorch 在搜索进程内评估网络';
+  }
 }
 
 function setControls(status) {
@@ -148,7 +154,7 @@ function renderRuntime(status) {
     : '未启用';
   const rows = [
     ['处理器', h.cpu || '—'], ['逻辑核心', h.logicalCores || '—'], ['内存', h.memoryGB ? h.memoryGB + ' GB' : '—'],
-    ['Node.js', h.runtime || '—'], ['训练设备', h.device || 'JavaScript CPU'], ['显卡', h.gpu || '—'],
+    ['Node.js', h.runtime || '—'], ['训练设备', h.device || c.device || 'JavaScript CPU'], ['显卡', h.gpu || '—'],
     ['PyTorch / CUDA', h.torch ? h.torch + ' / ' + (h.cuda || 'CPU') : '—'], ['训练进程', status.pid || '—'], ['参数量', integer(status.parameterCount)],
     ['网络档位', c.profile || '—'], ['并行自对弈', c.workers ? c.workers + ' 个进程' : '—'],
     ['GPU 峰值显存', status.point && status.point.gpuMemoryMB ? num(status.point.gpuMemoryMB, 0) + ' MB' : '—'],
@@ -310,6 +316,8 @@ $('stop-training').onclick = async () => {
 };
 $('profile').onchange = () => { if (latest) render(latest); };
 $('backend').onchange = updateMctsEvaluatorUI;
+$('device').onchange = updateMctsEvaluatorUI;
+$('native-inference-backend').onchange = updateMctsEvaluatorUI;
 $('mcts-evaluator').onchange = updateMctsEvaluatorUI;
 ['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth',
   'mcts-batch-size', 'mcts-max-wait', 'mcts-cache-size'].forEach(id => {

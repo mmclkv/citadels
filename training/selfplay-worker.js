@@ -69,7 +69,7 @@ function getNativeSearch() {
     python: require('node:path').join(__dirname, '..', '.python', 'python.exe'),
     script: require('node:path').join(__dirname, 'gpu_trainer.py'),
     profile: workerData.config.profile,
-    device: workerData.config.backend === 'cpu' ? 'cpu' : 'cuda',
+    device: workerData.config.device || (workerData.config.backend === 'cpu' ? 'cpu' : 'cuda'),
     inferenceBackend: workerData.config.nativeInferenceBackend || 'python-binary'
   });
   return nativeSearch;

@@ -80,10 +80,10 @@ class TorchBridge {
     try {
       this.info = await this.request({
         cmd: 'init', profile: this.config.profile, learningRate: this.config.learningRate,
-        device: this.config.backend === 'cpu' ? 'cpu' : 'cuda', modelPath: this.modelPath, optimizerPath
+        device: this.config.device || (this.config.backend === 'cpu' ? 'cpu' : 'cuda'), modelPath: this.modelPath, optimizerPath
       });
       this.onLog('训练器 init 完成：profile=' + this.config.profile + ' · lr=' + this.config.learningRate +
-        ' · device=' + (this.config.backend === 'cpu' ? 'cpu' : 'cuda') +
+        ' · device=' + (this.config.device || (this.config.backend === 'cpu' ? 'cpu' : 'cuda')) +
         (resumeCheckpoint ? ' · 续训 optimizer 已挂载' : ' · 全新 optimizer'));
       return this.info;
     } catch (error) {

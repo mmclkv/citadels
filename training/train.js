@@ -442,6 +442,8 @@ function sanitizeConfig(input = {}) {
     endDistricts: [7, 8].includes(Number(input.endDistricts)) ? Number(input.endDistricts) : 8,
     profile: PROFILES[input.profile] ? input.profile : 'balanced',
     backend: ['gpu', 'cpu', 'js', 'native'].includes(input.backend) ? input.backend : 'gpu',
+    device: ['cuda', 'cpu'].includes(input.device)
+      ? input.device : (input.backend === 'cpu' ? 'cpu' : 'cuda'),
     nativeSearchWorker: input.nativeSearchWorker ? String(input.nativeSearchWorker) : '',
     nativeInferenceBackend: ['python-binary', 'libtorch'].includes(input.nativeInferenceBackend)
       ? input.nativeInferenceBackend : 'python-binary',
