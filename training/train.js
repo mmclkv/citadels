@@ -327,6 +327,7 @@ function sanitizeConfig(input = {}) {
     endDistricts: [7, 8].includes(Number(input.endDistricts)) ? Number(input.endDistricts) : 8,
     profile: PROFILES[input.profile] ? input.profile : 'balanced',
     backend: ['gpu', 'cpu', 'js', 'native'].includes(input.backend) ? input.backend : 'gpu',
+    nativeSearchWorker: input.nativeSearchWorker ? String(input.nativeSearchWorker) : '',
     learningRate: Math.max(1e-6, Math.min(0.01, Number(input.learningRate) || 0.0003)),
     batchGames: Math.max(1, Math.min(32, Number(input.batchGames) || 4)),
     ppoEpochs: Math.max(1, Math.min(6, Number(input.ppoEpochs) || 2)),
