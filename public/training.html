@@ -25,7 +25,6 @@
         <label><span>MCTS 引擎</span><select id="mcts-engine"><option value="js" selected>JS</option><option value="cpp">C++</option></select><small>负责搜索和生成访问分布</small></label>
         <label><span>神经网络框架</span><select id="neural-network-framework"><option value="pytorch" selected>PyTorch</option><option value="libtorch">LibTorch（C++）</option></select><small>用于神经网络推理</small></label>
         <label><span>计算设备</span><select id="device"><option value="cuda" selected>GPU</option><option value="cpu">CPU</option></select></label>
-        <label class="native-only" style="display:none"><span>C++ 搜索进程</span><input id="native-search-worker" type="text" placeholder="自动使用环境变量或 search_worker.exe"><small>MCTS 引擎选择 C++ 时必填；也可由服务环境变量提供</small></label>
         <label><span>结束建筑数</span><select id="end-districts"><option value="7">7 栋</option><option value="8" selected>8 栋</option></select></label>
         <label><span>单局最大步数</span><input id="max-steps" type="number" min="1000" max="100000" step="1000" value="60000"></label>
         <label><span>起始温度</span><input id="temperature-start" type="number" min="0.2" max="2" step="0.05" value="1.1"></label>

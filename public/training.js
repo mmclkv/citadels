@@ -31,7 +31,6 @@ function formConfig() {
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
     profile: $('profile').value, rulesEngine, mctsEngine, neuralNetworkFramework, device: $('device').value,
     backend: mctsEngine === 'cpp' ? 'native' : 'gpu',
-    nativeSearchWorker: $('native-search-worker').value.trim(),
     nativeInferenceBackend: neuralNetworkFramework === 'libtorch' ? 'libtorch' : 'python-binary',
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
     temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
@@ -108,7 +107,8 @@ function render(status) {
   const done = status.completedGames || point.game || 0, target = status.targetGames || status.config && status.config.targetGames || 0;
   const progress = target ? Math.min(100, done / target * 100) : 0;
   $('progress-bar').style.width = progress + '%';
-  $('progress-text').textContent = integer(done) + ' / ' + integer(target) + ' 局（' + num(progress, 1) + '%）';
+  const progressLabel = integer(done) + ' / ' + integer(target) + ' 局（' + num(progress, 1) + '%）';
+  $('progress-text').textContent = status.prepareMessage ? status.prepareMessage + ' · ' + progressLabel : progressLabel;
   const remainingMs = point.gamesPerMinute > 0 ? (target - done) / point.gamesPerMinute * 60000 : NaN;
   $('eta').textContent = '预计剩余：' + duration(remainingMs);
   $('m-games').textContent = integer(done);
