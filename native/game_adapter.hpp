@@ -166,6 +166,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           state.players[player].role_id == "warlord" || state.players[player].role_id == "marshal")
         actions.push_back({ActionType::Income});
     }
+    if (state.resources_taken && !state.ability_used && state.pending_kind.empty()) {
+      const auto& role = state.players[player].role_id;
+      if (role == "assassin" || role == "thief" || role == "magician" || role == "emperor" ||
+          role == "diplomat" || role == "warlord" || role == "marshal" || role == "artist" ||
+          role == "navigator" || role == "scholar" || role == "prophet")
+        actions.push_back({ActionType::Ability});
+    }
     if (state.resources_taken && state.income_taken && !state.monk_extra_taken &&
         state.players[player].role_id == "monk") actions.push_back({ActionType::MonkTake});
     if (state.resources_taken) {
@@ -207,10 +214,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       state.players[player].hand = std::move(hands.mine);
       state.players[target].hand = std::move(hands.target);
       state.pending_kind.clear();
+      state.ability_used = true;
       return true;
     }
-    if (action.type == ActionType::ChooseCards && state.pending_kind == "magician_redraw")
-      return player == state.active_player && state.magician_redraw(action.selected_uids);
+    if (action.type == ActionType::ChooseCards && state.pending_kind == "magician_redraw") {
+      const bool ok = player == state.active_player && state.magician_redraw(action.selected_uids);
+      if (ok) state.ability_used = true;
+      return ok;
+    }
     if (action.type == ActionType::EmperorCrown && state.pending_kind == "emperor_crown") {
       if (player != state.active_player) return false;
       int target = -1;
@@ -223,7 +234,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (action.type == ActionType::EmperorTake && state.pending_kind == "emperor_take") {
       const bool ok = action.name == "gold" ? state.emperor_take_gold() :
         (action.name == "card" ? state.emperor_take_card() : false);
-      if (ok) state.pending_kind.clear();
+      if (ok) { state.pending_kind.clear(); state.ability_used = true; }
       return ok;
     }
     if (action.type == ActionType::ChooseDistrict && state.pending_kind == "diplomat_mine") {
@@ -236,14 +247,25 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (action.type == ActionType::ChooseDistrict && state.pending_kind == "diplomat_theirs") {
       if (player != state.active_player) return false;
-      return state.diplomat_swap(action.target, action.uid);
+      const bool ok = state.diplomat_swap(action.target, action.uid);
+      if (ok) state.ability_used = true;
+      return ok;
     }
-    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "warlord_destroy")
-      return state.warlord_destroy(action.target, action.uid);
-    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "marshal_seize")
-      return state.marshal_seize(action.target, action.uid);
-    if (action.type == ActionType::NavigatorBonus && state.pending_kind == "navigator_bonus")
-      return state.navigator_bonus(action.name);
+    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "warlord_destroy") {
+      const bool ok = state.warlord_destroy(action.target, action.uid);
+      if (ok) state.ability_used = true;
+      return ok;
+    }
+    if (action.type == ActionType::ChooseDistrict && state.pending_kind == "marshal_seize") {
+      const bool ok = state.marshal_seize(action.target, action.uid);
+      if (ok) state.ability_used = true;
+      return ok;
+    }
+    if (action.type == ActionType::NavigatorBonus && state.pending_kind == "navigator_bonus") {
+      const bool ok = state.navigator_bonus(action.name);
+      if (ok) state.ability_used = true;
+      return ok;
+    }
     if (action.type == ActionType::MonkResource && state.pending_kind == "monk_declare") {
       int gold = -1, cards = -1;
       try { gold = std::stoi(action.name); cards = std::stoi(action.effect); } catch (...) { return false; }
@@ -252,14 +274,19 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if ((action.type == ActionType::ScholarPick && state.pending_kind == "scholar_pick") ||
         (action.type == ActionType::DrawKeep && state.pending_kind == "draw_keep")) {
       if (player != state.active_player) return false;
-      return state.keep_pending_card(action.uid);
+      const bool ok = state.keep_pending_card(action.uid);
+      if (ok) state.ability_used = true;
+      return ok;
     }
     if (action.type == ActionType::ProphetGive && state.pending_kind == "prophet_give")
       return player == state.active_player && state.prophet_give(action.uid);
     if (action.type == ActionType::ChooseDistrict && state.pending_kind == "artist")
       return player == state.active_player && state.artist_select(action.uid);
-    if (action.type == ActionType::ArtistDone && state.pending_kind == "artist")
-      return player == state.active_player && state.artist_done(action.selected_uids);
+    if (action.type == ActionType::ArtistDone && state.pending_kind == "artist") {
+      const bool ok = player == state.active_player && state.artist_done(action.selected_uids);
+      if (ok) state.ability_used = true;
+      return ok;
+    }
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {
       if (player != state.active_player) return false;
@@ -271,6 +298,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (state.pending_kind == "assassin") state.assassinated = number;
       else state.thief_target = number;
       state.pending_kind.clear();
+      state.ability_used = true;
       return true;
     }
     if (state.phase == NativePhase::Draft) {
@@ -294,6 +322,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       case ActionType::TakeCards: return state.take_cards();
       case ActionType::Income: return state.income();
       case ActionType::MonkTake: return state.monk_take();
+      case ActionType::Ability: return state.start_ability();
       case ActionType::Build: return state.build(action.uid, action.name);
       case ActionType::Lab: return state.use_lab(action.uid, action.secondary_uid);
       case ActionType::Smithy: return state.use_smithy(action.uid);

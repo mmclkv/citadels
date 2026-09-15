@@ -378,6 +378,31 @@ struct NativeGameState {
     return true;
   }
 
+  bool start_ability() {
+    auto* p = active();
+    if (!p || ability_used || pending_kind.size()) return false;
+    if (p->role_id == "assassin" || p->role_id == "thief") {
+      pending_kind = p->role_id; return true;
+    }
+    if (p->role_id == "magician") { pending_kind = "magician_choice"; return true; }
+    if (p->role_id == "emperor") { pending_kind = "emperor_crown"; return true; }
+    if (p->role_id == "diplomat") {
+      if (p->city.empty()) return false;
+      pending_kind = "diplomat_mine"; return true;
+    }
+    if (p->role_id == "warlord") { pending_kind = "warlord_destroy"; return true; }
+    if (p->role_id == "marshal") { pending_kind = "marshal_seize"; return true; }
+    if (p->role_id == "artist") { pending_kind = "artist"; pending_selected.clear(); return true; }
+    if (p->role_id == "navigator") { pending_kind = "navigator_bonus"; return true; }
+    if (p->role_id == "scholar") {
+      pending_cards = deck.draw(7, rng);
+      if (pending_cards.empty()) { ability_used = true; return true; }
+      pending_kind = "scholar_pick"; return true;
+    }
+    if (p->role_id == "prophet") return prophet_collect();
+    return false;
+  }
+
   bool build(const std::string& uid, const std::string& name,
              const std::string& effect = {}) {
     auto* p = active();
