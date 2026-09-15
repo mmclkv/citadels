@@ -67,7 +67,7 @@ inline NativeDistrict load_city_card(const JsonValue& value) {
   district.card.cost = int_field(value, "cost", district.card.cost);
   district.card.score_value = int_field(value, "scoreValue", district.card.cost);
   district.name = string_field(value, "name");
-  district.beautified = bool_field(value, "beautified");
+  district.beautified = bool_field(value, "beautified") || number_field(value, "beautified", 0.0) != 0.0;
   district.built_round = int_field(value, "builtRound", 0);
   const int museum_count = int_field(value, "museumCount", 0);
   for (int i = 0; i < museum_count; ++i) district.museum_cards.push_back({});
