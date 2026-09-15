@@ -1,0 +1,49 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
+const Engine = require('../src/engine.js');
+const train = require('../training/train.js');
+const { recordAppliedAction } = require('../native/replay.js');
+const { encodeReplayTrace } = require('../native/replay_protocol.js');
+
+function finishDraft(state) {
+  while (state.phase === 'draft') {
+    const actor = train.currentActor(state);
+    const action = train.enumerateLegalActions(state, actor.id)[0];
+    assert.equal(Engine.applyAction(state, actor.id, action).ok, true);
+  }
+}
+
+test('C++ 原生状态可以执行并比对一条 JS 基础行动', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过跨语言检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 37, charSetMode: 'base' });
+  Engine.startGame(initial);
+  finishDraft(initial);
+  const state = JSON.parse(JSON.stringify(initial));
+  const actor = train.currentActor(state);
+  const action = train.enumerateLegalActions(state, actor.id).find(item => item.type === 'take_gold');
+  assert.ok(action, '应找到领取金币动作');
+  const record = recordAppliedAction(state, actor.id, action, Engine.applyAction);
+  assert.equal(record.ok, true);
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, [record], 'action-1'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  assert.equal(native.ok, true, native.error || 'C++ 动作执行失败');
+  assert.equal(native.phase, record.afterSummary.phase);
+  assert.equal(native.round, record.afterSummary.round);
+  assert.deepEqual(native.players, record.afterSummary.players.map(player => ({
+    id: player.id, gold: player.gold, handCount: player.handCount,
+    cityCount: player.cityCount, hasCrown: player.hasCrown
+  })));
+});
