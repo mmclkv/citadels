@@ -8,6 +8,7 @@
 #include "build_rules.hpp"
 #include "city_machine.hpp"
 #include "deck_machine.hpp"
+#include "emperor_machine.hpp"
 #include "resource_rules.hpp"
 #include "special_buildings.hpp"
 #include "turn_machine.hpp"
@@ -70,6 +71,8 @@ struct NativeGameState {
   std::vector<std::string> char_deck;
   int assassinated = -1;
   int thief_target = -1;
+  int pending_target = -1;
+  int pending_from_crown = -1;
 
   bool draft_remove(const std::string& id) {
     auto remove = [&](std::vector<std::string>& values) {
@@ -95,6 +98,25 @@ struct NativeGameState {
   NativePlayer* active() {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;
     return &players[active_player];
+  }
+
+  bool transfer_crown(int target) {
+    if (!active() || target < 0 || target >= static_cast<int>(players.size()) || target == active_player) return false;
+    for (auto& player : players) player.has_crown = false;
+    players[target].has_crown = true;
+    pending_target = target;
+    pending_from_crown = active_player;
+    return true;
+  }
+
+  bool emperor_take_gold() {
+    if (!active() || pending_target < 0 || pending_target >= static_cast<int>(players.size())) return false;
+    return ::citadels::native::emperor_take_gold(active()->gold, players[pending_target].gold) > 0;
+  }
+
+  bool emperor_take_card() {
+    if (!active() || pending_target < 0 || pending_target >= static_cast<int>(players.size())) return false;
+    return ::citadels::native::emperor_take_card(active()->hand, players[pending_target].hand, rng);
   }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

@@ -117,3 +117,43 @@ test('C++ 原生状态可以逐动作回放选角阶段', async t => {
   assert.deepEqual(native.players.map(p => ({ id: p.id, chars: p.chars })),
     expected.players.map(p => ({ id: p.id, chars: p.chars })));
 });
+
+test('C++ 原生状态可以回放皇帝转移皇冠并拿金币', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过皇帝回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 79, charSetMode: 'base' });
+  Engine.startGame(initial);
+  initial.phase = 'action';
+  initial.draft = null;
+  initial.roundConfirm = null;
+  initial.reaction = null;
+  initial.players.forEach((player, index) => { player.hasCrown = index === 1; });
+  initial.turn = { charId: 'emperor', num: 4, playerIdx: 0, phase: 'main', takenResources: true,
+    incomeTaken: true, abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false,
+    usedSmithy: false, usedMuseum: false, pending: { kind: 'emperor_crown' }, bonusDone: false };
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (const action of [
+    { type: 'emperor_crown', target: 'p2' },
+    { type: 'emperor_take', mode: 'gold' }
+  ]) {
+    const record = recordAppliedAction(state, 'p0', action, Engine.applyAction);
+    assert.equal(record.ok, true);
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'emperor-trace'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 皇帝回放失败');
+  assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, hasCrown: p.hasCrown })),
+    expected.players.map(p => ({ id: p.id, gold: p.gold, hasCrown: p.hasCrown })));
+});
