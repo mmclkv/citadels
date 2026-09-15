@@ -66,6 +66,18 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         if (!district.fortress) actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[player].id});
       return actions;
     }
+    if (state.pending_kind == "navigator_bonus") {
+      if (player != state.active_player) return {};
+      return {{ActionType::NavigatorBonus, {}, "gold", {}}, {ActionType::NavigatorBonus, {}, "cards", {}}};
+    }
+    if (state.pending_kind == "monk_declare") {
+      if (player != state.active_player) return {};
+      const int blue = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
+        [](const NativeDistrict& d) { return d.card.color == "blue"; }));
+      std::vector<NativeSearchAction> actions;
+      for (int gold = 0; gold <= blue; ++gold) actions.push_back({ActionType::MonkResource, {}, std::to_string(gold), std::to_string(blue - gold)});
+      return actions;
+    }
     if (state.pending_kind == "diplomat_theirs") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -190,6 +202,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       return state.warlord_destroy(action.target, action.uid);
     if (action.type == ActionType::ChooseDistrict && state.pending_kind == "marshal_seize")
       return state.marshal_seize(action.target, action.uid);
+    if (action.type == ActionType::NavigatorBonus && state.pending_kind == "navigator_bonus")
+      return state.navigator_bonus(action.name);
+    if (action.type == ActionType::MonkResource && state.pending_kind == "monk_declare") {
+      int gold = -1, cards = -1;
+      try { gold = std::stoi(action.name); cards = std::stoi(action.effect); } catch (...) { return false; }
+      return state.monk_resource(gold, cards);
+    }
     if (action.type == ActionType::ChooseChar &&
         (state.pending_kind == "assassin" || state.pending_kind == "thief")) {
       if (player != state.active_player) return false;

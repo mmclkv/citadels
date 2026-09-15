@@ -236,3 +236,42 @@ test('C++ 原生状态可以回放领主摧毁后的墓地响应', async t => {
   assert.deepEqual(native.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount, cityCount: p.cityCount })),
     expected.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount, cityCount: p.cityCount })));
 });
+
+test('C++ 原生状态可以回放航海家奖励和修士资源组合', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过角色奖励回放检查'); return; }
+  async function replay(initial, actions) {
+    const state = JSON.parse(JSON.stringify(initial));
+    const records = [];
+    for (const item of actions) {
+      const record = recordAppliedAction(state, item.playerId, item.action, Engine.applyAction);
+      assert.equal(record.ok, true);
+      records.push(record);
+    }
+    const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const response = new Promise((resolve, reject) => {
+      let data = '';
+      child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+      child.on('error', reject);
+    });
+    child.stdin.write(encodeReplayTrace(initial, records, 'resource-trace'));
+    child.stdin.end();
+    const result = await response; child.kill();
+    assert.equal(result.ok, true, result.error || 'C++ 角色奖励回放失败');
+    return { result, expected: records.at(-1).afterSummary };
+  }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const navigator = Engine.createGame({ seats, seed: 97, charSetMode: 'base' });
+  Engine.startGame(navigator); navigator.phase = 'action'; navigator.draft = null; navigator.roundConfirm = null; navigator.reaction = null;
+  navigator.turn = { charId: 'navigator', num: 9, playerIdx: 0, phase: 'main', takenResources: true, incomeTaken: true,
+    abilityUsed: false, builds: 0, spentOnBuild: 0, usedLab: false, usedSmithy: false, usedMuseum: false,
+    pending: { kind: 'navigator_bonus' }, bonusDone: false };
+  const nav = await replay(navigator, [{ playerId: 'p0', action: { type: 'navigator_bonus', mode: 'gold' } }]);
+  assert.deepEqual(nav.result.players.map(p => ({ id: p.id, gold: p.gold })), nav.expected.players.map(p => ({ id: p.id, gold: p.gold })));
+
+  const monk = JSON.parse(JSON.stringify(navigator));
+  monk.turn.charId = 'monk'; monk.turn.pending = { kind: 'monk_declare' }; monk.players[0].city = [{ uid: 'blue1', name: '教堂', color: 'blue', cost: 2 }];
+  const mon = await replay(monk, [{ playerId: 'p0', action: { type: 'monk_resource', gold: 1, cards: 0 } }]);
+  assert.deepEqual(mon.result.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount })),
+    mon.expected.players.map(p => ({ id: p.id, gold: p.gold, handCount: p.handCount })));
+});

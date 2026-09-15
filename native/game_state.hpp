@@ -59,6 +59,7 @@ struct NativeGameState {
   bool used_lab = false;
   bool used_smithy = false;
   bool used_museum = false;
+  bool bonus_done = false;
   int draft_step = -1;
   int draft_total_steps = 0;
   int draft_current_player = -1;
@@ -212,6 +213,25 @@ struct NativeGameState {
     deck.discard({reaction_card});
     reaction_kind.clear(); reaction_player = -1; has_reaction_card = false;
     return true;
+  }
+
+  bool navigator_bonus(const std::string& mode) {
+    if (!active() || bonus_done || (mode != "gold" && mode != "cards")) return false;
+    if (mode == "gold") active()->gold += 4;
+    else {
+      auto cards = deck.draw(4, rng);
+      active()->hand.insert(active()->hand.end(), std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
+    }
+    bonus_done = true; pending_kind.clear(); return true;
+  }
+
+  bool monk_resource(int gold, int cards) {
+    if (!active() || gold < 0 || cards < 0 || gold + cards != static_cast<int>(
+      std::count_if(active()->city.begin(), active()->city.end(), [](const NativeDistrict& d) { return d.card.color == "blue"; }))) return false;
+    active()->gold += gold;
+    auto drawn = deck.draw(cards, rng);
+    active()->hand.insert(active()->hand.end(), std::make_move_iterator(drawn.begin()), std::make_move_iterator(drawn.end()));
+    pending_kind.clear(); return true;
   }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

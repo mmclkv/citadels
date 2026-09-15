@@ -92,6 +92,14 @@ int main() {
           NativeSearchAction chosen{ActionType::Reaction, {}, bool_field(action, "use") ? "use" : "skip", {}, {}};
           NativeGameAdapter adapter;
           if (!adapter.apply(state, player, chosen)) throw std::runtime_error("reaction 执行失败");
+        } else if (type == "navigator_bonus") {
+          NativeSearchAction chosen{ActionType::NavigatorBonus, {}, string_field(action, "mode"), {}, {}};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("navigator_bonus 执行失败");
+        } else if (type == "monk_resource") {
+          NativeSearchAction chosen{ActionType::MonkResource, {}, std::to_string(int_field(action, "gold")), std::to_string(int_field(action, "cards")), {}};
+          NativeGameAdapter adapter;
+          if (!adapter.apply(state, player, chosen)) throw std::runtime_error("monk_resource 执行失败");
         } else if (type == "take_gold") {
           if (!state.take_gold()) throw std::runtime_error("take_gold 执行失败");
         } else if (type == "take_cards") {

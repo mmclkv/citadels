@@ -130,6 +130,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     state.active_player = int_field(*turn, "playerIdx", -1);
     state.resources_taken = bool_field(*turn, "takenResources");
     state.builds = int_field(*turn, "builds");
+    state.bonus_done = bool_field(*turn, "bonusDone");
     const auto* pending = turn->get("pending");
     if (pending && pending->is_object()) {
       state.pending_kind = string_field(*pending, "kind");
