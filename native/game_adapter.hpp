@@ -33,7 +33,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (state.resources_taken) {
       for (const auto& card : p->hand) {
-        actions.push_back({ActionType::Build, card.uid, card.uid, {}});
+        actions.push_back({ActionType::Build, card.uid, card.name, {}});
       }
       for (const auto& d : p->city) {
         if (d.effect == "lab" && !state.used_lab && !p->hand.empty())
