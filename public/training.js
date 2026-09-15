@@ -34,13 +34,12 @@ function formConfig() {
     nativeInferenceBackend: neuralNetworkFramework === 'libtorch' ? 'libtorch' : 'python-binary',
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
     temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
-    policyLossMode: $('policy-loss-mode').value,
     learningRate: +$('learning-rate').value,
     batchGames: +$('batch-games').value, workers: +$('workers').value,
-    ppoEpochs: +$('ppo-epochs').value, miniBatch: +$('mini-batch').value,
+    miniBatch: +$('mini-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
     resumeCheckpoint: $('resume-checkpoint').value,
-    mctsSimulations: +$('mcts-simulations').value,
+    mctsSimulations: Math.max(1, +$('mcts-simulations').value || 1),
     mctsC_puct: +$('mcts-cpuct').value,
     mctsDirichletAlpha: +$('mcts-dirichlet').value,
     mctsDirichletEpsilon: +$('mcts-diri-eps').value,
@@ -73,9 +72,7 @@ function updateMctsEvaluatorUI() {
   const mctsEngine = $('mcts-engine').value;
   const framework = $('neural-network-framework').value;
   const native = mctsEngine === 'cpp';
-  document.querySelectorAll('.gpu-only').forEach(el => {
-    el.style.display = evaluator === 'gpu' ? '' : 'none';
-  });
+  document.querySelectorAll('.gpu-only').forEach(el => { el.style.display = ''; });
   $('mcts-evaluator-hint').textContent = native
     ? (framework === 'libtorch' ? '✓ C++ MCTS 在搜索进程内使用 LibTorch 评估' : '✓ C++ MCTS 通过 PyTorch 桥评估网络')
     : (evaluator === 'gpu' ? '✓ JS MCTS 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');

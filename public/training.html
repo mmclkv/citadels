@@ -30,20 +30,18 @@
         <label><span>起始温度</span><input id="temperature-start" type="number" min="0.2" max="2" step="0.05" value="1.1"></label>
         <label><span>结束温度</span><input id="temperature-end" type="number" min="0.15" max="1.5" step="0.05" value="0.65"></label>
         <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" max="0.01" step="0.00001" value="0.0003"></label>
-        <label><span>策略损失</span><select id="policy-loss-mode"><option value="auto" selected>自动（有 MCTS 用访问分布交叉熵）</option><option value="mcts_ce">MCTS 访问分布交叉熵</option><option value="ppo">PPO</option></select><small>推荐自动：MCTS 训练使用访问分布作为策略目标</small></label>
         <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="32" value="4"></label>
         <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="4"></label>
-        <label><span>PPO 训练轮数</span><input id="ppo-epochs" type="number" min="1" max="6" value="2"></label>
         <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" max="2048" step="32" value="256"></label>
         <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="100"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"><option value="">从头训练</option></select></label>
       </form>
-      <details class="mcts-section">
-        <summary>蒙特卡洛树搜索（MCTS，可选）</summary>
+      <section class="mcts-section">
+        <h2>MCTS 配置（必选）</h2>
         <form id="mcts-form" class="mcts-form">
-          <p class="mcts-hint">每步走子前展开若干模拟，得到访问分布 π 作为更稳的训练目标；模拟数 = 0 即关闭 MCTS，沿用网络 softmax 采样。</p>
-          <label><span>MCTS 模拟次数 / 步</span><input id="mcts-simulations" type="number" min="0" max="2000" step="10" value="0"><small id="mcts-time-estimate">关闭</small></label>
+          <p class="mcts-hint">每步走子前展开若干模拟，使用访问分布 π 作为策略训练目标。MCTS 已强制启用。</p>
+          <label><span>MCTS 模拟次数 / 步</span><input id="mcts-simulations" type="number" min="1" max="2000" step="10" value="50"><small id="mcts-time-estimate"></small></label>
           <label><span>探索常数 c_puct</span><input id="mcts-cpuct" type="number" min="0" max="10" step="0.1" value="1.0"></label>
           <label><span>根节点 Dirichlet 混合 α</span><input id="mcts-dirichlet" type="number" min="0" max="1" step="0.05" value="0.3"><small id="mcts-dirichlet-hint">0 = 关闭噪声</small></label>
           <label><span>Dirichlet 浓度 ε</span><input id="mcts-diri-eps" type="number" min="0.001" max="1" step="0.01" value="0.03"></label>
@@ -55,11 +53,11 @@
             </select>
             <small id="mcts-evaluator-hint"></small>
           </label>
-          <label class="gpu-only" style="display:none"><span>GPU 批量大小</span><input id="mcts-batch-size" type="number" min="1" max="256" step="1" value="32"><small>worker 攒够 N 个 (state, actions) 才发一次批量前向；越大吞吐越高、延迟越大</small></label>
-          <label class="gpu-only" style="display:none"><span>最长等待</span><input id="mcts-max-wait" type="number" min="0" max="50" step="1" value="1"><small>毫秒；超过也立即发送（0 = 严格攒满才发）</small></label>
-          <label class="gpu-only" style="display:none"><span>状态缓存</span><input id="mcts-cache-size" type="number" min="0" max="1048576" step="1024" value="65536"><small>前向结果 LRU 缓存条数（0 = 关闭，重算更准但更慢）</small></label>
+          <label><span>GPU 批量大小</span><input id="mcts-batch-size" type="number" min="1" max="256" step="1" value="32"><small>GPU 评估时使用；JS 评估时保留此配置以便切换后端</small></label>
+          <label><span>最长等待</span><input id="mcts-max-wait" type="number" min="0" max="50" step="1" value="1"><small>毫秒；超过也立即发送（0 = 严格攒满才发）</small></label>
+          <label><span>状态缓存</span><input id="mcts-cache-size" type="number" min="0" max="1048576" step="1024" value="65536"><small>前向结果 LRU 缓存条数（0 = 关闭，重算更准但更慢）</small></label>
         </form>
-      </details>
+      </section>
       <div class="control-row">
         <button id="start-training" class="primary">开始训练</button>
         <button id="stop-training" class="danger" disabled>停止训练</button>
@@ -83,7 +81,7 @@
     <section class="chart-grid">
       <article class="panel chart-panel"><div class="section-title"><div><h2>价值损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="value-loss-now">—</span></div><canvas id="value-loss-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>总损失</h2><p>训练目标的总损失变化趋势</p></div><span id="total-loss-now">—</span></div><canvas id="total-loss-chart"></canvas></article>
-      <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次；策略损失在 PPO 中通常围绕零波动</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>座位胜局</h2><p>用于观察先后手与座位偏差</p></div></div><canvas id="seat-chart"></canvas></article>
     </section>
