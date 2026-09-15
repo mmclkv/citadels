@@ -170,7 +170,7 @@ class LibTorchNeuralBatchedEvaluator final
                               model_->policy2, model_->policy_out, model_->value1,
                               model_->value_out})
       expected += layer->weight.numel() + layer->bias.numel();
-    const size_t legacy_value_head_size = model_->value_out->in_features() * (kValueSlots - 1) +
+    const size_t legacy_value_head_size = model_->value_out->options.in_features() * (kValueSlots - 1) +
                                            (kValueSlots - 1);
     const bool legacy = flat.size() == expected - legacy_value_head_size;
     if (!legacy && flat.size() != expected)
@@ -193,7 +193,7 @@ class LibTorchNeuralBatchedEvaluator final
     copy_layer(model_->value1);
     if (legacy) {
       model_->value_out->weight.zero_(); model_->value_out->bias.zero_();
-      const size_t old_weight_count = model_->value_out->in_features();
+      const size_t old_weight_count = model_->value_out->options.in_features();
       model_->value_out->weight[0].copy_(tensor.slice(0, static_cast<int64_t>(offset),
           static_cast<int64_t>(offset + old_weight_count)));
       offset += old_weight_count;
