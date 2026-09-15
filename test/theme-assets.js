@@ -31,7 +31,10 @@ function checkEntry(label, entry) {
   });
 }
 
+// 每个游戏角色都必须有主题立绘。
 Cards.CHARACTERS.forEach(c => checkEntry('角色 ' + c.id, manifest.cards.roles[c.id]));
+// manifest 中的每个角色（含「主题专属」——已配立绘但尚未接入游戏代码的新角色）也必须文件完整。
+Object.keys(manifest.cards.roles).forEach(id => checkEntry('角色 ' + id, manifest.cards.roles[id]));
 Cards.DISTRICTS.forEach(d => {
   const key = 'district_' + safeKey(d.en || d.name);
   checkEntry('建筑 ' + d.name + ' [' + key + ']', manifest.cards.districts[key]);
@@ -48,7 +51,8 @@ if (!graveyardCard || graveyardCard.cost !== 5 || !/支付1枚金币/.test(grave
 
 const roleKeys = Object.keys(manifest.cards.roles);
 const districtKeys = Object.keys(manifest.cards.districts);
-if (roleKeys.length !== Cards.CHARACTERS.length) throw new Error('角色 manifest 数量不匹配');
+if (roleKeys.length < Cards.CHARACTERS.length) throw new Error('角色 manifest 数量不足');
 if (districtKeys.length !== Cards.DISTRICTS.length) throw new Error('建筑 manifest 数量不匹配');
 
-console.log('✓ neon 资源完整：' + roleKeys.length + ' 个角色 × 2，' + districtKeys.length + ' 个建筑 × 2');
+const extraRoles = roleKeys.filter(id => !Cards.CHARACTERS.some(c => c.id === id));
+console.log('✓ neon 资源完整：' + roleKeys.length + ' 个角色 × 2（含主题专属 ' + extraRoles.length + ' 个：' + extraRoles.join('、') + '），' + districtKeys.length + ' 个建筑 × 2');

@@ -7,10 +7,11 @@
 
   const base = 'assets/themes/neon/cards/';
   const roleIds = [
-    'assassin', 'witch', 'thief', 'magician', 'prophet', 'king', 'emperor',
-    'noble', 'bishop', 'monk', 'merchant', 'alchemist', 'businessman',
-    'architect', 'navigator', 'scholar', 'warlord', 'diplomat', 'marshal',
-    'queen', 'artist'
+    'assassin', 'witch', 'magistrate', 'thief', 'spy', 'blackmailer',
+    'magician', 'prophet', 'wizard', 'king', 'emperor', 'noble', 'bishop',
+    'monk', 'abbot', 'merchant', 'alchemist', 'businessman', 'architect',
+    'navigator', 'scholar', 'warlord', 'diplomat', 'marshal', 'queen',
+    'artist', 'tax_collector'
   ];
   const districtKeys = [
     'manor', 'castle', 'palace', 'temple', 'church', 'monastery', 'cathedral',
