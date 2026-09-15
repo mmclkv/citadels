@@ -107,6 +107,7 @@ int main() {
       config.seed = static_cast<uint32_t>(int_field(request, "seed", 1));
       const auto native_actions = game.legal_actions(state, root);
       std::vector<float> policy;
+      float root_value = 0.0f;
       int visits = 0, expansions = 0;
       if (native_actions.size() == supplied.size()) {
         bool same_order = true;
@@ -128,6 +129,7 @@ int main() {
           const auto result = Mcts<NativeGameState, NativeSearchAction>(game, *selected_evaluator, config)
             .search(state, root);
           policy = result.policy; visits = result.visits; expansions = result.expansions;
+          root_value = result.value;
         }
       }
       if (policy.size() != supplied.size()) policy.assign(supplied.size(), 1.0f / supplied.size());
@@ -137,7 +139,7 @@ int main() {
         if (i) std::cout << ',';
         std::cout << policy[i];
       }
-      std::cout << "],\"value\":0,\"visits\":" << visits
+      std::cout << "],\"value\":" << root_value << ",\"visits\":" << visits
                 << ",\"expansions\":" << expansions
                 << ",\"backend\":\"native-mcts\"}\n" << std::flush;
     } catch (const std::exception& error) {
