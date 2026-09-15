@@ -87,6 +87,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   NativeGameState state;
   state.phase = load_phase(snapshot);
   state.round = int_field(snapshot, "round", 1);
+  state.call_index = int_field(snapshot, "callIdx", 0);
   state.rng = JsRng(static_cast<uint32_t>(int_field(snapshot, "rngState")));
   const auto* config = snapshot.get("config");
   if (config && config->is_object()) state.end_districts = int_field(*config, "endDistricts", 8);
@@ -97,6 +98,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   if (effects && effects->is_object()) {
     state.assassinated = int_field(*effects, "assassinated", -1);
     state.thief_target = int_field(*effects, "thief", -1);
+    state.thief_player = int_field(*effects, "thiefBy", -1);
     state.bewitched = int_field(*effects, "bewitched", -1);
     state.witch_player = int_field(*effects, "witchBy", -1);
   }
@@ -186,6 +188,11 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (state.draft_current_player < 0 && state.draft_step >= 0 &&
         state.draft_step < static_cast<int>(state.draft_steps.size()))
       state.draft_current_player = state.draft_steps[state.draft_step].player;
+  }
+  const auto* call_queue = snapshot.get("callQueue");
+  if (call_queue && call_queue->is_array()) for (const auto& value : call_queue->as_array()) {
+    if (!value.is_object()) continue;
+    state.call_queue.push_back({string_field(value, "charId"), int_field(value, "num"), int_field(value, "playerIdx", -1)});
   }
   const auto* reaction = snapshot.get("reaction");
   if (reaction && reaction->is_object()) {

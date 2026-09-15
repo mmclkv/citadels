@@ -44,6 +44,12 @@ struct NativeDraftStep {
   bool from_face_down = false;
 };
 
+struct NativeCallEntry {
+  std::string char_id;
+  int number = 0;
+  int player = -1;
+};
+
 struct NativeGameState {
   NativePhase phase = NativePhase::Unknown;
   std::vector<NativePlayer> players;
@@ -53,6 +59,8 @@ struct NativeGameState {
   std::string turn_phase;
   int round = 1;
   int turns_completed = 0;
+  std::vector<NativeCallEntry> call_queue;
+  int call_index = 0;
   int end_districts = 8;
   int builds = 0;
   int spent_on_build = 0;
@@ -83,6 +91,7 @@ struct NativeGameState {
   std::vector<std::string> char_deck;
   int assassinated = -1;
   int thief_target = -1;
+  int thief_player = -1;
   int bewitched = -1;
   int witch_player = -1;
   int pending_target = -1;
@@ -586,6 +595,28 @@ struct NativeGameState {
     if (!citadels::native::end_turn(turn)) return false;
     active()->gold = turn.gold;
     ++turns_completed;
+    if (!call_queue.empty()) {
+      ++call_index;
+      while (call_index < static_cast<int>(call_queue.size())) {
+        const auto& entry = call_queue[call_index];
+        if (assassinated == entry.number) { ++call_index; continue; }
+        if (thief_target == entry.number && thief_player >= 0 && thief_player < static_cast<int>(players.size()) &&
+            entry.player >= 0 && entry.player < static_cast<int>(players.size())) {
+          players[thief_player].gold += players[entry.player].gold;
+          players[entry.player].gold = 0;
+          thief_target = -1;
+        }
+        active_player = entry.player;
+        players[active_player].role_id = entry.char_id;
+        turn_phase = bewitched == entry.number ? "bewitched" : "main";
+        resources_taken = false; income_taken = false; monk_extra_taken = false;
+        builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
+        return true;
+      }
+      active_player = -1; turn_phase.clear(); phase = NativePhase::RoundConfirm;
+      round_confirmed.assign(players.size(), false); round_confirm_count = 0;
+      return true;
+    }
     active_player = (active_player + 1) % static_cast<int>(players.size());
     if (active_player == 0) ++round;
     builds = 0;

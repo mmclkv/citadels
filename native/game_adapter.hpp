@@ -323,7 +323,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       for (const auto& id : state.char_deck) if (char_number(id) == number) known = true;
       if (!known || number < 1 || number > 8) return false;
       if (state.pending_kind == "assassin") state.assassinated = number;
-      else state.thief_target = number;
+      else { state.thief_target = number; state.thief_player = player; }
       state.pending_kind.clear();
       state.ability_used = true;
       return true;
