@@ -130,6 +130,21 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (current && current->is_string()) for (size_t i = 0; i < state.players.size(); ++i)
       if (state.players[i].id == current->as_string()) state.draft_current_player = static_cast<int>(i);
     state.draft_sub = string_field(*draft, "sub");
+    const auto* pool = draft->get("pool");
+    if (pool && pool->is_array()) for (const auto& id : pool->as_array()) if (id.is_string()) state.draft_pool.push_back(id.as_string());
+    const auto* face_up = draft->get("faceUp");
+    if (face_up && face_up->is_array()) for (const auto& id : face_up->as_array()) if (id.is_string()) state.draft_face_up.push_back(id.as_string());
+    const auto* face_down = draft->get("faceDown");
+    if (face_down && face_down->is_array()) for (const auto& id : face_down->as_array()) if (id.is_string()) state.draft_face_down.push_back(id.as_string());
+    const auto* steps = draft->get("steps");
+    if (steps && steps->is_array()) for (const auto& value : steps->as_array()) {
+      if (!value.is_object()) throw std::runtime_error("draft.steps 项必须是对象");
+      state.draft_steps.push_back({int_field(value, "player", -1), int_field(value, "keep", 1),
+        int_field(value, "discard", 0), bool_field(value, "fromFaceDown")});
+    }
+    if (state.draft_current_player < 0 && state.draft_step >= 0 &&
+        state.draft_step < static_cast<int>(state.draft_steps.size()))
+      state.draft_current_player = state.draft_steps[state.draft_step].player;
   }
   const auto* reaction = snapshot.get("reaction");
   if (reaction && reaction->is_object()) {

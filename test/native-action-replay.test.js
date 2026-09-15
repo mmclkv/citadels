@@ -44,7 +44,7 @@ test('C++ 原生状态可以执行并比对一条 JS 基础行动', async t => {
   assert.equal(native.round, record.afterSummary.round);
   assert.deepEqual(native.players, record.afterSummary.players.map(player => ({
     id: player.id, gold: player.gold, handCount: player.handCount,
-    cityCount: player.cityCount, hasCrown: player.hasCrown
+    cityCount: player.cityCount, hasCrown: player.hasCrown, chars: player.chars
   })));
 });
 
@@ -81,6 +81,39 @@ test('C++ 原生状态可以按顺序执行多步基础行动', async t => {
   assert.equal(native.round, expected.round);
   assert.deepEqual(native.players, expected.players.map(player => ({
     id: player.id, gold: player.gold, handCount: player.handCount,
-    cityCount: player.cityCount, hasCrown: player.hasCrown
+    cityCount: player.cityCount, hasCrown: player.hasCrown, chars: player.chars
   })));
+});
+
+test('C++ 原生状态可以逐动作回放选角阶段', async t => {
+  const executable = process.env.CITADELS_NATIVE_ACTION_REPLAY_PROBE;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_ACTION_REPLAY_PROBE，跳过选角回放检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'p' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const initial = Engine.createGame({ seats, seed: 73, charSetMode: 'base' });
+  Engine.startGame(initial);
+  const state = JSON.parse(JSON.stringify(initial));
+  const records = [];
+  for (let i = 0; i < 3; i++) {
+    const actor = train.currentActor(state);
+    const action = train.enumerateLegalActions(state, actor.id)[0];
+    assert.equal(action.type, 'draft_pick');
+    const record = recordAppliedAction(state, actor.id, action, Engine.applyAction);
+    assert.equal(record.ok, true);
+    records.push(record);
+  }
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => { data += chunk; const line = data.split(/\r?\n/)[0]; if (line) resolve(JSON.parse(line)); });
+    child.on('error', reject);
+  });
+  child.stdin.write(encodeReplayTrace(initial, records, 'draft-trace'));
+  child.stdin.end();
+  const native = await response;
+  child.kill();
+  const expected = records.at(-1).afterSummary;
+  assert.equal(native.ok, true, native.error || 'C++ 选角回放失败');
+  assert.equal(native.phase, expected.phase);
+  assert.deepEqual(native.players.map(p => ({ id: p.id, chars: p.chars })),
+    expected.players.map(p => ({ id: p.id, chars: p.chars })));
 });

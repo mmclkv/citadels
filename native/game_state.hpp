@@ -33,6 +33,13 @@ struct NativePlayer {
   std::vector<std::string> role_ids;
 };
 
+struct NativeDraftStep {
+  int player = -1;
+  int keep = 1;
+  int discard = 0;
+  bool from_face_down = false;
+};
+
 struct NativeGameState {
   NativePhase phase = NativePhase::Unknown;
   std::vector<NativePlayer> players;
@@ -52,10 +59,35 @@ struct NativeGameState {
   int draft_total_steps = 0;
   int draft_current_player = -1;
   std::string draft_sub;
+  std::vector<std::string> draft_pool;
+  std::vector<std::string> draft_face_up;
+  std::vector<std::string> draft_face_down;
+  std::vector<NativeDraftStep> draft_steps;
   int reaction_player = -1;
   std::string reaction_kind;
   int round_confirm_count = 0;
   std::string pending_kind;
+
+  bool draft_remove(const std::string& id) {
+    auto remove = [&](std::vector<std::string>& values) {
+      const auto it = std::find(values.begin(), values.end(), id);
+      if (it == values.end()) return false;
+      values.erase(it); return true;
+    };
+    return remove(draft_pool) || remove(draft_face_down);
+  }
+
+  bool advance_draft() {
+    if (draft_step < 0 || draft_step >= static_cast<int>(draft_steps.size())) return false;
+    const auto& step = draft_steps[draft_step];
+    if (step.discard > 0 && draft_sub == "pick") { draft_sub = "discard"; return true; }
+    ++draft_step; draft_sub = "pick";
+    if (draft_step >= static_cast<int>(draft_steps.size())) {
+      phase = NativePhase::Action;
+      active_player = 0;
+    } else draft_current_player = draft_steps[draft_step].player;
+    return true;
+  }
 
   NativePlayer* active() {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;

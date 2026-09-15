@@ -22,6 +22,18 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
  public:
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
+    if (state.phase == NativePhase::Draft) {
+      if (player != state.draft_current_player || state.draft_step < 0 ||
+          state.draft_step >= static_cast<int>(state.draft_steps.size())) return {};
+      std::vector<NativeSearchAction> actions;
+      const auto& step = state.draft_steps[state.draft_step];
+      std::vector<std::string> pool = state.draft_pool;
+      if (step.from_face_down && state.draft_sub == "pick")
+        pool.insert(pool.end(), state.draft_face_down.begin(), state.draft_face_down.end());
+      for (const auto& id : pool) actions.push_back({
+        state.draft_sub == "pick" ? ActionType::DraftPick : ActionType::DraftDiscard, id, {}, {}});
+      return actions;
+    }
     if (player != state.active_player) return {};
     const auto* p = player >= 0 && player < static_cast<int>(state.players.size())
                         ? &state.players[player] : nullptr;
@@ -50,6 +62,21 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   bool apply(NativeGameState& state, int player,
              const NativeSearchAction& action) const override {
+    if (state.phase == NativePhase::Draft) {
+      if (player != state.draft_current_player) return false;
+      if (action.type == ActionType::DraftPick && state.draft_sub == "pick") {
+        if (!state.draft_remove(action.uid)) return false;
+        state.players[player].role_ids.push_back(action.uid);
+        state.players[player].role_id = action.uid;
+        return state.advance_draft();
+      }
+      if (action.type == ActionType::DraftDiscard && state.draft_sub == "discard") {
+        if (!state.draft_remove(action.uid)) return false;
+        state.draft_face_down.push_back(action.uid);
+        return state.advance_draft();
+      }
+      return false;
+    }
     if (player != state.active_player) return false;
     switch (action.type) {
       case ActionType::TakeGold: return state.take_gold();

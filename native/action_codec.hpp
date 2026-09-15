@@ -12,6 +12,7 @@ enum class ActionType {
   ArtistDone,
   Build,
   ChooseCards,
+  ChooseChar,
   ChooseDistrict,
   ChoosePlayer,
   ConfirmRound,
@@ -55,6 +56,7 @@ inline std::optional<ActionType> action_type_from_string(std::string_view value)
   CITADELS_ACTION(ArtistDone, "artist_done")
   CITADELS_ACTION(Build, "build")
   CITADELS_ACTION(ChooseCards, "choose_cards")
+  CITADELS_ACTION(ChooseChar, "choose_char")
   CITADELS_ACTION(ChooseDistrict, "choose_district")
   CITADELS_ACTION(ChoosePlayer, "choose_player")
   CITADELS_ACTION(ConfirmRound, "confirm_round")
@@ -89,6 +91,7 @@ inline std::string_view action_type_name(ActionType type) {
     case ActionType::ArtistDone: return "artist_done";
     case ActionType::Build: return "build";
     case ActionType::ChooseCards: return "choose_cards";
+    case ActionType::ChooseChar: return "choose_char";
     case ActionType::ChooseDistrict: return "choose_district";
     case ActionType::ChoosePlayer: return "choose_player";
     case ActionType::ConfirmRound: return "confirm_round";
