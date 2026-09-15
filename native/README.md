@@ -53,12 +53,13 @@ native search worker 的 GPU evaluator 有两种模式：
 不足 8 人的槽位为无效 mask。search worker 返回 `valueVector`，同时保留
 `value = valueVector[0]` 供旧客户端兼容；GPU batch 协议也返回 8 个 float 的向量。
 
-## JS/C++ 输入编码协议 v3
+## JS/C++ 输入编码协议 v4
 
-`training/train.js` 与 `native/state_features.hpp` 共用版本化的 512 维实体槽位状态编码：
+`training/train.js` 与 `native/state_features.hpp` 共用版本化的 672 维实体槽位状态编码：
 前 32 维是全局回合/阶段/待决动作字段，随后是从当前玩家视角开始的 8 个座位，
-每个座位 60 维，包含玩家资源、公开角色、城区颜色/费用统计以及最多 8 个建筑实体
-槽位。对手手牌只使用公开的 `handCount`，角色只使用公开信息，因此不会泄漏隐藏信息。
+每个座位 80 维，包含玩家资源、角色编号、精确角色 ID、城区颜色/费用统计以及最多 8 个
+建筑实体槽位。对手手牌只使用公开的 `handCount`，精确角色只使用已经公开的角色，
+因此不会泄漏隐藏信息。
 动作编码为 256 维，使用动作类型、相对目标座位、角色 one-hot、模式、费用、选牌数量
 和稳定卡牌引用槽位，不再把任意字段哈希到特征桶中。`state_features_probe` 和
 `action_features_probe` 用于逐元素跨语言回归检查。

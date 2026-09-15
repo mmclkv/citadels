@@ -58,6 +58,8 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
   }
   const int role = role_number_for_action(action.name);
   if (role >= 1 && role <= 9) result[40 + role - 1] = 1.0f;
+  for (size_t i = 0; i < kRoleIds.size(); ++i)
+    if (action.name == kRoleIds[i]) { result[60 + i] = 1.0f; break; }
   const std::string mode = !action.name.empty() ? action.name : action.effect;
   static const std::array<const char*, 9> modes = {"gold", "cards", "card", "swap", "redraw", "use", "skip", "take", "destroy"};
   for (size_t i = 0; i < modes.size(); ++i) if (mode == modes[i]) { result[50 + i] = 1.0f; break; }

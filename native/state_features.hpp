@@ -9,9 +9,12 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 3;
-constexpr int kStateFeatureSize = 512;
-constexpr int kActionEncodingVersion = 3;
+constexpr int kStateEncodingVersion = 4;
+constexpr int kStateFeatureSize = 672;
+constexpr int kActionEncodingVersion = 4;
+constexpr std::array<const char*, 21> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
+  "king", "emperor", "noble", "bishop", "monk", "merchant", "alchemist", "businessman",
+  "architect", "navigator", "scholar", "warlord", "diplomat", "marshal", "queen", "artist"};
 
 inline int state_phase_code(NativePhase phase) {
   switch (phase) {
@@ -116,7 +119,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   for (int r = 0; r < 8 && r < player_count; ++r) {
     const int absolute = (me + r) % player_count;
     const auto& p = state.players[absolute];
-    const size_t base = static_cast<size_t>(32 + r * 60);
+    const size_t base = static_cast<size_t>(32 + r * 80);
     int city_score = 0, city_cost = 0, purple = 0, museum = 0, beautified = 0;
     std::array<bool, 5> have{};
     for (const auto& district : p.city) {
@@ -131,6 +134,9 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       : absolute == (state.has_turn ? state.active_player : -1) ? role_number(p.role_id)
       : (!p.played.empty() ? role_number(p.played.front()) : 0);
     const size_t visible_chars = absolute == me ? p.role_ids.size() : p.played.size();
+    const std::string revealed_id = absolute == me && !p.role_ids.empty() ? p.role_ids.front()
+      : state.has_turn && absolute == state.active_player && !p.role_id.empty() ? p.role_id
+      : !p.played.empty() ? p.played.front() : std::string{};
     // JS intentionally exposes only the boolean choice status, not opponent
     // role identities, so these two flags use raw chars while the length and
     // revealed-number slots remain perspective-masked.
@@ -157,9 +163,11 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     features[base + 18] = static_cast<float>(p.seat) / 8.0f;
     features[base + 19] = absolute == active ? static_cast<float>(state.pending_cards.size()) / 8.0f : 0.0f;
     if (revealed >= 1 && revealed <= 9) features[base + 19 + static_cast<size_t>(revealed)] = 1.0f;
+    for (size_t role = 0; role < kRoleIds.size(); ++role)
+      if (revealed_id == kRoleIds[role]) { features[base + 29 + role] = 1.0f; break; }
     for (size_t i = 0; i < p.city.size() && i < 8; ++i) {
       const auto& card = p.city[i].card;
-      const size_t slot = base + 29 + i * 3;
+      const size_t slot = base + 49 + i * 3;
       features[slot] = std::min(1.0f, std::max(0.0f, static_cast<float>(card.cost) / 8.0f));
       int color = 0;
       for (size_t c = 0; c < city_colors.size(); ++c)
@@ -171,7 +179,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     for (int cost = 0; cost <= 6; ++cost) {
       int count = 0;
       for (const auto& district : p.city) if (district.card.cost == cost) ++count;
-      features[base + 53 + static_cast<size_t>(cost)] = static_cast<float>(count) / 8.0f;
+      features[base + 73 + static_cast<size_t>(cost)] = static_cast<float>(count) / 8.0f;
     }
   }
   return features;

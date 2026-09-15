@@ -15,10 +15,13 @@ const mcts = require('./mcts.js');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
-const STATE_SIZE = 512;
+const STATE_SIZE = 672;
 const ACTION_SIZE = 256;
-const STATE_ENCODING_VERSION = 3;
-const ACTION_ENCODING_VERSION = 3;
+const STATE_ENCODING_VERSION = 4;
+const ACTION_ENCODING_VERSION = 4;
+const ROLE_IDS = ['assassin', 'witch', 'thief', 'magician', 'prophet', 'king', 'emperor', 'noble',
+  'bishop', 'monk', 'merchant', 'alchemist', 'businessman', 'architect', 'navigator', 'scholar',
+  'warlord', 'diplomat', 'marshal', 'queen', 'artist'];
 const PHASE_CODES = { lobby: 0, draft: 1, action: 2, reaction: 3, roundConfirm: 4, gameover: 5 };
 const TURN_PHASE_CODES = { main: 0, witch_resume: 1, draw_keep: 2, scholar_pick: 3 };
 const PENDING_CODES = {
@@ -104,11 +107,11 @@ function encodeState(view, playerId) {
   vector[29] = turn.pending && Number(turn.pending.count) ? Number(turn.pending.count) / 8 : 0;
   vector[30] = Number(turn.builds) / 4 || 0;
   vector[31] = Number(turn.spentOnBuild) / 20 || 0;
-  // Entity layout: global[0..31], then 8 player slots x 60 dimensions.
+  // Entity layout: global[0..31], then 8 player slots x 80 dimensions.
   // Every slot is relative to the observing player; missing slots stay zero.
   for (let r = 0; r < 8; r++) {
     const p = r < count ? players[(context.meIndex + r) % players.length] : null;
-    const base = 32 + r * 60;
+    const base = 32 + r * 80;
     if (!p) continue;
     const city = p.city || [];
     const colors = new Set(city.map(c => c.color));
@@ -135,16 +138,18 @@ function encodeState(view, playerId) {
       ? Number(turn.pending.count) / 8 : 0;
     const revealed = Number(p.revealedCharNum);
     if (revealed >= 1 && revealed <= 9) vector[base + 19 + revealed] = 1;
+    const exactRoleIndex = ROLE_IDS.indexOf(p.revealedCharId);
+    if (exactRoleIndex >= 0) vector[base + 29 + exactRoleIndex] = 1;
     const colorIndex = { yellow: 0, blue: 1, green: 2, red: 3, purple: 4 };
     city.forEach((card, i) => {
       if (i >= 8) return;
-      const slot = base + 29 + i * 3;
+      const slot = base + 49 + i * 3;
       vector[slot] = Math.min(1, Math.max(0, Number(card.cost) || 0) / 8);
       vector[slot + 1] = colorIndex[card.color] == null ? 0 : (colorIndex[card.color] + 1) / 5;
       vector[slot + 2] = Math.min(1, Math.max(0, Number(card.scoreValue) || Number(card.cost) || 0) / 10);
     });
     for (let cost = 0; cost <= 7; cost++) {
-      vector[base + 53 + cost] = city.filter(card => Number(card.cost) === cost).length / 8;
+      vector[base + 73 + cost] = city.filter(card => Number(card.cost) === cost).length / 8;
     }
   }
   return { vector, context };
@@ -164,6 +169,8 @@ function encodeAction(action, context) {
     architect: 7, navigator: 7, scholar: 7, warlord: 8, diplomat: 8, marshal: 8,
     queen: 9, artist: 9 }[role];
   if (roleNum) vector[40 + roleNum - 1] = 1;
+  const exactRoleIndex = ROLE_IDS.indexOf(role);
+  if (exactRoleIndex >= 0) vector[60 + exactRoleIndex] = 1;
   const mode = String(action && (action.mode != null ? action.mode : action.effect != null ? action.effect : action.use != null ? (action.use ? 'use' : 'skip') : '') || '');
   const modes = ['gold', 'cards', 'card', 'swap', 'redraw', 'use', 'skip', 'take', 'destroy'];
   const modeIndex = modes.indexOf(mode);
@@ -716,7 +723,7 @@ if (require.main === module) {
 
 module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
-  STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES,
+  STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR

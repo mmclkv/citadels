@@ -16,7 +16,7 @@ PROFILES = {
     "large": (512, 384, 384, 192, 192),
 }
 VALUE_SLOTS = 8
-STATE_SIZE = 512
+STATE_SIZE = 672
 ACTION_SIZE = 256
 
 BINARY_MAGIC = 0x31425443  # "CTB1" little-endian.
@@ -157,7 +157,7 @@ def run_binary_protocol(model, device):
 
 
 class PolicyValueNet(nn.Module):
-    def __init__(self, profile, state_size=512, action_size=256):
+    def __init__(self, profile, state_size=672, action_size=256):
         super().__init__()
         sh, latent, ph, pm, vh = PROFILES[profile]
         self.state1 = nn.Linear(state_size, sh)
