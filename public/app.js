@@ -464,6 +464,13 @@
         handTransferAnim(n.targetIdx, n.byIdx, Array.isArray(n.cards) ? n.cards.length : 0, '间谍获得手牌');
         return;
 
+      case 'hand_gain':
+        // 统一补齐所有规则效果带来的手牌入账动画：从别的玩家获得时显示玩家间转移，
+        // 从牌库/公共区域获得时显示牌堆飞入，始终只显示牌背以保护隐藏信息。
+        if (n.fromIdx != null) handTransferAnim(n.fromIdx, n.playerIdx, n.amount, n.why || '获得手牌');
+        else flyCardsToHand(n.playerIdx, n.amount);
+        return;
+
       case 'destroyed':
         destroyAnim(n.playerIdx, n.uid, n.cardName);
         if (isMe) {

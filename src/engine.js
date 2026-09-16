@@ -45,6 +45,17 @@
     if (state.notices.length > 24) state.notices.shift();
   }
 
+  function notifyHandGain(state, toIdx, amount, fromIdx, why) {
+    if (!(amount > 0) || !state.players[toIdx]) return;
+    const to = state.players[toIdx];
+    const from = fromIdx == null ? null : state.players[fromIdx];
+    notify(state, 'hand_gain', {
+      playerIdx: toIdx, playerId: to.id, playerName: to.name,
+      amount: amount, fromIdx: from ? fromIdx : null,
+      fromName: from ? from.name : null, why: why || '获得手牌'
+    });
+  }
+
   /* ------------------------------ 工具 ------------------------------- */
   function getPlayer(state, id) {
     return state.players.find(p => p.id === id) || null;
@@ -1188,6 +1199,7 @@
         const drawn = drawCards(state, n);
         if (keepBoth) {
           p.hand = p.hand.concat(drawn);
+          notifyHandGain(state, idx, drawn.length, null, '图书馆');
           log(state, p.name + '（' + c.name + '）抽了 2 张建筑牌并全部保留（图书馆）。', 'info');
           if (t.phase === 'bewitched') return finishBewitchedTurn(state);
           afterResources(state, t, p, c);
@@ -1208,6 +1220,7 @@
         const card = pd.cards.find(x => x.uid === action.uid);
         if (!card) return err('无效的卡牌');
         p.hand.push(card);
+        notifyHandGain(state, idx, 1, null, '抽牌保留');
         const rest = pd.cards.filter(x => x.uid !== action.uid);
         if (pd.toBottom) toBottom(state, rest);
         // 抽到的牌属于隐藏信息：战报只公开「抽了几张、留了几张」，不暴露具体牌面。
@@ -1299,6 +1312,7 @@
         p.gold -= 2;
         const cards = drawCards(state, 3);
         p.hand = p.hand.concat(cards);
+        notifyHandGain(state, idx, cards.length, null, '铁匠铺');
         t.usedSmithy = true;
         log(state, p.name + ' 使用【铁匠铺】支付 2 金抽取 3 张建筑牌。', 'good');
         return ok();
@@ -1458,6 +1472,7 @@
         const card = target.hand.find(c => c.uid === pd.card.uid);
         if (!card) return err('该卡牌已不在目标手牌中');
         target.hand = target.hand.filter(c => c.uid !== card.uid); p.hand.push(card);
+        notifyHandGain(state, idx, 1, pd.targetIdx, '法师获得手牌');
         t.abilityUsed = true; t.pending = null;
         log(state, '【法师】' + p.name + ' 从 ' + target.name + ' 处取得 1 张建筑牌。', 'magic');
         return ok();
@@ -1516,7 +1531,10 @@
       case 'abbot_resource': {
         const pd = t.pending; const n = countColorForIncome(p, 'blue', 'blue');
         if (!pd || pd.kind !== 'abbot_declare' || action.gold + action.cards !== n) return err('资源组合不正确');
-        p.gold += action.gold; p.hand = p.hand.concat(drawCards(state, action.cards));
+        p.gold += action.gold;
+        const cards = drawCards(state, action.cards);
+        p.hand = p.hand.concat(cards);
+        notifyHandGain(state, idx, cards.length, null, '住持资源');
         t.incomeTaken = true; t.abilityUsed = true; t.pending = null;
         const richest = richestOther(state, idx);
         if (richest >= 0 && !state.players.some((o, i) => i !== idx && o.gold === state.players[richest].gold && i !== richest)) {
@@ -1570,6 +1588,7 @@
         toBottom(state, dropped);
         const fresh = drawCards(state, dropped.length);
         p.hand = p.hand.concat(fresh);
+        notifyHandGain(state, idx, fresh.length, null, '魔术师重抽');
         t.abilityUsed = true; t.pending = null;
         log(state, '【魔术师】' + p.name + ' 弃掉 ' + dropped.length + ' 张并重抽 ' + fresh.length + ' 张。', 'magic');
         return ok();
@@ -1638,6 +1657,7 @@
         const card = (pd.cards || []).find(x => x.uid === action.uid);
         if (!card) return err('无效的卡牌');
         p.hand.push(card);
+        notifyHandGain(state, idx, 1, null, '学者选牌');
         const rest = (pd.cards || []).filter(x => x.uid !== action.uid);
         rest.forEach(r => state.deck.push(r));
         state.deck = CitCards.shuffle(state.deck, () => nextRand(state));
@@ -1654,6 +1674,7 @@
         p.gold += action.gold;
         const cards = drawCards(state, action.cards);
         p.hand = p.hand.concat(cards);
+        notifyHandGain(state, idx, cards.length, null, '修士资源');
         t.incomeTaken = true; t.pending = null;
         log(state, '【修士】' + p.name + ' 领取 ' + action.gold + ' 金 + ' + action.cards + ' 张建筑牌。', 'good');
         return ok();
@@ -1773,6 +1794,7 @@
     if (c.drawBonus && !t.bonusDone && t.phase !== 'witch_resume') {
       const cards = drawCards(state, c.drawBonus);
       p.hand = p.hand.concat(cards);
+      notifyHandGain(state, t.playerIdx, cards.length, null, c.name + '额外抽牌');
       t.bonusDone = true;
       log(state, '【' + c.name + '】' + p.name + ' 额外抽取 ' + c.drawBonus + ' 张建筑牌。', 'good');
     }
@@ -1845,6 +1867,7 @@
           const j = randInt(state, tp.hand.length);
           const card = tp.hand.splice(j, 1)[0];
           p.hand.push(card);
+          notifyHandGain(state, idx, 1, i, '预言家抽取手牌');
           queue.push(i);
         });
         log(state, '【预言家】' + p.name + ' 从 ' + queue.length + ' 位对手处各抽走 1 张建筑牌。', 'magic');
@@ -1888,7 +1911,7 @@
       if (gp.city.some(d => d.purple && d.purple.effect === 'graveyard') && gp.gold >= 1) gy.push(i);
     });
     if (gy.length) {
-      state.reaction = { kind: 'graveyard', playerIdx: gy[0], queue: gy, card: card, prompt: '' };
+      state.reaction = { kind: 'graveyard', playerIdx: gy[0], queue: gy, card: card, sourceIdx: ti, prompt: '' };
       state.reaction.prompt = '【墓地】是否支付 1 金将『' + card.name + '』收入手牌？';
       state.pendingDestroy = { card: card };
       return ok();
@@ -1969,6 +1992,7 @@
       p.gold -= 1;
       // 该牌已随摧毁从原城市移除；附着其上的博物馆牌在 doDestroy 里已收回弃牌堆。
       p.hand.push(card);
+      notifyHandGain(state, idx, 1, r.sourceIdx, '墓地收回建筑');
       log(state, '【墓地】' + p.name + ' 支付 1 金将『' + card.name + '』收入手牌。', 'good');
       r.queue = [];
       state.reaction = null; state.pendingDestroy = null;
