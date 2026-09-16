@@ -515,6 +515,10 @@
         flyGoldIn(n.playerIdx, n.amount);
         return;
 
+      case 'tax_collected':
+        flyTaxCoinsToCollector(n.playerIdx, n.amount);
+        return;
+
       case 'navigator_bonus':
         if (n.mode === 'gold') flyGoldIn(n.playerIdx, n.amount);
         else if (n.mode === 'cards') flyCardsToHand(n.playerIdx, n.amount);
@@ -1901,6 +1905,18 @@
   function flyCoins(fromSeat, toSeat, amount) {
     if (fromSeat == null || toSeat == null || fromSeat === toSeat) return;
     coinFlight(rectOf(playerBox(fromSeat)), rectOf(playerBox(toSeat)), amount);
+  }
+
+  function flyTaxCoinsToCollector(seat, amount) {
+    if (seat == null || !(amount > 0)) return;
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    // 通知在棋盘重绘前处理；等税务官框和金币标识完成更新后再读取坐标。
+    nextFrame(() => {
+      const pot = $('#tax-pot .tax-pot-mark') || $('#tax-pot');
+      const to = playerGoldAnchor(seat);
+      if (pot && to) coinFlight(rectOf(pot), { left: to.x, top: to.y, width: 0, height: 0 }, amount);
+    });
   }
 
   // 皇冠动画的视觉锚点：玩家圆角矩形中金币图标左侧（皇冠在界面上的固定位置）。

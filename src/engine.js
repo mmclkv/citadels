@@ -1546,6 +1546,9 @@
       case 'tax_collect': {
         if (!t.pending || t.pending.kind !== 'tax_collect') return err('当前无需收税');
         const amount = state.effects.taxCollectorGold || 0; p.gold += amount; state.effects.taxCollectorGold = 0;
+        if (amount > 0) notify(state, 'tax_collected', {
+          playerIdx: idx, playerId: p.id, playerName: p.name, amount: amount
+        });
         t.abilityUsed = true; t.pending = null;
         log(state, '【税务官】' + p.name + ' 收取了 ' + amount + ' 枚建筑税。', 'good');
         return ok();
