@@ -72,6 +72,18 @@ assert.ok(/warrantMarkHTML\(me\.warrant\)/.test(app), '自己面板应画逮捕�
 assert.ok(/\.warrant-mark/.test(css), '逮捕令卷轴需要有样式');
 assert.ok(/WARRANT_SVG[\s\S]{0,400}rect x="3\.4"/.test(app), '卷轴应画出上下卷杆');
 
+// 面板标记（逮捕令卷轴 / 威胁标记）不该在别人每次行动时重播入场动画
+const baseMarkRule = css.slice(css.indexOf('.threat-mark,'), css.indexOf('.threat-mark svg'));
+assert.ok(baseMarkRule.length > 0, '应能取到标记的基础样式规则');
+assert.ok(!/animation:/.test(baseMarkRule),
+  '标记的基础样式不能带 animation —— 面板每次行动都会重建，挂上去就会跟着抖');
+assert.ok(/\.threat-mark\.mark-in/.test(css) && /\.warrant-mark\.mark-in/.test(css),
+  '入场动画应改由 .mark-in 触发');
+assert.ok(/function markSignature\(/.test(app) && /function playMarkAnim\(/.test(app),
+  '前端应按标记状态签名决定是否播放动画');
+assert.ok(/playMarkAnim\(head, markSignature\(p\)/.test(app), '对手面板要做签名判断');
+assert.ok(/playMarkAnim\(myGold, markSignature\(me\)/.test(app), '自己面板要做签名判断');
+
 // 税务官：战场中央要有一个标记，并把已放置的金币数写在标记上
 assert.ok(/function renderTaxPot\(wrap, s\)/.test(app), '前端应有税务官标记的渲染函数');
 assert.ok(/renderTaxPot\(wrap, s\);/.test(app), 'renderOpponents 里要调用税务官标记渲染');

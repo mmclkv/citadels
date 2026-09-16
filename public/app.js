@@ -1511,6 +1511,31 @@
       : '<i class="threat-mark is-fake" title="威胁标记：玫瑰花（假）——虚惊一场">' + THREAT_SVG.rose + '</i>';
   }
 
+  /**
+   * 面板标记（逮捕令卷轴 / 威胁标记）的状态签名。
+   * 玩家面板每次行动都会整块重建，而入场动画是 CSS animation —— 新节点一插进去就会重播，
+   * 于是别人每动一步，这两枚标记都要抖一下。这里只在签名真的变了
+   * （标记刚出现、盖牌翻成刀或玫瑰、逮捕令刚随角色牌显形）时才给它加 .mark-in 播一次。
+   */
+  function markSignature(pl) {
+    const t = pl.threat
+      ? 'T' + pl.threat.num + (!pl.threat.revealed ? ':back' : pl.threat.isReal ? ':knife' : ':rose')
+      : 'T-';
+    const w = pl.warrant ? 'W' + pl.warrant.num : 'W-';
+    return t + w;
+  }
+
+  /** 签名变化时给容器内的标记加上一次性的入场动画，返回新签名。 */
+  function playMarkAnim(root, sig, lastSig, store) {
+    const changed = sig !== lastSig;
+    if (changed) {
+      Array.prototype.forEach.call(root.querySelectorAll('.threat-mark, .warrant-mark'),
+        m => m.classList.add('mark-in'));
+    }
+    if (store) store(sig);
+    return changed;
+  }
+
   function charStatusHTML(p) {
     let st = 'none';
     if (p.hasChosen && p.draftComplete !== false) {
@@ -2462,6 +2487,7 @@
           '<i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
         scoreBadgeHTML(i, p.name);
       bindScoreBadge(head.querySelector('.score-badge'), i);
+      playMarkAnim(head, markSignature(p), d.dataset.markSig, sig => { d.dataset.markSig = sig; });
 
       const city = d.querySelector('.opp-city');
       if (!p.city.length) {
@@ -3037,9 +3063,12 @@
     if (ms) ms.innerHTML = charStatusHTML(me);
     const myStats = $('#my-char-stats');
     if (myStats) myStats.innerHTML = handCountHTML(me.hand.length);
-    $('#my-gold').innerHTML = threatMarkHTML(me.threat) + warrantMarkHTML(me.warrant) +
+    const myGold = $('#my-gold');
+    myGold.innerHTML = threatMarkHTML(me.threat) + warrantMarkHTML(me.warrant) +
       (me.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '') +
       '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
+    playMarkAnim(myGold, markSignature(me), myGold.dataset.markSig,
+      sig => { myGold.dataset.markSig = sig; });
     const myScoreVal = $('#my-score-val');
     if (myScoreVal) {
       const srow = s.scores && s.scores[App.myIdx];
