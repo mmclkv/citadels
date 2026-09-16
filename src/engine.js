@@ -801,19 +801,13 @@
       case 'witch_target':
         return { prompt: '【女巫】选择要施咒的角色编号', actions: charChoices(state, t, [1], 'choose_char') };
       case 'magistrate_declare':
-        return { prompt: '【行政官】依次选择 3 个不同的角色编号作为逮捕令目标', actions: charChoices(state, t, [], 'magistrate_char') };
+        return { prompt: '【行政官】先选择真逮捕令的目标', actions:
+          charChoices(state, t, [], 'magistrate_signed').map(a => ({ type: 'magistrate_signed', num: a.num, label: a.label })) };
       case 'magistrate_second':
       case 'magistrate_third': {
         const used = pd.used || [];
-        return { prompt: '【行政官】选择第 ' + (used.length + 1) + ' 个逮捕令目标', actions:
+        return { prompt: '【行政官】选择第 ' + used.length + ' 个假逮捕令的目标', actions:
           charChoices(state, t, used.concat([t.num]), 'magistrate_char') };
-      }
-      case 'magistrate_signed': {
-        // 三个目标已暗置，现在由行政官本人决定哪一个是真（签名）逮捕令
-        const used = pd.used || [];
-        return { prompt: '【行政官】选择把真逮捕令放在哪个角色身上（其余两个为假逮捕令）',
-          actions: used.map(n => ({ type: 'magistrate_signed', num: n,
-            label: n + ' · ' + (charByNum(state, n) ? charByNum(state, n).name : '?') })) };
       }
       case 'blackmailer_declare':
         return { prompt: '【勒索者】选择第 1 个威胁角色编号（1 号角色、被刺杀者、被施咒者、已有逮捕令者不可选）',
@@ -1365,27 +1359,31 @@
         } else return err('无效的选择');
         return ok();
       }
-      case 'magistrate_char': {
-        const pd = t.pending;
-        if (!pd || !['magistrate_declare', 'magistrate_second', 'magistrate_third'].includes(pd.kind)) return err('当前无需分配逮捕令');
-        const n = Number(action.num);
-        if (!Number.isFinite(n) || n === t.num || (pd.used || []).includes(n)) return err('逮捕令目标必须是三个不同的角色');
-        const used = (pd.used || []).concat(n);
-        if (used.length < 3) { t.pending = { kind: used.length === 1 ? 'magistrate_second' : 'magistrate_third', used }; return ok(); }
-        // 三个目标都选完后，再让行政官指定哪一个是真逮捕令（原来这里是随机决定的）
-        t.pending = { kind: 'magistrate_signed', used };
-        return ok();
-      }
       case 'magistrate_signed': {
         const pd = t.pending;
-        if (!pd || pd.kind !== 'magistrate_signed') return err('当前无需指定真逮捕令');
+        if (!pd || pd.kind !== 'magistrate_declare') return err('当前无需选择真逮捕令目标');
+        const n = Number(action.num);
+        const legalNums = charChoices(state, t, [], 'magistrate_signed').map(a => a.num);
+        if (!Number.isFinite(n) || !legalNums.includes(n)) return err('真逮捕令目标无效');
+        t.pending = { kind: 'magistrate_second', used: [n], signed: n };
+        return ok();
+      }
+      case 'magistrate_char': {
+        const pd = t.pending;
+        if (!pd || !['magistrate_second', 'magistrate_third'].includes(pd.kind)) return err('当前无需分配假逮捕令');
         const used = pd.used || [];
         const n = Number(action.num);
-        if (!Number.isFinite(n) || !used.includes(n)) return err('真逮捕令只能放在已选的三个角色之一');
-        state.effects.magistrate = { nums: used, signed: n, playerIdx: idx, claimed: false };
+        const legalNums = charChoices(state, t, used, 'magistrate_char').map(a => a.num);
+        if (!Number.isFinite(n) || !legalNums.includes(n)) return err('假逮捕令目标必须与真逮捕令和其他目标不同');
+        const nextUsed = used.concat(n);
+        if (nextUsed.length < 3) {
+          t.pending = { kind: 'magistrate_third', used: nextUsed, signed: pd.signed };
+          return ok();
+        }
+        state.effects.magistrate = { nums: nextUsed, signed: pd.signed, playerIdx: idx, claimed: false };
         t.abilityUsed = true; t.pending = null;
-        // 三张逮捕令的去向对全场公开（哪一张是真的由行政官自己记着，不在战报里泄露）
-        const targets = used.map(num => {
+        // 对外只公开三张逮捕令的目标，不区分哪张为真。
+        const targets = nextUsed.map(num => {
           const cid = (state.charDeck || []).find(id => charOf(id).num === num);
           const c = cid ? charOf(cid) : null;
           return { num: num, charId: cid || '', name: c ? c.name : '未知角色' };
@@ -1393,7 +1391,7 @@
         log(state, '【行政官】' + p.name + ' 把 3 张逮捕令发给了 ' +
                    targets.map(x => x.num + ' 号·' + x.name).join('、') + '（其中只有一张是真的）。', 'magic');
         notify(state, 'magistrate_declare', {
-          byIdx: idx, byId: p.id, byName: p.name, nums: used,
+          byIdx: idx, byId: p.id, byName: p.name, nums: nextUsed,
           targets: targets.map(x => ({ num: x.num, name: x.name }))
         });
         return ok();

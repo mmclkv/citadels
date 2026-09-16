@@ -81,33 +81,46 @@ test('法师可以查看并立即建造目标手牌且不增加正常建造次�
   assert.equal(state.turn.builds, 0);
 });
 
-test('行政官可以指定哪个目标是真逮捕令（不再随机）', () => {
+test('行政官先选真逮捕令，再依次选择两个假逮捕令', () => {
   const state = stateWith('magistrate');
   state.players[0].chars = ['magistrate'];
   assert.equal(Engine.applyAction(state, 'p0', { type: 'ability' }).ok, true);
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 3 }).ok, true);
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 5 }).ok, true);
-  // 选满 3 个后不应立即生效，而是进入「指定真逮捕令」这一步
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 6 }).ok, true);
-  assert.equal(state.turn.pending.kind, 'magistrate_signed');
-  assert.equal(state.effects.magistrate, null);
-  // 真逮捕令只能给已选的三个角色之一
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: 4 }).ok, false);
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: 5 }).ok, true);
-  assert.equal(state.effects.magistrate.signed, 5);
-  assert.deepEqual(state.effects.magistrate.nums, [3, 5, 6]);
+  const available = Engine.getAvailableActions(state, 'p0');
+  assert.match(available.prompt, /先选择真逮捕令/);
+  assert.ok(available.actions.length > 0 && available.actions.every(a => a.type === 'magistrate_signed'),
+    '第一步只提供真逮捕令目标');
+  const signedNum = available.actions[0].num;
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: signedNum }).ok, true);
+  assert.equal(state.turn.pending.kind, 'magistrate_second');
+  assert.match(Engine.getAvailableActions(state, 'p0').prompt, /第 1 个假逮捕令/);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: signedNum }).ok, false,
+    '假逮捕令不能与真逮捕令目标重复');
+  let falseChoices = Engine.getAvailableActions(state, 'p0').actions;
+  assert.ok(falseChoices.every(a => a.type === 'magistrate_char' && a.num !== signedNum));
+  const falseNum1 = falseChoices[0].num;
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: falseNum1 }).ok, true);
+  assert.equal(state.turn.pending.kind, 'magistrate_third');
+  assert.match(Engine.getAvailableActions(state, 'p0').prompt, /第 2 个假逮捕令/);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: falseNum1 }).ok, false,
+    '两个假逮捕令也不能重复');
+  assert.equal(state.effects.magistrate, null, '三个目标选齐之前逮捕令不生效');
+  falseChoices = Engine.getAvailableActions(state, 'p0').actions;
+  const falseNum2 = falseChoices[0].num;
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: falseNum2 }).ok, true);
+  assert.equal(state.effects.magistrate.signed, signedNum);
+  assert.deepEqual(state.effects.magistrate.nums, [signedNum, falseNum1, falseNum2]);
   assert.equal(state.turn.pending, null);
   // 三个逮捕令的去向要写进战报，但不泄露哪一张是真的
   const line = state.log.map(l => l.text || l).join('\n').split('\n').filter(t => t.includes('逮捕令发给了')).pop();
   assert.ok(line, '战报应宣告逮捕令发给了谁');
-  for (const num of [3, 5, 6]) assert.ok(line.includes(num + ' 号·'), '战报应列出 ' + num + ' 号角色');
+  for (const num of [signedNum, falseNum1, falseNum2]) assert.ok(line.includes(num + ' 号·'), '战报应列出 ' + num + ' 号角色');
   assert.ok(!/真逮捕令是|真的那张/.test(line), '战报不应泄露哪张是真的');
   // 同时下发一条公告，供前端给所有玩家弹窗
   const notice = (state.notices || []).filter(n => n.kind === 'magistrate_declare').pop();
   assert.ok(notice, '应下发 magistrate_declare 公告');
-  assert.deepEqual(notice.nums, [3, 5, 6]);
+  assert.deepEqual(notice.nums, [signedNum, falseNum1, falseNum2]);
   assert.equal(notice.targets.length, 3);
-  assert.deepEqual(notice.targets.map(t => t.num), [3, 5, 6]);
+  assert.deepEqual(notice.targets.map(t => t.num), [signedNum, falseNum1, falseNum2]);
   assert.ok(notice.targets.every(t => t.name && t.name !== '未知角色'), '公告应带上角色名');
   assert.ok(!('signed' in notice), '公告不应泄露真逮捕令');
 });
@@ -238,25 +251,32 @@ test('勒索者能分配两个威胁目标，并在战报中公开去向', () =>
 test('逮捕令目标翻开角色牌后，面板金币左侧出现卷轴标记', () => {
   const state = stateWith('magistrate');
   state.players[0].chars = ['magistrate'];
-  state.players[1].chars = [charIdWithNum(state, 3)];
   assert.equal(Engine.applyAction(state, 'p0', { type: 'ability' }).ok, true);
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 3 }).ok, true);
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 5 }).ok, true);
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 6 }).ok, true);
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: 5 }).ok, true);
+  const available = Engine.getAvailableActions(state, 'p0').actions;
+  const targetNum = available[0].num;
+  const targetIdx = 1;
+  state.players[targetIdx].chars = [charIdWithNum(state, targetNum)];
+  state.callQueue = [{ num: targetNum, playerIdx: targetIdx }];
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: targetNum }).ok, true);
+  let fake = Engine.getAvailableActions(state, 'p0').actions;
+  const falseNum1 = fake[0].num;
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: falseNum1 }).ok, true);
+  fake = Engine.getAvailableActions(state, 'p0').actions;
+  const falseNum2 = fake[0].num;
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: falseNum2 }).ok, true);
   // 角色牌还盖着的时候，旁观者看不到任何人头上的逮捕令
-  assert.equal(Engine.sanitize(state, 'p2').players[1].warrant, null);
+  const targetId = state.players[targetIdx].id;
+  assert.equal(Engine.sanitize(state, 'p2').players[targetIdx].warrant, null);
   // 当事人自己知道自己的角色，所以看得见
-  assert.deepEqual(Engine.sanitize(state, 'p1').players[1].warrant, { num: 3 });
+  assert.deepEqual(Engine.sanitize(state, targetId).players[targetIdx].warrant, { num: targetNum });
   // 叫到他、角色牌翻开后，全场都能看到卷轴
-  state.turn = { charId: charIdWithNum(state, 3), num: 3, playerIdx: 1, phase: 'main',
+  state.turn = { charId: charIdWithNum(state, targetNum), num: targetNum, playerIdx: targetIdx, phase: 'main',
     takenResources: false, incomeTaken: false, abilityUsed: false, builds: 0, spentOnBuild: 0,
     usedLab: false, usedSmithy: false, usedMuseum: false, bonusDone: false, pending: null };
-  assert.deepEqual(Engine.sanitize(state, 'p2').players[1].warrant, { num: 3 });
-  assert.equal(Engine.sanitize(state, 'p2').players[2].warrant, null, '没被点名的玩家没有卷轴');
+  assert.deepEqual(Engine.sanitize(state, 'p2').players[targetIdx].warrant, { num: targetNum });
   // 只公开「发给了哪三个角色」，不泄露哪一张是真的
   const mg = Engine.sanitize(state, 'p2').effects.magistrate;
-  assert.deepEqual(mg.nums, [3, 5, 6]);
+  assert.deepEqual(mg.nums, [targetNum, falseNum1, falseNum2]);
   assert.ok(!('signed' in mg), '下发的逮捕令状态不得带 signed');
 });
 

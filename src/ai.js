@@ -355,15 +355,14 @@
     const c = CHAR_MAP[t.charId];
 
     switch (pd.kind) {
-      case 'magistrate_declare': case 'magistrate_second': case 'magistrate_third': {
+      case 'magistrate_declare': {
+        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num);
+        return { type: 'magistrate_signed', num: choices[0] || 1 };
+      }
+      case 'magistrate_second': case 'magistrate_third': {
         const used = pd.used || [];
         const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num && !used.includes(n));
         return { type: 'magistrate_char', num: choices[0] || 1 };
-      }
-      case 'magistrate_signed': {
-        // 三个目标已定，由 AI 指定真逮捕令：优先给本轮还没行动过的高顺位角色
-        const used = pd.used || [];
-        return { type: 'magistrate_signed', num: used[0] };
       }
       case 'blackmailer_declare': case 'blackmailer_second': {
         // 1 号角色 / 被刺杀 / 被施咒 / 已有逮捕令者都不能当威胁目标，必须走引擎同一套过滤
