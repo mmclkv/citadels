@@ -25,6 +25,9 @@
     name: '我',
     sel: null,             // 选择模式
     logOpen: true,
+    chatOpen: false,
+    activeSideTab: 'log',
+    sidePanelCollapsed: false,
     lastCfg: null,
     speed: 'normal',       // 电脑行动节奏：slow | normal | fast
     paused: false,         // 事件弹层展示期间暂停电脑行动
@@ -2057,6 +2060,7 @@
     syncSpeedBtn();
     syncThemeBtn();
     syncChatControl();
+    updateSidePanel();
 
     // 本轮生效的负面效果常驻显示，别让玩家忘了自己被刺杀/被盯上
     const fx = $('#tb-effects');
@@ -3013,7 +3017,19 @@
     const gameScreen = $('#screen-game');
     const both = App.logOpen && App.chatOpen;
     const any = App.logOpen || App.chatOpen;
+    const collapsed = any && !!App.sidePanelCollapsed;
     sp.classList.toggle('show', any);
+    sp.classList.toggle('collapsed', collapsed);
+    const sideToggle = $('#btn-side-panel-toggle');
+    if (sideToggle) {
+      sideToggle.setAttribute('aria-expanded', String(!collapsed));
+      sideToggle.setAttribute('aria-label', collapsed ? '展开右侧边栏' : '收起右侧边栏');
+      sideToggle.title = collapsed ? '展开右侧边栏' : '收起右侧边栏';
+      const icon = sideToggle.querySelector('.side-panel-toggle-icon');
+      const label = sideToggle.querySelector('.side-panel-toggle-label');
+      if (icon) icon.textContent = collapsed ? '‹' : '›';
+      if (label) label.textContent = collapsed ? '展开' : '收起';
+    }
     // PC 端侧栏占用棋盘右侧宽度：让浮动菜单继续锚定战斗区域右下角
     if (gameScreen) {
       gameScreen.classList.toggle('log-panel-open', any);
@@ -3701,17 +3717,27 @@
     $('#btn-chars').onclick = openCharacters;
     $('#btn-buildings').onclick = openBuildings;
     $('#btn-rules-top').onclick = openRules;
+    const sidePanelToggle = $('#btn-side-panel-toggle');
+    if (sidePanelToggle) {
+      sidePanelToggle.onclick = () => {
+        if (!App.logOpen && !App.chatOpen) return;
+        App.sidePanelCollapsed = !App.sidePanelCollapsed;
+        updateSidePanel();
+      };
+    }
     $('#btn-log-toggle').onclick = () => {
       // 竖屏下拉需从顶栏下沿开始：同步顶栏实际高度，避免盖住按钮也无法返回
       const tb = document.querySelector('.topbar');
       if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
       App.logOpen = !App.logOpen;
+      if (App.logOpen) App.sidePanelCollapsed = false;
       if (App.logOpen && !App.chatOpen) App.activeSideTab = 'log';
       else if (!App.logOpen && App.chatOpen) App.activeSideTab = 'chat';
       updateSidePanel();
     };
     $('#btn-chat-log-toggle').onclick = () => {
       App.chatOpen = !App.chatOpen;
+      if (App.chatOpen) App.sidePanelCollapsed = false;
       if (App.chatOpen && !App.logOpen) App.activeSideTab = 'chat';
       else if (!App.chatOpen && App.logOpen) App.activeSideTab = 'log';
       updateSidePanel();
@@ -3719,6 +3745,7 @@
     $('#tab-log').onclick = () => { App.activeSideTab = 'log'; updateSidePanel(); };
     $('#tab-chat').onclick = () => { App.activeSideTab = 'chat'; updateSidePanel(); };
     $('#btn-chat').onclick = openChatComposer;
+    $('#chat-close').onclick = closeChatComposer;
     $('#chat-composer').onsubmit = e => {
       e.preventDefault();
       const input = $('#chat-input');
@@ -3739,8 +3766,20 @@
     window.addEventListener('resize', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
     window.addEventListener('orientationchange', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
     document.addEventListener('keydown', e => {
+      const composer = $('#chat-composer');
+      const target = e.target;
+      const interactive = target && target.closest &&
+        target.closest('button, input, textarea, select, a, [contenteditable="true"]');
+      if (e.key === 'Enter' && !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
+          !interactive && gameScreen && gameScreen.classList.contains('active') &&
+          composer && composer.hidden && App.mode === 'net' && App.state &&
+          App.state.phase !== 'gameover') {
+        e.preventDefault();
+        openChatComposer();
+        return;
+      }
       if (e.key !== 'Escape') return;
-      if ($('#chat-composer') && !$('#chat-composer').hidden) { closeChatComposer(); return; }
+      if (composer && !composer.hidden) { closeChatComposer(); return; }
       // 展开的菜单优先级高于弹层：Esc 先收起菜单，再关弹层。
       if (gameScreen && gameScreen.classList.contains('mobile-menu-open')) { setMenuOpen(false); return; }
       closeModal();
@@ -3761,7 +3800,7 @@
   window.__CitadelsApp = App;
   // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
   if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=4', { scope: './' }).then(registration => {
+    navigator.serviceWorker.register('./sw.js?v=5', { scope: './' }).then(registration => {
       // GitHub Pages 上的 PWA 可能长时间保持旧 worker，启动时主动检查一次新版本。
       registration.update().catch(() => {});
       registration.addEventListener('updatefound', () => {

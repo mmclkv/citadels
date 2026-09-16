@@ -136,6 +136,20 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
   display:none;flex-direction:column;min-height:0}
 /* 桌面端默认隐藏，点「战报」后在右侧出现栏位，再点收起 */
 .side-panel.show{display:flex;flex:0 0 288px}
+.side-panel-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  min-height:38px;padding:5px 8px 5px 14px;border-bottom:1px solid var(--line);background:#f7efe0}
+.side-panel-title{font-size:12px;color:var(--dim);font-weight:800;letter-spacing:.04em}
+.side-panel-toggle{display:inline-flex;align-items:center;gap:4px;appearance:none;border:1px solid var(--line2);
+  border-radius:7px;background:transparent;color:var(--ink2);padding:4px 8px;font:inherit;font-size:11px;
+  font-weight:700;line-height:1.2;cursor:pointer;transition:.15s}
+.side-panel-toggle:hover{border-color:var(--gold);color:var(--gold-d,#a97c15);background:#fffaf0}
+.side-panel-toggle-icon{font-size:16px;line-height:10px}
+.side-panel-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0}
+.side-panel.collapsed{flex-basis:42px;width:42px}
+.side-panel.collapsed .side-panel-head{justify-content:center;padding:5px 3px}
+.side-panel.collapsed .side-panel-title,.side-panel.collapsed .side-panel-body{display:none}
+.side-panel.collapsed .side-panel-toggle{padding:7px 5px;flex-direction:column;gap:2px}
+.side-panel.collapsed .side-panel-toggle-label{font-size:10px;writing-mode:vertical-rl;letter-spacing:.05em}
 .side-panel h3{font-size:13px;padding:10px 14px;border-bottom:1px solid var(--line);color:#7a5c22}
 .log{flex:1 1 auto;overflow:auto;padding:10px 14px;font-size:12.5px;line-height:1.65}
 .log div{padding:2px 0;border-bottom:1px dotted rgba(200,180,150,.4)}
@@ -163,7 +177,8 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .chat-log .chat-entry.self .name{color:#2c5f9c}
 .chat-log .chat-entry .text{color:#4a3a1c}
 .chat-log .chat-entry .ts{color:#9b8a74;font-size:10.5px;margin-left:6px}
-@media(max-width:1000px){.side-panel{display:none}.side-panel.show{display:flex;position:fixed;right:0;top:52px;bottom:60px;width:300px;z-index:20}}
+@media(max-width:1000px){.side-panel{display:none}.side-panel.show{display:flex;position:fixed;right:0;top:52px;bottom:60px;width:300px;z-index:20}
+  .side-panel.show.collapsed{flex:0 0 42px;width:42px}}
 
 /* ------------------------------ 卡牌 ------------------------------ */
 .card{
@@ -1540,3 +1555,9 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
 .hand-count-multiply{font-size:18px;font-weight:800;line-height:1;color:var(--dim)}
 .hand-count-number{display:inline-flex;align-items:center;justify-content:center;
   color:var(--ink);font-size:15px;font-weight:800;line-height:1}
+
+/* 右侧栏收起后保留顶部窄条，让同一个按钮仍可用于展开；手机竖屏固定在右边缘。 */
+@media (max-width:820px) and (orientation:portrait){
+  .side-panel.show.collapsed{
+    left:auto;right:0;top:var(--topbar-h,52px);bottom:0;width:42px;flex:none}
+}

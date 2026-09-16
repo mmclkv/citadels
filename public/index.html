@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=55">
+  <link rel="stylesheet" href="./style.css?v=56">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=11">
 </head>
 <body>
@@ -274,17 +274,27 @@
     </div>
 
     <aside class="side-panel" id="side-panel">
-      <div class="side-tabs" id="side-tabs" hidden>
-        <button class="side-tab is-active" type="button" data-tab="log" id="tab-log">战报</button>
-        <button class="side-tab" type="button" data-tab="chat" id="tab-chat">聊天记录</button>
+      <div class="side-panel-head">
+        <span class="side-panel-title">对局信息</span>
+        <button class="side-panel-toggle" id="btn-side-panel-toggle" type="button"
+          aria-expanded="true" aria-controls="side-panel-body" title="收起右侧边栏">
+          <span class="side-panel-toggle-icon" aria-hidden="true">›</span>
+          <span class="side-panel-toggle-label">收起</span>
+        </button>
       </div>
-      <div class="side-pane" id="pane-log">
-        <h3>战报</h3>
-        <div class="log" id="log"></div>
-      </div>
-      <div class="side-pane" id="pane-chat" hidden>
-        <h3>聊天记录</h3>
-        <div class="chat-log" id="chat-log"></div>
+      <div class="side-panel-body" id="side-panel-body">
+        <div class="side-tabs" id="side-tabs" hidden>
+          <button class="side-tab is-active" type="button" data-tab="log" id="tab-log">战报</button>
+          <button class="side-tab" type="button" data-tab="chat" id="tab-chat">聊天记录</button>
+        </div>
+        <div class="side-pane" id="pane-log">
+          <h3>战报</h3>
+          <div class="log" id="log"></div>
+        </div>
+        <div class="side-pane" id="pane-chat" hidden>
+          <h3>聊天记录</h3>
+          <div class="chat-log" id="chat-log"></div>
+        </div>
       </div>
     </aside>
   </main>
@@ -298,6 +308,7 @@
     <label class="sr-only" for="chat-input">输入发言内容</label>
     <input id="chat-input" type="text" maxlength="120" enterkeyhint="send" placeholder="输入要说的话…">
     <button class="btn primary" id="chat-send" type="submit">发送</button>
+    <button class="btn ghost tiny" id="chat-close" type="button" title="关闭发言框" aria-label="关闭发言框">×</button>
   </form>
   <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
     <span aria-hidden="true">☰</span><span>菜单</span>
@@ -391,6 +402,6 @@
 <script src="./src/cards.js?v=4"></script>
 <script src="./src/engine.js?v=14"></script>
 <script src="./src/ai.js?v=2"></script>
-<script src="./app.js?v=76"></script>
+<script src="./app.js?v=77"></script>
 </body>
 </html>
