@@ -17,6 +17,8 @@ test('右侧边栏在顶部提供收起/展开按钮', () => {
   assert.match(html, /<div class="side-panel-head">[\s\S]*<div class="side-tabs" id="side-tabs">/);
   assert.match(html, /<div class="side-tabs" id="side-tabs">[\s\S]*<\/div>\s*<button class="side-panel-toggle"/);
   assert.doesNotMatch(html, /<div class="side-tabs" id="side-tabs" hidden>/);
+  assert.doesNotMatch(html, /<div class="side-pane" id="pane-log">\s*<h3>/);
+  assert.doesNotMatch(html, /<div class="side-pane" id="pane-chat" hidden>\s*<h3>/);
   assert.doesNotMatch(html, /side-panel-toggle-label/);
   assert.match(app, /sidePanelCollapsed: false/);
   assert.match(app, /sp\.classList\.toggle\('collapsed', collapsed\)/);
