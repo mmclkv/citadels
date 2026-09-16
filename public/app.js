@@ -458,6 +458,12 @@
         } else toast('$ ' + n.byName + ' 偷走了 ' + n.playerName + ' 的 ' + n.amount + ' 金');
         return;
 
+      case 'spy_result':
+        // 间谍从调查目标处取得金币与对应数量的建筑牌：牌面保持朝下，避免动画泄露抽到的牌。
+        flyCoins(n.targetIdx, n.byIdx, n.gold);
+        handTransferAnim(n.targetIdx, n.byIdx, Array.isArray(n.cards) ? n.cards.length : 0, '间谍获得手牌');
+        return;
+
       case 'destroyed':
         destroyAnim(n.playerIdx, n.uid, n.cardName);
         if (isMe) {
@@ -1903,29 +1909,35 @@
   }
 
   // 单张手牌从目标玩家飞向皇帝，使用牌背以保持信息隐藏。
-  function handTransferAnim(fromSeat, toSeat) {
+  function handTransferAnim(fromSeat, toSeat, amount = 1, badgeText = '手牌转移') {
     if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
         typeof document === 'undefined' || !document.body) return;
+    const count = Math.max(0, Math.min(8, Math.floor(Number(amount) || 0)));
+    if (!count) return;
     const from = rectOf(playerBox(fromSeat)), to = rectOf(playerBox(toSeat));
     if (!from || !to) return;
     const sx = from.left + from.width / 2, sy = from.top + from.height / 2;
     const ex = to.left + to.width / 2, ey = to.top + to.height / 2;
-    const card = document.createElement('div');
-    card.className = 'hand-swap-flight hand-transfer-flight';
-    card.textContent = '▧';
-    card.style.left = (sx - 21) + 'px';
-    card.style.top = (sy - 29) + 'px';
-    card.style.setProperty('--swap-dx', (ex - sx) + 'px');
-    card.style.setProperty('--swap-dy', (ey - sy) + 'px');
-    card.style.setProperty('--swap-rotate', '-7deg');
-    document.body.appendChild(card);
+    for (let i = 0; i < count; i++) {
+      const offset = (i - (count - 1) / 2) * 5;
+      const card = document.createElement('div');
+      card.className = 'hand-swap-flight hand-transfer-flight';
+      card.textContent = '▧';
+      card.style.left = (sx - 21 + offset) + 'px';
+      card.style.top = (sy - 29 + offset * .45) + 'px';
+      card.style.setProperty('--swap-dx', (ex - sx) + 'px');
+      card.style.setProperty('--swap-dy', (ey - sy) + 'px');
+      card.style.setProperty('--swap-rotate', (i % 2 ? '7deg' : '-7deg'));
+      card.style.animationDelay = (i * 65) + 'ms';
+      document.body.appendChild(card);
+      setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 1150 + i * 65);
+    }
     const badge = document.createElement('div');
     badge.className = 'hand-swap-badge';
-    badge.textContent = '手牌转移';
+    badge.textContent = badgeText;
     badge.style.left = ((sx + ex) / 2 - 34) + 'px';
     badge.style.top = ((sy + ey) / 2 - 12) + 'px';
     document.body.appendChild(badge);
-    setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 1150);
     setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1250);
   }
 
