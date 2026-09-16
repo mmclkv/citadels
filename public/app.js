@@ -402,6 +402,34 @@
         }
         return;
 
+      case 'magistrate_declare': {
+        // 逮捕令的去向对全场公开，所以不管是不是自己的角色都弹一次
+        const list = (Array.isArray(n.targets) && n.targets.length)
+          ? n.targets
+          : (n.nums || []).map(num => ({ num: num, name: num + ' 号角色' }));
+        const names = list.map(t => '<b>' + t.num + ' 号·' + escapeHtml(t.name) + '</b>').join('、');
+        const mine = list.filter(t => myChars(s).some(c => c.num === t.num));
+        const tail = '其中只有<b>一张是真的</b>——被真逮捕令命中的玩家建造建筑时，行政官可以当场没收那座建筑。';
+        if (byMe) {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '逮捕令已发出', hold: 5200,
+            text: '你把 3 张逮捕令发给了 ' + names + '。<br>' + tail
+          });
+        } else if (mine.length) {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '你收到了逮捕令', hold: 6000,
+            text: '【行政官】' + escapeHtml(n.byName) + ' 把逮捕令发给了 ' + names + '，' +
+                  '其中包括你的『<b>' + escapeHtml(mine[0].name) + '</b>』。<br>' + tail
+          });
+        } else {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '行政官已发出逮捕令', hold: 5200,
+            text: '【行政官】' + escapeHtml(n.byName) + ' 把 3 张逮捕令发给了 ' + names + '。<br>' + tail
+          });
+        }
+        return;
+      }
+
       case 'assassinated':
         if (isMe) {
           // 极少数情况（中途接管 / 漏掉了宣告）没提前警告过，这里补一次弹层

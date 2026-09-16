@@ -46,4 +46,15 @@ for (const kind of ['assassin_declare', 'thief_declare']) {
   assert.ok(/n\.charName/.test(block), kind + ' 弹窗同时显示角色名');
 }
 
+// 行政官：三个逮捕令的去向对全场公开，三种身份（行政官本人 / 收到逮捕令的人 / 旁观者）都要弹窗
+const magStart = app.indexOf("case 'magistrate_declare':");
+assert.ok(magStart > 0, '前端应处理 magistrate_declare 公告');
+const magBlock = app.slice(magStart, app.indexOf('\n      case ', magStart + 10));
+assert.ok(!/if \(byMe\) return/.test(magBlock), '行政官宣告不得跳过任何玩家');
+assert.ok((magBlock.match(/queueEvent\(\{/g) || []).length >= 3,
+  '行政官宣告对「本人 / 收到逮捕令的人 / 旁观者」都要用弹窗（当前 ' +
+  (magBlock.match(/queueEvent\(\{/g) || []).length + ' 处）');
+assert.ok(!/signed/.test(magBlock), '弹窗不得泄露哪一张是真逮捕令');
+assert.ok(/n\.targets/.test(magBlock), '弹窗应列出全部三个目标的角色名');
+
 console.log('刺客/盗贼宣告：全体弹窗、编号与角色名战报全部通过');

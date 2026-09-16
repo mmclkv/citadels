@@ -1302,8 +1302,18 @@
         if (!Number.isFinite(n) || !used.includes(n)) return err('真逮捕令只能放在已选的三个角色之一');
         state.effects.magistrate = { nums: used, signed: n, playerIdx: idx, claimed: false };
         t.abilityUsed = true; t.pending = null;
-        log(state, '【行政官】' + p.name + ' 分配了 3 个逮捕令标记。', 'magic');
-        notify(state, 'magistrate_declare', { byIdx: idx, byId: p.id, byName: p.name, nums: used });
+        // 三张逮捕令的去向对全场公开（哪一张是真的由行政官自己记着，不在战报里泄露）
+        const targets = used.map(num => {
+          const cid = (state.charDeck || []).find(id => charOf(id).num === num);
+          const c = cid ? charOf(cid) : null;
+          return { num: num, charId: cid || '', name: c ? c.name : '未知角色' };
+        });
+        log(state, '【行政官】' + p.name + ' 把 3 张逮捕令发给了 ' +
+                   targets.map(x => x.num + ' 号·' + x.name).join('、') + '（其中只有一张是真的）。', 'magic');
+        notify(state, 'magistrate_declare', {
+          byIdx: idx, byId: p.id, byName: p.name, nums: used,
+          targets: targets.map(x => ({ num: x.num, name: x.name }))
+        });
         return ok();
       }
       case 'blackmailer_char': {

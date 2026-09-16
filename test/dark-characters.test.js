@@ -97,6 +97,19 @@ test('行政官可以指定哪个目标是真逮捕令（不再随机）', () =>
   assert.equal(state.effects.magistrate.signed, 5);
   assert.deepEqual(state.effects.magistrate.nums, [3, 5, 6]);
   assert.equal(state.turn.pending, null);
+  // 三个逮捕令的去向要写进战报，但不泄露哪一张是真的
+  const line = state.log.map(l => l.text || l).join('\n').split('\n').filter(t => t.includes('逮捕令发给了')).pop();
+  assert.ok(line, '战报应宣告逮捕令发给了谁');
+  for (const num of [3, 5, 6]) assert.ok(line.includes(num + ' 号·'), '战报应列出 ' + num + ' 号角色');
+  assert.ok(!/真逮捕令是|真的那张/.test(line), '战报不应泄露哪张是真的');
+  // 同时下发一条公告，供前端给所有玩家弹窗
+  const notice = (state.notices || []).filter(n => n.kind === 'magistrate_declare').pop();
+  assert.ok(notice, '应下发 magistrate_declare 公告');
+  assert.deepEqual(notice.nums, [3, 5, 6]);
+  assert.equal(notice.targets.length, 3);
+  assert.deepEqual(notice.targets.map(t => t.num), [3, 5, 6]);
+  assert.ok(notice.targets.every(t => t.name && t.name !== '未知角色'), '公告应带上角色名');
+  assert.ok(!('signed' in notice), '公告不应泄露真逮捕令');
 });
 
 test('真逮捕令命中时会冻结建造方，等行政官决定是否发动', () => {
