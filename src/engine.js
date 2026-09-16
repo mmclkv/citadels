@@ -2200,6 +2200,7 @@
           connected: p.connected,
           played: p.played.slice(),
           threat: blackmailerMark(state, i, idx),
+          warrant: magistrateMark(state, i, idx),
           // 选角状态：未完成选角时不显示角色牌背；2~3 人局需要完成两次选取。
           hasChosen: p.chars.length > 0,
           draftComplete: state.phase !== 'draft' ||
@@ -2248,6 +2249,11 @@
           playerIdx: state.effects.blackmailer.playerIdx,
           revealed: (state.effects.blackmailer.revealed || []).map(r => ({ num: r.num, isReal: !!r.isReal })),
           done: (state.effects.blackmailer.done || []).slice()
+        } : null,
+        // 逮捕令：公开的是「发给哪三个角色」，哪一张是真的仍然保密
+        magistrate: state.effects.magistrate ? {
+          nums: (state.effects.magistrate.nums || []).slice(),
+          playerIdx: state.effects.magistrate.playerIdx
         } : null
       },
       firstToFinish: state.firstToFinish,
@@ -2320,14 +2326,11 @@
   }
 
   /**
-   * 玩家面板上要不要画威胁标记（盖牌 / 翻开后的刀子或玫瑰）。
-   * 标记是挂在「角色编号」上的，而角色归属本身是暗置信息，
-   * 所以只有该角色已公开（自己手上、正在行动、本轮已行动过）时才画，
-   * 免得顺带把别人的角色泄露出去。
+   * 某个玩家「已公开」的角色编号：自己手上的、正在行动的、本轮已经行动过的。
+   * 逮捕令和威胁标记都挂在角色编号上，而角色归属本身是暗置信息，
+   * 所以只有这些编号能安全地拿来在玩家面板上画标记。
    */
-  function blackmailerMark(state, i, idx) {
-    const th = state.effects.blackmailer;
-    if (!th) return null;
+  function publicCharNums(state, i, idx) {
     const p = state.players[i];
     const known = [];
     if (i === idx) {
@@ -2336,6 +2339,16 @@
       if (state.turn && state.turn.playerIdx === i) known.push(charOf(state.turn.charId).num);
       (p.played || []).forEach(cid => known.push(charOf(cid).num));
     }
+    return known;
+  }
+
+  /**
+   * 玩家面板上要不要画威胁标记（盖牌 / 翻开后的刀子或玫瑰）。
+   */
+  function blackmailerMark(state, i, idx) {
+    const th = state.effects.blackmailer;
+    if (!th) return null;
+    const known = publicCharNums(state, i, idx);
     const rev = (th.revealed || []).filter(r => known.indexOf(r.num) >= 0);
     if (rev.length) {
       const last = rev[rev.length - 1];
@@ -2347,6 +2360,21 @@
       if (known.indexOf(n) >= 0 && (th.done || []).indexOf(n) < 0) {
         return { num: n, revealed: false, isReal: null };
       }
+    }
+    return null;
+  }
+
+  /**
+   * 玩家面板上要不要画逮捕令（卷轴）。只在角色牌已经翻开后才画；
+   * 三张逮捕令长得一样，不泄露哪一张是真的。
+   */
+  function magistrateMark(state, i, idx) {
+    const w = state.effects.magistrate;
+    if (!w) return null;
+    const known = publicCharNums(state, i, idx);
+    const nums = w.nums || [];
+    for (let k = 0; k < nums.length; k++) {
+      if (known.indexOf(nums[k]) >= 0) return { num: nums[k] };
     }
     return null;
   }

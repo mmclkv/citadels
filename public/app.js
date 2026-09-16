@@ -1441,6 +1441,21 @@
       '<circle cx="12" cy="13" r="5.2" fill="#c62828"/><circle cx="12" cy="13" r="3.1" fill="#ef5350"/>' +
       '<circle cx="12" cy="13" r="1.5" fill="#8e1b1b"/></svg>'
   };
+  /* 行政官的逮捕令：动画画风的羊皮纸卷轴（上下卷轴杆 + 正文横线 + 红蜡封）。 */
+  const WARRANT_SVG = '<svg viewBox="0 0 24 32" aria-hidden="true">' +
+    '<path d="M6 4.6 Q4.2 15 6 25.4 L18 25.4 Q19.8 15 18 4.6 Z" fill="#f7e6bd" stroke="#c2902f" stroke-width="1"/>' +
+    '<rect x="3.4" y="1.8" width="17.2" height="4.6" rx="2.3" fill="#e0bb7d" stroke="#a9762a" stroke-width="1"/>' +
+    '<rect x="3.4" y="23.6" width="17.2" height="4.6" rx="2.3" fill="#e0bb7d" stroke="#a9762a" stroke-width="1"/>' +
+    '<path d="M8.8 10.4 H15.2" stroke="#b8862f" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>' +
+    '<path d="M8.8 13.7 H15.2" stroke="#b8862f" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>' +
+    '<path d="M8.8 17 H13" stroke="#b8862f" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>' +
+    '<circle cx="12" cy="25.9" r="2.4" fill="#c0392b" stroke="#8e1b1b" stroke-width=".7"/>' +
+    '<path d="M10.8 25.4 h2.4" stroke="#f6cdc8" stroke-width=".8" stroke-linecap="round"/></svg>';
+  function warrantMarkHTML(warrant) {
+    if (!warrant) return '';
+    return '<i class="warrant-mark" title="逮捕令：你被行政官盯上了">' + WARRANT_SVG + '</i>';
+  }
+
   function threatMarkHTML(threat) {
     if (!threat) return '';
     if (!threat.revealed) {
@@ -2398,7 +2413,7 @@
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
         '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
-        '<span class="opp-gold">' + threatMarkHTML(p.threat) + crownIcon +
+        '<span class="opp-gold">' + threatMarkHTML(p.threat) + warrantMarkHTML(p.warrant) + crownIcon +
           '<i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
         scoreBadgeHTML(i, p.name);
       bindScoreBadge(head.querySelector('.score-badge'), i);
@@ -2976,7 +2991,7 @@
     if (ms) ms.innerHTML = charStatusHTML(me);
     const myStats = $('#my-char-stats');
     if (myStats) myStats.innerHTML = handCountHTML(me.hand.length);
-    $('#my-gold').innerHTML = threatMarkHTML(me.threat) +
+    $('#my-gold').innerHTML = threatMarkHTML(me.threat) + warrantMarkHTML(me.warrant) +
       (me.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '') +
       '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
     const myScoreVal = $('#my-score-val');

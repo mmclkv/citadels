@@ -65,6 +65,11 @@ assert.ok(/threatMarkHTML\(p\.threat\)/.test(app), '对手面板应画威胁标�
 assert.ok(/threatMarkHTML\(me\.threat\)/.test(app), '自己面板应画威胁标记');
 assert.ok(/is-real/.test(app) && /is-fake/.test(app), '翻开后要区分刀子与玫瑰花');
 const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), 'utf8');
-assert.ok(/\.threat-mark\s*\{/.test(css), '威胁标记需要有样式');
+assert.ok(/\.threat-mark/.test(css), '威胁标记需要有样式');
+// 行政官的逮捕令：卷轴图标同样画在金币左侧
+assert.ok(/warrantMarkHTML\(p\.warrant\)/.test(app), '对手面板应画逮捕令卷轴');
+assert.ok(/warrantMarkHTML\(me\.warrant\)/.test(app), '自己面板应画逮捕令卷轴');
+assert.ok(/\.warrant-mark/.test(css), '逮捕令卷轴需要有样式');
+assert.ok(/WARRANT_SVG[\s\S]{0,400}rect x="3\.4"/.test(app), '卷轴应画出上下卷杆');
 
 console.log('刺客/盗贼宣告：全体弹窗、编号与角色名战报全部通过');

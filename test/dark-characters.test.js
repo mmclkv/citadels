@@ -222,6 +222,31 @@ test('勒索者能分配两个威胁目标，并在战报中公开去向', () =>
   assert.ok(!('signed' in notice), '公告不应泄露真威胁标记');
 });
 
+test('逮捕令目标翻开角色牌后，面板金币左侧出现卷轴标记', () => {
+  const state = stateWith('magistrate');
+  state.players[0].chars = ['magistrate'];
+  state.players[1].chars = [charIdWithNum(state, 3)];
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'ability' }).ok, true);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 3 }).ok, true);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 5 }).ok, true);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 6 }).ok, true);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: 5 }).ok, true);
+  // 角色牌还盖着的时候，旁观者看不到任何人头上的逮捕令
+  assert.equal(Engine.sanitize(state, 'p2').players[1].warrant, null);
+  // 当事人自己知道自己的角色，所以看得见
+  assert.deepEqual(Engine.sanitize(state, 'p1').players[1].warrant, { num: 3 });
+  // 叫到他、角色牌翻开后，全场都能看到卷轴
+  state.turn = { charId: charIdWithNum(state, 3), num: 3, playerIdx: 1, phase: 'main',
+    takenResources: false, incomeTaken: false, abilityUsed: false, builds: 0, spentOnBuild: 0,
+    usedLab: false, usedSmithy: false, usedMuseum: false, bonusDone: false, pending: null };
+  assert.deepEqual(Engine.sanitize(state, 'p2').players[1].warrant, { num: 3 });
+  assert.equal(Engine.sanitize(state, 'p2').players[2].warrant, null, '没被点名的玩家没有卷轴');
+  // 只公开「发给了哪三个角色」，不泄露哪一张是真的
+  const mg = Engine.sanitize(state, 'p2').effects.magistrate;
+  assert.deepEqual(mg.nums, [3, 5, 6]);
+  assert.ok(!('signed' in mg), '下发的逮捕令状态不得带 signed');
+});
+
 test('拒绝赎回后目标被冻结，等勒索者决定是否翻开威胁标记', () => {
   const state = threatState(3, 3);
   assert.equal(Engine.applyAction(state, 'p1', { type: 'blackmailer_refuse' }).ok, true);
