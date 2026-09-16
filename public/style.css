@@ -448,7 +448,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .table-core.has-removed .table-core-hint{margin-top:4px}
 .table-core.active{border-color:var(--gold);box-shadow:0 0 0 10px rgba(200,149,43,.08),0 0 32px rgba(200,149,43,.28),inset 0 0 30px rgba(200,149,43,.2)}
 /* 战场中央的税务官标记：钱袋 + 已放置的金币数 */
-.tax-pot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;
+.tax-pot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5;
+  flex:0 0 auto;/* 不参与玩家框的排版与碰撞推挤，始终锚定战场中心 */
   display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 11px 6px;
   border:1px solid rgba(200,149,43,.45);border-radius:14px;pointer-events:none;
   background:radial-gradient(ellipse at 50% 35%,#fffaf0,#f2e2c2 78%,#e6d0a6);
@@ -883,10 +884,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   /* 移动端保留顺序流，避免圆桌卡片过度缩小；桌面端才使用环形座位。 */
   .table-arena{min-height:0;margin:0 0 11px;padding-top:0;border:0;border-radius:0;background:none;overflow:visible}
   .table-core{display:none}
-  /* 小屏时对手是横向滚动列表，中央标记改成跟着排在第一位，避免浮在卡片上面 */
-  .opponents .tax-pot{position:static;transform:none;flex:0 0 auto;align-self:center;margin:0 2px 0 0}
-  .opponents[data-layout="mobile-ring"] .tax-pot{position:absolute;left:50%;top:50%;
-    transform:translate(-50%,-50%);margin:0}
+  /* 钱袋是战场标记，不作为横向玩家列表中的 flex 项；否则会随列表排版/滚动移位。 */
+  .opponents .tax-pot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    z-index:5;flex:0 0 auto;align-self:auto;margin:0;pointer-events:none}
   .removed-corner{left:10px;bottom:calc(68px + env(safe-area-inset-bottom));padding:4px}
   .turn-order-guide{position:relative;top:auto;left:auto;width:100%;transform:none;justify-content:flex-start;margin:0 0 8px;overflow-x:auto;border-radius:10px}
   .opponents{display:flex;gap:9px;overflow-x:auto;padding-bottom:5px;margin-bottom:11px;
