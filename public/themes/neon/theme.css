@@ -220,7 +220,7 @@ html[data-theme="neon"] .side-panel-toggle { color:var(--ui-cyan); border-color:
 html[data-theme="neon"] .side-panel-toggle:hover { color:#eaf7ff; border-color:var(--ui-cyan); background:rgba(67,228,255,.10); }
 html[data-theme="neon"] .side-panel h3 { color:var(--ui-cyan); border-color:var(--line); }
 html[data-theme="neon"] .log div { border-color:rgba(67,228,255,.10); }
-html[data-theme="neon"] .log .round { color:var(--ui-cyan); background:rgba(67,228,255,.08); }
+html[data-theme="neon"] .log .round { color:#173447; background:rgba(67,228,255,.14); }
 html[data-theme="neon"] .log .good { color:var(--c-green-d); }
 html[data-theme="neon"] .log .bad { color:var(--c-red-d); }
 html[data-theme="neon"] .log .magic { color:var(--c-purple-d); }
@@ -241,7 +241,17 @@ html[data-theme="neon"] .log .magic,
 html[data-theme="neon"] .log .build,
 html[data-theme="neon"] .log .crown,
 html[data-theme="neon"] .log .score { color:#173447; }
-html[data-theme="neon"] .log .round { color:#173447; background:rgba(240,188,69,.2); }
+html[data-theme="neon"] .log .info {
+  color:#1b6179;
+  font-weight:600;
+  text-shadow:0 0 6px rgba(67,228,255,.18);
+}
+html[data-theme="neon"] .log .round {
+  color:#173447;
+  background:rgba(67,228,255,.14);
+  border-left:3px solid var(--ui-cyan);
+  box-shadow:inset 0 0 14px rgba(67,228,255,.08),0 0 12px rgba(67,228,255,.08);
+}
 html[data-theme="neon"] .chat-log { color:#eaf7ff; }
 html[data-theme="neon"] .chat-log .chat-entry .name,
 html[data-theme="neon"] .chat-log .chat-entry.self .name,
