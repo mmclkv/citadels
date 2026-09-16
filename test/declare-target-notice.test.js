@@ -46,6 +46,14 @@ for (const kind of ['assassin_declare', 'thief_declare']) {
   assert.ok(/n\.charName/.test(block), kind + ' 弹窗同时显示角色名');
 }
 
+const confiscateStart = app.indexOf("case 'magistrate_confiscate':");
+assert.ok(confiscateStart > 0, '前端应处理行政官没收建筑通知');
+const confiscateBlock = app.slice(confiscateStart, app.indexOf('\n      case ', confiscateStart + 10));
+assert.ok(/if \(isMe\)\s*\{[\s\S]*?queueEvent\(\{/.test(confiscateBlock),
+  '建筑被行政官没收时应向受影响玩家弹出事件提示');
+assert.ok(/你的建筑被行政官没收/.test(confiscateBlock) && /建造费用已退还/.test(confiscateBlock),
+  '弹窗应说明建筑被没收并提示建造费用已退还');
+
 // 行政官：三个逮捕令的去向对全场公开，三种身份（行政官本人 / 收到逮捕令的人 / 旁观者）都要弹窗
 const magStart = app.indexOf("case 'magistrate_declare':");
 assert.ok(magStart > 0, '前端应处理 magistrate_declare 公告');

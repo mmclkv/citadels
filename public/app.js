@@ -485,6 +485,25 @@
         } else toast('! ' + n.byName + ' 抢走了 ' + n.playerName + ' 的『' + n.cardName + '』');
         return;
 
+      case 'magistrate_confiscate':
+        if (isMe) {
+          queueEvent({
+            tone: 'danger', icon: '§', title: '你的建筑被行政官没收', hold: 5200,
+            text: '【行政官】' + escapeHtml(n.byName) + ' 没收了你刚建造的『<b>' +
+                  escapeHtml(n.card && n.card.name || '建筑') + '</b>』，建造费用已退还。'
+          });
+        } else if (byMe) {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '逮捕令已执行', hold: 4600,
+            text: '你从 ' + escapeHtml(n.playerName) + ' 处没收了『<b>' +
+                  escapeHtml(n.card && n.card.name || '建筑') + '</b>』，并免费建入自己的城市。'
+          });
+        } else {
+          toast('§ ' + escapeHtml(n.byName) + ' 没收了 ' + escapeHtml(n.playerName) + ' 建造的『' +
+            escapeHtml(n.card && n.card.name || '建筑') + '』');
+        }
+        return;
+
       case 'got_gold':
         flyGoldIn(n.playerIdx, n.amount);
         return;

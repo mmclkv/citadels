@@ -154,6 +154,10 @@ test('行政官发动逮捕令后没收建筑，目标方拿回建造费', () =>
   assert.equal(state.players[1].gold, 3, '建造费已返还');
   assert.equal(state.players[1].hand.length, 0, '建筑已出手牌');
   assert.equal(state.effects.magistrate.claimed, true);
+  const notice = state.notices.filter(n => n.kind === 'magistrate_confiscate').pop();
+  assert.ok(notice, '没收时应发送专属通知');
+  assert.equal(notice.playerId, 'p1', '通知应能定位被没收建筑的玩家');
+  assert.equal(notice.card.name, '神庙', '通知应包含被没收建筑名');
 });
 
 test('行政官放弃发动时建筑归建造方，且同一轮不再触发', () => {
