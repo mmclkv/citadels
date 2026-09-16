@@ -385,10 +385,10 @@
       state.effects.thief = null;
     }
 
-    // 勒索者的威胁必须在目标领取资源前处理。这里把拒绝赎金简化为
-    // 立即揭示签名标记，避免引入跨玩家的二次响应状态。
+    // 勒索者的威胁必须在目标领取资源前处理：先问目标要不要花钱赎回，
+    // 拒绝的话冻结该玩家，交给勒索者决定是否翻开盖牌（见 blackmailer_refuse）。
     const threat = state.effects.blackmailer;
-    if (threat && threat.nums.indexOf(entry.num) >= 0) {
+    if (threat && threat.nums.indexOf(entry.num) >= 0 && (threat.done || []).indexOf(entry.num) < 0) {
       const target = state.players[entry.playerIdx];
       state.turn = newTurn(state, entry, 'main');
       state.turn.pending = { kind: 'blackmailer_threat', targetIdx: entry.playerIdx,
@@ -578,6 +578,11 @@
         buildCallQueue(state);
       }
     }
+    // 勒索者回合结束 / 状态过期后残留的「是否翻开威胁标记」会锁死全场，这里兜底清掉
+    if (state.reaction && state.reaction.kind === 'blackmailer' && !state.effects.blackmailer) {
+      state.reaction = null;
+      if (state.turn) { state.turn.pending = null; state.turn.takenResources = false; }
+    }
     if (state.phase === 'action') ensureActionTurn(state);
     return state;
   }
@@ -590,9 +595,15 @@
 
     const idx = playerIdx(state, playerId);
 
-    // 需要其它玩家响应（墓地）
+    // 需要其它玩家响应（墓地 / 行政官 / 勒索者）
     if (state.reaction) {
-      if (state.reaction.playerIdx !== idx) return { actions: [], prompt: '等待其他玩家响应…' };
+      if (state.reaction.playerIdx !== idx) {
+        // 被勒索者威胁的玩家处于冻结状态，提示语要说明在等谁
+        if (state.reaction.kind === 'blackmailer' && state.reaction.targetIdx === idx) {
+          return { actions: [], prompt: '请等待勒索者翻开威胁标记……' };
+        }
+        return { actions: [], prompt: '等待其他玩家响应…' };
+      }
       const r = state.reaction;
       if (r.kind === 'magistrate') {
         return {
@@ -600,6 +611,15 @@
           actions: [
             { type: 'reaction', use: true, label: '发动逮捕令：没收『' + r.card.name + '』，免费建入自己城市' },
             { type: 'reaction', use: false, label: '不发动' }
+          ]
+        };
+      }
+      if (r.kind === 'blackmailer') {
+        return {
+          prompt: r.prompt,
+          actions: [
+            { type: 'reaction', use: true, label: '是' },
+            { type: 'reaction', use: false, label: '否' }
           ]
         };
       }
@@ -1323,10 +1343,21 @@
         if (!Number.isFinite(n) || n === t.num || (pd.first != null && pd.first === n)) return err('威胁目标必须是两个不同角色');
         if (pd.kind === 'blackmailer_declare') { t.pending = { kind: 'blackmailer_second', first: n }; return ok(); }
         const signed = randInt(state, 2) === 0 ? pd.first : n;
-        state.effects.blackmailer = { nums: [pd.first, n], signed, playerIdx: idx };
+        const nums = [pd.first, n];
+        state.effects.blackmailer = { nums: nums, signed: signed, playerIdx: idx, done: [], revealed: [] };
         t.abilityUsed = true; t.pending = null;
-        log(state, '【勒索者】' + p.name + ' 分配了 2 个威胁标记。', 'magic');
-        notify(state, 'blackmailer_declare', { byIdx: idx, byId: p.id, byName: p.name, nums: [pd.first, n] });
+        // 两个标记落在哪两个角色上是公开信息（哪一个是真的仍然保密）
+        const targets = nums.map(num => {
+          const cid = (state.charDeck || []).find(id => charOf(id).num === num);
+          const c = cid ? charOf(cid) : null;
+          return { num: num, charId: cid || '', name: c ? c.name : '未知角色' };
+        });
+        log(state, '【勒索者】' + p.name + ' 把 2 个威胁标记发给了 ' +
+                   targets.map(x => x.num + ' 号·' + x.name).join('、') + '（其中只有一个是真的）。', 'magic');
+        notify(state, 'blackmailer_declare', {
+          byIdx: idx, byId: p.id, byName: p.name, nums: nums,
+          targets: targets.map(x => ({ num: x.num, name: x.name }))
+        });
         return ok();
       }
       case 'spy_target': {
@@ -1394,18 +1425,34 @@
       }
       case 'blackmailer_bribe': {
         const pd = t.pending; if (!pd || pd.kind !== 'blackmailer_threat') return err('当前没有勒索威胁');
+        const bth = state.effects.blackmailer;
+        if (!bth) return err('当前没有生效的威胁标记');
         const amount = Math.floor(p.gold / 2); p.gold -= amount;
-        state.effects.blackmailer.nums = state.effects.blackmailer.nums.filter(n => n !== t.num);
+        bth.nums = bth.nums.filter(n => n !== t.num);
         t.pending = null; t.takenResources = false;
         log(state, '【勒索者】' + p.name + ' 支付 ' + amount + ' 金赎回威胁。', 'magic');
         return ok();
       }
       case 'blackmailer_refuse': {
         const pd = t.pending; if (!pd || pd.kind !== 'blackmailer_threat') return err('当前没有勒索威胁');
-        if (pd.signed) { const amount = p.gold; p.gold = 0; const owner = state.players[state.effects.blackmailer.playerIdx]; owner.gold += amount;
-          log(state, '【勒索者】' + owner.name + ' 揭示签名威胁并拿走 ' + p.name + ' 的全部金币。', 'bad'); }
-        state.effects.blackmailer.nums = state.effects.blackmailer.nums.filter(n => n !== t.num);
-        t.pending = null; t.takenResources = false;
+        const threat = state.effects.blackmailer;
+        if (!threat) return err('当前没有生效的威胁标记');
+        const ownerIdx = threat.playerIdx;
+        // 勒索者和目标恰好是同一个人时（理论上不会发生），直接当作放弃翻开，避免自锁
+        if (ownerIdx === idx) {
+          threat.done = (threat.done || []).concat([t.num]);
+          t.pending = null; t.takenResources = false;
+          log(state, '【勒索者】' + p.name + ' 放弃使用威胁标记。', 'magic');
+          return ok();
+        }
+        const owner = state.players[ownerIdx];
+        // 不当场揭示：冻结目标，把「翻不翻开」的决定权交给勒索者
+        t.pending = null;
+        state.reaction = { kind: 'blackmailer', playerIdx: ownerIdx, targetIdx: idx, num: t.num,
+          prompt: '【勒索者】是否翻开 ' + p.name + ' 的威胁标记？' };
+        log(state, '【勒索者】' + p.name + ' 拒绝支付赎金，等待 ' + owner.name + ' 决定是否翻开威胁标记。', 'magic');
+        notify(state, 'blackmailer_wait', { playerIdx: idx, playerId: p.id, playerName: p.name,
+          byIdx: ownerIdx, byId: owner.id, byName: owner.name, num: t.num });
         return ok();
       }
       case 'abbot_resource': {
@@ -1790,11 +1837,57 @@
     return resolveBuild(state, t, ti, card, canTake ? idx : -1);
   }
 
+  // 勒索者的威胁标记响应：use=true 翻开盖牌（真的拿走全部金币，假的什么事都没有），
+  // use=false 直接跳过。无论哪种都要把目标解冻，让他继续正常的领资源 / 建造。
+  function applyBlackmailerReveal(state, idx, use) {
+    const r = state.reaction;
+    const t = state.turn;
+    const ti = r.targetIdx;
+    const target = state.players[ti];
+    const owner = state.players[idx];
+    const threat = state.effects.blackmailer;
+    const num = r.num;
+    state.reaction = null;
+    if (!t || t.playerIdx !== ti) return err('当前不是该玩家的回合');
+    t.pending = null;
+    t.takenResources = false;               // 解冻后照常领取资源
+    if (!threat) return ok();
+    const isReal = threat.signed === num;
+    threat.done = (threat.done || []).concat([num]);
+    if (!use) {
+      log(state, '【勒索者】' + owner.name + ' 选择不翻开，' + target.name + ' 的威胁标记本轮作废。', 'magic');
+      notify(state, 'blackmailer_reveal', {
+        playerIdx: ti, playerId: target.id, playerName: target.name,
+        byIdx: idx, byId: owner.id, byName: owner.name,
+        revealed: false, isReal: false, amount: 0
+      });
+      return ok();
+    }
+    threat.revealed = (threat.revealed || []).concat([{ num: num, isReal: isReal }]);
+    let amount = 0;
+    if (isReal) {
+      amount = target.gold;
+      target.gold = 0;
+      owner.gold += amount;
+      log(state, '【勒索者】翻开威胁标记：『带血的刀』——' + owner.name +
+                 ' 拿走 ' + target.name + ' 的全部 ' + amount + ' 枚金币。', 'bad');
+    } else {
+      log(state, '【勒索者】翻开威胁标记：『玫瑰花』——虚惊一场，' + target.name + ' 分文未失。', 'good');
+    }
+    notify(state, 'blackmailer_reveal', {
+      playerIdx: ti, playerId: target.id, playerName: target.name,
+      byIdx: idx, byId: owner.id, byName: owner.name,
+      revealed: true, isReal: isReal, amount: amount
+    });
+    return ok();
+  }
+
   function applyReaction(state, idx, action) {
     const r = state.reaction;
     const p = state.players[idx];
     if (action.type !== 'reaction') return err('无效的响应');
     if (r.kind === 'magistrate') return applyMagistrateWarrant(state, idx, !!action.use);
+    if (r.kind === 'blackmailer') return applyBlackmailerReveal(state, idx, !!action.use);
     const card = state.pendingDestroy ? state.pendingDestroy.card : r.card;
     if (action.use) {
       if (p.gold < 1) return err('金币不足');
@@ -2106,6 +2199,7 @@
           hasCrown: p.hasCrown,
           connected: p.connected,
           played: p.played.slice(),
+          threat: blackmailerMark(state, i, idx),
           // 选角状态：未完成选角时不显示角色牌背；2~3 人局需要完成两次选取。
           hasChosen: p.chars.length > 0,
           draftComplete: state.phase !== 'draft' ||
@@ -2147,7 +2241,14 @@
         assassinated: state.effects.assassinated,
         thief: state.effects.thief,
         bewitched: state.effects.bewitched,
-        taxCollectorGold: state.effects.taxCollectorGold || 0
+        taxCollectorGold: state.effects.taxCollectorGold || 0,
+        // 威胁标记挂在角色编号上：哪两个角色被威胁是公开信息，哪个是真的仍保密
+        blackmailer: state.effects.blackmailer ? {
+          nums: (state.effects.blackmailer.nums || []).slice(),
+          playerIdx: state.effects.blackmailer.playerIdx,
+          revealed: (state.effects.blackmailer.revealed || []).map(r => ({ num: r.num, isReal: !!r.isReal })),
+          done: (state.effects.blackmailer.done || []).slice()
+        } : null
       },
       firstToFinish: state.firstToFinish,
       log: state.log.slice(-120),
@@ -2209,11 +2310,45 @@
       };
     }
     if (state.reaction) {
-      out.reaction = { playerIdx: state.reaction.playerIdx,
+      out.reaction = { kind: state.reaction.kind || 'graveyard',
+                       playerIdx: state.reaction.playerIdx,
                        playerId: state.players[state.reaction.playerIdx].id,
+                       targetIdx: state.reaction.targetIdx != null ? state.reaction.targetIdx : null,
                        prompt: state.reaction.prompt };
     }
     return out;
+  }
+
+  /**
+   * 玩家面板上要不要画威胁标记（盖牌 / 翻开后的刀子或玫瑰）。
+   * 标记是挂在「角色编号」上的，而角色归属本身是暗置信息，
+   * 所以只有该角色已公开（自己手上、正在行动、本轮已行动过）时才画，
+   * 免得顺带把别人的角色泄露出去。
+   */
+  function blackmailerMark(state, i, idx) {
+    const th = state.effects.blackmailer;
+    if (!th) return null;
+    const p = state.players[i];
+    const known = [];
+    if (i === idx) {
+      (p.chars || []).forEach(cid => known.push(charOf(cid).num));
+    } else {
+      if (state.turn && state.turn.playerIdx === i) known.push(charOf(state.turn.charId).num);
+      (p.played || []).forEach(cid => known.push(charOf(cid).num));
+    }
+    const rev = (th.revealed || []).filter(r => known.indexOf(r.num) >= 0);
+    if (rev.length) {
+      const last = rev[rev.length - 1];
+      return { num: last.num, revealed: true, isReal: !!last.isReal };
+    }
+    const nums = th.nums || [];
+    for (let k = 0; k < nums.length; k++) {
+      const n = nums[k];
+      if (known.indexOf(n) >= 0 && (th.done || []).indexOf(n) < 0) {
+        return { num: n, revealed: false, isReal: null };
+      }
+    }
+    return null;
   }
 
   function pendingPublic(pd, isActor) {

@@ -1425,6 +1425,32 @@
   }
 
   /* 玩家小框框里的角色卡状态：未选 / 盖牌 / 翻面；翻面后立即在右侧显示角色名 */
+  /* 威胁标记：盖牌 → 翻开后是「带血的刀」（真）或「玫瑰花」（假）。
+     画在金币图案左侧，尺寸跟金币一致，纯 SVG 不依赖字体/emoji。 */
+  const THREAT_SVG = {
+    back: '<svg viewBox="0 0 24 32" aria-hidden="true"><rect x="1.2" y="1.2" width="21.6" height="29.6" rx="3.2" fill="#2b3a67" stroke="#d9b25a" stroke-width="1.6"/>' +
+      '<path d="M7 8 L17 16 L7 24 Z" fill="none" stroke="#d9b25a" stroke-width="1.3" opacity=".9"/>' +
+      '<path d="M17 8 L7 16 L17 24 Z" fill="none" stroke="#d9b25a" stroke-width="1.3" opacity=".45"/></svg>',
+    knife: '<svg viewBox="0 0 24 32" aria-hidden="true"><path d="M12 2.5 L15 11 L12 20 L9 11 Z" fill="#d3dae6" stroke="#7d879b" stroke-width="1"/>' +
+      '<rect x="10.4" y="19.6" width="3.2" height="6" rx="1" fill="#8b5a2b"/><rect x="9.6" y="25" width="4.8" height="4.5" rx="1.4" fill="#6f4520"/>' +
+      '<path d="M16.6 8.6 c1.3 2 1.3 3.4 0 4.8 c-1.3 -1.4 -1.3 -2.8 0 -4.8 z" fill="#c0392b"/>' +
+      '<circle cx="18.4" cy="16" r="1.7" fill="#c0392b"/><circle cx="20" cy="20.4" r="1.15" fill="#c0392b"/></svg>',
+    rose: '<svg viewBox="0 0 24 32" aria-hidden="true"><path d="M12 18 L12 30.5" stroke="#2e7d32" stroke-width="1.7" stroke-linecap="round"/>' +
+      '<path d="M12 25.5 c-4.6 -.3 -6.6 -2.4 -6.2 -4.6 c3.2 .3 5.2 1.5 6.2 3.6 z" fill="#43a047"/>' +
+      '<path d="M12 22 c4.4 -.4 6.4 -2.5 6 -4.7 c-3.1 .3 -5.1 1.6 -6 3.7 z" fill="#66bb6a"/>' +
+      '<circle cx="12" cy="13" r="5.2" fill="#c62828"/><circle cx="12" cy="13" r="3.1" fill="#ef5350"/>' +
+      '<circle cx="12" cy="13" r="1.5" fill="#8e1b1b"/></svg>'
+  };
+  function threatMarkHTML(threat) {
+    if (!threat) return '';
+    if (!threat.revealed) {
+      return '<i class="threat-mark" title="威胁标记（盖牌，真假未知）">' + THREAT_SVG.back + '</i>';
+    }
+    return threat.isReal
+      ? '<i class="threat-mark is-real" title="威胁标记：带血的刀（真）——金币已被勒索者拿走">' + THREAT_SVG.knife + '</i>'
+      : '<i class="threat-mark is-fake" title="威胁标记：玫瑰花（假）——虚惊一场">' + THREAT_SVG.rose + '</i>';
+  }
+
   function charStatusHTML(p) {
     let st = 'none';
     if (p.hasChosen && p.draftComplete !== false) {
@@ -2372,7 +2398,8 @@
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
         '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
-        '<span class="opp-gold">' + crownIcon + '<i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
+        '<span class="opp-gold">' + threatMarkHTML(p.threat) + crownIcon +
+          '<i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
         scoreBadgeHTML(i, p.name);
       bindScoreBadge(head.querySelector('.score-badge'), i);
 
@@ -2949,7 +2976,8 @@
     if (ms) ms.innerHTML = charStatusHTML(me);
     const myStats = $('#my-char-stats');
     if (myStats) myStats.innerHTML = handCountHTML(me.hand.length);
-    $('#my-gold').innerHTML = (me.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '') +
+    $('#my-gold').innerHTML = threatMarkHTML(me.threat) +
+      (me.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '') +
       '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
     const myScoreVal = $('#my-score-val');
     if (myScoreVal) {
@@ -3198,12 +3226,15 @@
     if (renderAgentStatus(s)) return;
     if (!av) { promptEl.textContent = ''; return; }
 
-    // 墓地响应
+    // 墓地 / 行政官 / 勒索者响应
     if (s.reaction) {
       if (s.reaction.playerId === App.myId) {
-        // prompt 已自带【墓地】/【行政官】等前缀，这里不再重复拼接来源
+        // prompt 已自带【墓地】/【行政官】/【勒索者】等前缀，这里不再重复拼接来源
         promptEl.innerHTML = escapeHtml(s.reaction.prompt);
         (av.actions || []).forEach(a => actionsEl.appendChild(actionBtn(a, a.use ? 'main' : '')));
+      } else if (s.reaction.kind === 'blackmailer' && s.reaction.targetIdx === App.myIdx) {
+        // 被威胁的一方处于冻结状态，明确告诉他现在在等谁
+        promptEl.textContent = '请等待勒索者翻开威胁标记……';
       } else {
         const who = s.players.find(p => p.id === s.reaction.playerId);
         promptEl.innerHTML = '等待 ' + escapeHtml(who ? who.name : '') + ' 决定是否响应…';

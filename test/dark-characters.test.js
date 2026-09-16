@@ -182,10 +182,102 @@ test('行政官放弃发动时建筑归建造方，且同一轮不再触发', ()
   assert.equal(state.players[1].city.length, 2);
 });
 
-test('勒索者能分配两个威胁目标，目标可用一半金币赎回', () => {
+function charIdWithNum(state, num) {
+  return (state.charDeck || []).find(id => Engine.charOf(id).num === num);
+}
+
+function threatState(signedNum, targetNum) {
+  const state = stateWith('blackmailer');
+  state.players[0].chars = ['blackmailer'];
+  state.players[0].gold = 0;            // 勒索者起始 0 金，便于断言翻开后拿走了多少
+  state.players[1].gold = 6;
+  state.players[1].chars = [charIdWithNum(state, targetNum)];
+  state.effects.blackmailer = { nums: [targetNum], signed: signedNum, playerIdx: 0, done: [], revealed: [] };
+  state.turn = { charId: charIdWithNum(state, targetNum), num: targetNum, playerIdx: 1, phase: 'main',
+    takenResources: false, incomeTaken: false, abilityUsed: false, builds: 0, spentOnBuild: 0,
+    usedLab: false, usedSmithy: false, usedMuseum: false, bonusDone: false,
+    pending: { kind: 'blackmailer_threat', targetIdx: 1, signed: signedNum === targetNum } };
+  return state;
+}
+
+test('勒索者能分配两个威胁目标，并在战报中公开去向', () => {
   const state = stateWith('blackmailer');
   assert.equal(Engine.applyAction(state, 'p0', { type: 'ability' }).ok, true);
   assert.equal(Engine.applyAction(state, 'p0', { type: 'blackmailer_char', num: 3 }).ok, true);
   assert.equal(Engine.applyAction(state, 'p0', { type: 'blackmailer_char', num: 5 }).ok, true);
   assert.deepEqual(state.effects.blackmailer.nums, [3, 5]);
+  assert.deepEqual(state.effects.blackmailer.done, []);
+  assert.deepEqual(state.effects.blackmailer.revealed, []);
+  assert.ok([3, 5].includes(state.effects.blackmailer.signed));
+  // 战报公开两个目标，但不泄露哪一个是真的
+  const line = state.log.map(l => l.text).filter(t => t.includes('威胁标记发给了')).pop();
+  assert.ok(line, '战报应宣告威胁标记发给了谁');
+  for (const num of [3, 5]) assert.ok(line.includes(num + ' 号·'), '战报应列出 ' + num + ' 号角色');
+  assert.ok(!/真威胁|签名威胁/.test(line), '战报不应泄露哪个是真的');
+  const notice = state.notices.filter(n => n.kind === 'blackmailer_declare').pop();
+  assert.ok(notice, '应下发 blackmailer_declare 公告');
+  assert.deepEqual(notice.nums, [3, 5]);
+  assert.deepEqual(notice.targets.map(t => t.num), [3, 5]);
+  assert.ok(notice.targets.every(t => t.name && t.name !== '未知角色'), '公告应带上角色名');
+  assert.ok(!('signed' in notice), '公告不应泄露真威胁标记');
+});
+
+test('拒绝赎回后目标被冻结，等勒索者决定是否翻开威胁标记', () => {
+  const state = threatState(3, 3);
+  assert.equal(Engine.applyAction(state, 'p1', { type: 'blackmailer_refuse' }).ok, true);
+  assert.equal(state.reaction.kind, 'blackmailer');
+  assert.equal(state.reaction.playerIdx, 0, '由勒索者决断');
+  assert.equal(state.reaction.targetIdx, 1);
+  // 目标被冻结：没有任何可行动作，状态栏提示在等勒索者
+  const forTarget = Engine.getAvailableActions(state, 'p1');
+  assert.deepEqual(forTarget.actions, []);
+  assert.match(forTarget.prompt, /^请等待勒索者翻开威胁标记/);
+  // 勒索者这边给出「是 / 否」
+  const forOwner = Engine.getAvailableActions(state, 'p0');
+  assert.match(forOwner.prompt, /是否翻开/);
+  assert.deepEqual(forOwner.actions.map(a => a.use), [true, false]);
+  // 选「否」：直接跳过，金币分文不动，目标解冻
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'reaction', use: false }).ok, true);
+  assert.equal(state.reaction, null);
+  assert.equal(state.players[1].gold, 6, '不翻开则金币不变');
+  assert.equal(state.turn.pending, null, '解冻后回到正常回合');
+  assert.ok(Engine.getAvailableActions(state, 'p1').actions.some(a => a.type === 'take_gold'),
+    '解冻后可以正常领资源');
+});
+
+test('翻开真威胁标记拿走全部金币（刀），假的分文不失（玫瑰）', () => {
+  const real = threatState(3, 3);
+  assert.equal(Engine.applyAction(real, 'p1', { type: 'blackmailer_refuse' }).ok, true);
+  assert.equal(Engine.applyAction(real, 'p0', { type: 'reaction', use: true }).ok, true);
+  assert.equal(real.players[1].gold, 0, '真威胁标记拿走全部金币');
+  assert.equal(real.players[0].gold, 6);
+  assert.deepEqual(real.effects.blackmailer.revealed, [{ num: 3, isReal: true }]);
+  assert.ok(real.log.map(l => l.text).some(t => t.includes('带血的刀')), '战报说明翻出的是刀');
+
+  const fake = threatState(9, 3);
+  assert.equal(Engine.applyAction(fake, 'p1', { type: 'blackmailer_refuse' }).ok, true);
+  assert.equal(Engine.applyAction(fake, 'p0', { type: 'reaction', use: true }).ok, true);
+  assert.equal(fake.players[1].gold, 6, '假威胁标记分文不失');
+  assert.deepEqual(fake.effects.blackmailer.revealed, [{ num: 3, isReal: false }]);
+  assert.ok(fake.log.map(l => l.text).some(t => t.includes('玫瑰花')), '战报说明翻出的是玫瑰');
+
+  // 面板标记：翻开前是盖牌，翻开后带 isReal
+  const view1 = Engine.sanitize(real, 'p1');
+  assert.deepEqual(view1.players[1].threat, { num: 3, revealed: true, isReal: true });
+  const view0 = Engine.sanitize(fake, 'p1');
+  assert.deepEqual(view0.players[1].threat, { num: 3, revealed: true, isReal: false });
+  // 还没翻开的那一轮：面板上是盖牌（isReal 为 null）
+  const pending = threatState(9, 3);
+  assert.deepEqual(Engine.sanitize(pending, 'p1').players[1].threat,
+    { num: 3, revealed: false, isReal: null });
+});
+
+test('支付赎金后威胁标记消失，不再触发冻结', () => {
+  const state = threatState(3, 3);
+  assert.equal(Engine.applyAction(state, 'p1', { type: 'blackmailer_bribe' }).ok, true);
+  assert.equal(state.players[1].gold, 3, '支付一半金币');
+  assert.equal(state.players[0].gold, 0, '赎金不给勒索者（沿用既定规则：只是销毁）');
+  assert.deepEqual(state.effects.blackmailer.nums, []);
+  assert.equal(state.reaction, null);
+  assert.equal(Engine.sanitize(state, 'p1').players[1].threat, null);
 });

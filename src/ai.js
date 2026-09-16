@@ -184,6 +184,8 @@
       if (state.reaction.playerIdx !== idx) return null;
       // 行政官的逮捕令：白拿一栋建筑，几乎总是值得发动
       if (state.reaction.kind === 'magistrate') return { type: 'reaction', use: true };
+      // 勒索者的威胁标记：翻开没有成本，最多白拿对方全部金币
+      if (state.reaction.kind === 'blackmailer') return { type: 'reaction', use: true };
       const card = state.pendingDestroy ? state.pendingDestroy.card : state.reaction.card;
       const worth = card.cost >= 3 && p.gold >= 2;
       return { type: 'reaction', use: worth };
@@ -372,7 +374,9 @@
         return { type: 'blackmailer_char', num: choices[0] || 2 };
       }
       case 'blackmailer_threat':
-        return { type: 'blackmailer_bribe' };
+        // 赎金是一半金币，被真标记命中是全没了 —— 期望上两者相当，
+        // 金币多时花钱买确定性，金币少时干脆赌一把让勒索者去翻
+        return { type: p.gold >= 4 ? 'blackmailer_bribe' : 'blackmailer_refuse' };
       case 'spy_target': {
         const target = state.players.filter((_, i) => i !== idx).sort((a, b) => b.hand.length - a.hand.length)[0];
         return { type: 'spy_target', target: target && target.id };

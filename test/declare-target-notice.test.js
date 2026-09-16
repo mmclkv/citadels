@@ -57,4 +57,14 @@ assert.ok((magBlock.match(/queueEvent\(\{/g) || []).length >= 3,
 assert.ok(!/signed/.test(magBlock), '弹窗不得泄露哪一张是真逮捕令');
 assert.ok(/n\.targets/.test(magBlock), '弹窗应列出全部三个目标的角色名');
 
+// 勒索者：目标拒绝赎回后被冻结，状态栏要说清在等谁；面板上要画威胁标记
+assert.ok(/请等待勒索者翻开威胁标记/.test(app), '被威胁方应看到等待勒索者的提示');
+assert.ok(/s\.reaction\.kind === 'blackmailer'[\s\S]{0,80}targetIdx === App\.myIdx/.test(app),
+  '等待提示只在自己被威胁时出现');
+assert.ok(/threatMarkHTML\(p\.threat\)/.test(app), '对手面板应画威胁标记');
+assert.ok(/threatMarkHTML\(me\.threat\)/.test(app), '自己面板应画威胁标记');
+assert.ok(/is-real/.test(app) && /is-fake/.test(app), '翻开后要区分刀子与玫瑰花');
+const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), 'utf8');
+assert.ok(/\.threat-mark\s*\{/.test(css), '威胁标记需要有样式');
+
 console.log('刺客/盗贼宣告：全体弹窗、编号与角色名战报全部通过');
