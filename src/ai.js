@@ -372,6 +372,17 @@
         if (choices.length === 0) return { type: 'ability_skip' };
         return { type: 'blackmailer_char', num: choices[0] };
       }
+      case 'blackmailer_signed': {
+        // 两个目标已定，由 AI 指定真威胁标记：优先给金币更多的那个，威胁才有意义
+        const nums = pd.nums || [];
+        let best = nums[0]; let bestGold = -1;
+        nums.forEach(n => {
+          const entry = (state.callQueue || []).find(e => e.num === n);
+          const gold = entry && state.players[entry.playerIdx] ? state.players[entry.playerIdx].gold : 0;
+          if (gold > bestGold) { bestGold = gold; best = n; }
+        });
+        return { type: 'blackmailer_signed', num: best };
+      }
       case 'blackmailer_threat':
         // 赎金是一半金币，被真标记命中是全没了 —— 期望上两者相当，
         // 金币多时花钱买确定性，金币少时干脆赌一把让勒索者去翻

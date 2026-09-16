@@ -13,6 +13,7 @@ enum class ActionType {
   ArtistDone,
   BlackmailerBribe,
   BlackmailerRefuse,
+  BlackmailerSigned,
   Build,
   ChooseCards,
   ChooseChar,
@@ -68,6 +69,7 @@ inline std::optional<ActionType> action_type_from_string(std::string_view value)
   CITADELS_ACTION(ArtistDone, "artist_done")
   CITADELS_ACTION(BlackmailerBribe, "blackmailer_bribe")
   CITADELS_ACTION(BlackmailerRefuse, "blackmailer_refuse")
+  CITADELS_ACTION(BlackmailerSigned, "blackmailer_signed")
   CITADELS_ACTION(Build, "build")
   CITADELS_ACTION(ChooseCards, "choose_cards")
   CITADELS_ACTION(ChooseChar, "choose_char")
@@ -114,6 +116,7 @@ inline std::string_view action_type_name(ActionType type) {
     case ActionType::ArtistDone: return "artist_done";
     case ActionType::BlackmailerBribe: return "blackmailer_bribe";
     case ActionType::BlackmailerRefuse: return "blackmailer_refuse";
+    case ActionType::BlackmailerSigned: return "blackmailer_signed";
     case ActionType::Build: return "build";
     case ActionType::ChooseCards: return "choose_cards";
     case ActionType::ChooseChar: return "choose_char";

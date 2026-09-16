@@ -205,10 +205,19 @@ test('勒索者能分配两个威胁目标，并在战报中公开去向', () =>
   assert.equal(Engine.applyAction(state, 'p0', { type: 'ability' }).ok, true);
   assert.equal(Engine.applyAction(state, 'p0', { type: 'blackmailer_char', num: 3 }).ok, true);
   assert.equal(Engine.applyAction(state, 'p0', { type: 'blackmailer_char', num: 5 }).ok, true);
+  // 两个目标选完后，还要由勒索者指定哪一个是真威胁标记（不再随机）
+  assert.equal(state.turn.pending.kind, 'blackmailer_signed', '应先问勒索者真标记给谁');
+  assert.equal(state.effects.blackmailer, null, '指定真标记前不应落地');
+  const signedActs = Engine.getAvailableActions(state, 'p0').actions
+    .filter(a => a.type === 'blackmailer_signed').map(a => a.num).sort((a, b) => a - b);
+  assert.deepEqual(signedActs, [3, 5], '只能在两个已选目标里挑');
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'blackmailer_signed', num: 9 }).ok, false,
+    '不在两个目标里的编号应被拒绝');
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'blackmailer_signed', num: 5 }).ok, true);
   assert.deepEqual(state.effects.blackmailer.nums, [3, 5]);
   assert.deepEqual(state.effects.blackmailer.done, []);
   assert.deepEqual(state.effects.blackmailer.revealed, []);
-  assert.ok([3, 5].includes(state.effects.blackmailer.signed));
+  assert.equal(state.effects.blackmailer.signed, 5, '真标记应落在勒索者指定的 5 号身上');
   // 战报公开两个目标，但不泄露哪一个是真的
   const line = state.log.map(l => l.text).filter(t => t.includes('威胁标记发给了')).pop();
   assert.ok(line, '战报应宣告威胁标记发给了谁');

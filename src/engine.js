@@ -821,6 +821,13 @@
       case 'blackmailer_second':
         return { prompt: '【勒索者】选择第 2 个威胁角色编号', actions:
           charChoices(state, t, blackmailerBlockedNums(state).concat([t.num, pd.first]), 'blackmailer_char') };
+      case 'blackmailer_signed': {
+        // 两个目标已暗置，现在由勒索者本人决定哪一个是真（签名）威胁标记
+        const nums = pd.nums || [];
+        return { prompt: '【勒索者】选择把真威胁标记放在哪个角色身上（另一个为假威胁标记）',
+          actions: nums.map(n => ({ type: 'blackmailer_signed', num: n,
+            label: n + ' · ' + (charByNum(state, n) ? charByNum(state, n).name : '?') })) };
+      }
       case 'blackmailer_threat':
         return { prompt: '【勒索者】你受到威胁，可支付一半金币赎回', actions: [
           { type: 'blackmailer_bribe', label: '支付 ' + Math.floor(p.gold / 2) + ' 金赎回' },
@@ -1401,10 +1408,17 @@
           return err('不能把威胁标记放在 ' + n + ' 号角色身上（1 号角色 / 被刺杀 / 被施咒 / 已有逮捕令者除外）');
         }
         if (pd.kind === 'blackmailer_declare') { t.pending = { kind: 'blackmailer_second', first: n }; return ok(); }
-        // 两个标记落在哪两个角色上是公开信息（哪一个是真的仍然保密）
-        const nums = [pd.first, n];
-        const signed = randInt(state, 2) === 0 ? pd.first : n;
-        return commitBlackmailer(state, idx, t, nums, signed);
+        // 两个目标都选完后，再让勒索者指定哪一个是真威胁标记（原来这里是随机决定的）
+        t.pending = { kind: 'blackmailer_signed', nums: [pd.first, n] };
+        return ok();
+      }
+      case 'blackmailer_signed': {
+        const pd = t.pending;
+        if (!pd || pd.kind !== 'blackmailer_signed') return err('当前无需指定真威胁标记');
+        const nums = pd.nums || [];
+        const n = Number(action.num);
+        if (!Number.isFinite(n) || nums.indexOf(n) < 0) return err('真威胁标记只能放在已选的两个角色之一');
+        return commitBlackmailer(state, idx, t, nums, n);
       }
       case 'spy_target': {
         const pd = t.pending;
@@ -2473,7 +2487,8 @@
       abbot_declare: '宣告住持资源组合', tax_collect: '收取建筑税',
       magistrate_declare: '分配逮捕令', magistrate_second: '分配逮捕令', magistrate_third: '分配逮捕令',
       magistrate_signed: '指定真逮捕令目标',
-      blackmailer_declare: '分配威胁标记', blackmailer_second: '分配威胁标记', blackmailer_threat: '处理勒索威胁',
+      blackmailer_declare: '分配威胁标记', blackmailer_second: '分配威胁标记',
+      blackmailer_signed: '指定真威胁标记目标', blackmailer_threat: '处理勒索威胁',
       spy_target: '选择间谍调查对象', spy_color: '选择间谍调查类型',
       wizard_target: '选择法师查看对象', wizard_card: '选择法师取得的牌', wizard_choice: '选择法师牌的去向',
       emperor_crown: '选择皇冠归属', emperor_take: '选择拿取金币或手牌',
