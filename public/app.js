@@ -508,6 +508,11 @@
         flyGoldIn(n.playerIdx, n.amount);
         return;
 
+      case 'navigator_bonus':
+        if (n.mode === 'gold') flyGoldIn(n.playerIdx, n.amount);
+        else if (n.mode === 'cards') flyCardsToHand(n.playerIdx, n.amount);
+        return;
+
       case 'noble_draw':
         // 贵族：每有1栋皇家建筑抽1张建筑牌。飞行动画让玩家看清"谁抽了多少张"。
         flyCardsToHand(n.playerIdx, n.amount);

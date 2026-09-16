@@ -1617,12 +1617,18 @@
       case 'navigator_bonus': {
         const pd = t.pending;
         if (!pd || pd.kind !== 'navigator_bonus') return err('当前无需选择');
-        if (action.mode === 'gold') { p.gold += 4; log(state, '【航海家】' + p.name + ' 额外获得 4 枚金币。', 'good'); }
-        else {
+        if (action.mode === 'gold') {
+          p.gold += 4;
+          log(state, '【航海家】' + p.name + ' 额外获得 4 枚金币。', 'good');
+          notify(state, 'navigator_bonus', { playerIdx: idx, playerId: p.id, playerName: p.name,
+            mode: 'gold', amount: 4 });
+        } else if (action.mode === 'cards') {
           const cards = drawCards(state, 4);
           p.hand = p.hand.concat(cards);
           log(state, '【航海家】' + p.name + ' 额外抽取 4 张建筑牌。', 'good');
-        }
+          notify(state, 'navigator_bonus', { playerIdx: idx, playerId: p.id, playerName: p.name,
+            mode: 'cards', amount: cards.length });
+        } else return err('无效的航海家奖励');
         t.bonusDone = true; t.abilityUsed = true; t.pending = null;
         return ok();
       }
