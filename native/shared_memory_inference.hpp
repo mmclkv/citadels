@@ -55,7 +55,16 @@ class SharedMemoryInferenceClient {
 
   BatchEvaluationResult evaluate(const std::vector<std::vector<float>>& states,
                                  const std::vector<std::vector<std::vector<float>>>& actions) {
-    const auto payload = encode_binary_batch_eval_request(states, actions);
+    // The pipe client uses CTB1 framing, while a shared-memory slot stores
+    // only the command payload. Strip the frame before handing it to Python.
+    const auto frame = encode_binary_batch_eval_request(states, actions);
+    if (frame.size() < 8) throw std::runtime_error("共享内存推理请求帧不完整");
+    uint32_t magic = 0, frame_size = 0;
+    std::memcpy(&magic, frame.data(), sizeof(magic));
+    std::memcpy(&frame_size, frame.data() + 4, sizeof(frame_size));
+    if (magic != kGpuBinaryMagic || frame_size != frame.size() - 8)
+      throw std::runtime_error("共享内存推理请求帧头错误");
+    const std::vector<uint8_t> payload(frame.begin() + 8, frame.end());
     if (payload.size() > slot_bytes_ - kSharedSlotHeaderBytes)
       throw std::runtime_error("共享内存推理请求超过槽位容量");
     uint8_t* slot = nullptr;
