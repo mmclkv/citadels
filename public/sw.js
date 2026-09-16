@@ -1,4 +1,4 @@
-const CACHE_NAME = 'citadels-shell-v15';
+const CACHE_NAME = 'citadels-shell-v16';
 const APP_SHELL = [
   './', './index.html', './manifest.json', './style.css',
   './themes/neon/theme.css', './themes/neon/manifest.js', './themes/theme-manager.js',

@@ -140,16 +140,15 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
   min-height:38px;padding:5px 8px 5px 14px;border-bottom:1px solid var(--line);background:#f7efe0}
 .side-panel-title{font-size:12px;color:var(--dim);font-weight:800;letter-spacing:.04em}
 .side-panel-toggle{display:inline-flex;align-items:center;gap:4px;appearance:none;border:1px solid var(--line2);
-  border-radius:7px;background:transparent;color:var(--ink2);padding:4px 8px;font:inherit;font-size:11px;
-  font-weight:700;line-height:1.2;cursor:pointer;transition:.15s}
+  justify-content:center;width:30px;height:28px;border-radius:7px;background:transparent;color:var(--ink2);
+  padding:2px;font:inherit;font-size:11px;font-weight:700;line-height:1.2;cursor:pointer;transition:.15s}
 .side-panel-toggle:hover{border-color:var(--gold);color:var(--gold-d,#a97c15);background:#fffaf0}
 .side-panel-toggle-icon{font-size:16px;line-height:10px}
 .side-panel-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0}
 .side-panel.collapsed{flex-basis:42px;width:42px}
 .side-panel.collapsed .side-panel-head{justify-content:center;padding:5px 3px}
 .side-panel.collapsed .side-panel-title,.side-panel.collapsed .side-panel-body{display:none}
-.side-panel.collapsed .side-panel-toggle{padding:7px 5px;flex-direction:column;gap:2px}
-.side-panel.collapsed .side-panel-toggle-label{font-size:10px;writing-mode:vertical-rl;letter-spacing:.05em}
+.side-panel.collapsed .side-panel-toggle{width:30px;height:28px}
 .side-panel h3{font-size:13px;padding:10px 14px;border-bottom:1px solid var(--line);color:#7a5c22}
 .log{flex:1 1 auto;overflow:auto;padding:10px 14px;font-size:12.5px;line-height:1.65}
 .log div{padding:2px 0;border-bottom:1px dotted rgba(200,180,150,.4)}

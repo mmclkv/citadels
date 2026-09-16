@@ -64,11 +64,12 @@ html[data-theme="neon"] input,
 html[data-theme="neon"] select { color:var(--ink); }
 html[data-theme="neon"] button:focus-visible,
 html[data-theme="neon"] input:focus-visible,
-html[data-theme="neon"] select:focus-visible,
 html[data-theme="neon"] [tabindex]:focus-visible {
   outline:2px solid var(--ui-cyan);
   outline-offset:3px;
 }
+html[data-theme="neon"] input:focus-visible,
+html[data-theme="neon"] select:focus-visible { outline:none; }
 
 /* 主题切换控件 */
 .theme-control {
@@ -172,7 +173,12 @@ html[data-theme="neon"] select {
   color:var(--ink);
 }
 html[data-theme="neon"] input:focus,
-html[data-theme="neon"] select:focus { border-color:var(--ui-cyan); box-shadow:0 0 0 3px rgba(67,228,255,.14); }
+html[data-theme="neon"] select:focus { border-color:var(--ui-cyan); }
+html[data-theme="neon"] input:focus,
+html[data-theme="neon"] select:focus {
+  outline:none;
+  box-shadow:0 0 0 3px rgba(67,228,255,.14),0 0 14px rgba(67,228,255,.30);
+}
 html[data-theme="neon"] .btn,
 html[data-theme="neon"] .act {
   background:rgba(9,22,35,.84);

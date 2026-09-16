@@ -3026,9 +3026,7 @@
       sideToggle.setAttribute('aria-label', collapsed ? '展开右侧边栏' : '收起右侧边栏');
       sideToggle.title = collapsed ? '展开右侧边栏' : '收起右侧边栏';
       const icon = sideToggle.querySelector('.side-panel-toggle-icon');
-      const label = sideToggle.querySelector('.side-panel-toggle-label');
       if (icon) icon.textContent = collapsed ? '‹' : '›';
-      if (label) label.textContent = collapsed ? '展开' : '收起';
     }
     // PC 端侧栏占用棋盘右侧宽度：让浮动菜单继续锚定战斗区域右下角
     if (gameScreen) {
@@ -3040,7 +3038,7 @@
       }
     }
     const tabs = $('#side-tabs');
-    if (tabs) tabs.hidden = !both;
+    if (tabs) tabs.hidden = false;
     const active = both ? App.activeSideTab : (App.logOpen ? 'log' : 'chat');
     const showLog = App.logOpen && (!both || active === 'log');
     const showChat = App.chatOpen && (!both || active === 'chat');
@@ -3742,8 +3740,18 @@
       else if (!App.chatOpen && App.logOpen) App.activeSideTab = 'log';
       updateSidePanel();
     };
-    $('#tab-log').onclick = () => { App.activeSideTab = 'log'; updateSidePanel(); };
-    $('#tab-chat').onclick = () => { App.activeSideTab = 'chat'; updateSidePanel(); };
+    $('#tab-log').onclick = () => {
+      App.logOpen = true;
+      App.activeSideTab = 'log';
+      App.sidePanelCollapsed = false;
+      updateSidePanel();
+    };
+    $('#tab-chat').onclick = () => {
+      App.chatOpen = true;
+      App.activeSideTab = 'chat';
+      App.sidePanelCollapsed = false;
+      updateSidePanel();
+    };
     $('#btn-chat').onclick = openChatComposer;
     $('#chat-close').onclick = closeChatComposer;
     $('#chat-composer').onsubmit = e => {
@@ -3800,7 +3808,7 @@
   window.__CitadelsApp = App;
   // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
   if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=5', { scope: './' }).then(registration => {
+    navigator.serviceWorker.register('./sw.js?v=6', { scope: './' }).then(registration => {
       // GitHub Pages 上的 PWA 可能长时间保持旧 worker，启动时主动检查一次新版本。
       registration.update().catch(() => {});
       registration.addEventListener('updatefound', () => {
