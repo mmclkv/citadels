@@ -44,7 +44,10 @@ async function main() {
     client.setModelPath(flatPath);
 
     for (let game = 1; game <= GAMES; game++) {
-      const charSet = ['base', 'dark', 'mixed'][(game - 1) % 3];
+      // 每局从基本、黑暗、混合三种角色组中伪随机选择；使用固定种子
+      // 让评测可复现，同时避免按固定周期暴露角色组分布。
+      const charSetSeed = Math.imul(20260913 + game * 7919, 1664525) + 1013904223;
+      const charSet = ['base', 'dark', 'mixed'][(charSetSeed >>> 0) % 3];
       const seats = [{ id: 'nn', name: '策略网络', isBot: true, botType: 'neural', botLevel: 'hard' }];
       for (let i = 1; i < 6; i++) seats.push({
         id: 'h' + i, name: '启发式' + i, isBot: true, botType: 'heuristic',
