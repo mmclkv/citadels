@@ -56,6 +56,10 @@
     return state.players.findIndex(p => p.hasCrown);
   }
   function charOf(id) { return CHAR_MAP[id]; }
+  function charByNum(state, num) {
+    const id = (state.charDeck || []).find(cid => charOf(cid) && charOf(cid).num === num);
+    return id ? charOf(id) : null;
+  }
   /** 玩家当前正在行动的角色（用于判断主教保护等） */
   function playerHolds(state, idx, charId) {
     return state.players[idx].chars.indexOf(charId) >= 0;
@@ -482,6 +486,68 @@
     return same < maxSameName(p);
   }
 
+  /* ------------------------- 建造的落定与收尾 ------------------------- */
+  // 建造被拆成两段，是为了让「行政官是否发动逮捕令」能在建筑真正落地之前决定：
+  // 先由 completeBuild 扣费入手城市，再由 finishBuild 做税务、日志与终局判定。
+  function completeBuild(state, t, idx, card) {
+    const p = state.players[idx];
+    p.gold -= card.cost;
+    t.spentOnBuild += card.cost;
+    p.hand = p.hand.filter(x => x.uid !== card.uid);
+    // 保留 card 上可能附着的 museum 牌（经由墓地回收等路径回到手牌的建筑会带着它们）。
+    // 不能无条件 museum: [] —— 那会让这些物理牌从整局中消失。
+    const built = Object.assign({}, card, {
+      beautified: 0, builtRound: state.round,
+      museum: Array.isArray(card.museum) ? card.museum.slice() : []
+    });
+    p.city.push(built);
+    t.builds++;
+    return built;
+  }
+
+  // confiscateBy >= 0 表示本次建造被该玩家（行政官）没收。
+  function finishBuild(state, t, idx, card, built, confiscateBy) {
+    const p = state.players[idx];
+    const confiscated = confiscateBy >= 0;
+    // 税务官的标记跨轮保留；行政官没收时由行政官承担本次税费。
+    const taxCollector = state.players.findIndex(player => player.chars.some(cid => cid === 'tax_collector'));
+    const taxPayer = confiscated ? state.players[confiscateBy] : p;
+    if (state.charDeck.some(cid => cid === 'tax_collector') && taxPayer !== state.players[taxCollector] && taxPayer.gold > 0) {
+      taxPayer.gold--; state.effects.taxCollectorGold = (state.effects.taxCollectorGold || 0) + 1;
+      log(state, '【税务官】收取 1 枚建筑税。', 'info');
+    }
+    log(state, p.name + ' 建造了『' + card.name + '』（' + card.cost + ' 金）。', 'build');
+    notify(state, 'built', {
+      playerIdx: idx, playerId: p.id, playerName: p.name,
+      card: { uid: built.uid, name: built.name, en: built.en, desc: built.desc,
+        color: built.color, cost: built.cost, scoreValue: built.scoreValue,
+        purple: built.purple || null }
+    });
+    if (p.city.length >= state.config.endDistricts && state.firstToFinish < 0) {
+      state.firstToFinish = idx;
+      log(state, '* ' + p.name + ' 率先建成第 ' + state.config.endDistricts + ' 栋建筑，本轮结束后游戏结束！', 'sys');
+    }
+    // 炼金术士的建造花费统一在 endTurn 回收（含女巫接管的情况）
+    return ok();
+  }
+
+  function resolveBuild(state, t, idx, card, confiscateBy) {
+    const built = completeBuild(state, t, idx, card);
+    if (confiscateBy >= 0) {
+      const p = state.players[idx];
+      const magistrate = state.players[confiscateBy];
+      // 没收：建筑从目标城市移出、返还建造费，行政官免费获得该建筑。
+      // 目标的建造次数仍然照计（t.builds 已在 completeBuild 里 ++）。
+      p.city = p.city.filter(d => d.uid !== built.uid);
+      p.gold += card.cost;
+      magistrate.city.push(built);
+      log(state, '【行政官】' + magistrate.name + ' 没收了 ' + p.name + ' 建造的『' + card.name + '』。', 'bad');
+      notify(state, 'magistrate_confiscate', { byIdx: confiscateBy, byId: magistrate.id, byName: magistrate.name,
+        playerIdx: idx, playerId: p.id, playerName: p.name, card: { uid: card.uid, name: card.name, cost: card.cost } });
+    }
+    return finishBuild(state, t, idx, card, built, confiscateBy);
+  }
+
   // 状态同步/重连时，极少数情况下可能出现「已进入行动阶段，但 turn 为空」的
   // 中间状态。只要本轮还有角色没有叫到，就可以安全地从行动队列恢复当前行动者。
   // 这也兼容旧版本服务进程留下的房间状态，避免客户端永远停留在“等待开始”。
@@ -528,6 +594,15 @@
     if (state.reaction) {
       if (state.reaction.playerIdx !== idx) return { actions: [], prompt: '等待其他玩家响应…' };
       const r = state.reaction;
+      if (r.kind === 'magistrate') {
+        return {
+          prompt: r.prompt,
+          actions: [
+            { type: 'reaction', use: true, label: '发动逮捕令：没收『' + r.card.name + '』，免费建入自己城市' },
+            { type: 'reaction', use: false, label: '不发动' }
+          ]
+        };
+      }
       return {
         prompt: r.prompt,
         actions: [
@@ -712,6 +787,13 @@
         const used = pd.used || [];
         return { prompt: '【行政官】选择第 ' + (used.length + 1) + ' 个逮捕令目标', actions:
           charChoices(state, t, used.concat([t.num]), 'magistrate_char') };
+      }
+      case 'magistrate_signed': {
+        // 三个目标已暗置，现在由行政官本人决定哪一个是真（签名）逮捕令
+        const used = pd.used || [];
+        return { prompt: '【行政官】选择把真逮捕令放在哪个角色身上（其余两个为假逮捕令）',
+          actions: used.map(n => ({ type: 'magistrate_signed', num: n,
+            label: n + ' · ' + (charByNum(state, n) ? charByNum(state, n).name : '?') })) };
       }
       case 'blackmailer_declare':
         return { prompt: '【勒索者】选择第 1 个威胁角色编号', actions: charChoices(state, t, [], 'blackmailer_char') };
@@ -1096,56 +1178,28 @@
         const card = p.hand.find(x => x.uid === action.uid);
         if (!card) return err('手牌中没有这张建筑牌');
         if (!canBuildCard(state, p, card, t)) return err('无法建造该建筑（金币不足、超出建造限额或已有同名建筑）');
-        p.gold -= card.cost;
-        t.spentOnBuild += card.cost;
-        p.hand = p.hand.filter(x => x.uid !== action.uid);
-        // 保留 card 上可能附着的 museum 牌（经由墓地回收等路径回到手牌的建筑会带着它们）。
-        // 不能无条件 museum: [] —— 那会让这些物理牌从整局中消失。
-        const built = Object.assign({}, card, {
-          beautified: 0, builtRound: state.round,
-          museum: Array.isArray(card.museum) ? card.museum.slice() : []
-        });
-        p.city.push(built);
-        t.builds++;
-        // 行政官的签名逮捕令：目标第一次付费建造时没收建筑，返还建造费，
-        // 并将建筑免费放入行政官城市；目标的建造次数仍然照计。
-        const warrant = state.effects.magistrate;
-        let confiscated = false;
-        if (warrant && !warrant.claimed && warrant.signed === t.num && idx !== warrant.playerIdx) {
-          const magistrate = state.players[warrant.playerIdx];
-          if (!magistrate.city.some(d => d.name === built.name)) {
-            p.city = p.city.filter(d => d.uid !== built.uid);
-            p.gold += card.cost;
-            magistrate.city.push(built);
-            confiscated = true;
-            log(state, '【行政官】' + magistrate.name + ' 没收了 ' + p.name + ' 建造的『' + card.name + '』。', 'bad');
-            notify(state, 'magistrate_confiscate', { byIdx: warrant.playerIdx, byId: magistrate.id, byName: magistrate.name,
-              playerIdx: idx, playerId: p.id, playerName: p.name, card: { uid: card.uid, name: card.name, cost: card.cost } });
+
+        // 行政官的签名（真）逮捕令：目标第一次付费建造时，先冻结全场，
+        // 由行政官决定是否发动——发动则没收该建筑并免费建入自己城市。
+        // 无论发动与否，签名逮捕令都只针对这一次建造。
+        const w = state.effects.magistrate;
+        if (w && !w.claimed && w.signed === t.num && idx !== w.playerIdx) {
+          w.claimed = true;
+          const magistrate = state.players[w.playerIdx];
+          if (!magistrate.city.some(d => d.name === card.name)) {
+            state.reaction = {
+              kind: 'magistrate',
+              playerIdx: w.playerIdx,
+              queue: [w.playerIdx],
+              build: { uid: card.uid, targetIdx: idx },
+              card: { uid: card.uid, name: card.name, cost: card.cost },
+              prompt: '【行政官】是否发动逮捕令，没收 ' + p.name + ' 即将建造的『' + card.name + '』？'
+            };
+            return ok();
           }
-          // 签名逮捕令只针对目标第一次付费建造，无论能否没收都视为已处理。
-          warrant.claimed = true;
         }
-        // 税务官的标记跨轮保留；行政官没收时由行政官承担本次税费。
-        const taxCollector = state.players.findIndex(player => player.chars.some(cid => cid === 'tax_collector'));
-        const taxPayer = confiscated
-          ? state.players[warrant.playerIdx] : p;
-        if (state.charDeck.some(cid => cid === 'tax_collector') && taxPayer !== state.players[taxCollector] && taxPayer.gold > 0) {
-          taxPayer.gold--; state.effects.taxCollectorGold = (state.effects.taxCollectorGold || 0) + 1;
-          log(state, '【税务官】收取 1 枚建筑税。', 'info');
-        }
-        log(state, p.name + ' 建造了『' + card.name + '』（' + card.cost + ' 金）。', 'build');
-        notify(state, 'built', {
-          playerIdx: idx, playerId: p.id, playerName: p.name,
-          card: { uid: built.uid, name: built.name, en: built.en, desc: built.desc,
-            color: built.color, cost: built.cost, scoreValue: built.scoreValue,
-            purple: built.purple || null }
-        });
-        if (p.city.length >= state.config.endDistricts && state.firstToFinish < 0) {
-          state.firstToFinish = idx;
-          log(state, '* ' + p.name + ' 率先建成第 ' + state.config.endDistricts + ' 栋建筑，本轮结束后游戏结束！', 'sys');
-        }
-        // 炼金术士的建造花费统一在 endTurn 回收（含女巫接管的情况）
-        return ok();
+
+        return resolveBuild(state, t, idx, card, -1);
       }
 
       /* ---------- 紫色建筑能力 ---------- */
@@ -1236,8 +1290,17 @@
         if (!Number.isFinite(n) || n === t.num || (pd.used || []).includes(n)) return err('逮捕令目标必须是三个不同的角色');
         const used = (pd.used || []).concat(n);
         if (used.length < 3) { t.pending = { kind: used.length === 1 ? 'magistrate_second' : 'magistrate_third', used }; return ok(); }
-        const signed = used[randInt(state, used.length)];
-        state.effects.magistrate = { nums: used, signed, playerIdx: idx, claimed: false };
+        // 三个目标都选完后，再让行政官指定哪一个是真逮捕令（原来这里是随机决定的）
+        t.pending = { kind: 'magistrate_signed', used };
+        return ok();
+      }
+      case 'magistrate_signed': {
+        const pd = t.pending;
+        if (!pd || pd.kind !== 'magistrate_signed') return err('当前无需指定真逮捕令');
+        const used = pd.used || [];
+        const n = Number(action.num);
+        if (!Number.isFinite(n) || !used.includes(n)) return err('真逮捕令只能放在已选的三个角色之一');
+        state.effects.magistrate = { nums: used, signed: n, playerIdx: idx, claimed: false };
         t.abilityUsed = true; t.pending = null;
         log(state, '【行政官】' + p.name + ' 分配了 3 个逮捕令标记。', 'magic');
         notify(state, 'magistrate_declare', { byIdx: idx, byId: p.id, byName: p.name, nums: used });
@@ -1702,11 +1765,27 @@
     return ok();
   }
 
+  // 行政官的逮捕令响应：先解冻，再按是否发动完成目标那一手建造
+  function applyMagistrateWarrant(state, idx, use) {
+    const r = state.reaction;
+    const t = state.turn;
+    const ti = r.build.targetIdx;
+    const target = state.players[ti];
+    const card = target.hand.find(x => x.uid === r.build.uid);
+    state.reaction = null;
+    if (!t || t.playerIdx !== ti) return err('当前不是该玩家的建造时机');
+    if (!card) return err('待建造的建筑已不在手牌');
+    const magistrate = state.players[idx];
+    const canTake = use && !magistrate.city.some(d => d.name === card.name);
+    return resolveBuild(state, t, ti, card, canTake ? idx : -1);
+  }
+
   function applyReaction(state, idx, action) {
     const r = state.reaction;
     const p = state.players[idx];
-    const card = state.pendingDestroy ? state.pendingDestroy.card : r.card;
     if (action.type !== 'reaction') return err('无效的响应');
+    if (r.kind === 'magistrate') return applyMagistrateWarrant(state, idx, !!action.use);
+    const card = state.pendingDestroy ? state.pendingDestroy.card : r.card;
     if (action.use) {
       if (p.gold < 1) return err('金币不足');
       p.gold -= 1;
@@ -2163,6 +2242,7 @@
       navigator_bonus: '选择额外奖励', monk_declare: '宣告资源组合',
       abbot_declare: '宣告住持资源组合', tax_collect: '收取建筑税',
       magistrate_declare: '分配逮捕令', magistrate_second: '分配逮捕令', magistrate_third: '分配逮捕令',
+      magistrate_signed: '指定真逮捕令目标',
       blackmailer_declare: '分配威胁标记', blackmailer_second: '分配威胁标记', blackmailer_threat: '处理勒索威胁',
       spy_target: '选择间谍调查对象', spy_color: '选择间谍调查类型',
       wizard_target: '选择法师查看对象', wizard_card: '选择法师取得的牌', wizard_choice: '选择法师牌的去向',

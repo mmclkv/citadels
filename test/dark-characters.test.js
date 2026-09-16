@@ -81,7 +81,25 @@ test('法师可以查看并立即建造目标手牌且不增加正常建造次�
   assert.equal(state.turn.builds, 0);
 });
 
-test('行政官签名逮捕令会没收目标第一次付费建造的建筑', () => {
+test('行政官可以指定哪个目标是真逮捕令（不再随机）', () => {
+  const state = stateWith('magistrate');
+  state.players[0].chars = ['magistrate'];
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'ability' }).ok, true);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 3 }).ok, true);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 5 }).ok, true);
+  // 选满 3 个后不应立即生效，而是进入「指定真逮捕令」这一步
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_char', num: 6 }).ok, true);
+  assert.equal(state.turn.pending.kind, 'magistrate_signed');
+  assert.equal(state.effects.magistrate, null);
+  // 真逮捕令只能给已选的三个角色之一
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: 4 }).ok, false);
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'magistrate_signed', num: 5 }).ok, true);
+  assert.equal(state.effects.magistrate.signed, 5);
+  assert.deepEqual(state.effects.magistrate.nums, [3, 5, 6]);
+  assert.equal(state.turn.pending, null);
+});
+
+test('真逮捕令命中时会冻结建造方，等行政官决定是否发动', () => {
   const state = stateWith('magistrate');
   state.players[0].chars = ['magistrate'];
   state.players[1].hand = [{ uid: 'x3', name: '神庙', color: 'blue', cost: 1, scoreValue: 1 }];
@@ -91,9 +109,64 @@ test('行政官签名逮捕令会没收目标第一次付费建造的建筑', ()
     incomeTaken: true, abilityUsed: true, builds: 0, spentOnBuild: 0, usedLab: false,
     usedSmithy: false, usedMuseum: false, bonusDone: false, pending: null };
   assert.equal(Engine.applyAction(state, 'p1', { type: 'build', uid: 'x3' }).ok, true);
-  assert.equal(state.players[0].city[0].uid, 'x3');
+  // 建筑尚未落地：既没扣钱也没进城市，等待行政官
+  assert.ok(state.reaction, '应挂起行政官的响应');
+  assert.equal(state.reaction.kind, 'magistrate');
+  assert.equal(state.reaction.playerIdx, 0);
   assert.equal(state.players[1].city.length, 0);
   assert.equal(state.players[1].gold, 3);
+  assert.equal(state.players[1].hand.length, 1);
+  // 冻结：目标玩家拿不到任何行动，行政官拿到「发动/不发动」
+  const forTarget = Engine.getAvailableActions(state, 'p1');
+  assert.deepEqual(forTarget.actions, [], '建造方在行政官决定前被冻结');
+  const forMagistrate = Engine.getAvailableActions(state, 'p0');
+  assert.equal(forMagistrate.actions.length, 2);
+  assert.equal(forMagistrate.actions[0].use, true);
+});
+
+test('行政官发动逮捕令后没收建筑，目标方拿回建造费', () => {
+  const state = stateWith('magistrate');
+  state.players[0].chars = ['magistrate'];
+  state.players[1].hand = [{ uid: 'x3', name: '神庙', color: 'blue', cost: 1, scoreValue: 1 }];
+  state.players[1].gold = 3;
+  state.effects.magistrate = { nums: [3, 5, 6], signed: 3, playerIdx: 0, claimed: false };
+  state.turn = { charId: 'wizard', num: 3, playerIdx: 1, phase: 'main', takenResources: true,
+    incomeTaken: true, abilityUsed: true, builds: 0, spentOnBuild: 0, usedLab: false,
+    usedSmithy: false, usedMuseum: false, bonusDone: false, pending: null };
+  Engine.applyAction(state, 'p1', { type: 'build', uid: 'x3' });
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'reaction', use: true }).ok, true);
+  assert.equal(state.reaction, null, '响应后解冻');
+  assert.equal(state.players[0].city[0].uid, 'x3');
+  assert.equal(state.players[1].city.length, 0);
+  assert.equal(state.players[1].gold, 3, '建造费已返还');
+  assert.equal(state.players[1].hand.length, 0, '建筑已出手牌');
+  assert.equal(state.effects.magistrate.claimed, true);
+});
+
+test('行政官放弃发动时建筑归建造方，且同一轮不再触发', () => {
+  const state = stateWith('magistrate');
+  state.players[0].chars = ['magistrate'];
+  state.players[1].hand = [
+    { uid: 'x3', name: '神庙', color: 'blue', cost: 1, scoreValue: 1 },
+    { uid: 'x4', name: '酒馆', color: 'green', cost: 1, scoreValue: 1 }
+  ];
+  state.players[1].gold = 5;
+  // 黑暗角色组默认含税务官，建造会被抽 1 金建筑税；这里剔除以单独验证逮捕令
+  state.charDeck = state.charDeck.filter(id => id !== 'tax_collector');
+  // 用建筑师（每回合可建 3 栋）才能验证「同回合第二次建造不再触发」
+  state.effects.magistrate = { nums: [7, 5, 6], signed: 7, playerIdx: 0, claimed: false };
+  state.turn = { charId: 'architect', num: 7, playerIdx: 1, phase: 'main', takenResources: true,
+    incomeTaken: true, abilityUsed: true, builds: 0, spentOnBuild: 0, usedLab: false,
+    usedSmithy: false, usedMuseum: false, bonusDone: false, pending: null };
+  Engine.applyAction(state, 'p1', { type: 'build', uid: 'x3' });
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'reaction', use: false }).ok, true);
+  assert.equal(state.players[1].city[0].uid, 'x3');
+  assert.equal(state.players[1].gold, 4, '放弃发动则正常付费');
+  assert.equal(state.players[0].city.length, 0);
+  // 签名逮捕令只针对第一次付费建造
+  assert.equal(Engine.applyAction(state, 'p1', { type: 'build', uid: 'x4' }).ok, true);
+  assert.equal(state.reaction, null, '第二次建造不再冻结');
+  assert.equal(state.players[1].city.length, 2);
 });
 
 test('勒索者能分配两个威胁目标，目标可用一半金币赎回', () => {

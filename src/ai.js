@@ -182,6 +182,8 @@
 
     if (state.reaction) {
       if (state.reaction.playerIdx !== idx) return null;
+      // 行政官的逮捕令：白拿一栋建筑，几乎总是值得发动
+      if (state.reaction.kind === 'magistrate') return { type: 'reaction', use: true };
       const card = state.pendingDestroy ? state.pendingDestroy.card : state.reaction.card;
       const worth = card.cost >= 3 && p.gold >= 2;
       return { type: 'reaction', use: worth };
@@ -355,6 +357,11 @@
         const used = pd.used || [];
         const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num && !used.includes(n));
         return { type: 'magistrate_char', num: choices[0] || 1 };
+      }
+      case 'magistrate_signed': {
+        // 三个目标已定，由 AI 指定真逮捕令：优先给本轮还没行动过的高顺位角色
+        const used = pd.used || [];
+        return { type: 'magistrate_signed', num: used[0] };
       }
       case 'blackmailer_declare': {
         const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num);

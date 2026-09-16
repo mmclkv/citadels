@@ -11,7 +11,7 @@ test('C++ 动作类型映射覆盖 JS 引擎全部动作', () => {
   const jsTypes = [...fs.readFileSync(path.join(__dirname, '..', 'src', 'engine.js'), 'utf8')
     .matchAll(/type:\s*'([^']+)'/g)].map(match => match[1]);
   for (const type of new Set(jsTypes)) assert.match(source, new RegExp(`\\"${type}\\"`));
-  assert.equal(new Set(jsTypes).size, 28);
+  assert.equal(new Set(jsTypes).size, 39);
 });
 
 test('C++ 动作 codec 头文件可独立编译', () => {

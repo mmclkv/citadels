@@ -3173,11 +3173,12 @@
     // 墓地响应
     if (s.reaction) {
       if (s.reaction.playerId === App.myId) {
-        promptEl.innerHTML = '墓地：' + escapeHtml(s.reaction.prompt);
+        // prompt 已自带【墓地】/【行政官】等前缀，这里不再重复拼接来源
+        promptEl.innerHTML = escapeHtml(s.reaction.prompt);
         (av.actions || []).forEach(a => actionsEl.appendChild(actionBtn(a, a.use ? 'main' : '')));
       } else {
         const who = s.players.find(p => p.id === s.reaction.playerId);
-        promptEl.innerHTML = '等待 ' + escapeHtml(who ? who.name : '') + ' 决定是否使用【墓地】…';
+        promptEl.innerHTML = '等待 ' + escapeHtml(who ? who.name : '') + ' 决定是否响应…';
       }
       return;
     }

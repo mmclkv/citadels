@@ -45,7 +45,8 @@ test('drawLines 支持自定义刻度精度与零基线，且不再写死 toFixe
 test('顶部数值：KL 归独立面板，不再挤在策略损失标题里重复显示', () => {
   const js = read('public/training.js');
   assert.match(js, /\$\('approx-kl-now'\)\.textContent = 'KL ' \+ num\(point\.approxKl, 5\)/);
-  const policyLine = js.match(/\$\('policy-now'\)\.textContent = [\s\S]*?;\n/);
+  // 注意：仓库在 Windows 上检出为 CRLF，行尾不能写死 \n，用 \s* 兼容两种换行
+  const policyLine = js.match(/\$\('policy-now'\)\.textContent = [\s\S]*?;\s*\n/);
   assert.ok(policyLine, '应保留策略损失标题的赋值');
   assert.doesNotMatch(policyLine[0], /approxKl|' · KL '/, '策略损失标题不应再重复显示 KL');
 });
