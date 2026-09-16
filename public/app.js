@@ -1451,6 +1451,51 @@
     '<path d="M8.8 17 H13" stroke="#b8862f" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>' +
     '<circle cx="12" cy="25.9" r="2.4" fill="#c0392b" stroke="#8e1b1b" stroke-width=".7"/>' +
     '<path d="M10.8 25.4 h2.4" stroke="#f6cdc8" stroke-width=".8" stroke-linecap="round"/></svg>';
+  /* 税务官标记：战场中央的钱袋，袋上压一枚铜钱，右下角挂金币数。
+     只有本局角色里有税务官时才出现，用来提示「场上已经积压了多少建筑税」。 */
+  const TAX_POT_SVG = '<svg viewBox="0 0 32 36" aria-hidden="true">' +
+    '<path d="M8.5 12.6 Q5.2 24 8 29.6 Q11 34.4 16 34.4 Q21 34.4 24 29.6 Q26.8 24 23.5 12.6 Z" ' +
+    'fill="#b07a45" stroke="#7a4f27" stroke-width="1.3" stroke-linejoin="round"/>' +
+    '<path d="M8.5 12.6 Q16 16.6 23.5 12.6 Q22.4 8.6 16 8.6 Q9.6 8.6 8.5 12.6 Z" ' +
+    'fill="#c98f56" stroke="#7a4f27" stroke-width="1.2" stroke-linejoin="round"/>' +
+    '<path d="M9.8 12.3 Q16 15.5 22.2 12.3" fill="none" stroke="#e6c469" stroke-width="1.8" stroke-linecap="round"/>' +
+    '<path d="M11 9.5 Q16 6.9 21 9.5" fill="none" stroke="#8a5a2c" stroke-width="1.4" stroke-linecap="round"/>' +
+    '<path d="M11.6 19 Q10.8 25.2 13 29.4" fill="none" stroke="#f3d9b0" stroke-width="1.4" ' +
+    'stroke-linecap="round" opacity=".5"/>' +
+    '<circle cx="16" cy="24.4" r="5.3" fill="#f6d877" stroke="#b8862f" stroke-width="1.2"/>' +
+    '<rect x="14.2" y="22.6" width="3.6" height="3.6" rx=".4" fill="#b8862f"/></svg>';
+
+  function renderTaxPot(wrap, s) {
+    if (!wrap) return;
+    const inPlay = (s.charDeck || []).some(c => c.id === 'tax_collector');
+    let pot = wrap.querySelector('#tax-pot');
+    if (!inPlay || s.phase === 'gameover') { if (pot) pot.remove(); return; }
+    if (!pot) {
+      pot = el('div', 'tax-pot');
+      pot.id = 'tax-pot';
+      pot.innerHTML = '<span class="tax-pot-mark">' + TAX_POT_SVG +
+        '<span class="tax-pot-count">0</span></span><span class="tax-pot-label">税务官</span>';
+      // 放在最前面：环形座位里的玩家框都带 data-seat，靠后追加，中央标记不会被它们顶掉
+      wrap.insertBefore(pot, wrap.firstChild);
+    }
+    const amount = (s.effects && s.effects.taxCollectorGold) || 0;
+    const cnt = pot.querySelector('.tax-pot-count');
+    if (cnt.textContent !== String(amount)) {
+      const grew = Number(cnt.textContent || 0) < amount;
+      cnt.textContent = String(amount);
+      if (grew) {
+        pot.classList.remove('is-bumped');
+        void pot.offsetWidth; // 强制回流，让动画能重新触发
+        pot.classList.add('is-bumped');
+      }
+    }
+    pot.classList.toggle('is-empty', amount <= 0);
+    const mark = pot.querySelector('.tax-pot-mark');
+    mark.title = amount > 0
+      ? '税务官：场上已放置 ' + amount + ' 枚金币，轮到税务官时可全部收走'
+      : '税务官：还没有人缴纳建筑税';
+  }
+
   function warrantMarkHTML(warrant) {
     if (!warrant) return '';
     return '<i class="warrant-mark" title="逮捕令：你被行政官盯上了">' + WARRANT_SVG + '</i>';
@@ -2442,6 +2487,7 @@
       if (ch.dataset && ch.dataset.seat != null && !keep[ch.dataset.seat] && ch.parentNode) ch.parentNode.removeChild(ch);
     });
     wrap.appendChild(frag);
+    renderTaxPot(wrap, s);
     if (mobileRingLayout) {
       applyMobileRingLayout(wrap);
       const pwa = typeof window !== 'undefined' && window.matchMedia &&

@@ -447,6 +447,25 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .table-removed .char-card{pointer-events:auto;cursor:zoom-in}
 .table-core.has-removed .table-core-hint{margin-top:4px}
 .table-core.active{border-color:var(--gold);box-shadow:0 0 0 10px rgba(200,149,43,.08),0 0 32px rgba(200,149,43,.28),inset 0 0 30px rgba(200,149,43,.2)}
+/* 战场中央的税务官标记：钱袋 + 已放置的金币数 */
+.tax-pot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;
+  display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 11px 6px;
+  border:1px solid rgba(200,149,43,.45);border-radius:14px;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 35%,#fffaf0,#f2e2c2 78%,#e6d0a6);
+  box-shadow:0 6px 18px rgba(92,61,22,.18),inset 0 0 14px rgba(200,149,43,.16)}
+.tax-pot-mark{position:relative;display:block;width:38px;height:43px;pointer-events:auto;
+  filter:drop-shadow(0 2px 3px rgba(92,61,22,.26))}
+.tax-pot-mark svg{width:100%;height:100%;display:block}
+.tax-pot-count{position:absolute;right:-9px;bottom:-7px;min-width:21px;height:21px;padding:0 4px;
+  display:grid;place-items:center;box-sizing:border-box;border:2px solid #fffaf0;border-radius:11px;
+  background:linear-gradient(180deg,#f7dc86,#d9a521);color:#5a3d06;
+  font-size:12px;font-weight:900;line-height:1;box-shadow:0 2px 5px rgba(80,50,0,.32)}
+.tax-pot.is-empty .tax-pot-count{background:#e7ddc7;color:#8a7a5e}
+.tax-pot.is-empty .tax-pot-mark{opacity:.62;filter:saturate(.7)}
+.tax-pot-label{font-size:10px;font-weight:800;letter-spacing:.1em;color:#7a5c22;white-space:nowrap}
+.tax-pot.is-bumped{animation:tax-pot-bump .42s ease-out}
+@keyframes tax-pot-bump{0%{transform:translate(-50%,-50%) scale(1)}
+  38%{transform:translate(-50%,-50%) scale(1.16)}100%{transform:translate(-50%,-50%) scale(1)}}
 .removed-corner{position:fixed;left:16px;bottom:76px;z-index:8;display:flex;flex-direction:column;align-items:flex-start;gap:5px;
   padding:5px;border:1px solid var(--line2);border-radius:10px;background:var(--paper);box-shadow:var(--shadow2);color:var(--ink2)}
 .removed-corner[hidden]{display:none}
@@ -859,6 +878,10 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   /* 移动端保留顺序流，避免圆桌卡片过度缩小；桌面端才使用环形座位。 */
   .table-arena{min-height:0;margin:0 0 11px;padding-top:0;border:0;border-radius:0;background:none;overflow:visible}
   .table-core{display:none}
+  /* 小屏时对手是横向滚动列表，中央标记改成跟着排在第一位，避免浮在卡片上面 */
+  .opponents .tax-pot{position:static;transform:none;flex:0 0 auto;align-self:center;margin:0 2px 0 0}
+  .opponents[data-layout="mobile-ring"] .tax-pot{position:absolute;left:50%;top:50%;
+    transform:translate(-50%,-50%);margin:0}
   .removed-corner{left:10px;bottom:calc(68px + env(safe-area-inset-bottom));padding:4px}
   .turn-order-guide{position:relative;top:auto;left:auto;width:100%;transform:none;justify-content:flex-start;margin:0 0 8px;overflow-x:auto;border-radius:10px}
   .opponents{display:flex;gap:9px;overflow-x:auto;padding-bottom:5px;margin-bottom:11px;

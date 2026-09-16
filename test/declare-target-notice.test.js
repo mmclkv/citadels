@@ -72,4 +72,18 @@ assert.ok(/warrantMarkHTML\(me\.warrant\)/.test(app), '自己面板应画逮捕�
 assert.ok(/\.warrant-mark/.test(css), '逮捕令卷轴需要有样式');
 assert.ok(/WARRANT_SVG[\s\S]{0,400}rect x="3\.4"/.test(app), '卷轴应画出上下卷杆');
 
+// 税务官：战场中央要有一个标记，并把已放置的金币数写在标记上
+assert.ok(/function renderTaxPot\(wrap, s\)/.test(app), '前端应有税务官标记的渲染函数');
+assert.ok(/renderTaxPot\(wrap, s\);/.test(app), 'renderOpponents 里要调用税务官标记渲染');
+assert.ok(/c\.id === 'tax_collector'/.test(app), '只有本局有税务官时才显示标记');
+assert.ok(/s\.effects && s\.effects\.taxCollectorGold/.test(app), '标记上的数字取税务官已放置的金币数');
+assert.ok(/class="tax-pot-count"/.test(app), '标记上要有显示金币数的元素');
+assert.ok(/TAX_POT_SVG/.test(app), '标记用内联 SVG 绘制，不依赖字体/emoji');
+assert.ok(/\.tax-pot\{/.test(css), '税务官标记需要有样式');
+assert.ok(/\.tax-pot-count\{/.test(css), '金币数徽章需要有样式');
+assert.ok(/@keyframes tax-pot-bump/.test(css), '金币数增加时要有提示动画');
+assert.ok(/html\[data-theme="neon"\] \.tax-pot /.test(
+  fs.readFileSync(path.join(__dirname, '..', 'public', 'themes', 'neon', 'theme.css'), 'utf8')),
+  '霓虹主题需要适配税务官标记');
+
 console.log('刺客/盗贼宣告：全体弹窗、编号与角色名战报全部通过');
