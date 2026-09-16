@@ -5,6 +5,7 @@ import json
 import os
 import struct
 import sys
+import time
 
 import torch
 from torch import nn
@@ -218,7 +219,19 @@ class PolicyValueNet(nn.Module):
         temporary = filename + ".tmp"
         with open(temporary, "wb") as handle:
             values.tofile(handle)
-        os.replace(temporary, filename)
+        # The shared inference daemon may briefly have the old model open while
+        # polling for a weight update. Windows refuses replacing an open file,
+        # so retry the atomic swap across that short read window.
+        last_error = None
+        for attempt in range(20):
+            try:
+                os.replace(temporary, filename)
+                break
+            except PermissionError as error:
+                last_error = error
+                if attempt == 19:
+                    raise
+                time.sleep(0.025 * (attempt + 1))
 
 
 def load_rollout(filename):
