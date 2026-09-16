@@ -643,6 +643,9 @@ async function train(rawConfig, hooks = {}) {
   const winSeats = Array(8).fill(0);
   let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0;
   let rollout = [];
+  // 训练批次按“完成的对局数”计数，而不是按 worker 池是否存在计数。
+  // worker 一次返回多少局属于并行调度细节，不应覆盖控制台里的 batchGames 配置。
+  let gamesSinceUpdate = 0;
   if (torch && !stopping) {
     const nativeGpuSearch = config.mctsEngine === 'cpp' && config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu';
     if (nativeGpuSearch) {
@@ -698,6 +701,7 @@ async function train(rawConfig, hooks = {}) {
     if (!results.length) break;
     for (const result of results) {
       completedGames++;
+      gamesSinceUpdate++;
       rollout.push(...result.transitions);
       totalSteps += result.steps;
       totalInferenceMs += result.avgInferenceMs * result.steps;
@@ -718,7 +722,7 @@ async function train(rawConfig, hooks = {}) {
     let losses = history.length ? history[history.length - 1] :
       { policyLoss: 0, valueLoss: 0, totalLoss: 0, entropy: 0, clipFraction: 0, approxKl: 0, gradientNorm: 0 };
     let justTrained = false;
-    if ((pool || completedGames % config.batchGames === 0) && rollout.length) {
+    if (gamesSinceUpdate >= config.batchGames && rollout.length) {
       losses = torch ? await torch.train(rollout) :
         model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs, policyLossMode: config.policyLossMode });
       justTrained = true;
@@ -730,6 +734,10 @@ async function train(rawConfig, hooks = {}) {
         ' · 梯度 ' + Number(losses.gradientNorm || 0).toFixed(3) +
         (losses.gpuMemoryMB ? ' · 显存 ' + losses.gpuMemoryMB + ' MB' : ''));
       rollout = [];
+      gamesSinceUpdate = 0;
+    } else if (gamesSinceUpdate >= config.batchGames) {
+      // 本批没有可训练样本时也要消费掉批次数，避免下一批被错误合并。
+      gamesSinceUpdate = 0;
     }
     const checkpointDue = completedGames % config.checkpointEvery === 0 || completedGames === config.targetGames;
     let checkpoint = '';
