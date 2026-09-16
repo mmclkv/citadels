@@ -3758,7 +3758,7 @@
       e.preventDefault();
       const input = $('#chat-input');
       const text = input ? input.value.trim() : '';
-      if (!text) { if (input) input.focus(); return; }
+      if (!text) { closeChatComposer(); return; }
       Net.send({ t: 'chat', text: text });
       closeChatComposer();
     };

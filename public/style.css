@@ -136,9 +136,8 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
   display:none;flex-direction:column;min-height:0}
 /* 桌面端默认隐藏，点「战报」后在右侧出现栏位，再点收起 */
 .side-panel.show{display:flex;flex:0 0 288px}
-.side-panel-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;
-  min-height:38px;padding:5px 8px 5px 14px;border-bottom:1px solid var(--line);background:#f7efe0}
-.side-panel-title{font-size:12px;color:var(--dim);font-weight:800;letter-spacing:.04em}
+.side-panel-head{flex:0 0 auto;display:flex;align-items:stretch;justify-content:space-between;gap:8px;
+  min-height:44px;padding:0 8px 0 0;border-bottom:1px solid var(--line);background:#f7efe0}
 .side-panel-toggle{display:inline-flex;align-items:center;gap:4px;appearance:none;border:1px solid var(--line2);
   justify-content:center;width:30px;height:28px;border-radius:7px;background:transparent;color:var(--ink2);
   padding:2px;font:inherit;font-size:11px;font-weight:700;line-height:1.2;cursor:pointer;transition:.15s}
@@ -147,7 +146,7 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .side-panel-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0}
 .side-panel.collapsed{flex-basis:42px;width:42px}
 .side-panel.collapsed .side-panel-head{justify-content:center;padding:5px 3px}
-.side-panel.collapsed .side-panel-title,.side-panel.collapsed .side-panel-body{display:none}
+.side-panel.collapsed .side-tabs,.side-panel.collapsed .side-panel-body{display:none}
 .side-panel.collapsed .side-panel-toggle{width:30px;height:28px}
 .side-panel h3{font-size:13px;padding:10px 14px;border-bottom:1px solid var(--line);color:#7a5c22}
 .log{flex:1 1 auto;overflow:auto;padding:10px 14px;font-size:12.5px;line-height:1.65}
@@ -161,9 +160,9 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .log .crown{color:#a97c15;font-weight:600}
 .log .score{color:#5a4520;font-weight:700}
 /* 侧栏标签页：战报 / 聊天记录 同时开启时叠加切换（仿 Chrome 标签） */
-.side-tabs{display:flex;border-bottom:1px solid var(--line);background:#f7efe0}
+.side-tabs{display:flex;flex:1 1 auto;min-width:0;background:transparent}
 .side-tabs[hidden]{display:none}
-.side-tab{flex:1 1 0;appearance:none;margin:0;border:0;background:transparent;padding:9px 6px;
+.side-tab{flex:0 0 auto;appearance:none;margin:0;border:0;background:transparent;padding:0 16px;min-height:44px;
   font-family:inherit;font-size:13px;font-weight:800;color:#7a5c22;cursor:pointer;border-bottom:2px solid transparent}
 .side-tab:hover{color:#a97c15}
 .side-tab.is-active{color:#a97c15;border-bottom-color:var(--gold,#c8952b)}

@@ -213,8 +213,7 @@ html[data-theme="neon"] .chip b { color:var(--ink); }
 html[data-theme="neon"] .board { background:rgba(3,9,16,.34); }
 html[data-theme="neon"] .board-main { background:linear-gradient(135deg,rgba(4,12,21,.68),rgba(7,16,28,.34)); }
 html[data-theme="neon"] .side-panel { background:rgba(5,13,23,.92); border-color:var(--line); }
-html[data-theme="neon"] .side-panel-head { background:rgba(9,16,27,.96); border-color:var(--line); }
-html[data-theme="neon"] .side-panel-title { color:var(--dim); }
+html[data-theme="neon"] .side-panel-head { background:rgba(5,13,23,.96); border-color:var(--line); }
 html[data-theme="neon"] .side-panel-toggle { color:var(--ui-cyan); border-color:var(--line2); }
 html[data-theme="neon"] .side-panel-toggle:hover { color:#eaf7ff; border-color:var(--ui-cyan); background:rgba(67,228,255,.10); }
 html[data-theme="neon"] .side-panel h3 { color:var(--ui-cyan); border-color:var(--line); }
@@ -227,10 +226,11 @@ html[data-theme="neon"] .log .build { color:var(--c-blue-d); }
 html[data-theme="neon"] .log .crown { color:var(--gold); }
 /* 侧栏在深色主题下保持明确的明暗层级：战报正文使用深色高对比文字，
    标签和聊天记录使用浅色文字，避免沿用经典主题颜色导致不可读。 */
-html[data-theme="neon"] .side-tabs { background:rgba(9,16,27,.96); border-color:var(--line); }
-html[data-theme="neon"] .side-tab { color:#173447; background:rgba(234,247,255,.92); }
-html[data-theme="neon"] .side-tab.is-active { color:#102536; border-bottom-color:var(--gold); }
-html[data-theme="neon"] .side-tab:hover { color:#071722; }
+html[data-theme="neon"] .side-tabs { background:transparent; border-color:var(--line); }
+html[data-theme="neon"] .side-panel-head { min-height:64px; }
+html[data-theme="neon"] .side-tab { min-height:64px; padding:0 16px; color:#8ba6b5; background:transparent; border-bottom-color:transparent; font-size:16px; text-align:left; }
+html[data-theme="neon"] .side-tab.is-active { color:var(--ui-cyan); border-bottom-color:var(--ui-cyan); text-shadow:0 0 10px rgba(67,228,255,.52); }
+html[data-theme="neon"] .side-tab:hover { color:#eaf7ff; background:rgba(67,228,255,.08); }
 html[data-theme="neon"] .log { color:#173447; background:rgba(234,247,255,.92); }
 html[data-theme="neon"] .log .sys,
 html[data-theme="neon"] .log .good,

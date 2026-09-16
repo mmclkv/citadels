@@ -275,17 +275,16 @@
 
     <aside class="side-panel" id="side-panel">
       <div class="side-panel-head">
-        <span class="side-panel-title">对局信息</span>
+        <div class="side-tabs" id="side-tabs">
+          <button class="side-tab is-active" type="button" data-tab="log" id="tab-log">战报</button>
+          <button class="side-tab" type="button" data-tab="chat" id="tab-chat">聊天记录</button>
+        </div>
         <button class="side-panel-toggle" id="btn-side-panel-toggle" type="button"
           aria-expanded="true" aria-controls="side-panel-body" title="收起右侧边栏">
           <span class="side-panel-toggle-icon" aria-hidden="true">›</span>
         </button>
       </div>
       <div class="side-panel-body" id="side-panel-body">
-        <div class="side-tabs" id="side-tabs">
-          <button class="side-tab is-active" type="button" data-tab="log" id="tab-log">战报</button>
-          <button class="side-tab" type="button" data-tab="chat" id="tab-chat">聊天记录</button>
-        </div>
         <div class="side-pane" id="pane-log">
           <h3>战报</h3>
           <div class="log" id="log"></div>
