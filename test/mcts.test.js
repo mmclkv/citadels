@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const mcts = require('../training/mcts.js');
-const { runSelfPlayGame, sanitizeConfig } = require('../training/train.js');
+const { runSelfPlayGame, sanitizeConfig, resolveNetworkPlayerCount } = require('../training/train.js');
 const { PolicyValueNetwork, mulberry32 } = require('../training/neural-policy.js');
 
 function buildTinyModel(seed = 1) {
@@ -120,4 +120,23 @@ test('关闭 MCTS 时 transition 没有 pi 字段（保持向后兼容）', asyn
   for (const tr of result.transitions.slice(0, 5)) {
     assert.equal(tr.pi, undefined, '非 MCTS 模式无 pi 字段');
   }
+});
+
+test('课程阵容按阶段增加策略网络玩家，且混合模式保留至少一名网络玩家', () => {
+  const mixed = sanitizeConfig({ minPlayers: 6, maxPlayers: 6, selfPlayMode: 'network-vs-heuristic', networkPlayerCount: 2 });
+  assert.equal(resolveNetworkPlayerCount(mixed, 1, 6), 2);
+  const curriculum = sanitizeConfig({ minPlayers: 6, maxPlayers: 6, selfPlayMode: 'curriculum',
+    curriculumStartPlayers: 1, curriculumEndPlayers: 6, curriculumStepGames: 100 });
+  assert.equal(resolveNetworkPlayerCount(curriculum, 1, 6), 1);
+  assert.equal(resolveNetworkPlayerCount(curriculum, 101, 6), 2);
+  assert.equal(resolveNetworkPlayerCount(curriculum, 501, 6), 6);
+});
+
+test('混合自对弈只收集策略网络玩家的训练样本', async () => {
+  const config = sanitizeConfig({ targetGames: 1, mctsSimulations: 0, charSet: 'base', minPlayers: 4, maxPlayers: 4,
+    profile: 'fast', backend: 'js', selfPlayMode: 'network-vs-heuristic', networkPlayerCount: 1, trainNetworkOnly: true });
+  const result = await runSelfPlayGame(buildTinyModel(19), config, 1, mulberry32(9), () => false);
+  assert.equal(result.networkPlayerCount, 1);
+  assert.ok(result.transitions.length > 0);
+  assert.ok(result.transitions.every(tr => tr.playerId.startsWith('nn-')));
 });

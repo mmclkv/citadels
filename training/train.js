@@ -311,13 +311,41 @@ function normalizeValueVector(valueVector, scalar = 0) {
   return out;
 }
 
+function clampInteger(value, min, max, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fallback;
+}
+
+function resolveNetworkPlayerCount(config, gameIndex, playerCount) {
+  if (config.selfPlayMode === 'all-network') return playerCount;
+  if (config.selfPlayMode === 'network-vs-heuristic') {
+    return Math.max(1, Math.min(playerCount, config.networkPlayerCount || 1));
+  }
+  const start = Math.max(1, Math.min(playerCount, config.curriculumStartPlayers || 1));
+  const end = Math.max(start, Math.min(playerCount, config.curriculumEndPlayers || playerCount));
+  const stepGames = Math.max(1, config.curriculumStepGames || 1000);
+  const stage = Math.floor(Math.max(0, gameIndex - 1) / stepGames);
+  return Math.min(end, start + stage);
+}
+
+function heuristicLevelFor(config, seatIndex, gameIndex) {
+  if (config.heuristicDifficulty !== 'random') return config.heuristicDifficulty;
+  const levels = ['easy', 'normal', 'hard'];
+  return levels[(Math.abs((config.seed || 0) + gameIndex * 17 + seatIndex * 31) % levels.length)];
+}
+
 async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evaluator = null, nativeSearch = null) {
   const playerCount = config.minPlayers + Math.floor(rng() * (config.maxPlayers - config.minPlayers + 1));
   const charSets = config.charSet === 'random' ? ['base', 'dark', 'mixed'] : [config.charSet];
   const charSet = charSets[Math.floor(rng() * charSets.length)];
-  const seats = Array.from({ length: playerCount }, (_, i) => ({
-    id: 'nn-' + gameIndex + '-' + i, name: '神经网络 ' + (i + 1), isBot: true, botType: 'neural'
-  }));
+  const networkPlayerCount = resolveNetworkPlayerCount(config, gameIndex, playerCount);
+  const seats = Array.from({ length: playerCount }, (_, i) => {
+    const neural = i < networkPlayerCount;
+    return { id: (neural ? 'nn-' : 'heuristic-') + gameIndex + '-' + i,
+      name: neural ? '神经网络 ' + (i + 1) : '启发式 ' + (i + 1), isBot: true,
+      botType: neural ? 'neural' : 'heuristic',
+      botLevel: neural ? undefined : heuristicLevelFor(config, i, gameIndex) };
+  });
   const state = Engine.createGame({
     roomId: 'training-' + gameIndex, endDistricts: config.endDistricts,
     charSetMode: charSet, seed: config.seed + gameIndex * 7919, seats
@@ -342,7 +370,13 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     let piVector = null;
     let mctsValue = null;
     let mctsValueVector = null;
-    if ((config.mctsEngine === 'cpp' || config.backend === 'native') && nativeSearch) {
+    if (actor.botType === 'heuristic') {
+      const heuristicAction = HeuristicAI.decide(state, actor.id, rng);
+      const heuristicKey = heuristicAction && JSON.stringify(heuristicAction);
+      let chosen = heuristicKey ? legal.findIndex(action => JSON.stringify(action) === heuristicKey) : -1;
+      if (chosen < 0) chosen = 0;
+      decision = { chosen, probability: 1 / legal.length, value: 0, entropy: 0 };
+    } else if ((config.mctsEngine === 'cpp' || config.backend === 'native') && nativeSearch) {
       const nativeResult = await nativeSearch.search(state, actor.id, legal, config.modelVersion || 0);
       piVector = nativeResult.policy;
       mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
@@ -387,7 +421,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       decision = model.choose(encoded.vector, actionVectors, temperature);
     }
     inferenceMs += performance.now() - t0;
-    if (legal.length > 1) {
+    if (legal.length > 1 && (actor.botType === 'neural' || !config.trainNetworkOnly)) {
       const transition = {
         playerId: actor.id, state: encoded.vector, actions: actionVectors, chosen: decision.chosen,
         oldProb: decision.probability, oldValue: decision.value,
@@ -428,6 +462,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   return {
     transitions, steps, rounds: state.round, durationMs: Date.now() - startedAt,
     avgInferenceMs: inferenceMs / Math.max(1, steps), fallbackCount, playerCount, charSet,
+    networkPlayerCount,
     rewards: Array.from(rewards.values()), scores: state.scores.map(s => s.total), winners: winning
   };
 }
@@ -482,7 +517,18 @@ function sanitizeConfig(input = {}) {
     // 0 是合法值，表示"不限制等待"（等满批或显式 flush 才发）；仅 undefined/NaN 取默认 1
     mctsMaxWaitMs: Math.max(0, Math.min(50, Number.isFinite(Number(input.mctsMaxWaitMs)) ? Number(input.mctsMaxWaitMs) : 1)),
     mctsCacheSize: Math.max(0, Math.min(1048576, Number(input.mctsCacheSize) || 65536)),
-    policyLossMode: ['auto', 'ppo', 'mcts_ce'].includes(input.policyLossMode) ? input.policyLossMode : 'auto'
+    policyLossMode: ['auto', 'ppo', 'mcts_ce'].includes(input.policyLossMode) ? input.policyLossMode : 'auto',
+    // 自对弈阵容：默认保持历史行为（所有座位均由策略网络控制）。
+    selfPlayMode: ['all-network', 'network-vs-heuristic', 'curriculum'].includes(input.selfPlayMode)
+      ? input.selfPlayMode : 'all-network',
+    // 0 表示在全网络模式下自动使用所有玩家；固定混合模式下 0 退化为 1。
+    networkPlayerCount: clampInteger(input.networkPlayerCount, 0, maxPlayers, 0),
+    heuristicDifficulty: ['easy', 'normal', 'hard', 'random'].includes(input.heuristicDifficulty)
+      ? input.heuristicDifficulty : 'normal',
+    curriculumStartPlayers: clampInteger(input.curriculumStartPlayers, 1, maxPlayers, 1),
+    curriculumEndPlayers: clampInteger(input.curriculumEndPlayers, 0, maxPlayers, 0),
+    curriculumStepGames: clampInteger(input.curriculumStepGames, 1, 1000000, 1000),
+    trainNetworkOnly: input.trainNetworkOnly !== false
   };
 }
 
@@ -560,6 +606,13 @@ async function train(rawConfig, hooks = {}) {
     'workers=' + config.workers + ' · 策略损失=' + (config.policyLossMode === 'auto' && config.mctsSimulations > 0 ? 'MCTS 交叉熵' : config.policyLossMode.toUpperCase()) +
     ' · epochs=' + config.ppoEpochs + ' · miniBatch=' + config.miniBatch +
     ' · lr=' + config.learningRate + ' · seed=' + config.seed);
+  const composition = config.selfPlayMode === 'all-network' ? '全策略网络' :
+    config.selfPlayMode === 'network-vs-heuristic'
+      ? ('策略网络 ' + (config.networkPlayerCount || 1) + ' 人 + 启发式')
+      : ('课程：' + config.curriculumStartPlayers + '→' + (config.curriculumEndPlayers || '全员') +
+        '，每 ' + config.curriculumStepGames + ' 局增加 1 人');
+  log('自对弈阵容：' + composition + ' · 启发式难度=' + config.heuristicDifficulty +
+    ' · 训练样本=' + (config.trainNetworkOnly ? '仅策略网络玩家' : '全部玩家')); 
   if (config.mctsSimulations > 0) {
     log('MCTS 已启用：每步 ' + config.mctsSimulations + ' 模拟 · c_puct=' + config.mctsC_puct +
       ' · α=' + config.mctsDirichletAlpha + ' · ε=' + config.mctsDirichletEpsilon +
@@ -760,6 +813,7 @@ module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
   STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
+  resolveNetworkPlayerCount, heuristicLevelFor,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR
 };
