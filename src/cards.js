@@ -127,17 +127,37 @@
       desc: '领取资源后，说出一个角色编号对其施咒并结束自己的回合。被施咒者被叫到时只能领取资源，随后女巫接管其剩余行动（可使用其能力与建造）。建筑物的能力不受女巫控制。',
       hint: '选择要施咒的角色编号' },
 
+    { id: 'magistrate', num: 1, name: '行政官', en: 'Magistrate', version: 'dark',
+      income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
+      desc: '暗置三个逮捕令标记。签名标记指向的玩家第一次付费建造时，行政官可没收该建筑并免费建入自己的城市。',
+      hint: '分配逮捕令标记' },
+
     /* ============ 2 号 ============ */
     { id: 'thief', num: 2, name: '盗贼', en: 'Thief', version: 'base',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
       desc: '说出一个你要偷窃的角色编号。该角色被叫到并公开时，须把全部金币交给盗贼。不可偷窃1号角色、被刺杀者和被施咒者。',
       hint: '选择要偷窃的角色编号' },
 
+    { id: 'spy', num: 2, name: '间谍', en: 'Spy', version: 'dark',
+      income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
+      desc: '选择一位玩家和一种建筑类型，查看其手牌；每有一张该类型的牌，拿走其一枚金币并从牌堆抽一张牌。',
+      hint: '查看手牌并指定建筑类型' },
+
+    { id: 'blackmailer', num: 2, name: '勒索者', en: 'Blackmailer', version: 'dark',
+      income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
+      desc: '将两个威胁标记暗置分配给两个角色。被威胁者行动前可支付一半金币赎回；签名标记的目标拒绝时失去全部金币。',
+      hint: '分配威胁标记' },
+
     /* ============ 3 号 ============ */
     { id: 'magician', num: 3, name: '魔术师', en: 'Magician', version: 'base',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
       desc: '二选一：①与一位玩家交换全部手牌（即使一方没有手牌也可交换）；②将手中任意数量的建筑牌放到牌堆底，再抽等量新牌。',
       hint: '选择一种能力' },
+
+    { id: 'wizard', num: 3, name: '法师', en: 'Wizard', version: 'dark',
+      income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
+      desc: '查看一位玩家的手牌并选择一张：加入手牌或立即支付建造。立即建造不占本回合建造次数；本回合可建造同名建筑。',
+      hint: '查看并取得一张手牌' },
 
     { id: 'prophet', num: 3, name: '预言家', en: 'Prophet', version: 'deluxe',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 2,
@@ -170,6 +190,11 @@
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
       desc: '每有1栋宗教（蓝）建筑获得1金或抽1张牌（须先宣告组合）。回合中若有人金币比你多，可从最富有者处拿1金。',
       hint: '修士：宣告要领取的资源组合' },
+
+    { id: 'abbot', num: 5, name: '住持', en: 'Abbot', version: 'dark',
+      income: 'blue', drawBonus: 0, goldBonus: 0, buildLimit: 1,
+      desc: '每有一栋宗教建筑，可获得一枚金币或抽一张建筑牌。领取资源后，金币最多的其他玩家必须给你一枚金币；若你并列最多则不能获得。',
+      hint: '宣告宗教收入并向最富有者收取金币' },
 
     /* ============ 6 号 ============ */
     { id: 'merchant', num: 6, name: '商人', en: 'Merchant', version: 'base',
@@ -228,7 +253,12 @@
     { id: 'artist', num: 9, name: '艺术家', en: 'Artist', version: 'dark',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
       desc: '美化建筑：将1枚金币放在已建成的建筑上，计分时该建筑+1分。每回合最多美化2栋，每栋只能被美化一次。',
-      hint: '艺术家：美化最多2栋建筑' }
+      hint: '艺术家：美化最多2栋建筑' },
+
+    { id: 'tax_collector', num: 9, name: '税务官', en: 'Tax Collector', version: 'dark',
+      income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
+      desc: '其他玩家建造建筑后若仍有金币，向税务官标记放置一枚金币。你的回合中可收取标记上的全部金币。',
+      hint: '收取建筑税' }
   ];
 
   const CHAR_MAP = {};
