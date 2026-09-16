@@ -37,6 +37,25 @@
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"><option value="">从头训练</option></select></label>
       </form>
+      <section class="composition-section">
+        <h2>自对弈阵容与课程训练</h2>
+        <form id="composition-form" class="mcts-form">
+          <label><span>自对弈阵容</span><select id="self-play-mode">
+            <option value="all-network" selected>全策略网络</option>
+            <option value="network-vs-heuristic">策略网络 + 启发式</option>
+            <option value="curriculum">课程式递增</option>
+          </select><small>决定每局由策略网络和启发式玩家组成的比例</small></label>
+          <label><span>策略网络玩家数</span><input id="network-player-count" type="number" min="1" max="8" value="1"><small>混合模式生效；全策略网络模式自动使用全部玩家</small></label>
+          <label><span>启发式难度</span><select id="heuristic-difficulty">
+            <option value="normal" selected>标准</option><option value="easy">简单</option>
+            <option value="hard">困难</option><option value="random">每局随机</option>
+          </select></label>
+          <label><span>课程起始网络玩家数</span><input id="curriculum-start-players" type="number" min="1" max="8" value="1"></label>
+          <label><span>课程目标网络玩家数</span><input id="curriculum-end-players" type="number" min="0" max="8" value="0"><small>0 = 随当前局人数达到全员</small></label>
+          <label><span>课程每阶段局数</span><input id="curriculum-step-games" type="number" min="1" max="1000000" value="1000"><small>每经过此数量的对局增加 1 名策略网络玩家</small></label>
+          <label><span>训练样本来源</span><select id="train-network-only"><option value="true" selected>仅策略网络玩家</option><option value="false">全部玩家</option></select><small>推荐仅使用策略网络玩家，避免把启发式策略直接当作网络目标</small></label>
+        </form>
+      </section>
       <section class="mcts-section">
         <h2>MCTS 配置（必选）</h2>
         <form id="mcts-form" class="mcts-form">
@@ -86,6 +105,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=12"></script>
+  <script src="./training.js?v=13"></script>
 </body>
 </html>

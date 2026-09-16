@@ -52,7 +52,14 @@ function formConfig() {
     mctsEvaluator: resolveMctsEvaluator(),
     mctsBatchSize: +$('mcts-batch-size').value,
     mctsMaxWaitMs: +$('mcts-max-wait').value,
-    mctsCacheSize: +$('mcts-cache-size').value
+    mctsCacheSize: +$('mcts-cache-size').value,
+    selfPlayMode: $('self-play-mode').value,
+    networkPlayerCount: +$('network-player-count').value,
+    heuristicDifficulty: $('heuristic-difficulty').value,
+    curriculumStartPlayers: +$('curriculum-start-players').value,
+    curriculumEndPlayers: +$('curriculum-end-players').value,
+    curriculumStepGames: +$('curriculum-step-games').value,
+    trainNetworkOnly: $('train-network-only').value === 'true'
   };
 }
 
@@ -183,6 +190,9 @@ function renderRuntime(status) {
     ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++' : (c.mctsEngine === 'js' ? 'JS' : '—')],
     ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch（C++）' : (c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—')],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
+    ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
+    ['启发式难度', c.heuristicDifficulty || '—'],
+    ['样本来源', c.trainNetworkOnly === false ? '全部玩家' : '仅策略网络玩家'],
     ['MCTS', mctsLabel],
     ['日志文件', c.logFile || status.logFile || '—'],
     ['运行时间', status.startedAt ? duration(Date.now() - new Date(status.startedAt).getTime()) : '—']
@@ -414,11 +424,18 @@ $('rules-engine').onchange = updateMctsEvaluatorUI;
 $('mcts-engine').onchange = updateMctsEvaluatorUI;
 $('neural-network-framework').onchange = updateMctsEvaluatorUI;
 $('device').onchange = updateMctsEvaluatorUI;
+function updateCompositionUI() {
+  const mode = $('self-play-mode').value;
+  $('network-player-count').disabled = mode !== 'network-vs-heuristic';
+  ['curriculum-start-players', 'curriculum-end-players', 'curriculum-step-games'].forEach(id => { $(id).disabled = mode !== 'curriculum'; });
+}
+$('self-play-mode').onchange = updateCompositionUI;
 ['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth',
   'mcts-batch-size', 'mcts-max-wait', 'mcts-cache-size'].forEach(id => {
   $(id).oninput = estimateMCTS;
 });
 estimateMCTS();
 updateMctsEvaluatorUI();
+updateCompositionUI();
 window.addEventListener('resize', () => { if (latest) render(latest); });
 refresh(); setInterval(refresh, 1000);
