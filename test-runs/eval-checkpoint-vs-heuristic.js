@@ -32,6 +32,8 @@ async function main() {
   });
   let client;
   let wins = 0, top3 = 0, totalSteps = 0, totalGameMs = 0, totalSearchMs = 0;
+  const playerWins = Array(6).fill(0);
+  const playerRanks = Array.from({ length: 6 }, () => Array(6).fill(0));
   try {
     const queue = await daemon.start();
     client = new NativeSearchClient({
@@ -89,6 +91,11 @@ async function main() {
       const rank = 1 + scores.filter(row => row.total > mine.total).length;
       if (rank === 1) wins++;
       if (rank <= 3) top3++;
+      scores.forEach(row => {
+        const playerRank = 1 + scores.filter(other => other.total > row.total).length;
+        if (playerRank === 1) playerWins[row.playerIdx]++;
+        if (playerRank >= 1 && playerRank <= 6) playerRanks[row.playerIdx][playerRank - 1]++;
+      });
       const gameMs = Date.now() - gameStarted;
       totalSteps += steps; totalGameMs += gameMs; totalSearchMs += searchMs;
       console.log(JSON.stringify({ game, charSet, rank, win: rank === 1, steps, gameMs,
@@ -100,6 +107,7 @@ async function main() {
       totalSteps, avgSteps: totalSteps / GAMES, totalGameMs,
       avgGameMs: totalGameMs / GAMES, totalSearchMs,
       avgSearchMsPerGame: totalSearchMs / GAMES, avgSearchMsPerStep: totalSearchMs / totalSteps,
+      playerWins, playerWinRates: playerWins.map(count => count / GAMES), playerRanks,
       totalWallMs: Date.now() - started
     }));
   } finally {
