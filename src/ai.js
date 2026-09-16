@@ -365,13 +365,12 @@
         const used = pd.used || [];
         return { type: 'magistrate_signed', num: used[0] };
       }
-      case 'blackmailer_declare': {
-        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num);
-        return { type: 'blackmailer_char', num: choices[0] || 1 };
-      }
-      case 'blackmailer_second': {
-        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num && n !== pd.first);
-        return { type: 'blackmailer_char', num: choices[0] || 2 };
+      case 'blackmailer_declare': case 'blackmailer_second': {
+        // 1 号角色 / 被刺杀 / 被施咒 / 已有逮捕令者都不能当威胁目标，必须走引擎同一套过滤
+        const exclude = pd.kind === 'blackmailer_second' ? [pd.first] : [];
+        const choices = Engine.blackmailerValidNums(state, t, exclude);
+        if (choices.length === 0) return { type: 'ability_skip' };
+        return { type: 'blackmailer_char', num: choices[0] };
       }
       case 'blackmailer_threat':
         // 赎金是一半金币，被真标记命中是全没了 —— 期望上两者相当，

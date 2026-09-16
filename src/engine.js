@@ -816,10 +816,11 @@
             label: n + ' · ' + (charByNum(state, n) ? charByNum(state, n).name : '?') })) };
       }
       case 'blackmailer_declare':
-        return { prompt: '【勒索者】选择第 1 个威胁角色编号', actions: charChoices(state, t, [], 'blackmailer_char') };
+        return { prompt: '【勒索者】选择第 1 个威胁角色编号（1 号角色、被刺杀者、被施咒者、已有逮捕令者不可选）',
+          actions: charChoices(state, t, blackmailerBlockedNums(state), 'blackmailer_char') };
       case 'blackmailer_second':
         return { prompt: '【勒索者】选择第 2 个威胁角色编号', actions:
-          charChoices(state, t, [t.num, pd.first], 'blackmailer_char') };
+          charChoices(state, t, blackmailerBlockedNums(state).concat([t.num, pd.first]), 'blackmailer_char') };
       case 'blackmailer_threat':
         return { prompt: '【勒索者】你受到威胁，可支付一半金币赎回', actions: [
           { type: 'blackmailer_bribe', label: '支付 ' + Math.floor(p.gold / 2) + ' 金赎回' },
@@ -954,6 +955,60 @@
    *   - excludeNums（盗贼固定为 [1] 刺客）
    * 暗置移除 / 被刺杀 / 被施咒 等角色仍可选：规则允许指名，只是命中后可能无效。
    */
+  /**
+   * 威胁标记的禁用目标（勒索者专用）。
+   * 规则上不能把威胁标记塞给：
+   *   - 1 号角色（刺客 / 女巫 / 行政官，官方规则即禁止）
+   *   - 本轮被刺杀的角色（他根本不会行动，标记毫无意义）
+   *   - 本轮被施咒的角色（同上）
+   *   - 已经挂上逮捕令标记的角色（一个人不能同时被两套暗置标记盯上）
+   * 行政官是 1 号位、勒索者是 2 号位，所以轮到勒索者时逮捕令一定已经分完了。
+   */
+  function blackmailerBlockedNums(state) {
+    const out = [1];
+    const push = n => {
+      if (n == null || n === false || !Number.isFinite(Number(n))) return;
+      const v = Number(n);
+      if (out.indexOf(v) < 0) out.push(v);
+    };
+    push(state.effects.assassinated);
+    push(state.effects.bewitched);
+    const mg = state.effects.magistrate;
+    if (mg && Array.isArray(mg.nums)) mg.nums.forEach(push);
+    return out;
+  }
+
+  /** 勒索者当前真正能下标记的角色编号（已剔除禁用名单与 exclude）。 */
+  function blackmailerValidNums(state, t, exclude) {
+    const blocked = blackmailerBlockedNums(state).concat(exclude || []);
+    return charChoices(state, t, blocked, 'blackmailer_char')
+      .filter(a => a.type === 'blackmailer_char')
+      .map(a => a.num);
+  }
+
+  /**
+   * 落地威胁标记：nums 为被标记的 1~2 个角色编号，signed 为其中唯一真标记。
+   * 去向对全场公开，哪个是真的保密。
+   */
+  function commitBlackmailer(state, idx, t, nums, signed) {
+    const p = state.players[idx];
+    state.effects.blackmailer = { nums: nums.slice(), signed: signed, playerIdx: idx, done: [], revealed: [] };
+    t.abilityUsed = true; t.pending = null;
+    const targets = nums.map(num => {
+      const cid = (state.charDeck || []).find(id => charOf(id).num === num);
+      const c = cid ? charOf(cid) : null;
+      return { num: num, charId: cid || '', name: c ? c.name : '未知角色' };
+    });
+    log(state, '【勒索者】' + p.name + ' 把 ' + nums.length + ' 个威胁标记发给了 ' +
+      targets.map(x => x.num + ' 号·' + x.name).join('、') +
+      (nums.length > 1 ? '（其中只有一个是真的）。' : '。'), 'magic');
+    notify(state, 'blackmailer_declare', {
+      byIdx: idx, byId: p.id, byName: p.name, nums: targets.map(x => x.num),
+      targets: targets.map(x => ({ num: x.num, name: x.name }))
+    });
+    return ok();
+  }
+
   function charChoices(state, t, excludeNums, actionType) {
     const faceUpRemoved = {};
     if (state.draft && Array.isArray(state.draft.faceUp)) {
@@ -1341,24 +1396,15 @@
         const n = Number(action.num);
         if (!pd || !['blackmailer_declare', 'blackmailer_second'].includes(pd.kind)) return err('当前无需分配威胁标记');
         if (!Number.isFinite(n) || n === t.num || (pd.first != null && pd.first === n)) return err('威胁目标必须是两个不同角色');
+        // 1 号角色、被刺杀者、被施咒者、已有逮捕令者都不能被放威胁标记
+        if (blackmailerBlockedNums(state).indexOf(n) >= 0) {
+          return err('不能把威胁标记放在 ' + n + ' 号角色身上（1 号角色 / 被刺杀 / 被施咒 / 已有逮捕令者除外）');
+        }
         if (pd.kind === 'blackmailer_declare') { t.pending = { kind: 'blackmailer_second', first: n }; return ok(); }
-        const signed = randInt(state, 2) === 0 ? pd.first : n;
-        const nums = [pd.first, n];
-        state.effects.blackmailer = { nums: nums, signed: signed, playerIdx: idx, done: [], revealed: [] };
-        t.abilityUsed = true; t.pending = null;
         // 两个标记落在哪两个角色上是公开信息（哪一个是真的仍然保密）
-        const targets = nums.map(num => {
-          const cid = (state.charDeck || []).find(id => charOf(id).num === num);
-          const c = cid ? charOf(cid) : null;
-          return { num: num, charId: cid || '', name: c ? c.name : '未知角色' };
-        });
-        log(state, '【勒索者】' + p.name + ' 把 2 个威胁标记发给了 ' +
-                   targets.map(x => x.num + ' 号·' + x.name).join('、') + '（其中只有一个是真的）。', 'magic');
-        notify(state, 'blackmailer_declare', {
-          byIdx: idx, byId: p.id, byName: p.name, nums: nums,
-          targets: targets.map(x => ({ num: x.num, name: x.name }))
-        });
-        return ok();
+        const nums = [pd.first, n];
+        const signed = randInt(state, 2) === 0 ? pd.first : n;
+        return commitBlackmailer(state, idx, t, nums, signed);
       }
       case 'spy_target': {
         const pd = t.pending;
@@ -1744,7 +1790,18 @@
       case 'thief': t.pending = { kind: 'thief' }; break;
       case 'witch': t.pending = { kind: 'witch_target' }; break;
       case 'magistrate': t.pending = { kind: 'magistrate_declare', used: [] }; break;
-      case 'blackmailer': t.pending = { kind: 'blackmailer_declare' }; break;
+      case 'blackmailer': {
+        // 合法目标不足时不必走两步选择：0 个直接作废，1 个直接放下唯一的真标记
+        const valid = blackmailerValidNums(state, t, []);
+        if (valid.length === 0) {
+          t.abilityUsed = true;
+          log(state, '【勒索者】没有可以放置威胁标记的目标，能力作废。', 'info');
+          return ok();
+        }
+        if (valid.length === 1) return commitBlackmailer(state, idx, t, [valid[0]], valid[0]);
+        t.pending = { kind: 'blackmailer_declare' };
+        break;
+      }
       case 'spy': t.pending = { kind: 'spy_target' }; break;
       case 'magician': t.pending = { kind: 'magician_choice' }; break;
       case 'wizard': t.pending = { kind: 'wizard_target' }; break;
@@ -2434,6 +2491,8 @@
     sanitize: sanitize,
     computeScores: computeScores,
     charOf: charOf,
-    log: log
+    log: log,
+    blackmailerBlockedNums: blackmailerBlockedNums,
+    blackmailerValidNums: blackmailerValidNums
   };
 });

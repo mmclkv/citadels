@@ -306,3 +306,47 @@ test('支付赎金后威胁标记消失，不再触发冻结', () => {
   assert.equal(state.reaction, null);
   assert.equal(Engine.sanitize(state, 'p1').players[1].threat, null);
 });
+
+test('威胁标记不能给 1 号角色、被刺杀者、被施咒者、已有逮捕令者', () => {
+  const state = stateWith('blackmailer');
+  // 本局角色为 1~9，其中 5/8/9 明置移除，勒索者自己占 2 号
+  state.effects.assassinated = 3;
+  state.effects.bewitched = 4;
+  state.effects.magistrate = { nums: [5, 8, 9], signed: 5, playerIdx: 1 };
+  const blocked = [1, 3, 4, 5, 8, 9];
+
+  assert.deepEqual(Engine.blackmailerBlockedNums(state).sort((a, b) => a - b), blocked);
+
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'ability' }).ok, true);
+  assert.equal(state.turn.pending.kind, 'blackmailer_declare');
+  const offered = Engine.getAvailableActions(state, 'p0').actions
+    .filter(a => a.type === 'blackmailer_char').map(a => a.num).sort((a, b) => a - b);
+  assert.deepEqual(offered, [6, 7], '只剩 6、7 可选：1 号、被刺杀的 3 号、被施咒的 4 号、有逮捕令的 5 号都要排除');
+
+  // 绕过 UI 直接提交被禁用的编号，引擎也必须拒绝
+  for (const n of [1, 3, 4, 5]) {
+    assert.equal(Engine.applyAction(state, 'p0', { type: 'blackmailer_char', num: n }).ok, false,
+      n + ' 号不该被接受');
+  }
+});
+
+test('威胁标记目标不足两个时只放一个，一个都没有则能力作废', () => {
+  // 只剩 7 号一个合法目标：直接落地唯一的真标记，不再走两步选择
+  const one = stateWith('blackmailer');
+  one.effects.assassinated = 3;
+  one.effects.bewitched = 4;
+  one.effects.magistrate = { nums: [6, 8, 9], signed: 6, playerIdx: 1 };
+  assert.equal(Engine.applyAction(one, 'p0', { type: 'ability' }).ok, true);
+  assert.equal(one.turn.pending, null, '不需要再让玩家选');
+  assert.deepEqual(one.effects.blackmailer.nums, [7]);
+  assert.equal(one.effects.blackmailer.signed, 7, '只有一个标记时它就是真标记');
+
+  // 一个合法目标都不剩：能力直接作废
+  const none = stateWith('blackmailer');
+  none.effects.assassinated = 3;
+  none.effects.bewitched = 4;
+  none.effects.magistrate = { nums: [6, 7, 8], signed: 6, playerIdx: 1 };
+  assert.equal(Engine.applyAction(none, 'p0', { type: 'ability' }).ok, true);
+  assert.equal(none.effects.blackmailer, null);
+  assert.equal(none.turn.abilityUsed, true);
+});
