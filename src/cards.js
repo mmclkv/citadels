@@ -315,8 +315,8 @@
       pool = CHARACTERS.filter(c => c.version === 'base');           // 8 张（1-8）
     } else if (setMode === 'dark') {
       // 基本版 + 黑暗城市扩充各号一个 + 皇后
-      const want = { 1: 'witch', 2: 'thief', 3: 'magician', 4: 'emperor', 5: 'monk',
-                     6: 'alchemist', 7: 'navigator', 8: 'diplomat', 9: 'queen' };
+      const want = { 1: 'witch', 2: 'blackmailer', 3: 'wizard', 4: 'emperor', 5: 'abbot',
+                     6: 'alchemist', 7: 'navigator', 8: 'diplomat', 9: 'tax_collector' };
       pool = Object.keys(want).map(k => CHAR_MAP[want[k]]);
     } else {
       // mixed（加强版混合）：从每个编号中随机挑一个，编号 9 只在大局使用
