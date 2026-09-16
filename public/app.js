@@ -3994,7 +3994,7 @@
   window.__CitadelsApp = App;
   // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
   if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=9', { scope: './' }).then(registration => {
+    navigator.serviceWorker.register('./sw.js?v=10', { scope: './' }).then(registration => {
       // GitHub Pages 上的 PWA 可能长时间保持旧 worker，启动时主动检查一次新版本。
       registration.update().catch(() => {});
       registration.addEventListener('updatefound', () => {

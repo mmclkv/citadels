@@ -48,6 +48,10 @@ const graveyardCard = Cards.DISTRICTS.find(d => d.en === 'Graveyard');
 if (!graveyardCard || graveyardCard.cost !== 5 || !/支付1枚金币/.test(graveyardCard.desc)) {
   throw new Error('墓地规则应为建造费用 5，发动回收能力支付 1 金');
 }
+const blackmailer = manifest.cards.roles.blackmailer;
+if (!/blackmailer\.webp\?v=2$/.test(blackmailer.thumb) || !/blackmailer\.webp\?v=2$/.test(blackmailer.full)) {
+  throw new Error('勒索者更新卡图缺少缓存版本标记');
+}
 
 const roleKeys = Object.keys(manifest.cards.roles);
 const districtKeys = Object.keys(manifest.cards.districts);
