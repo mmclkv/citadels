@@ -270,7 +270,10 @@
 
   function shouldUseAbility(state, idx, t, c, level) {
     switch (c.id) {
-      case 'assassin': case 'thief': case 'witch': case 'magician': return true;
+      case 'assassin': case 'thief': case 'witch': case 'magician':
+      case 'magistrate': case 'spy': case 'blackmailer': case 'wizard': return true;
+      case 'abbot': return true;
+      case 'tax_collector': return true;
       case 'warlord': {
         const p = state.players[idx];
         if (p.gold < 1) return false;
@@ -348,6 +351,45 @@
     const c = CHAR_MAP[t.charId];
 
     switch (pd.kind) {
+      case 'magistrate_declare': case 'magistrate_second': case 'magistrate_third': {
+        const used = pd.used || [];
+        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num && !used.includes(n));
+        return { type: 'magistrate_char', num: choices[0] || 1 };
+      }
+      case 'blackmailer_declare': {
+        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num);
+        return { type: 'blackmailer_char', num: choices[0] || 1 };
+      }
+      case 'blackmailer_second': {
+        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num && n !== pd.first);
+        return { type: 'blackmailer_char', num: choices[0] || 2 };
+      }
+      case 'blackmailer_threat':
+        return { type: 'blackmailer_bribe' };
+      case 'spy_target': {
+        const target = state.players.filter((_, i) => i !== idx).sort((a, b) => b.hand.length - a.hand.length)[0];
+        return { type: 'spy_target', target: target && target.id };
+      }
+      case 'spy_color': {
+        const target = state.players[pd.targetIdx]; const counts = {};
+        (target.hand || []).forEach(card => { counts[card.color] = (counts[card.color] || 0) + 1; });
+        const color = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || 'blue';
+        return { type: 'spy_color', color };
+      }
+      case 'wizard_target': {
+        const target = state.players.filter((_, i) => i !== idx).sort((a, b) => b.hand.length - a.hand.length)[0];
+        return { type: 'wizard_target', target: target && target.id };
+      }
+      case 'wizard_card': {
+        const card = (pd.cards || []).slice().sort((a, b) => b.cost - a.cost)[0];
+        return { type: 'wizard_card', uid: card && card.uid };
+      }
+      case 'wizard_choice':
+        return { type: p.gold >= (pd.card && pd.card.cost || 0) ? 'wizard_build' : 'wizard_take' };
+      case 'abbot_declare':
+        return { type: 'abbot_resource', gold: (p.city || []).filter(d => d.color === 'blue').length, cards: 0 };
+      case 'tax_collect':
+        return { type: 'tax_collect' };
       case 'assassin': {
         const pref = { 7: 3.2, 4: 2.6, 6: 2.2, 5: 2.0, 8: 2.4, 3: 1.8, 2: 1.6, 9: 0.8 };
         const leader = leaderIdx(state);

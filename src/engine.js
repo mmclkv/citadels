@@ -142,7 +142,8 @@
       turn: null,
       witchResume: null,
       reaction: null,
-      effects: { assassinated: null, thief: null, bewitched: null, witchBy: null, thiefBy: null },
+      effects: { assassinated: null, thief: null, bewitched: null, witchBy: null, thiefBy: null,
+        magistrate: null, blackmailer: null, taxCollectorGold: 0 },
       firstToFinish: -1,
       pendingQueen: null,
       log: [],
@@ -195,7 +196,9 @@
   /* ============================ 回合：选角 ============================ */
   function startRound(state) {
     state.round++;
-    state.effects = { assassinated: null, thief: null, bewitched: null, witchBy: null, thiefBy: null };
+    state.effects.assassinated = null; state.effects.thief = null; state.effects.bewitched = null;
+    state.effects.witchBy = null; state.effects.thiefBy = null;
+    state.effects.magistrate = null; state.effects.blackmailer = null;
     state.witchResume = null;
     state.reaction = null;
     state.pendingQueen = null;
@@ -376,6 +379,20 @@
         num: entry.num, charName: charOf(entry.charId).name
       });
       state.effects.thief = null;
+    }
+
+    // 勒索者的威胁必须在目标领取资源前处理。这里把拒绝赎金简化为
+    // 立即揭示签名标记，避免引入跨玩家的二次响应状态。
+    const threat = state.effects.blackmailer;
+    if (threat && threat.nums.indexOf(entry.num) >= 0) {
+      const target = state.players[entry.playerIdx];
+      state.turn = newTurn(state, entry, 'main');
+      state.turn.pending = { kind: 'blackmailer_threat', targetIdx: entry.playerIdx,
+        signed: threat.signed === entry.num };
+      log(state, '【勒索者】' + target.name + ' 受到威胁，可支付一半金币赎回。', 'bad');
+      notify(state, 'blackmailer_threat', { playerIdx: entry.playerIdx, playerId: target.id,
+        playerName: target.name, signed: threat.signed === entry.num });
+      return;
     }
 
     state.turn = newTurn(state, entry, 'main');
@@ -562,6 +579,8 @@
       return { prompt: '『' + c.name + '』— 先领取资源', actions: acts, turn: turnInfo(state, t) };
     }
 
+    if (t.pending && t.pending.kind === 'blackmailer_threat') return pendingActions(state, t);
+
     // 角色能力
     if (!t.abilityUsed) {
       const label = abilityLabel(c.id);
@@ -575,8 +594,10 @@
 
     // 角色收入
     if (!t.incomeTaken) {
-      const inc = incomeAmount(state, p, t);
-      if (inc != null) acts.push({ type: 'income', label: '领取角色收入（' + inc.text + '）' });
+      if (c.id !== 'abbot') {
+        const inc = incomeAmount(state, p, t);
+        if (inc != null) acts.push({ type: 'income', label: '领取角色收入（' + inc.text + '）' });
+      }
     }
     // 修士：从最富有者拿 1 金
     if (c.id === 'monk' && t.incomeTaken && !t.monkExtraTaken) {
@@ -629,12 +650,18 @@
       case 'assassin': return '【刺客】刺杀一个角色';
       case 'witch': return '【女巫】对一个角色施咒';
       case 'thief': return '【盗贼】偷窃一个角色';
+      case 'magistrate': return '【行政官】分配逮捕令';
+      case 'spy': return '【间谍】查看并调查手牌';
+      case 'blackmailer': return '【勒索者】分配威胁标记';
       case 'magician': return '【魔术师】使用能力';
+      case 'wizard': return '【法师】查看并取得一张手牌';
+      case 'abbot': return '【住持】宣告资源组合';
       case 'warlord': return '【领主】摧毁一栋建筑';
       case 'diplomat': return '【外交官】交换建筑';
       case 'marshal': return '【元帅】抢夺建筑（费用≤3）';
       case 'artist': return '【艺术家】美化建筑';
       case 'emperor': return '【皇帝】转移皇冠';
+      case 'tax_collector': return '【税务官】收取建筑税';
       case 'navigator': return '【航海家】领取额外奖励';
       case 'scholar': return '【学者】抽 7 张选 1 张';
       case 'prophet': return '【预言家】抽取对手手牌';
@@ -678,6 +705,42 @@
         return { prompt: '【盗贼】选择要偷窃的角色编号', actions: charChoices(state, t, [1], 'choose_char') };
       case 'witch_target':
         return { prompt: '【女巫】选择要施咒的角色编号', actions: charChoices(state, t, [1], 'choose_char') };
+      case 'magistrate_declare':
+        return { prompt: '【行政官】依次选择 3 个不同的角色编号作为逮捕令目标', actions: charChoices(state, t, [], 'magistrate_char') };
+      case 'magistrate_second':
+      case 'magistrate_third': {
+        const used = pd.used || [];
+        return { prompt: '【行政官】选择第 ' + (used.length + 1) + ' 个逮捕令目标', actions:
+          charChoices(state, t, used.concat([t.num]), 'magistrate_char') };
+      }
+      case 'blackmailer_declare':
+        return { prompt: '【勒索者】选择第 1 个威胁角色编号', actions: charChoices(state, t, [], 'blackmailer_char') };
+      case 'blackmailer_second':
+        return { prompt: '【勒索者】选择第 2 个威胁角色编号', actions:
+          charChoices(state, t, [t.num, pd.first], 'blackmailer_char') };
+      case 'blackmailer_threat':
+        return { prompt: '【勒索者】你受到威胁，可支付一半金币赎回', actions: [
+          { type: 'blackmailer_bribe', label: '支付 ' + Math.floor(p.gold / 2) + ' 金赎回' },
+          { type: 'blackmailer_refuse', label: '拒绝支付' }
+        ] };
+      case 'spy_target':
+        return { prompt: '【间谍】选择要查看手牌的玩家', actions: otherPlayers(state, t.playerIdx).map(i => ({
+          type: 'spy_target', target: state.players[i].id, label: state.players[i].name })) };
+      case 'spy_color':
+        return { prompt: '【间谍】选择要调查的建筑类型', actions: [
+          ['yellow','皇家'], ['blue','宗教'], ['green','商业'], ['red','军事'], ['purple','独特']
+        ].map(([color, name]) => ({ type: 'spy_color', color, label: name + '建筑' })) };
+      case 'wizard_target':
+        return { prompt: '【法师】选择要查看手牌的玩家', actions: otherPlayers(state, t.playerIdx).map(i => ({
+          type: 'wizard_target', target: state.players[i].id, label: state.players[i].name })) };
+      case 'wizard_card':
+        return { prompt: '【法师】选择一张牌', actions: (pd.cards || []).map(c => ({ type: 'wizard_card', uid: c.uid,
+          label: c.name + '（' + c.cost + ' 金）', color: c.color })) };
+      case 'wizard_choice':
+        return { prompt: '【法师】将牌加入手牌或立即建造', actions: [
+          { type: 'wizard_take', label: '加入手牌' },
+          { type: 'wizard_build', label: '立即建造（不占建造次数）' }
+        ] };
       case 'magician_choice':
         return { prompt: '【魔术师】选择一种能力', actions: [
           { type: 'magician_mode', mode: 'swap', label: '与一位玩家交换全部手牌' },
@@ -740,6 +803,17 @@
           label: g + ' 金 + ' + (n - g) + ' 张建筑牌' });
         return { prompt: '【修士】宣告要领取的资源组合（共 ' + n + ' 份）', actions: opts };
       }
+      case 'abbot_declare': {
+        const n = countColorForIncome(p, 'blue', 'blue');
+        const opts = [];
+        for (let g = 0; g <= n; g++) opts.push({ type: 'abbot_resource', gold: g, cards: n - g,
+          label: g + ' 金 + ' + (n - g) + ' 张建筑牌' });
+        return { prompt: '【住持】宣告要领取的资源组合（共 ' + n + ' 份）', actions: opts };
+      }
+      case 'tax_collect':
+        return { prompt: '【税务官】收取税务标记上的金币', actions: [
+          { type: 'tax_collect', label: '收取 ' + (state.effects.taxCollectorGold || 0) + ' 枚金币' }
+        ] };
       case 'emperor_crown':
         return { prompt: '【皇帝】将皇冠交给谁？', actions: otherPlayers(state, t.playerIdx).map(i => ({
           type: 'emperor_crown', target: state.players[i].id, label: state.players[i].name
@@ -1033,6 +1107,32 @@
         });
         p.city.push(built);
         t.builds++;
+        // 行政官的签名逮捕令：目标第一次付费建造时没收建筑，返还建造费，
+        // 并将建筑免费放入行政官城市；目标的建造次数仍然照计。
+        const warrant = state.effects.magistrate;
+        let confiscated = false;
+        if (warrant && !warrant.claimed && warrant.signed === t.num && idx !== warrant.playerIdx) {
+          const magistrate = state.players[warrant.playerIdx];
+          if (!magistrate.city.some(d => d.name === built.name)) {
+            p.city = p.city.filter(d => d.uid !== built.uid);
+            p.gold += card.cost;
+            magistrate.city.push(built);
+            confiscated = true;
+            log(state, '【行政官】' + magistrate.name + ' 没收了 ' + p.name + ' 建造的『' + card.name + '』。', 'bad');
+            notify(state, 'magistrate_confiscate', { byIdx: warrant.playerIdx, byId: magistrate.id, byName: magistrate.name,
+              playerIdx: idx, playerId: p.id, playerName: p.name, card: { uid: card.uid, name: card.name, cost: card.cost } });
+          }
+          // 签名逮捕令只针对目标第一次付费建造，无论能否没收都视为已处理。
+          warrant.claimed = true;
+        }
+        // 税务官的标记跨轮保留；行政官没收时由行政官承担本次税费。
+        const taxCollector = state.players.findIndex(player => player.chars.some(cid => cid === 'tax_collector'));
+        const taxPayer = confiscated
+          ? state.players[warrant.playerIdx] : p;
+        if (state.charDeck.some(cid => cid === 'tax_collector') && taxPayer !== state.players[taxCollector] && taxPayer.gold > 0) {
+          taxPayer.gold--; state.effects.taxCollectorGold = (state.effects.taxCollectorGold || 0) + 1;
+          log(state, '【税务官】收取 1 枚建筑税。', 'info');
+        }
         log(state, p.name + ' 建造了『' + card.name + '』（' + card.cost + ' 金）。', 'build');
         notify(state, 'built', {
           playerIdx: idx, playerId: p.id, playerName: p.name,
@@ -1127,6 +1227,131 @@
           // 女巫获得皇冠的例外：对国王/贵族施咒不获得皇冠
           return endTurn(state);
         } else return err('无效的选择');
+        return ok();
+      }
+      case 'magistrate_char': {
+        const pd = t.pending;
+        if (!pd || !['magistrate_declare', 'magistrate_second', 'magistrate_third'].includes(pd.kind)) return err('当前无需分配逮捕令');
+        const n = Number(action.num);
+        if (!Number.isFinite(n) || n === t.num || (pd.used || []).includes(n)) return err('逮捕令目标必须是三个不同的角色');
+        const used = (pd.used || []).concat(n);
+        if (used.length < 3) { t.pending = { kind: used.length === 1 ? 'magistrate_second' : 'magistrate_third', used }; return ok(); }
+        const signed = used[randInt(state, used.length)];
+        state.effects.magistrate = { nums: used, signed, playerIdx: idx, claimed: false };
+        t.abilityUsed = true; t.pending = null;
+        log(state, '【行政官】' + p.name + ' 分配了 3 个逮捕令标记。', 'magic');
+        notify(state, 'magistrate_declare', { byIdx: idx, byId: p.id, byName: p.name, nums: used });
+        return ok();
+      }
+      case 'blackmailer_char': {
+        const pd = t.pending;
+        const n = Number(action.num);
+        if (!pd || !['blackmailer_declare', 'blackmailer_second'].includes(pd.kind)) return err('当前无需分配威胁标记');
+        if (!Number.isFinite(n) || n === t.num || (pd.first != null && pd.first === n)) return err('威胁目标必须是两个不同角色');
+        if (pd.kind === 'blackmailer_declare') { t.pending = { kind: 'blackmailer_second', first: n }; return ok(); }
+        const signed = randInt(state, 2) === 0 ? pd.first : n;
+        state.effects.blackmailer = { nums: [pd.first, n], signed, playerIdx: idx };
+        t.abilityUsed = true; t.pending = null;
+        log(state, '【勒索者】' + p.name + ' 分配了 2 个威胁标记。', 'magic');
+        notify(state, 'blackmailer_declare', { byIdx: idx, byId: p.id, byName: p.name, nums: [pd.first, n] });
+        return ok();
+      }
+      case 'spy_target': {
+        const pd = t.pending;
+        const ti = playerIdx(state, action.target);
+        if (!pd || pd.kind !== 'spy_target' || ti < 0 || ti === idx) return err('无效的间谍目标');
+        t.pending = { kind: 'spy_color', targetIdx: ti };
+        return ok();
+      }
+      case 'spy_color': {
+        const pd = t.pending;
+        if (!pd || pd.kind !== 'spy_color' || !['yellow','blue','green','red','purple'].includes(action.color)) return err('无效的调查类型');
+        const target = state.players[pd.targetIdx];
+        const matching = target.hand.filter(card => card.color === action.color).length;
+        const stolen = Math.min(target.gold, matching);
+        target.gold -= stolen; p.gold += stolen;
+        const cards = drawCards(state, matching); p.hand = p.hand.concat(cards);
+        t.abilityUsed = true; t.pending = null;
+        log(state, '【间谍】' + p.name + ' 调查了 ' + target.name + ' 的手牌，获得 ' + cards.length + ' 张建筑牌并拿走 ' + stolen + ' 金。', 'magic');
+        notify(state, 'spy_result', { byIdx: idx, byId: p.id, byName: p.name, targetIdx: pd.targetIdx, targetId: target.id,
+          targetName: target.name, color: action.color, matching, gold: stolen, cards: cards.map(c => c.name) });
+        return ok();
+      }
+      case 'wizard_target': {
+        const ti = playerIdx(state, action.target);
+        if (!t.pending || t.pending.kind !== 'wizard_target' || ti < 0 || ti === idx) return err('无效的法师目标');
+        t.pending = { kind: 'wizard_card', targetIdx: ti, cards: state.players[ti].hand.slice() };
+        return ok();
+      }
+      case 'wizard_card': {
+        const pd = t.pending;
+        const card = pd && pd.kind === 'wizard_card' && pd.cards.find(c => c.uid === action.uid);
+        if (!card) return err('无效的法师卡牌');
+        t.pending = { kind: 'wizard_choice', targetIdx: pd.targetIdx, card };
+        return ok();
+      }
+      case 'wizard_take': {
+        const pd = t.pending; const target = pd && state.players[pd.targetIdx];
+        if (!pd || pd.kind !== 'wizard_choice' || !target) return err('当前无需选择');
+        const card = target.hand.find(c => c.uid === pd.card.uid);
+        if (!card) return err('该卡牌已不在目标手牌中');
+        target.hand = target.hand.filter(c => c.uid !== card.uid); p.hand.push(card);
+        t.abilityUsed = true; t.pending = null;
+        log(state, '【法师】' + p.name + ' 从 ' + target.name + ' 处取得 1 张建筑牌。', 'magic');
+        return ok();
+      }
+      case 'wizard_build': {
+        const pd = t.pending; const target = pd && state.players[pd.targetIdx]; const card = pd && pd.card;
+        if (!pd || pd.kind !== 'wizard_choice' || !target || !card) return err('当前无需选择');
+        const actual = target.hand.find(c => c.uid === card.uid);
+        if (!actual) return err('该卡牌已不在目标手牌中');
+        if (p.gold < actual.cost) return err('金币不足');
+        p.gold -= actual.cost; t.spentOnBuild += actual.cost;
+        target.hand = target.hand.filter(c => c.uid !== actual.uid);
+        const built = Object.assign({}, actual, { beautified: 0, builtRound: state.round, museum: [] });
+        p.city.push(built);
+        const taxCollector = state.players.findIndex(player => player.chars.some(cid => cid === 'tax_collector'));
+        if (state.charDeck.some(cid => cid === 'tax_collector') && idx !== taxCollector && p.gold > 0) {
+          p.gold--; state.effects.taxCollectorGold = (state.effects.taxCollectorGold || 0) + 1;
+        }
+        if (p.city.length >= state.config.endDistricts && state.firstToFinish < 0) state.firstToFinish = idx;
+        t.abilityUsed = true; t.pending = null;
+        log(state, '【法师】' + p.name + ' 从 ' + target.name + ' 处取牌并立即建造了『' + actual.name + '』。', 'build');
+        return ok();
+      }
+      case 'blackmailer_bribe': {
+        const pd = t.pending; if (!pd || pd.kind !== 'blackmailer_threat') return err('当前没有勒索威胁');
+        const amount = Math.floor(p.gold / 2); p.gold -= amount;
+        state.effects.blackmailer.nums = state.effects.blackmailer.nums.filter(n => n !== t.num);
+        t.pending = null; t.takenResources = false;
+        log(state, '【勒索者】' + p.name + ' 支付 ' + amount + ' 金赎回威胁。', 'magic');
+        return ok();
+      }
+      case 'blackmailer_refuse': {
+        const pd = t.pending; if (!pd || pd.kind !== 'blackmailer_threat') return err('当前没有勒索威胁');
+        if (pd.signed) { const amount = p.gold; p.gold = 0; const owner = state.players[state.effects.blackmailer.playerIdx]; owner.gold += amount;
+          log(state, '【勒索者】' + owner.name + ' 揭示签名威胁并拿走 ' + p.name + ' 的全部金币。', 'bad'); }
+        state.effects.blackmailer.nums = state.effects.blackmailer.nums.filter(n => n !== t.num);
+        t.pending = null; t.takenResources = false;
+        return ok();
+      }
+      case 'abbot_resource': {
+        const pd = t.pending; const n = countColorForIncome(p, 'blue', 'blue');
+        if (!pd || pd.kind !== 'abbot_declare' || action.gold + action.cards !== n) return err('资源组合不正确');
+        p.gold += action.gold; p.hand = p.hand.concat(drawCards(state, action.cards));
+        t.incomeTaken = true; t.abilityUsed = true; t.pending = null;
+        const richest = richestOther(state, idx);
+        if (richest >= 0 && !state.players.some((o, i) => i !== idx && o.gold === state.players[richest].gold && i !== richest)) {
+          if (state.players[richest].gold > p.gold) { state.players[richest].gold--; p.gold++; }
+        }
+        log(state, '【住持】' + p.name + ' 领取 ' + action.gold + ' 金 + ' + action.cards + ' 张建筑牌。', 'good');
+        return ok();
+      }
+      case 'tax_collect': {
+        if (!t.pending || t.pending.kind !== 'tax_collect') return err('当前无需收税');
+        const amount = state.effects.taxCollectorGold || 0; p.gold += amount; state.effects.taxCollectorGold = 0;
+        t.abilityUsed = true; t.pending = null;
+        log(state, '【税务官】' + p.name + ' 收取了 ' + amount + ' 枚建筑税。', 'good');
         return ok();
       }
       case 'magician_mode': {
@@ -1398,12 +1623,18 @@
       case 'assassin': t.pending = { kind: 'assassin' }; break;
       case 'thief': t.pending = { kind: 'thief' }; break;
       case 'witch': t.pending = { kind: 'witch_target' }; break;
+      case 'magistrate': t.pending = { kind: 'magistrate_declare', used: [] }; break;
+      case 'blackmailer': t.pending = { kind: 'blackmailer_declare' }; break;
+      case 'spy': t.pending = { kind: 'spy_target' }; break;
       case 'magician': t.pending = { kind: 'magician_choice' }; break;
+      case 'wizard': t.pending = { kind: 'wizard_target' }; break;
+      case 'abbot': t.pending = { kind: 'abbot_declare' }; break;
       case 'warlord': t.pending = { kind: 'warlord_destroy' }; break;
       case 'marshal': t.pending = { kind: 'marshal_seize' }; break;
       case 'diplomat': t.pending = { kind: 'diplomat_mine' }; break;
       case 'artist': t.pending = { kind: 'artist', selected: [] }; break;
       case 'emperor': t.pending = { kind: 'emperor_crown' }; break;
+      case 'tax_collector': t.pending = { kind: 'tax_collect' }; break;
       case 'navigator': t.pending = { kind: 'navigator_bonus' }; break;
       case 'scholar': {
         const cards = drawCards(state, 7);
@@ -1826,7 +2057,8 @@
       effects: {
         assassinated: state.effects.assassinated,
         thief: state.effects.thief,
-        bewitched: state.effects.bewitched
+        bewitched: state.effects.bewitched,
+        taxCollectorGold: state.effects.taxCollectorGold || 0
       },
       firstToFinish: state.firstToFinish,
       log: state.log.slice(-120),
@@ -1904,6 +2136,15 @@
           fromCrownIdx: pd._fromCrownIdx ?? null, count: (pd.cards || []).length,
           cards: isActor ? (pd.cards || []).map(c => ({
             uid: c.uid, name: c.name, en: c.en, color: c.color, cost: c.cost, desc: c.desc })) : [] };
+      case 'wizard_card':
+        return { kind: pd.kind, prompt: pendingPrompt(pd.kind), targetIdx: pd.targetIdx ?? null,
+          count: (pd.cards || []).length,
+          cards: isActor ? (pd.cards || []).map(c => ({ uid: c.uid, name: c.name, en: c.en,
+            color: c.color, cost: c.cost, desc: c.desc })) : [] };
+      case 'wizard_choice':
+        return { kind: pd.kind, prompt: pendingPrompt(pd.kind), targetIdx: pd.targetIdx ?? null,
+          card: isActor && pd.card ? { uid: pd.card.uid, name: pd.card.name, en: pd.card.en,
+            color: pd.card.color, cost: pd.card.cost, desc: pd.card.desc } : null };
       case 'artist':
         return { kind: pd.kind, targetIdx: pd.targetIdx ?? null,
           fromCrownIdx: pd._fromCrownIdx ?? null, selected: pd.selected || [] };
@@ -1920,6 +2161,11 @@
       marshal_seize: '选择要抢夺的建筑', diplomat_mine: '选择自己的建筑',
       diplomat_theirs: '选择要换取的建筑', artist: '选择要美化的建筑',
       navigator_bonus: '选择额外奖励', monk_declare: '宣告资源组合',
+      abbot_declare: '宣告住持资源组合', tax_collect: '收取建筑税',
+      magistrate_declare: '分配逮捕令', magistrate_second: '分配逮捕令', magistrate_third: '分配逮捕令',
+      blackmailer_declare: '分配威胁标记', blackmailer_second: '分配威胁标记', blackmailer_threat: '处理勒索威胁',
+      spy_target: '选择间谍调查对象', spy_color: '选择间谍调查类型',
+      wizard_target: '选择法师查看对象', wizard_card: '选择法师取得的牌', wizard_choice: '选择法师牌的去向',
       emperor_crown: '选择皇冠归属', emperor_take: '选择拿取金币或手牌',
       prophet_give: '选择归还的手牌', draw_keep: '选择保留的建筑牌', scholar_pick: '选择 1 张建筑牌'
     };
