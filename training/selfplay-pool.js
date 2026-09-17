@@ -95,6 +95,9 @@ class SelfPlayPool {
 
   async close() {
     this.onLog('自对弈池：关闭 ' + this.workers.length + ' 个 worker');
+    // 标记为主动关闭：terminate() 的正常退出码就是 1，不置位的话 exit 处理器
+    // 会把每次正常关闭都报成「异常退出 code=1」（2026-09-17 训练日志实录）。
+    this.stopping = true;
     // 先通知每个 worker 自己收摊（关掉 native 搜索子进程及其拉起的 Python），
     // 等它们回 'closed' 再 terminate。terminate() 是硬杀线程，worker 内的清理代码
     // 一行都不会跑 —— 少了这一步，每次训练结束都会留下一批 mcts_worker.exe 孤儿，

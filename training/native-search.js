@@ -15,6 +15,12 @@ class NativeSearchClient {
     if (inferenceBackend === 'libtorch') {
       const torchLib = path.join(root, '.python', 'Lib', 'site-packages', 'torch', 'lib');
       environment.PATH = torchLib + path.delimiter + (environment.PATH || '');
+      // 6GB 级显卡上 batching 的高峰显存很容易碎片化到「总量够、连续块不够」而 OOM
+      // （2026-09-17 训练日志：单次申请 2.80 GiB 失败）。expandable_segments 让
+      // 分配器可以整体伸缩段，PyTorch 官方 OOM 提示也是这个建议。用户显式设了就不覆盖。
+      if (!environment.PYTORCH_CUDA_ALLOC_CONF) {
+        environment.PYTORCH_CUDA_ALLOC_CONF = 'expandable_segments:True';
+      }
     }
     this.child = spawn(binary, [], { cwd: root, env: environment, stdio: ['pipe', 'pipe', 'pipe'] });
     this.simulations = simulations;
@@ -121,6 +127,16 @@ class NativeSearchClient {
     if (this.closed) return;
     this.closed = true;
     this.#fail(new Error('native mcts_worker 已关闭'));
+    // Windows 上 kill() 只杀这一个进程；万一 native worker 以后再拉子进程，
+    // 留下的就是占着显存的孤儿（2026-09-17 日志：池关闭 30 秒后孤儿还在跑并 OOM）。
+    // taskkill /T 连整棵树一起杀，失败再回退普通 kill。
+    if (process.platform === 'win32' && this.child.pid && this.child.exitCode == null) {
+      try {
+        spawn('taskkill', ['/PID', String(this.child.pid), '/T', '/F'],
+          { windowsHide: true, stdio: 'ignore' });
+        return;
+      } catch (_) { /* taskkill 不可用，走下面的普通 kill */ }
+    }
     this.child.kill();
   }
 }
