@@ -22,11 +22,14 @@
   ];
 
   function variants(folder, key) {
-    // 墓地卡图曾把建造费用 5 错印成能力支付费用 1，勒索者卡图已更新；
+    // 墓地卡图曾把建造费用 5 错印成能力支付费用 1，勒索者卡图已更新，
+    // 法师使用新版卡图，魔术师恢复为原卡图；
     // 单独版本化，让已安装 PWA 绕过旧图片的 HTTP / Service Worker 缓存。
     const versioned = (folder === 'districts' && key === 'graveyard') ||
-      (folder === 'roles' && key === 'blackmailer');
-    const version = versioned ? '?v=2' : '';
+      (folder === 'roles' && (key === 'blackmailer' || key === 'magician' || key === 'wizard'));
+    const version = folder === 'roles' && key === 'magician'
+      ? '?v=3'
+      : (versioned ? '?v=2' : '');
     return {
       thumb: base + folder + '/thumb/' + key + '.webp' + version,
       full: base + folder + '/full/' + key + '.webp' + version

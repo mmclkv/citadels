@@ -52,6 +52,14 @@ const blackmailer = manifest.cards.roles.blackmailer;
 if (!/blackmailer\.webp\?v=2$/.test(blackmailer.thumb) || !/blackmailer\.webp\?v=2$/.test(blackmailer.full)) {
   throw new Error('勒索者更新卡图缺少缓存版本标记');
 }
+const magician = manifest.cards.roles.magician;
+if (!/magician\.webp\?v=3$/.test(magician.thumb) || !/magician\.webp\?v=3$/.test(magician.full)) {
+  throw new Error('魔术师恢复卡图缺少缓存版本标记');
+}
+const wizard = manifest.cards.roles.wizard;
+if (!/wizard\.webp\?v=2$/.test(wizard.thumb) || !/wizard\.webp\?v=2$/.test(wizard.full)) {
+  throw new Error('法师更新卡图缺少缓存版本标记');
+}
 
 const roleKeys = Object.keys(manifest.cards.roles);
 const districtKeys = Object.keys(manifest.cards.districts);
