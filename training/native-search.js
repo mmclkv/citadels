@@ -38,9 +38,20 @@ class NativeSearchClient {
     this.closed = false;
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', chunk => this.#onData(chunk));
+    // stderr 必须有人读：管道建了却不读，数据会无上限堆在流的内部缓冲里（内存泄漏），
+    // 而且管道一旦写满，子进程会阻塞在写 stderr 上（实测 4MB 就卡死）——LibTorch /
+    // torch 初始化警告、Python traceback 都往这里打，不读迟早出事。
+    // 这里只保留最后一段用于报错定位，不让它无限增长。
+    this.stderrTail = '';
+    this.child.stderr.setEncoding('utf8');
+    this.child.stderr.on('data', chunk => this.#onStderr(chunk));
     this.child.on('error', error => this.#fail(error));
     this.child.on('exit', code => {
-      if (!this.closed && code !== 0) this.#fail(new Error('native mcts_worker 异常退出 code=' + code));
+      if (!this.closed && code !== 0) {
+        const tail = this.lastStderr();
+        this.#fail(new Error('native mcts_worker 异常退出 code=' + code +
+          (tail ? ' · stderr: ' + tail : '')));
+      }
     });
   }
 
@@ -59,7 +70,15 @@ class NativeSearchClient {
         else waiter.resolve(decodeSearchResponse(result));
       } catch (error) { this.#fail(error); }
     }
+    // 兜底：子进程吐了大量没有换行的输出时（异常日志风暴），别让 buffer 无限膨胀。
+    if (this.buffer.length > 16 * 1024 * 1024) this.buffer = '';
   }
+
+  #onStderr(chunk) {
+    this.stderrTail = (this.stderrTail + chunk).slice(-4096);
+  }
+
+  lastStderr() { return this.stderrTail.trim(); }
 
   #fail(error) {
     for (const waiter of this.pending.values()) waiter.reject(error);

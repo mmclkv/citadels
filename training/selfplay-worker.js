@@ -81,6 +81,15 @@ function getNativeSearch() {
 
 parentPort.on('message', async message => {
   if (message.type === 'stop') { stopping = true; return; }
+  // 池关闭前先走这条路：worker.terminate() 不会执行本文件里的任何清理代码，
+  // 直接 terminate 会把 mcts_worker.exe（以及它拉起的 gpu_trainer.py）留成孤儿进程，
+  // 每个都占内存、GPU 后端还各占一份 CUDA 显存。所以先自己关，再让池来 terminate。
+  if (message.type === 'shutdown') {
+    if (nativeSearch) { try { nativeSearch.close(); } catch (_) { /* 进程可能已退出 */ } nativeSearch = null; }
+    if (mctsEvaluator) { try { await mctsEvaluator.close(); } catch (_) { /* 同上 */ } }
+    parentPort.postMessage({ type: 'closed' });
+    return;
+  }
   if (message.type === 'forwardBatchResult') {
     const pending = forwardPending.get(message.id);
     if (!pending) return;

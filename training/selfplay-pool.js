@@ -4,7 +4,9 @@ const path = require('path');
 const { Worker } = require('worker_threads');
 
 class SelfPlayPool {
-  constructor({ root, config, size, onLog = () => {}, batchForward = null }) {
+  constructor({ root, config, size, onLog = () => {}, batchForward = null,
+    // 可注入，测试用假 Worker 验证「先 shutdown 再 terminate」的关闭顺序
+    WorkerImpl = Worker, workerFile = null }) {
     this.root = root;
     this.config = config;
     this.size = size;
@@ -12,8 +14,9 @@ class SelfPlayPool {
     this.batchForward = batchForward;
     this.workers = [];
     this.stopping = false;
+    const script = workerFile || path.join(root, 'training', 'selfplay-worker.js');
     for (let i = 0; i < size; i++) {
-      const worker = new Worker(path.join(root, 'training', 'selfplay-worker.js'), {
+      const worker = new WorkerImpl(script, {
         workerData: { config, workerId: i + 1 }
       });
       worker.on('error', error => this.onLog('[worker #' + (i + 1) + '] ' + (error.message || String(error))));
@@ -92,6 +95,26 @@ class SelfPlayPool {
 
   async close() {
     this.onLog('自对弈池：关闭 ' + this.workers.length + ' 个 worker');
+    // 先通知每个 worker 自己收摊（关掉 native 搜索子进程及其拉起的 Python），
+    // 等它们回 'closed' 再 terminate。terminate() 是硬杀线程，worker 内的清理代码
+    // 一行都不会跑 —— 少了这一步，每次训练结束都会留下一批 mcts_worker.exe 孤儿，
+    // 内存与（GPU 后端的）显存都跟着一次次累积。
+    await Promise.all(this.workers.map(worker => new Promise(resolve => {
+      let settled = false;
+      let timer = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        worker.removeListener('message', onClosed);
+        resolve();
+      };
+      const onClosed = message => { if (message && message.type === 'closed') finish(); };
+      worker.on('message', onClosed);
+      try { worker.postMessage({ type: 'shutdown' }); }
+      catch (_) { finish(); return; }
+      timer = setTimeout(finish, 3000);   // worker 卡住时不无限等
+    })));
     await Promise.all(this.workers.map(worker => worker.terminate()));
   }
 }
