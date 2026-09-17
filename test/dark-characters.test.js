@@ -29,14 +29,14 @@ test('dark 6 个角色已注册，dark 角色组可选用新增角色', () => {
   assert.deepEqual(ids, ['witch', 'blackmailer', 'wizard', 'emperor', 'abbot', 'alchemist', 'navigator', 'diplomat', 'tax_collector']);
 });
 
-test('住持可以按蓝色建筑数量宣告金币和建筑牌', () => {
+test('住持按蓝色建筑数量领取金币，不再发动资源组合技能', () => {
   const state = stateWith('abbot');
   state.players[0].city = [{ uid: 'b1', name: '神庙', color: 'blue', cost: 1, scoreValue: 1 }];
-  const ability = Engine.getAvailableActions(state, 'p0').actions.find(a => a.type === 'ability');
-  assert.ok(ability, '住持应有主动能力');
-  assert.equal(Engine.applyAction(state, 'p0', ability).ok, true);
-  assert.equal(state.turn.pending.kind, 'abbot_declare');
-  assert.equal(Engine.applyAction(state, 'p0', { type: 'abbot_resource', gold: 1, cards: 0 }).ok, true);
+  const actions = Engine.getAvailableActions(state, 'p0').actions;
+  assert.ok(actions.some(a => a.type === 'income'), '住持应能领取宗教收入');
+  assert.ok(!actions.some(a => a.type === 'ability'), '住持没有旧版主动技能');
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'income' }).ok, true);
+  assert.equal(state.players[0].gold, 3);
   assert.equal(state.turn.incomeTaken, true);
 });
 

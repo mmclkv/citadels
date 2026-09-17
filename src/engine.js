@@ -56,6 +56,25 @@
     });
   }
 
+  /**
+   * 金币易主的统一上报，和 notifyHandGain 对称。
+   * toIdx 收到 amount 枚金币；fromIdx 为来源玩家（null 表示来自银行/金库，非玩家间转移）。
+   * 客户端据此决定播「玩家间金币飞行」还是「从金库飞入」，避免每个效果各写一遍。
+   * 注意：本函数只负责「获得」侧，付费到银行的支出（建造、抢夺费等）另有专门的位移动画，
+   * 不要用它报告，否则会看到金币凭空飞进来。
+   */
+  function notifyGoldGain(state, toIdx, amount, fromIdx, why) {
+    const amt = Math.floor(Number(amount) || 0);
+    if (!(amt > 0) || !state.players[toIdx]) return;
+    const to = state.players[toIdx];
+    const from = fromIdx == null ? null : state.players[fromIdx];
+    notify(state, 'got_gold', {
+      playerIdx: toIdx, playerId: to.id, playerName: to.name,
+      amount: amt, fromIdx: from ? fromIdx : null,
+      fromName: from ? from.name : null, why: why || '获得金币'
+    });
+  }
+
   /* ------------------------------ 工具 ------------------------------- */
   function getPlayer(state, id) {
     return state.players.find(p => p.id === id) || null;
@@ -455,6 +474,7 @@
     const adjacent = (Math.abs(a - b) === 1) || (Math.abs(a - b) === n - 1);
     if (adjacent) {
       state.players[entry.playerIdx].gold += 3;
+      notifyGoldGain(state, entry.playerIdx, 3, null, '皇后相邻奖励');
       log(state, '【皇后】' + state.players[entry.playerIdx].name + ' 坐在 ' +
         state.players[holder].name + '（4号角色）旁边，获得 3 枚金币。', 'good');
     } else {
@@ -495,6 +515,14 @@
     if (!greenFree && turn.builds >= limit) return false;
     const same = p.city.filter(d => d.name === card.name).length;
     return same < maxSameName(p);
+  }
+
+  function canBuildIgnoringGold(state, p, card, turn) {
+    const c = charOf(turn.charId);
+    if (!c || c.id !== 'bishop' || (c.id === 'navigator' && turn.phase !== 'witch_resume')) return false;
+    const limit = buildLimitFor(state, turn);
+    if (turn.builds >= limit) return false;
+    return p.city.filter(d => d.name === card.name).length < maxSameName(p);
   }
 
   /* ------------------------- 建造的落定与收尾 ------------------------- */
@@ -551,6 +579,7 @@
       // 目标的建造次数仍然照计（t.builds 已在 completeBuild 里 ++）。
       p.city = p.city.filter(d => d.uid !== built.uid);
       p.gold += card.cost;
+      notifyGoldGain(state, idx, card.cost, null, '行政官没收退款');
       magistrate.city.push(built);
       log(state, '【行政官】' + magistrate.name + ' 没收了 ' + p.name + ' 建造的『' + card.name + '』。', 'bad');
       notify(state, 'magistrate_confiscate', { byIdx: confiscateBy, byId: magistrate.id, byName: magistrate.name,
@@ -661,8 +690,18 @@
       return { actions: [], prompt: '等待 ' + state.players[t.playerIdx].name + ' 行动…' };
     }
 
-    // 多步能力等待中
-    if (t.pending) return pendingActions(state, t);
+    // 多步能力等待中。
+    // 兜底：有些多步步骤在特定局面下一个候选都列不出来（最典型的是法师选中了手牌为空的
+    // 玩家，'wizard_card' 的候选就为空），此时必须给出「放弃使用能力」出口，
+    // 否则整个房间会永久卡在这个玩家身上（训练里表现为「没有合法行动」直接报错）。
+    if (t.pending) {
+      const opts = pendingActions(state, t);
+      if (!(opts.actions || []).some(a => !a.disabled)) {
+        return { prompt: opts.prompt || '没有可选项',
+          actions: [{ type: 'ability_skip', label: '没有可选项，放弃使用能力' }] };
+      }
+      return opts;
+    }
 
     const p = state.players[idx];
     const c = charOf(t.charId);
@@ -700,10 +739,8 @@
 
     // 角色收入
     if (!t.incomeTaken) {
-      if (c.id !== 'abbot') {
-        const inc = incomeAmount(state, p, t);
-        if (inc != null) acts.push({ type: 'income', label: '领取角色收入（' + inc.text + '）' });
-      }
+      const inc = incomeAmount(state, p, t);
+      if (inc != null) acts.push({ type: 'income', label: '领取角色收入（' + inc.text + '）' });
     }
     // 修士：从最富有者拿 1 金
     if (c.id === 'monk' && t.incomeTaken && !t.monkExtraTaken) {
@@ -718,6 +755,13 @@
       if (canBuildCard(state, p, card, turnSafe(t))) {
         acts.push({ type: 'build', uid: card.uid, label: '建造『' + card.name + '』（' + card.cost + ' 金）',
                     color: card.color });
+      } else if (c.id === 'bishop' && card.cost > p.gold && canBuildIgnoringGold(state, p, card, turnSafe(t))) {
+        const shortfall = card.cost - p.gold;
+        if (p.hand.length - 1 >= shortfall) state.players.forEach((payer, payerIdx) => {
+          if (payerIdx !== idx && payer.gold >= shortfall) acts.push({ type: 'build', uid: card.uid,
+            target: payer.id, label: '建造『' + card.name + '』（请 ' + payer.name + ' 垫付 ' + shortfall + ' 金，偿还 ' + shortfall + ' 张手牌）',
+            color: card.color });
+        });
       }
     });
 
@@ -761,7 +805,6 @@
       case 'blackmailer': return '【勒索者】分配威胁标记';
       case 'magician': return '【魔术师】使用能力';
       case 'wizard': return '【法师】查看并取得一张手牌';
-      case 'abbot': return '【住持】宣告资源组合';
       case 'warlord': return '【领主】摧毁一栋建筑';
       case 'diplomat': return '【外交官】交换建筑';
       case 'marshal': return '【元帅】抢夺建筑（费用≤3）';
@@ -777,6 +820,10 @@
 
   function incomeAmount(state, p, t) {
     const c = charOf(t.charId);
+    if (c.id === 'bishop') {
+      const n = countColorForIncome(p, 'blue', 'blue');
+      return { n: n, color: 'blue', kind: 'cards', text: n + ' 张建筑牌（宗教建筑 ×' + n + '）' };
+    }
     let color = c.income;
     if (t.phase === 'witch_resume') color = c.income;
     if (!color) return null;
@@ -846,8 +893,11 @@
           ['yellow','皇家'], ['blue','宗教'], ['green','商业'], ['red','军事'], ['purple','独特']
         ].map(([color, name]) => ({ type: 'spy_color', color, label: name + '建筑' })) };
       case 'wizard_target':
-        return { prompt: '【法师】选择要查看手牌的玩家', actions: otherPlayers(state, t.playerIdx).map(i => ({
-          type: 'wizard_target', target: state.players[i].id, label: state.players[i].name })) };
+        // 只列出「有手牌」的玩家：选中空手玩家会让下一步 wizard_card 无牌可选而卡住。
+        return { prompt: '【法师】选择要查看手牌的玩家', actions:
+          otherPlayers(state, t.playerIdx).filter(i => state.players[i].hand.length > 0).map(i => ({
+            type: 'wizard_target', target: state.players[i].id,
+            label: state.players[i].name + '（' + state.players[i].hand.length + ' 张手牌）' })) };
       case 'wizard_card':
         return { prompt: '【法师】选择一张牌', actions: (pd.cards || []).map(c => ({ type: 'wizard_card', uid: c.uid,
           label: c.name + '（' + c.cost + ' 金）', color: c.color })) };
@@ -856,6 +906,10 @@
           { type: 'wizard_take', label: '加入手牌' },
           { type: 'wizard_build', label: '立即建造（不占建造次数）' }
         ] };
+      case 'bishop_repay':
+        return { prompt: '【主教】选择 ' + pd.amount + ' 张手牌，偿还 ' + state.players[pd.payerIdx].name + ' 代付的 ' + pd.amount + ' 金',
+          actions: [{ type: 'choose_cards', uids: [], label: '确认交出所选手牌' }],
+          selectable: 'hand', multi: true, max: pd.amount };
       case 'magician_choice':
         return { prompt: '【魔术师】选择一种能力', actions: [
           { type: 'magician_mode', mode: 'swap', label: '与一位玩家交换全部手牌' },
@@ -876,8 +930,13 @@
       case 'marshal_seize':
         return { prompt: '【元帅】选择要抢夺的建筑（费用 ≤ 3）', actions: seizeChoices(state, t) };
       case 'diplomat_mine': {
-        const acts = ownDistrictChoices(state, t, false);
-        if (acts.length === 0) acts.push({ type: 'ability_skip', label: '你还没有建筑，无法交换，放弃使用能力' });
+        // 自己的堡垒（immune）同样不可用于交换 —— 提交时会被 doDiplomatSwap 拒绝，
+        // 若玩家手里恰好只有堡垒，列表里唯一的候选必然失败，整步就没有合法动作了。
+        const acts = ownDistrictChoices(state, t, false).filter(a => {
+          const card = p.city.find(c => c.uid === a.uid);
+          return card && canTargetDistrict(state, card);
+        });
+        if (acts.length === 0) acts.push({ type: 'ability_skip', label: '没有可用于交换的建筑，放弃使用能力' });
         return { prompt: '【外交官】选择你自己的一栋建筑用于交换', actions: acts };
       }
       case 'diplomat_theirs':
@@ -1040,12 +1099,10 @@
     return out;
   }
 
-  function isBishopProtected(state, pidx) {
+  function isAbbotProtected(state, pidx) {
     const p = state.players[pidx];
-    if (!p.chars.some(c => c === 'bishop')) return false;
-    if (state.effects.assassinated === 5) return false;
-    if (state.effects.bewitched === 5) return false;
-    return true;
+    if (!p.chars.some(c => c === 'abbot')) return false;
+    return state.effects.assassinated !== 5 && state.effects.bewitched !== 5;
   }
   function destroyCost(state, tpidx, card) {
     const tp = state.players[tpidx];
@@ -1065,7 +1122,7 @@
         // 允许摧毁自己的建筑
       }
       if (tp.city.length >= state.config.endDistricts) return;   // 已达标不可摧毁
-      if (i !== t.playerIdx && isBishopProtected(state, i)) return;
+      if (i !== t.playerIdx && isAbbotProtected(state, i)) return;
       tp.city.forEach(card => {
         if (!canTargetDistrict(state, card)) return;
         const cost = destroyCost(state, i, card);
@@ -1084,6 +1141,7 @@
     state.players.forEach((tp, i) => {
       if (i === t.playerIdx) return;
       if (tp.city.length >= state.config.endDistricts) return;
+      if (isAbbotProtected(state, i)) return;
       tp.city.forEach(card => {
         if (card.cost > 3) return;
         if (!canTargetDistrict(state, card)) return;
@@ -1114,6 +1172,7 @@
     const out = [];
     state.players.forEach((tp, i) => {
       if (i === t.playerIdx) return;
+      if (isAbbotProtected(state, i)) return;
       tp.city.forEach(card => {
         if (!canTargetDistrict(state, card)) return;
         if (me.city.filter(d => d.name === card.name).length >= maxSameName(me)) return;
@@ -1172,10 +1231,7 @@
         p.gold += amt;
         t.takenResources = true;
         log(state, p.name + '（' + c.name + '）领取 ' + amt + ' 枚金币。', 'info');
-        notify(state, 'got_gold', {
-          playerIdx: idx, playerId: p.id, playerName: p.name,
-          amount: amt, why: '领取资源'
-        });
+        notifyGoldGain(state, idx, amt, null, '领取资源');
         if (t.phase === 'bewitched') return finishBewitchedTurn(state);
         afterResources(state, t, p, c);
         return ok();
@@ -1190,10 +1246,7 @@
         if (gb > 0) {
           p.gold += gb;
           log(state, '【' + c.name + '】' + p.name + ' 额外获得 ' + gb + ' 枚金币。', 'good');
-          notify(state, 'got_gold', {
-            playerIdx: idx, playerId: p.id, playerName: p.name,
-            amount: gb, why: '角色加成'
-          });
+          notifyGoldGain(state, idx, gb, null, '角色加成');
         }
         const n = draw3 ? 3 : 2;
         const drawn = drawCards(state, n);
@@ -1237,15 +1290,19 @@
         if (t.incomeTaken) return err('本回合已领取收入');
         const inc = incomeAmount(state, p, t);
         if (!inc) return err('该角色没有收入能力');
-        p.gold += inc.n;
         t.incomeTaken = true;
-        if (inc.n > 0) {
+        if (inc.kind === 'cards') {
+          const cards = drawCards(state, inc.n);
+          p.hand = p.hand.concat(cards);
+          notifyHandGain(state, idx, cards.length, null, '主教宗教建筑收入');
+          log(state, '【主教】' + p.name + ' 因 ' + inc.n + ' 栋宗教建筑抽取 ' + cards.length + ' 张建筑牌。', 'good');
+        } else {
+          p.gold += inc.n;
+        }
+        if (inc.kind !== 'cards' && inc.n > 0) {
           log(state, '【' + c.name + '】' + p.name + ' 因 ' + inc.n + ' 栋' +
             CitCards.COLORS[inc.color].name + '建筑获得 ' + inc.n + ' 枚金币。', 'good');
-          notify(state, 'got_gold', {
-            playerIdx: idx, playerId: p.id, playerName: p.name,
-            amount: inc.n, why: '角色收入'
-          });
+          notifyGoldGain(state, idx, inc.n, null, '角色收入');
         }
         return ok();
       }
@@ -1266,6 +1323,15 @@
       case 'build': {
         const card = p.hand.find(x => x.uid === action.uid);
         if (!card) return err('手牌中没有这张建筑牌');
+        if (card.cost > p.gold && c.id === 'bishop') {
+          if (!canBuildIgnoringGold(state, p, card, t)) return err('无法建造该建筑（超出建造限额或已有同名建筑）');
+          const payerIdx = playerIdx(state, action.target);
+          const amount = card.cost - p.gold;
+          if (payerIdx < 0 || payerIdx === idx || state.players[payerIdx].gold < amount || p.hand.length - 1 < amount)
+            return err('指定的代付玩家或偿还手牌数量不符合要求');
+          t.pending = { kind: 'bishop_repay', uid: card.uid, payerIdx: payerIdx, targetIdx: payerIdx, amount: amount };
+          return ok();
+        }
         if (!canBuildCard(state, p, card, t)) return err('无法建造该建筑（金币不足、超出建造限额或已有同名建筑）');
 
         // 行政官的签名（真）逮捕令：目标第一次付费建造时，先冻结全场，
@@ -1303,6 +1369,7 @@
         p.gold += 1;
         t.usedLab = true;
         log(state, p.name + ' 使用【实验室】弃掉『' + hc.name + '』获得 1 枚金币。', 'good');
+        notifyGoldGain(state, idx, 1, null, '实验室换取金币');
         return ok();
       }
       case 'smithy': {
@@ -1456,7 +1523,14 @@
       case 'wizard_target': {
         const ti = playerIdx(state, action.target);
         if (!t.pending || t.pending.kind !== 'wizard_target' || ti < 0 || ti === idx) return err('无效的法师目标');
-        t.pending = { kind: 'wizard_card', targetIdx: ti, cards: state.players[ti].hand.slice() };
+        const cards = state.players[ti].hand.slice();
+        // 对方没有手牌时能力无事可做：直接结束，而不是进到「无牌可选」的死状态。
+        if (!cards.length) {
+          t.pending = null; t.abilityUsed = true;
+          log(state, '【法师】' + state.players[ti].name + ' 没有手牌，能力无从发动。', 'info');
+          return ok();
+        }
+        t.pending = { kind: 'wizard_card', targetIdx: ti, cards: cards };
         return ok();
       }
       case 'wizard_card': {
@@ -1490,6 +1564,7 @@
         const taxCollector = state.players.findIndex(player => player.chars.some(cid => cid === 'tax_collector'));
         if (state.charDeck.some(cid => cid === 'tax_collector') && idx !== taxCollector && p.gold > 0) {
           p.gold--; state.effects.taxCollectorGold = (state.effects.taxCollectorGold || 0) + 1;
+          notify(state, 'tax_paid', { playerIdx: idx, playerId: p.id, playerName: p.name, amount: 1 });
         }
         if (p.city.length >= state.config.endDistricts && state.firstToFinish < 0) state.firstToFinish = idx;
         t.abilityUsed = true; t.pending = null;
@@ -1532,13 +1607,17 @@
         const pd = t.pending; const n = countColorForIncome(p, 'blue', 'blue');
         if (!pd || pd.kind !== 'abbot_declare' || action.gold + action.cards !== n) return err('资源组合不正确');
         p.gold += action.gold;
+        notifyGoldGain(state, idx, action.gold, null, '住持资源');
         const cards = drawCards(state, action.cards);
         p.hand = p.hand.concat(cards);
         notifyHandGain(state, idx, cards.length, null, '住持资源');
         t.incomeTaken = true; t.abilityUsed = true; t.pending = null;
         const richest = richestOther(state, idx);
         if (richest >= 0 && !state.players.some((o, i) => i !== idx && o.gold === state.players[richest].gold && i !== richest)) {
-          if (state.players[richest].gold > p.gold) { state.players[richest].gold--; p.gold++; }
+          if (state.players[richest].gold > p.gold) {
+            state.players[richest].gold--; p.gold++;
+            notifyGoldGain(state, idx, 1, richest, '住持向最富有者索取');
+          }
         }
         log(state, '【住持】' + p.name + ' 领取 ' + action.gold + ' 金 + ' + action.cards + ' 张建筑牌。', 'good');
         return ok();
@@ -1581,6 +1660,36 @@
       }
       case 'choose_cards': {
         const pd = t.pending;
+        if (pd && pd.kind === 'bishop_repay') {
+          const uids = action.uids || [];
+          if (uids.length !== pd.amount || new Set(uids).size !== uids.length) return err('必须选择恰好 ' + pd.amount + ' 张手牌');
+          const card = p.hand.find(x => x.uid === pd.uid);
+          const payer = state.players[pd.payerIdx];
+          if (!card || !payer || payer.gold < pd.amount || uids.some(uid => uid === pd.uid || !p.hand.some(x => x.uid === uid)))
+            return err('建筑、代付玩家或偿还手牌状态已改变');
+          const repaid = uids.map(uid => p.hand.find(x => x.uid === uid));
+        payer.gold -= pd.amount;
+        p.gold += pd.amount;
+        notifyGoldGain(state, idx, pd.amount, pd.payerIdx, '主教代付');
+          p.hand = p.hand.filter(x => !uids.includes(x.uid));
+          payer.hand.push(...repaid);
+          t.pending = null;
+          log(state, '【主教】' + p.name + ' 请 ' + payer.name + ' 代付 ' + pd.amount + ' 金，并交给对方 ' + pd.amount + ' 张手牌。', 'good');
+          notifyHandGain(state, pd.payerIdx, repaid.length, idx, '主教偿还代付');
+          const warrant = state.effects.magistrate;
+          if (warrant && !warrant.claimed && warrant.signed === t.num && idx !== warrant.playerIdx) {
+            warrant.claimed = true;
+            const magistrate = state.players[warrant.playerIdx];
+            if (!magistrate.city.some(d => d.name === card.name)) {
+              state.reaction = { kind: 'magistrate', playerIdx: warrant.playerIdx,
+                queue: [warrant.playerIdx], build: { uid: card.uid, targetIdx: idx },
+                card: { uid: card.uid, name: card.name, cost: card.cost },
+                prompt: '【行政官】是否发动逮捕令，没收 ' + p.name + ' 即将建造的『' + card.name + '』？' };
+              return ok();
+            }
+          }
+          return resolveBuild(state, t, idx, card, -1);
+        }
         if (!pd || pd.kind !== 'magician_redraw') return err('当前无需选择卡牌');
         const uids = action.uids || [];
         const dropped = [];
@@ -1678,6 +1787,7 @@
         const cards = drawCards(state, action.cards);
         p.hand = p.hand.concat(cards);
         notifyHandGain(state, idx, cards.length, null, '修士资源');
+        notifyGoldGain(state, idx, action.gold, null, '修士资源');
         t.incomeTaken = true; t.pending = null;
         log(state, '【修士】' + p.name + ' 领取 ' + action.gold + ' 金 + ' + action.cards + ' 张建筑牌。', 'good');
         return ok();
@@ -1735,6 +1845,8 @@
         p.hand = p.hand.filter(x => x.uid !== card.uid);
         state.players[pd.targetIdx].hand.push(card);
         log(state, '【预言家】' + p.name + ' 还给 ' + state.players[pd.targetIdx].name + ' 一张建筑牌。', 'magic');
+        // 归还同样是一次「手牌易主」，和抽取阶段一样上报，客户端据此播放牌背飞行动画。
+        notifyHandGain(state, pd.targetIdx, 1, idx, '预言家归还手牌');
         const rest = (pd.queue || []).slice();
         rest.shift();
         if (rest.length > 0) {
@@ -1848,7 +1960,6 @@
       case 'spy': t.pending = { kind: 'spy_target' }; break;
       case 'magician': t.pending = { kind: 'magician_choice' }; break;
       case 'wizard': t.pending = { kind: 'wizard_target' }; break;
-      case 'abbot': t.pending = { kind: 'abbot_declare' }; break;
       case 'warlord': t.pending = { kind: 'warlord_destroy' }; break;
       case 'marshal': t.pending = { kind: 'marshal_seize' }; break;
       case 'diplomat': t.pending = { kind: 'diplomat_mine' }; break;
@@ -1892,7 +2003,7 @@
     const card = tp.city.find(x => x.uid === action.uid);
     if (!card) return err('无效的建筑');
     if (tp.city.length >= state.config.endDistricts) return err('该玩家已达标，不可摧毁');
-    if (ti !== idx && isBishopProtected(state, ti)) return err('主教的城市不可摧毁');
+    if (ti !== idx && isAbbotProtected(state, ti)) return err('该玩家的城市受到角色保护，不受8号角色能力影响');
     if (!canTargetDistrict(state, card)) return err('堡垒不可摧毁');
     const cost = destroyCost(state, ti, card);
     if (cost > me.gold) return err('金币不足，摧毁需 ' + cost + ' 金');
@@ -1978,6 +2089,8 @@
     notify(state, 'blackmailer_reveal', {
       playerIdx: ti, playerId: target.id, playerName: target.name,
       byIdx: idx, byId: owner.id, byName: owner.name,
+      // fromIdx/toIdx 供客户端播放「全部金币被勒索者拿走」的飞行动画
+      fromIdx: amount > 0 ? ti : null, toIdx: amount > 0 ? idx : null,
       revealed: true, isReal: isReal, amount: amount
     });
     return ok();
@@ -2019,6 +2132,7 @@
     const ti = playerIdx(state, action.target);
     if (ti < 0) return err('无效的目标');
     const tp = state.players[ti];
+    if (isAbbotProtected(state, ti)) return err('该玩家的城市受到角色保护，不受8号角色能力影响');
     const card = tp.city.find(x => x.uid === action.uid);
     if (!card) return err('无效的建筑');
     if (card.cost > 3) return err('只能抢夺费用 3 以下的建筑');
@@ -2028,6 +2142,7 @@
     if (card.cost > me.gold) return err('金币不足');
     me.gold -= card.cost;
     tp.gold += card.cost;
+    notifyGoldGain(state, ti, card.cost, idx, '元帅抢夺付款');
     tp.city = tp.city.filter(x => x.uid !== card.uid);
     detachMuseum(state, card);
     me.city.push(card);
@@ -2049,6 +2164,7 @@
     const ti = playerIdx(state, action.target);
     if (ti < 0 || ti === idx) return err('无效的目标');
     const tp = state.players[ti];
+    if (isAbbotProtected(state, ti)) return err('该玩家的城市受到角色保护，不受8号角色能力影响');
     const theirs = tp.city.find(x => x.uid === action.uid);
     if (!theirs) return err('无效的建筑');
     if (!canTargetDistrict(state, theirs)) return err('堡垒不可交换');
@@ -2057,6 +2173,7 @@
     if (diff > me.gold) return err('金币不足，需补差价 ' + diff + ' 金');
     me.gold -= diff;
     tp.gold += diff;
+    if (diff > 0) notifyGoldGain(state, ti, diff, idx, '外交官补差价');
     tp.city = tp.city.filter(x => x.uid !== theirs.uid);
     me.city = me.city.filter(x => x.uid !== mine.uid);
     detachMuseum(state, theirs);
@@ -2166,6 +2283,7 @@
                            (Math.abs(q.playerIdx - entry.playerIdx) === n - 1);
           if (adjacent) {
             state.players[q.playerIdx].gold += 3;
+            notifyGoldGain(state, q.playerIdx, 3, null, '皇后相邻奖励（轮末）');
             log(state, '【皇后】座位与 4 号角色相邻，轮末获得 3 枚金币。', 'good');
           }
           state.pendingQueen = null;
@@ -2502,6 +2620,9 @@
       case 'artist':
         return { kind: pd.kind, targetIdx: pd.targetIdx ?? null,
           fromCrownIdx: pd._fromCrownIdx ?? null, selected: pd.selected || [] };
+      case 'bishop_repay':
+        return { kind: pd.kind, targetIdx: isActor ? pd.payerIdx : null,
+          amount: isActor ? pd.amount : 0, uid: isActor ? pd.uid : '' };
       default:
         return { kind: pd.kind, prompt: pendingPrompt(pd.kind), targetIdx: pd.targetIdx ?? null,
           fromCrownIdx: pd._fromCrownIdx ?? null };
@@ -2539,6 +2660,7 @@
     charOf: charOf,
     log: log,
     blackmailerBlockedNums: blackmailerBlockedNums,
-    blackmailerValidNums: blackmailerValidNums
+    blackmailerValidNums: blackmailerValidNums,
+    isAbbotProtected: isAbbotProtected
   };
 });

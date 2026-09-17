@@ -9,12 +9,13 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 4;
+constexpr int kStateEncodingVersion = 6;
 constexpr int kStateFeatureSize = 672;
-constexpr int kActionEncodingVersion = 4;
-constexpr std::array<const char*, 21> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
+constexpr int kActionEncodingVersion = 6;
+constexpr std::array<const char*, 27> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
   "king", "emperor", "noble", "bishop", "monk", "merchant", "alchemist", "businessman",
-  "architect", "navigator", "scholar", "warlord", "diplomat", "marshal", "queen", "artist"};
+  "architect", "navigator", "scholar", "warlord", "diplomat", "marshal", "queen", "artist",
+  "magistrate", "spy", "blackmailer", "wizard", "abbot", "tax_collector"};
 
 inline int state_phase_code(NativePhase phase) {
   switch (phase) {
@@ -30,23 +31,31 @@ inline int state_phase_code(NativePhase phase) {
 
 inline int role_number(const std::string& id) {
   if (id == "assassin" || id == "witch") return 1;
+  if (id == "magistrate") return 1;
   if (id == "thief") return 2;
+  if (id == "spy" || id == "blackmailer") return 2;
   if (id == "magician" || id == "prophet") return 3;
+  if (id == "wizard") return 3;
   if (id == "king" || id == "emperor" || id == "noble") return 4;
   if (id == "bishop" || id == "monk") return 5;
+  if (id == "abbot") return 5;
   if (id == "merchant" || id == "alchemist" || id == "businessman") return 6;
   if (id == "architect" || id == "navigator" || id == "scholar") return 7;
   if (id == "warlord" || id == "diplomat" || id == "marshal") return 8;
   if (id == "queen" || id == "artist") return 9;
+  if (id == "tax_collector") return 9;
   return 0;
 }
 
 inline int pending_kind_code(const std::string& kind) {
-  static const std::array<const char*, 18> names = {
+  static const std::array<const char*, 33> names = {
     "assassin", "thief", "witch_target", "magician_choice", "magician_swap",
     "magician_redraw", "warlord_destroy", "marshal_seize", "artist",
     "navigator_bonus", "monk_declare", "emperor_crown", "emperor_take",
-    "prophet_give", "draw_keep", "scholar_pick", "diplomat_mine", "diplomat_theirs"
+    "prophet_give", "draw_keep", "scholar_pick", "diplomat_mine", "diplomat_theirs",
+    "magistrate_declare", "magistrate_second", "magistrate_third", "blackmailer_declare",
+    "blackmailer_second", "blackmailer_signed", "blackmailer_threat", "spy_target", "spy_color",
+    "wizard_target", "wizard_card", "wizard_choice", "abbot_declare", "tax_collect", "bishop_repay"
   };
   for (size_t i = 0; i < names.size(); ++i) if (kind == names[i]) return static_cast<int>(i + 1);
   return 0;
@@ -100,7 +109,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[15] = static_cast<float>(state.round_confirm_count) / 8.0f;
   features[16] = state.pending_target < 0 ? 0.0f : static_cast<float>(rel(state.pending_target) + 1) / 9.0f;
   features[17] = state.pending_from_crown < 0 ? 0.0f : static_cast<float>(rel(state.pending_from_crown) + 1) / 9.0f;
-  features[18] = static_cast<float>(pending_kind_code(state.pending_kind)) / 32.0f;
+  features[18] = static_cast<float>(pending_kind_code(state.pending_kind)) / 33.0f;
   features[19] = static_cast<float>(state.has_turn ? turn_phase_code(state.turn_phase) : 4) / 4.0f;
   features[20] = static_cast<float>(state.turns_completed) / 100.0f;
   features[21] = state.resources_taken ? 1.0f : 0.0f;
@@ -111,7 +120,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[26] = state.used_smithy ? 1.0f : 0.0f;
   features[27] = state.used_museum ? 1.0f : 0.0f;
   features[28] = state.bonus_done ? 1.0f : 0.0f;
-  features[29] = static_cast<float>(state.pending_cards.size()) / 8.0f;
+  features[29] = static_cast<float>(state.pending_kind == "bishop_repay" ? state.pending_amount : static_cast<int>(state.pending_cards.size())) / 8.0f;
   features[30] = static_cast<float>(state.builds) / 4.0f;
   features[31] = static_cast<float>(state.spent_on_build) / 20.0f;
   constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
@@ -167,7 +176,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       if (revealed_id == kRoleIds[role]) { features[base + 29 + role] = 1.0f; break; }
     for (size_t i = 0; i < p.city.size() && i < 8; ++i) {
       const auto& card = p.city[i].card;
-      const size_t slot = base + 49 + i * 3;
+      const size_t slot = base + 56 + i * 3;
       features[slot] = std::min(1.0f, std::max(0.0f, static_cast<float>(card.cost) / 8.0f));
       int color = 0;
       for (size_t c = 0; c < city_colors.size(); ++c)
@@ -175,11 +184,6 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       features[slot + 1] = static_cast<float>(color) / 5.0f;
       const int score = card.score_value > 0 ? card.score_value : card.cost;
       features[slot + 2] = std::min(1.0f, std::max(0.0f, static_cast<float>(score) / 10.0f));
-    }
-    for (int cost = 0; cost <= 6; ++cost) {
-      int count = 0;
-      for (const auto& district : p.city) if (district.card.cost == cost) ++count;
-      features[base + 73 + static_cast<size_t>(cost)] = static_cast<float>(count) / 8.0f;
     }
   }
   return features;

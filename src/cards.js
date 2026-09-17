@@ -182,9 +182,9 @@
 
     /* ============ 5 号 ============ */
     { id: 'bishop', num: 5, name: '主教', en: 'Bishop', version: 'base',
-      income: 'blue', drawBonus: 0, goldBonus: 0, buildLimit: 1,
-      desc: '每有1栋宗教（蓝）建筑获得1金。你的城市不会被8号角色摧毁（但被刺杀/被施咒后则失去此保护）。',
-      hint: '主教：领取宗教建筑收入' },
+      income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
+      desc: '每有1栋宗教建筑，抽1张建筑牌；建造金币不足时，可指定玩家代付差额；对方每支付1金币，你须给其1张手牌。',
+      hint: '主教：领取宗教建筑收入，必要时可请人垫付建造差额' },
 
     { id: 'monk', num: 5, name: '修士', en: 'Monk', version: 'dark',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
@@ -193,8 +193,8 @@
 
     { id: 'abbot', num: 5, name: '住持', en: 'Abbot', version: 'dark',
       income: 'blue', drawBonus: 0, goldBonus: 0, buildLimit: 1,
-      desc: '每有一栋宗教建筑，可获得一枚金币或抽一张建筑牌。领取资源后，金币最多的其他玩家必须给你一枚金币；若你并列最多则不能获得。',
-      hint: '宣告宗教收入并向最富有者收取金币' },
+      desc: '每栋宗教建筑获得1金币；若你未被刺杀或施咒，你的建筑不受8号角色能力影响。',
+      hint: '住持：领取宗教建筑金币并保护自己的城市' },
 
     /* ============ 6 号 ============ */
     { id: 'merchant', num: 6, name: '商人', en: 'Merchant', version: 'base',

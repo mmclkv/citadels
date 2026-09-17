@@ -22,6 +22,17 @@ assert.ok(/d\.dataset\.pushX = '0';[\s\S]{0,80}d\.dataset\.pushY = '0';/.test(ap
   '桌面圆环每次重绘重置碰撞偏移，并同步本帧的圆桌避让位移');
 assert.ok(/arena\.dataset\.layout\s*=\s*wrap\.dataset\.layout/.test(app),
   '父棋盘同步记录移动环形布局，供 PWA 解除桌面裁剪规则');
+assert.ok(/function expandPanelsForInnerCollisions\(wrap\)/.test(app) &&
+  /getBoundingClientRect\(\)[\s\S]{0,900}overlapX[\s\S]{0,180}overlapY/.test(app),
+  '移动端递归测量玩家面板内部兄弟元素的实际矩形并检测相交');
+assert.ok(/scheduleMobilePanelInnerCollisionPass\(\)/.test(app) &&
+  /renderMe\(s\);\s*scheduleMobilePanelInnerCollisionPass\(\)/.test(app),
+  '碰撞检测安排在玩家与卡牌内容渲染完成之后');
+assert.ok(/--mobile-opp-width', desiredWidth/.test(app) &&
+  /min-height', Math\.ceil\(rect\.height \+ heightGrowth\)/.test(app),
+  '检测到内部重叠时扩展玩家面板宽度或高度');
+assert.ok(/mobile-inner-collision-wrap/.test(app) && /\.mobile-inner-collision-wrap\s*\{[^}]*flex-wrap:wrap!important/.test(css),
+  '横向没有剩余空间时允许冲突行换行，让外层面板向下扩展');
 
 const flowRule = /\.me-area\.pwa-collision-flow\s*\{([^}]*)\}/.exec(css);
 assert.ok(flowRule, 'PWA 碰撞布局拥有独立样式');
@@ -39,4 +50,4 @@ assert.ok(draftArenaRule && /height\s*:\s*auto!important/.test(draftArenaRule[1]
 assert.ok(/style\.css\?v=\d+/.test(html) && /app\.js\?v=\d+/.test(html),
   '静态资源带缓存版本号，PWA 能获取新布局代码（值由发布时推进，不在测试里锁死）');
 
-console.log('PWA 我的面板与对手碰撞回归：10 项断言全部通过');
+console.log('PWA 玩家面板碰撞回归：14 项断言全部通过');

@@ -532,6 +532,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-gold{font-size:8px}
 .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city{gap:3px;min-height:28px}
 .opponents[data-layout="mobile-ring"] .opp[data-compact="4"] .opp-city>.card{height:var(--mobile-city-card-height,47px)}
+/* Inner mobile collision fallback: when the panel has no remaining width, wrap
+   the colliding flex row so its enclosing player panel can grow vertically. */
+.mobile-inner-collision-wrap{flex-wrap:wrap!important;min-width:0!important}
 /* 移动端5人以上：我的城市固定为两行，建筑牌按列横向扩展，避免继续向下撑高页面。 */
 #opponents[data-layout="mobile-ring"] ~ .me-area{width:calc(100% - 12px)!important;margin:4px auto 0!important;padding:5px 7px!important;border:1px solid var(--line2)!important;border-radius:10px!important}
 #opponents[data-layout="mobile-ring"] ~ .me-area .me-role-row{gap:5px;margin-bottom:4px}
@@ -1261,7 +1264,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     grid-template-columns:minmax(86px,auto) minmax(0,1fr);
     grid-template-rows:minmax(58px,auto) minmax(54px,auto);
     grid-template-areas:"role city" "hand-title hand";
-    gap:4px 8px;
+    gap:0 8px;
     min-height:0!important;
     min-height:210px;
     max-height:240px;
@@ -1280,7 +1283,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     grid-area:city;
     min-width:0;
     min-height:0!important;
-    height:58px;
+    height:100%;
     padding:3px;
     gap:4px;
     flex-wrap:nowrap!important;
@@ -1298,7 +1301,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     grid-area:hand;
     min-width:0;
     min-height:0!important;
-    height:54px;
+    height:100%;
     padding:3px;
     gap:4px;
     flex-wrap:nowrap;
@@ -1307,9 +1310,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   }
   #screen-game .me-area.many-players .me-char .cs-card{width:36px!important;height:54px!important}
   #screen-game .me-area.many-players .city-row>.card,
-  #screen-game .me-area.many-players .hand-row>.card{width:38px!important;height:54px!important}
-  #screen-game .me-area.many-players .city-row>.card.mini,
-  #screen-game .me-area.many-players .hand-row>.card.mini{width:34px!important;height:48px!important}
+  #screen-game .me-area.many-players .hand-row>.card{width:auto!important;height:calc(100% - 6px)!important;
+    min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
+    aspect-ratio:2/3;flex:0 0 auto}
 }
 
 /* PWA 5+ 最终碰撞层：iPad 横屏也会命中 PC 选角规则，PC 规则会把我的面板
@@ -1342,14 +1345,14 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     grid-template-columns:minmax(76px,auto) minmax(0,1fr)!important;
     grid-template-rows:minmax(72px,auto) minmax(68px,auto)!important;
     min-height:150px!important;
-    max-height:190px!important;
+    max-height:240px!important;
     padding:5px 7px!important;
-    gap:4px 7px!important;
+    gap:0 7px!important;
   }
   #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact>.city-row,
   #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact>.hand-row{
-    height:68px!important;
-    max-height:68px!important;
+    height:auto!important;
+    max-height:none!important;
     padding:3px!important;
   }
   #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .me-char .cs-card{
@@ -1357,7 +1360,9 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   }
   #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .city-row>.card,
   #screen-game #opponents[data-layout="mobile-ring"] ~ .me-area.pwa-collision-flow.pwa-collision-compact .hand-row>.card{
-    width:42px!important;height:63px!important;aspect-ratio:2 / 3;
+    width:auto!important;height:calc(100% - 6px)!important;aspect-ratio:2 / 3;
+    min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
+    flex:0 0 auto;
   }
 }
 
@@ -1475,15 +1480,15 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #opponents[data-layout="mobile-ring"] ~ .me-area.many-players{
     grid-template-columns:minmax(110px,auto) minmax(0,1fr);
     grid-template-rows:minmax(130px,auto) minmax(130px,auto);
-    gap:8px 12px;min-height:280px!important;max-height:340px!important
+    gap:0 12px;min-height:280px!important;max-height:340px!important
   }
   #opponents[data-layout="mobile-ring"] ~ .me-area.many-players>.city-row,
-  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players>.hand-row{height:130px!important;max-height:130px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players>.hand-row{height:100%!important;max-height:none!important}
   #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .me-char .cs-card{width:84px!important;height:126px!important}
   #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .city-row>.card,
-  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .hand-row>.card{width:84px!important;height:126px!important}
-  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .city-row>.card.mini,
-  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .hand-row>.card.mini{width:72px!important;height:108px!important}
+  #opponents[data-layout="mobile-ring"] ~ .me-area.many-players .hand-row>.card{width:auto!important;height:calc(100% - 12px)!important;
+    min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
+    aspect-ratio:2/3;flex:0 0 auto}
 }
 
 /* PWA 横屏四人局：在环形布局仍有余量时放大玩家区域内的角色牌和建筑牌。 */

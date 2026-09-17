@@ -69,6 +69,13 @@ struct NativeSearchAction {
   std::string target;
   std::vector<std::string> selected_uids;
   std::string secondary_uid;
+  std::string mode;
+  std::string color;
+  int num = -1;
+  int gold = -1;
+  int cards = -1;
+  bool use = false;
+  bool has_num = false;
 };
 
 // 将统一原生状态接入通用 PUCT。这里的动作集合只暴露当前状态真正可执行的
@@ -76,16 +83,48 @@ struct NativeSearchAction {
 // 继续沿用同一接口扩展，不在搜索核心里硬编码规则。
 class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearchAction> {
  public:
+  static NativeSearchAction number_action(ActionType type, int number) {
+    NativeSearchAction action; action.type = type; action.num = number; action.has_num = true; return action;
+  }
+  // 选角色类动作（刺客/盗贼/女巫目标等）：native 规则按 name（角色编号字符串）
+  // 结算，而 JS 侧同一动作带的是 num 字段。两边都填上，worker 的
+  // 「native 动作 vs JS 合法动作」对齐校验才不会全盘失配。
+  static NativeSearchAction make_choose_char(int number) {
+    NativeSearchAction action;
+    action.type = ActionType::ChooseChar;
+    action.name = std::to_string(number);
+    action.num = number;
+    action.has_num = true;
+    return action;
+  }
+  static std::vector<int> blackmailer_candidates(const NativeGameState& state, int player, int excluded = -1) {
+    std::vector<int> result;
+    if (player < 0 || player >= static_cast<int>(state.players.size())) return result;
+    for (const auto& id : state.char_deck) {
+      const int n = char_number(id);
+      if (n <= 1 || n == char_number(state.players[player].role_id) || n == excluded ||
+          n == state.assassinated || n == state.bewitched || face_up_removed(state, n) ||
+          std::find(state.magistrate_nums.begin(), state.magistrate_nums.end(), n) != state.magistrate_nums.end()) continue;
+      if (std::find(result.begin(), result.end(), n) == result.end()) result.push_back(n);
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+  }
   static int char_number(const std::string& id) {
     if (id == "assassin" || id == "witch") return 1;
+    if (id == "magistrate") return 1;
     if (id == "thief") return 2;
+    if (id == "spy" || id == "blackmailer") return 2;
     if (id == "magician" || id == "prophet") return 3;
+    if (id == "wizard") return 3;
     if (id == "king" || id == "emperor" || id == "noble") return 4;
     if (id == "bishop" || id == "monk") return 5;
+    if (id == "abbot") return 5;
     if (id == "merchant" || id == "alchemist" || id == "businessman") return 6;
     if (id == "architect" || id == "navigator" || id == "scholar") return 7;
     if (id == "warlord" || id == "diplomat" || id == "marshal") return 8;
     if (id == "queen" || id == "artist") return 9;
+    if (id == "tax_collector") return 9;
     return -1;
   }
 
@@ -139,6 +178,23 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     return result;
   }
 
+  static std::vector<std::vector<std::string>> exact_hand_choices(const NativePlayer& player,
+      const std::string& excluded_uid, int count) {
+    std::vector<std::vector<std::string>> result;
+    std::vector<std::string> current;
+    std::vector<std::string> available;
+    for (const auto& card : player.hand) if (card.uid != excluded_uid) available.push_back(card.uid);
+    if (count < 0 || count > static_cast<int>(available.size())) return result;
+    const auto visit = [&](const auto& self, size_t start) -> void {
+      if (static_cast<int>(current.size()) == count) { result.push_back(current); return; }
+      for (size_t i = start; i < available.size(); ++i) {
+        current.push_back(available[i]); self(self, i + 1); current.pop_back();
+      }
+    };
+    visit(visit, 0);
+    return result;
+  }
+
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
     if (state.phase == NativePhase::RoundConfirm) {
@@ -149,6 +205,97 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (state.reaction_kind == "graveyard") {
       if (player != state.reaction_player) return {};
       return {{ActionType::Reaction, {}, "use", {}}, {ActionType::Reaction, {}, "skip", {}}};
+    }
+    if (state.reaction_kind == "magistrate") {
+      if (player != state.reaction_player) return {};
+      return {{ActionType::Reaction, {}, "use", {}}, {ActionType::Reaction, {}, "skip", {}}};
+    }
+    if (state.reaction_kind == "blackmailer") {
+      if (player != state.reaction_player) return {};
+      return {{ActionType::Reaction, {}, "use", {}}, {ActionType::Reaction, {}, "skip", {}}};
+    }
+    if (state.pending_kind == "blackmailer_threat") {
+      if (player != state.active_player) return {};
+      return {{ActionType::BlackmailerBribe}, {ActionType::BlackmailerRefuse}};
+    }
+    if (state.pending_kind == "bishop_repay") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& uids : exact_hand_choices(state.players[player], state.pending_uid, state.pending_amount)) {
+        NativeSearchAction action; action.type = ActionType::ChooseCards; action.selected_uids = uids;
+        actions.push_back(std::move(action));
+      }
+      return actions;
+    }
+    if (state.pending_kind == "magistrate_declare" || state.pending_kind == "magistrate_second" || state.pending_kind == "magistrate_third") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& id : state.char_deck) {
+        const int n = char_number(id);
+        const bool faceup = face_up_removed(state, n);
+        if (n <= 0 || faceup || n == char_number(state.players[player].role_id) ||
+            std::find(state.pending_nums.begin(), state.pending_nums.end(), n) != state.pending_nums.end()) continue;
+        // First selection is the signed warrant; subsequent selections are decoys.
+        actions.push_back(number_action(state.pending_kind == "magistrate_declare" ? ActionType::MagistrateSigned : ActionType::MagistrateChar, n));
+      }
+      std::sort(actions.begin(), actions.end(), [](const auto& a, const auto& b) { return a.num < b.num; });
+      actions.erase(std::unique(actions.begin(), actions.end(), [](const auto& a, const auto& b) { return a.num == b.num; }), actions.end());
+      if (actions.empty()) actions.push_back({ActionType::AbilitySkip});
+      return actions;
+    }
+    if (state.pending_kind == "blackmailer_declare" || state.pending_kind == "blackmailer_second") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      const int excluded = state.pending_kind == "blackmailer_second" ? state.pending_first : -1;
+      for (const int n : blackmailer_candidates(state, player, excluded)) actions.push_back(number_action(ActionType::BlackmailerChar, n));
+      if (actions.empty()) actions.push_back({ActionType::AbilitySkip});
+      return actions;
+    }
+    if (state.pending_kind == "blackmailer_signed") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const int n : state.pending_nums) actions.push_back(number_action(ActionType::BlackmailerSigned, n));
+      return actions;
+    }
+    if (state.pending_kind == "spy_target" || state.pending_kind == "wizard_target") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player) {
+        NativeSearchAction action; action.type = state.pending_kind == "spy_target" ? ActionType::SpyTarget : ActionType::WizardTarget;
+        action.target = state.players[i].id; actions.push_back(std::move(action));
+      }
+      return actions;
+    }
+    if (state.pending_kind == "spy_color") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& color : {"yellow", "blue", "green", "red", "purple"}) {
+        NativeSearchAction action; action.type = ActionType::SpyColor; action.color = color; actions.push_back(std::move(action));
+      }
+      return actions;
+    }
+    if (state.pending_kind == "wizard_card") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& card : state.pending_cards) { NativeSearchAction action; action.type = ActionType::WizardCard; action.uid = card.uid; actions.push_back(std::move(action)); }
+      return actions;
+    }
+    if (state.pending_kind == "wizard_choice") {
+      if (player != state.active_player) return {};
+      return {{ActionType::WizardTake}, {ActionType::WizardBuild}};
+    }
+    if (state.pending_kind == "abbot_declare") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (int gold = 0; gold <= state.blue_districts(player); ++gold) {
+        NativeSearchAction action; action.type = ActionType::AbbotResource;
+        action.gold = gold; action.cards = state.blue_districts(player) - gold; actions.push_back(std::move(action));
+      }
+      return actions;
+    }
+    if (state.pending_kind == "tax_collect") {
+      if (player != state.active_player) return {};
+      return {{ActionType::TaxCollect}};
     }
     if (state.pending_kind == "magician_choice") {
       if (player != state.active_player) return {};
@@ -240,7 +387,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (mine_it != state.players[player].city.end()) {
         const int quarry = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
           [](const NativeDistrict& own) { return own.effect == "quarry"; }));
-        for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player)
+        for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player && !state.protected_from_rank8(static_cast<int>(i)))
           for (const auto& district : state.players[i].city) {
             if (district.fortress) continue;
             const int same_name = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
@@ -259,7 +406,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       for (size_t i = 0; i < state.players.size(); ++i) {
         if (state.pending_kind == "marshal_seize" && static_cast<int>(i) == player) continue;
         if (state.players[i].city.size() >= static_cast<size_t>(state.end_districts)) continue;
-        if (static_cast<int>(i) != player && state.pending_kind == "warlord_destroy" && state.players[i].role_id == "bishop") continue;
+        if (static_cast<int>(i) != player && state.protected_from_rank8(static_cast<int>(i))) continue;
         for (const auto& district : state.players[i].city) {
           if (district.fortress || (state.pending_kind == "marshal_seize" && district.card.cost > 3)) continue;
           if (state.pending_kind == "warlord_destroy") {
@@ -291,7 +438,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         if (number <= 0 || face_up_removed(state, number) ||
             number == char_number(state.players[player].role_id) ||
             (state.pending_kind == "thief" && number == 1)) continue;
-        actions.push_back({ActionType::ChooseChar, {}, std::to_string(number), {}});
+        actions.push_back(make_choose_char(number));
       }
       std::stable_sort(actions.begin(), actions.end(), [](const auto& left, const auto& right) {
         return std::stoi(left.name) < std::stoi(right.name);
@@ -305,7 +452,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         const int number = char_number(id);
         if (number > 0 && number != 1 && number != char_number(state.players[player].role_id) &&
             !face_up_removed(state, number))
-          actions.push_back({ActionType::ChooseChar, {}, std::to_string(number), {}});
+          actions.push_back(make_choose_char(number));
       }
       std::stable_sort(actions.begin(), actions.end(), [](const auto& left, const auto& right) {
         return std::stoi(left.name) < std::stoi(right.name);
@@ -320,8 +467,17 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       std::vector<std::string> pool = state.draft_pool;
       if (step.from_face_down && state.draft_sub == "pick")
         pool.insert(pool.end(), state.draft_face_down.begin(), state.draft_face_down.end());
-      for (const auto& id : pool) actions.push_back({
-        state.draft_sub == "pick" ? ActionType::DraftPick : ActionType::DraftDiscard, id, {}, {}});
+      const bool picking = state.draft_sub == "pick";
+      for (const auto& id : pool) {
+        // JS 侧的 draft_pick/draft_discard 只用 charId 标识角色，worker 收到后会
+        // 把 charId 填到 name 上；这里同步把 name 也写上，动作列表
+        // 才能与 JS 对齐（uid 仍保留，供 native 规则自行结算）。
+        NativeSearchAction action;
+        action.type = picking ? ActionType::DraftPick : ActionType::DraftDiscard;
+        action.uid = id;
+        action.name = id;
+        actions.push_back(action);
+      }
       if (state.draft_sub == "discard") {
         actions.erase(std::remove_if(actions.begin(), actions.end(), [&](const auto& action) {
           return char_number(action.uid) == 4;
@@ -342,7 +498,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       const auto& role = state.players[player].role_id;
       if (role == "assassin" || role == "thief" || role == "magician" || role == "emperor" ||
           role == "diplomat" || role == "warlord" || role == "marshal" || role == "artist" ||
-          role == "navigator" || role == "scholar" || role == "prophet") {
+          role == "navigator" || role == "scholar" || role == "prophet" || role == "magistrate" ||
+          role == "spy" || role == "blackmailer" || role == "wizard" || role == "tax_collector") {
         // JS marks diplomat's ability disabled when the player has no city;
         // training.enumerateLegalActions removes disabled actions.
         if ((role != "diplomat" || !p->city.empty()) &&
@@ -352,7 +509,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (state.resources_taken && !state.income_taken) {
       if (state.players[player].role_id == "king" || state.players[player].role_id == "emperor" ||
           state.players[player].role_id == "noble" ||
-          state.players[player].role_id == "bishop" || state.players[player].role_id == "merchant" ||
+          state.players[player].role_id == "bishop" || state.players[player].role_id == "abbot" || state.players[player].role_id == "merchant" ||
           state.players[player].role_id == "businessman" ||
           state.players[player].role_id == "warlord" || state.players[player].role_id == "diplomat" ||
           state.players[player].role_id == "marshal")
@@ -373,6 +530,18 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       for (const auto& card : p->hand) {
         if (can_build(state, *p, card))
           actions.push_back({ActionType::Build, card.uid, card.name, card.purple_effect});
+        else if (p->role_id == "bishop" && card.cost > p->gold && p->hand.size() > 1) {
+          NativePlayer funded = *p; funded.gold = card.cost;
+          if (!can_build(state, funded, card)) continue;
+          const int shortfall = card.cost - p->gold;
+          if (static_cast<int>(p->hand.size()) - 1 < shortfall) continue;
+          for (size_t payer = 0; payer < state.players.size(); ++payer) {
+            if (static_cast<int>(payer) == player || state.players[payer].gold < shortfall) continue;
+            NativeSearchAction action; action.type = ActionType::Build; action.uid = card.uid;
+            action.name = card.name; action.effect = card.purple_effect; action.target = state.players[payer].id;
+            actions.push_back(std::move(action));
+          }
+        }
       }
       for (const auto& d : p->city) {
         if (d.effect == "lab" && !state.used_lab && !p->hand.empty())
@@ -402,6 +571,81 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (player != state.reaction_player) return false;
       return state.reaction(action.name == "use");
     }
+    if (action.type == ActionType::Reaction && state.reaction_kind == "magistrate") {
+      if (player != state.reaction_player) return false;
+      return state.resolve_build_reaction(action.name == "use");
+    }
+    if (action.type == ActionType::Reaction && state.reaction_kind == "blackmailer") {
+      if (player != state.reaction_player) return false;
+      return state.resolve_blackmailer(action.name == "use");
+    }
+    if (action.type == ActionType::BlackmailerBribe && state.pending_kind == "blackmailer_threat")
+      return player == state.active_player && state.blackmailer_bribe();
+    if (action.type == ActionType::BlackmailerRefuse && state.pending_kind == "blackmailer_threat")
+      return player == state.active_player && state.blackmailer_refuse();
+    if ((action.type == ActionType::MagistrateSigned || action.type == ActionType::MagistrateChar) &&
+        player == state.active_player && action.has_num) {
+      const int n = action.num;
+      if (n <= 0 || n == char_number(state.players[player].role_id) || face_up_removed(state, n) ||
+          std::find(state.pending_nums.begin(), state.pending_nums.end(), n) != state.pending_nums.end()) return false;
+      if (action.type == ActionType::MagistrateSigned && state.pending_kind == "magistrate_declare") {
+        state.pending_signed = n; state.pending_nums = {n}; state.pending_kind = "magistrate_second"; return true;
+      }
+      if (action.type == ActionType::MagistrateChar &&
+          (state.pending_kind == "magistrate_second" || state.pending_kind == "magistrate_third")) {
+        state.pending_nums.push_back(n);
+        if (state.pending_nums.size() < 3) { state.pending_kind = "magistrate_third"; return true; }
+        state.magistrate_nums = state.pending_nums; state.magistrate_signed = state.pending_signed;
+        state.magistrate_player = player; state.magistrate_claimed = false;
+        state.pending_nums.clear(); state.pending_signed = -1; state.pending_kind.clear(); state.ability_used = true;
+        return true;
+      }
+      return false;
+    }
+    if (action.type == ActionType::BlackmailerChar && player == state.active_player && action.has_num &&
+        (state.pending_kind == "blackmailer_declare" || state.pending_kind == "blackmailer_second")) {
+      const int n = action.num;
+      const int excluded = state.pending_kind == "blackmailer_second" ? state.pending_first : -1;
+      const auto candidates = blackmailer_candidates(state, player, excluded);
+      if (std::find(candidates.begin(), candidates.end(), n) == candidates.end()) return false;
+      if (state.pending_kind == "blackmailer_declare") {
+        state.pending_first = n; state.pending_kind = candidates.size() > 1 ? "blackmailer_second" : "blackmailer_signed";
+        state.pending_nums = candidates.size() > 1 ? std::vector<int>{} : std::vector<int>{n};
+        return true;
+      }
+      state.pending_nums = {state.pending_first, n}; state.pending_kind = "blackmailer_signed"; return true;
+    }
+    if (action.type == ActionType::BlackmailerSigned && player == state.active_player && action.has_num &&
+        state.pending_kind == "blackmailer_signed" &&
+        std::find(state.pending_nums.begin(), state.pending_nums.end(), action.num) != state.pending_nums.end()) {
+      state.blackmailer_nums = state.pending_nums; state.blackmailer_signed = action.num;
+      state.blackmailer_player = player; state.blackmailer_done.clear();
+      state.pending_nums.clear(); state.pending_first = -1; state.pending_kind.clear(); state.ability_used = true; return true;
+    }
+    if (action.type == ActionType::SpyTarget && player == state.active_player && state.pending_kind == "spy_target") {
+      const int target = state.find_player(action.target);
+      if (target < 0 || target == player) return false;
+      state.pending_target = target; state.pending_kind = "spy_color"; return true;
+    }
+    if (action.type == ActionType::SpyColor && player == state.active_player && state.pending_kind == "spy_color" &&
+        state.pending_target >= 0 && state.pending_target < static_cast<int>(state.players.size()))
+      return state.spy_collect(state.players[state.pending_target].id, action.color);
+    if (action.type == ActionType::WizardTarget && player == state.active_player && state.pending_kind == "wizard_target") {
+      const int target = state.find_player(action.target);
+      if (target < 0 || target == player) return false;
+      state.pending_target = target; state.pending_cards = state.players[target].hand; state.pending_kind = "wizard_card"; return true;
+    }
+    if (action.type == ActionType::WizardCard && player == state.active_player && state.pending_kind == "wizard_card") {
+      const auto it = std::find_if(state.pending_cards.begin(), state.pending_cards.end(), [&](const DistrictCard& c) { return c.uid == action.uid; });
+      if (it == state.pending_cards.end()) return false;
+      const DistrictCard chosen = *it; state.pending_cards = {chosen}; state.pending_kind = "wizard_choice"; return true;
+    }
+    if (action.type == ActionType::WizardTake && player == state.active_player && state.pending_kind == "wizard_choice") return state.wizard_take(false);
+    if (action.type == ActionType::WizardBuild && player == state.active_player && state.pending_kind == "wizard_choice") return state.wizard_take(true);
+    if (action.type == ActionType::AbbotResource && player == state.active_player && state.pending_kind == "abbot_declare")
+      return state.abbot_resource(action.gold, action.cards);
+    if (action.type == ActionType::TaxCollect && player == state.active_player && state.pending_kind == "tax_collect")
+      return state.tax_collect();
     if (action.type == ActionType::MagicianMode && state.pending_kind == "magician_choice") {
       if (player != state.active_player || (action.name != "swap" && action.name != "redraw")) return false;
       state.pending_kind = action.name == "swap" ? "magician_swap" : "magician_redraw";
@@ -425,6 +669,45 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       const bool ok = player == state.active_player && state.magician_redraw(action.selected_uids);
       if (ok) state.ability_used = true;
       return ok;
+    }
+    if (action.type == ActionType::ChooseCards && state.pending_kind == "bishop_repay") {
+      if (player != state.active_player || static_cast<int>(action.selected_uids.size()) != state.pending_amount ||
+          state.pending_target < 0 || state.pending_target >= static_cast<int>(state.players.size())) return false;
+      auto& builder = state.players[player];
+      auto& payer = state.players[state.pending_target];
+      auto building = std::find_if(builder.hand.begin(), builder.hand.end(), [&](const DistrictCard& card) {
+        return card.uid == state.pending_uid;
+      });
+      if (building == builder.hand.end() || payer.gold < state.pending_amount) return false;
+      std::vector<DistrictCard> payment;
+      for (const auto& uid : action.selected_uids) {
+        if (uid == state.pending_uid || std::any_of(payment.begin(), payment.end(), [&](const DistrictCard& c) { return c.uid == uid; })) return false;
+        auto it = std::find_if(builder.hand.begin(), builder.hand.end(), [&](const DistrictCard& card) { return card.uid == uid; });
+        if (it == builder.hand.end()) return false;
+        payment.push_back(*it);
+      }
+      const int amount = state.pending_amount;
+      const std::string build_uid = state.pending_uid;
+      const DistrictCard build_card = *building;
+      const int payer_index = state.pending_target;
+      payer.gold -= amount;
+      builder.gold += amount;
+      builder.hand.erase(std::remove_if(builder.hand.begin(), builder.hand.end(), [&](const DistrictCard& card) {
+        return std::find(action.selected_uids.begin(), action.selected_uids.end(), card.uid) != action.selected_uids.end();
+      }), builder.hand.end());
+      payer.hand.insert(payer.hand.end(), payment.begin(), payment.end());
+      state.pending_kind.clear(); state.pending_uid.clear(); state.pending_target = -1; state.pending_amount = 0;
+      const int builder_num = char_number(builder.role_id);
+      if (state.magistrate_player >= 0 && !state.magistrate_claimed && state.magistrate_signed == builder_num &&
+          state.magistrate_player != player &&
+          std::none_of(state.players[state.magistrate_player].city.begin(), state.players[state.magistrate_player].city.end(),
+            [&](const NativeDistrict& district) { return district.name == build_card.name; })) {
+        state.magistrate_claimed = true;
+        state.reaction_kind = "magistrate"; state.reaction_player = state.magistrate_player;
+        state.reaction_target = state.magistrate_player; state.reaction_uid = build_uid; state.reaction_build = true;
+        return true;
+      }
+      return state.build(build_uid, build_card.name, build_card.purple_effect);
     }
     if (action.type == ActionType::EmperorCrown && state.pending_kind == "emperor_crown") {
       if (player != state.active_player) return false;
@@ -538,7 +821,37 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       case ActionType::Income: return state.income();
       case ActionType::MonkTake: return state.monk_take();
       case ActionType::Ability: return state.start_ability();
-      case ActionType::Build: return state.build(action.uid, action.name);
+      case ActionType::Build: {
+        if (state.players[player].role_id == "bishop" && !action.target.empty()) {
+          const auto card = std::find_if(state.players[player].hand.begin(), state.players[player].hand.end(),
+            [&](const DistrictCard& value) { return value.uid == action.uid; });
+          const int payer = state.find_player(action.target);
+          if (card == state.players[player].hand.end() || payer < 0 || payer == player || card->cost <= state.players[player].gold) return false;
+          const int amount = card->cost - state.players[player].gold;
+          if (state.players[payer].gold < amount || static_cast<int>(state.players[player].hand.size()) - 1 < amount) return false;
+          NativePlayer funded = state.players[player]; funded.gold = card->cost;
+          if (!can_build(state, funded, *card)) return false;
+          state.pending_kind = "bishop_repay"; state.pending_uid = card->uid;
+          state.pending_target = payer; state.pending_amount = amount;
+          return true;
+        }
+        const int builder_num = char_number(state.players[player].role_id);
+        if (state.magistrate_player >= 0 && !state.magistrate_claimed && state.magistrate_signed == builder_num &&
+            state.magistrate_player != player) {
+          state.magistrate_claimed = true;
+          auto card = std::find_if(state.players[player].hand.begin(), state.players[player].hand.end(),
+            [&](const DistrictCard& c) { return c.uid == action.uid; });
+          const bool duplicate = card != state.players[player].hand.end() &&
+            std::any_of(state.players[state.magistrate_player].city.begin(), state.players[state.magistrate_player].city.end(),
+              [&](const NativeDistrict& d) { return d.name == card->name; });
+          if (card != state.players[player].hand.end() && !duplicate) {
+            state.reaction_kind = "magistrate"; state.reaction_player = state.magistrate_player;
+            state.reaction_target = state.magistrate_player; state.reaction_uid = card->uid; state.reaction_build = true;
+            return true;
+          }
+        }
+        return state.build(action.uid, action.name);
+      }
       case ActionType::Lab: return state.use_lab(action.uid, action.secondary_uid);
       case ActionType::Smithy: return state.use_smithy(action.uid);
       case ActionType::Museum: return state.use_museum(action.uid, action.secondary_uid);
@@ -548,7 +861,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   }
 
   int next_player(const NativeGameState& state) const override {
-    return state.active_player;
+    return state.reaction_kind.empty() ? state.active_player : state.reaction_player;
   }
 
   bool terminal(const NativeGameState& state) const override {

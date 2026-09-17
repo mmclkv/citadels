@@ -24,6 +24,22 @@ function configFromEnv(env = process.env) {
 }
 // Only the acting player's observation is sent: no deck order, opponents' hands,
 // hidden roles, resume tokens, or model reasoning exposed to other players.
+// Bishop repay (主教代付偿还) 要求一次交出恰好 amount 张手牌（不含代付的那张），
+// 裸的 choose_cards 会被引擎拒绝，必须展开成精确数量的组合（与 train.js 同一套口径）。
+function exactCardCandidates(action, hand, count, excludedUid) {
+  const cards = (hand || []).filter(card => card.uid !== excludedUid);
+  const result = [];
+  const selected = [];
+  const visit = start => {
+    if (selected.length === count) { result.push({ ...action, uids: selected.slice() }); return; }
+    for (let i = start; i < cards.length; i++) {
+      selected.push(cards[i].uid); visit(i + 1); selected.pop();
+    }
+  };
+  if (count >= 0 && count <= cards.length) visit(0);
+  return result;
+}
+
 function prepareDecision(state, playerId) {
   const view = clone(Engine.sanitize(state, playerId));
   const me = view.players.find(p => p.id === playerId);
@@ -39,6 +55,10 @@ function prepareDecision(state, playerId) {
       for (const card of me.hand || []) actions.push({ ...action,
         [action.type === 'lab' ? 'discardUid' : 'cardUid']: card.uid,
         label: action.label + '：' + card.name });
+    } else if (action.type === 'choose_cards' && state.turn && state.turn.pending &&
+               state.turn.pending.kind === 'bishop_repay') {
+      actions.push(...exactCardCandidates(action, me.hand || [],
+        state.turn.pending.amount, state.turn.pending.uid));
     } else actions.push(clone(action));
   }
   // Some UI options (e.g. an unaffordable reaction) are not actually legal.

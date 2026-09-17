@@ -28,6 +28,14 @@ int main() {
     action.secondary_uid = string_field(value, "secondaryUid");
     if (action.secondary_uid.empty()) action.secondary_uid = string_field(value, "discardUid");
     if (action.secondary_uid.empty()) action.secondary_uid = string_field(value, "cardUid");
+    action.mode = string_field(value, "mode");
+    action.color = string_field(value, "color");
+    if (const auto* field = value.get("num"); field && field->is_number()) {
+      action.num = static_cast<int>(field->as_number()); action.has_num = true;
+    }
+    if (const auto* field = value.get("gold"); field && field->is_number()) action.gold = static_cast<int>(field->as_number());
+    if (const auto* field = value.get("cards"); field && field->is_number()) action.cards = static_cast<int>(field->as_number());
+    action.use = bool_field(value, "use");
     const auto vector = encode_network_action(action);
     std::cout << std::setprecision(9);
     for (size_t i = 0; i < vector.size(); ++i) {

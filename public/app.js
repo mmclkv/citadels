@@ -512,11 +512,37 @@
         return;
 
       case 'got_gold':
-        flyGoldIn(n.playerIdx, n.amount);
+        // 金币入账的统一入口（引擎侧 notifyGoldGain）：
+        // 有来源玩家就是玩家间转移，来自银行/角色效果则从顶部金库飞入。
+        if (n.fromIdx != null) flyCoins(n.fromIdx, n.playerIdx, n.amount);
+        else flyGoldIn(n.playerIdx, n.amount);
         return;
 
       case 'tax_collected':
         flyTaxCoinsToCollector(n.playerIdx, n.amount);
+        return;
+
+      case 'tax_paid':
+        flyCoinToTaxPot(n.playerIdx, n.amount || 1);
+        return;
+
+      case 'blackmailer_reveal':
+        // 真威胁标记翻开：被勒索者的全部金币飞向勒索者（刀）；假标记不产生金币流动。
+        if (n.revealed && n.isReal && n.amount > 0) flyCoins(n.fromIdx, n.toIdx, n.amount);
+        if (isMe) {
+          queueEvent({
+            tone: n.revealed && n.isReal ? 'danger' : 'good', icon: n.revealed && n.isReal ? '†' : '❀',
+            title: n.revealed ? (n.isReal ? '威胁标记：带血的刀' : '威胁标记：玫瑰花') : '威胁标记未翻开',
+            hold: 5000,
+            text: n.revealed && n.isReal
+              ? '【勒索者】' + escapeHtml(n.byName) + ' 翻开了真威胁标记，' +
+                '你失去全部 <b>' + n.amount + ' 枚金币</b>。'
+              : (n.revealed ? '虚惊一场——那是朵玫瑰花，你分文未失。'
+                           : escapeHtml(n.byName) + ' 选择不翻开你的威胁标记，本轮作废。')
+          });
+        } else if (n.revealed && n.isReal) {
+          toast('† ' + n.byName + ' 翻走了 ' + n.playerName + ' 的全部 ' + n.amount + ' 金');
+        }
         return;
 
       case 'navigator_bonus':
@@ -1907,6 +1933,21 @@
     coinFlight(rectOf(playerBox(fromSeat)), rectOf(playerBox(toSeat)), amount);
   }
 
+  // 建造时交税：金币从玩家飞向战场中央的税务官钱罐（与 flyTaxCoinsToCollector 方向相反）。
+  function flyCoinToTaxPot(seat, amount) {
+    if (seat == null || !(amount > 0)) return;
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    // 同 readTaxPot 的时机问题：等本帧 render 把 #tax-pot 重绘出来再量坐标。
+    nextFrame(() => {
+      const pot = $('#tax-pot .tax-pot-mark') || $('#tax-pot');
+      const from = playerGoldAnchor(seat);
+      if (pot && from) {
+        coinFlight({ left: from.x, top: from.y, width: 0, height: 0 }, rectOf(pot), amount);
+      }
+    });
+  }
+
   function flyTaxCoinsToCollector(seat, amount) {
     if (seat == null || !(amount > 0)) return;
     const nextFrame = (typeof requestAnimationFrame === 'function') ?
@@ -2294,6 +2335,7 @@
       renderTableGuide(s);
       renderOpponents(s);
       renderMe(s);
+      scheduleMobilePanelInnerCollisionPass();
       renderLog(s);
       requestAnimationFrame(positionPlayerChatBubbles);
       restoreScroll(_scrollSnap);
@@ -2305,6 +2347,7 @@
     renderTableGuide(s);
     renderOpponents(s);
     renderMe(s);
+    scheduleMobilePanelInnerCollisionPass();
     renderLog(s);
     renderActions(s);
     autoOpenPick(s);
@@ -2591,6 +2634,86 @@
     const touch = (typeof navigator !== 'undefined' &&
       (navigator.maxTouchPoints > 0 || 'ontouchstart' in window));
     return window.innerWidth <= 1000 || (touch && window.innerWidth <= 1400);
+  }
+
+  // Mobile card/text rules can force adjacent items to overlap even when the
+  // outer player panels themselves do not. Measure real DOM boxes recursively
+  // and give the owning player panel enough room before resolving panel-vs-panel
+  // collisions. This is intentionally run after card sizes/layout are applied.
+  function scheduleMobilePanelInnerCollisionPass() {
+    if (!isMobileOpponentLayout() || typeof window.requestAnimationFrame !== 'function') return;
+    window.requestAnimationFrame(() => {
+      const wrap = $('#opponents');
+      if (!wrap || !document.documentElement.contains(wrap)) return;
+      expandPanelsForInnerCollisions(wrap);
+      if (wrap.dataset.layout === 'mobile-ring') stabilizePwaRingCollisions(wrap);
+      else separateOpponentPanels(wrap);
+    });
+  }
+
+  function expandPanelsForInnerCollisions(wrap) {
+    if (!wrap || !isMobileOpponentLayout()) return;
+    const panels = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    const me = $('#me-area');
+    if (me) panels.push(me);
+    const viewportLimit = Math.max(180, (window.innerWidth || 360) - 16);
+    panels.forEach(panel => {
+      panel.style.removeProperty('min-height');
+      panel.style.removeProperty('min-width');
+      panel.style.removeProperty('--inner-collision-min-width');
+      panel.querySelectorAll('.mobile-inner-collision-wrap').forEach(node => node.classList.remove('mobile-inner-collision-wrap'));
+      let widthGrowth = 0;
+      let heightGrowth = 0;
+      const rowCollisionParents = [];
+      const visit = parent => {
+        const children = Array.prototype.filter.call(parent.children || [], child => {
+          if (!(child instanceof Element)) return false;
+          const style = getComputedStyle(child);
+          return style.display !== 'none' && style.position !== 'absolute' &&
+            style.position !== 'fixed' && child.getBoundingClientRect().width > 0 &&
+            child.getBoundingClientRect().height > 0;
+        });
+        if (children.length > 1) {
+          const parentStyle = getComputedStyle(parent);
+          const row = parentStyle.display.indexOf('flex') === 0
+            ? parentStyle.flexDirection.indexOf('row') === 0
+            : parentStyle.display.indexOf('grid') === 0;
+          for (let i = 0; i < children.length; i++) {
+            const a = children[i].getBoundingClientRect();
+            for (let j = i + 1; j < children.length; j++) {
+              const b = children[j].getBoundingClientRect();
+              const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (overlapX <= 1 || overlapY <= 1) continue;
+              if (row) {
+                widthGrowth = Math.max(widthGrowth, Math.ceil(overlapX + 6));
+                if (rowCollisionParents.indexOf(parent) < 0) rowCollisionParents.push(parent);
+              }
+              else heightGrowth = Math.max(heightGrowth, Math.ceil(overlapY + 6));
+            }
+          }
+        }
+        children.forEach(visit);
+      };
+      visit(panel);
+      if (!widthGrowth && !heightGrowth) return;
+      const rect = panel.getBoundingClientRect();
+      const desiredWidth = Math.min(viewportLimit, Math.ceil(rect.width + widthGrowth));
+      if (desiredWidth > rect.width + 1) {
+        if (panel.classList.contains('opp') && wrap.dataset.layout === 'mobile-ring') {
+          panel.style.setProperty('--mobile-opp-width', desiredWidth + 'px');
+        } else {
+          panel.style.setProperty('min-width', desiredWidth + 'px', 'important');
+        }
+      }
+      if (widthGrowth && desiredWidth <= rect.width + 1) {
+        // No horizontal viewport room remains. Let the colliding row wrap and
+        // allow the panel to grow vertically instead of clipping its contents.
+        rowCollisionParents.forEach(parent => parent.classList.add('mobile-inner-collision-wrap'));
+      }
+      if (heightGrowth) panel.style.setProperty('min-height', Math.ceil(rect.height + heightGrowth) + 'px', 'important');
+      panel.dataset.innerCollisionExpanded = 'true';
+    });
   }
 
   // 移动端多人布局：保留圆桌座位角度，只缩小玩家框和内部元素，
@@ -3419,6 +3542,9 @@
     // 多选确认按钮（魔术师弃牌 / 艺术家美化）
     if (App.sel && App.sel.kind === 'multi') {
       const b = el('button', 'act main', '✓ 确定（' + App.sel.items.length + '）');
+      const min = App.sel.min || 0;
+      const max = App.sel.max;
+      b.disabled = App.sel.items.length < min || (max != null && App.sel.items.length > max);
       onTap(b, () => { App.sel.commit(App.sel.items.slice()); App.sel = null; });
       actionsEl.appendChild(b);
       const c = el('button', 'act', '取消选择');
@@ -3461,10 +3587,15 @@
         App.sel = { kind: 'handpick', items: [], label: '【博物馆】点击一张手牌放入，计分 +1',
           commit(uids) { App.sel = null; send({ type: 'museum', uid: a.uid, cardUid: uids[0] }); } };
         render(); return;
-      case 'choose_cards':
+      case 'choose_cards': {
+        const pending = App.state && App.state.turn && App.state.turn.pending;
         App.sel = { kind: 'multi', items: [],
+          min: pending && pending.kind === 'bishop_repay' ? pending.amount : 0,
+          max: pending && pending.kind === 'bishop_repay' ? pending.amount : undefined,
+          excludeUid: pending && pending.kind === 'bishop_repay' ? pending.uid : null,
           commit(uids) { App.sel = null; send({ type: 'choose_cards', uids: uids }); } };
         render(); return;
+      }
       case 'choose_district':
         send(a); return;
       case 'pending_back':
@@ -3481,8 +3612,10 @@
     const s = App.state;
     if (App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')) {
       if (App.sel.kind === 'handpick') { App.sel.commit([c.uid]); return; }
+      if (App.sel.excludeUid && App.sel.excludeUid === c.uid) return;
       const i = App.sel.items.indexOf(c.uid);
-      if (i >= 0) App.sel.items.splice(i, 1); else App.sel.items.push(c.uid);
+      if (i >= 0) App.sel.items.splice(i, 1);
+      else if (App.sel.max == null || App.sel.items.length < App.sel.max) App.sel.items.push(c.uid);
       render(); return;
     }
     // 默认：建造

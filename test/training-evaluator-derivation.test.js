@@ -20,6 +20,7 @@ test('训练页不再有「神经网络评估器」选项', () => {
   assert.doesNotMatch(html, /神经网络评估器/, '下拉框标签应已删除');
   assert.doesNotMatch(html, /id="mcts-evaluator"/, 'mcts-evaluator select 应已删除');
   assert.doesNotMatch(html, /id="mcts-evaluator-hint"/, '旧提示位应已删除');
+  assert.match(html, /option value="cpp" disabled>C\+\+（尚未支持完整规则）/, '未完成的 C++ 规则引擎应禁用');
 });
 
 test('前端不再残留任何对旧选项的引用', () => {

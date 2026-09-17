@@ -21,6 +21,19 @@ function enumerateFull(state, playerId) {
       for (const card of player.hand) candidates.push({ ...action, discardUid: card.uid });
     } else if (action.type === 'museum') {
       for (const card of player.hand) candidates.push({ ...action, cardUid: card.uid });
+    } else if (action.type === 'choose_cards' && state.turn && state.turn.pending &&
+               state.turn.pending.kind === 'bishop_repay') {
+      // 主教还债：一次交出恰好 amount 张（排除代付那张），与 train.exactCardCandidates 同构
+      const cards = (player.hand || []).filter(c => c.uid !== state.turn.pending.uid);
+      const count = state.turn.pending.amount;
+      const combos = [];
+      const pick = [];
+      const visit = start => {
+        if (pick.length === count) { combos.push({ ...action, uids: pick.slice() }); return; }
+        for (let i = start; i < cards.length; i++) { pick.push(cards[i].uid); visit(i + 1); pick.pop(); }
+      };
+      if (count >= 0 && count <= cards.length) visit(0);
+      candidates.push(...combos);
     } else if (action.type === 'choose_cards') candidates.push(...train.redrawCandidates(action, player.hand));
     else candidates.push(clone(action));
   }

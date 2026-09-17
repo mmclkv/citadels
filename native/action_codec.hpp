@@ -14,6 +14,7 @@ enum class ActionType {
   BlackmailerBribe,
   BlackmailerRefuse,
   BlackmailerSigned,
+  BlackmailerChar,
   Build,
   ChooseCards,
   ChooseChar,
@@ -30,6 +31,7 @@ enum class ActionType {
   Lab,
   MagicianMode,
   MagistrateSigned,
+  MagistrateChar,
   MonkResource,
   MonkTake,
   Museum,
@@ -70,6 +72,7 @@ inline std::optional<ActionType> action_type_from_string(std::string_view value)
   CITADELS_ACTION(BlackmailerBribe, "blackmailer_bribe")
   CITADELS_ACTION(BlackmailerRefuse, "blackmailer_refuse")
   CITADELS_ACTION(BlackmailerSigned, "blackmailer_signed")
+  CITADELS_ACTION(BlackmailerChar, "blackmailer_char")
   CITADELS_ACTION(Build, "build")
   CITADELS_ACTION(ChooseCards, "choose_cards")
   CITADELS_ACTION(ChooseChar, "choose_char")
@@ -86,6 +89,7 @@ inline std::optional<ActionType> action_type_from_string(std::string_view value)
   CITADELS_ACTION(Lab, "lab")
   CITADELS_ACTION(MagicianMode, "magician_mode")
   CITADELS_ACTION(MagistrateSigned, "magistrate_signed")
+  CITADELS_ACTION(MagistrateChar, "magistrate_char")
   CITADELS_ACTION(MonkResource, "monk_resource")
   CITADELS_ACTION(MonkTake, "monk_take")
   CITADELS_ACTION(Museum, "museum")
@@ -117,6 +121,7 @@ inline std::string_view action_type_name(ActionType type) {
     case ActionType::BlackmailerBribe: return "blackmailer_bribe";
     case ActionType::BlackmailerRefuse: return "blackmailer_refuse";
     case ActionType::BlackmailerSigned: return "blackmailer_signed";
+    case ActionType::BlackmailerChar: return "blackmailer_char";
     case ActionType::Build: return "build";
     case ActionType::ChooseCards: return "choose_cards";
     case ActionType::ChooseChar: return "choose_char";
@@ -133,6 +138,7 @@ inline std::string_view action_type_name(ActionType type) {
     case ActionType::Lab: return "lab";
     case ActionType::MagicianMode: return "magician_mode";
     case ActionType::MagistrateSigned: return "magistrate_signed";
+    case ActionType::MagistrateChar: return "magistrate_char";
     case ActionType::MonkResource: return "monk_resource";
     case ActionType::MonkTake: return "monk_take";
     case ActionType::Museum: return "museum";

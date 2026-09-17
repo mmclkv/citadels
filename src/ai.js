@@ -276,7 +276,6 @@
     switch (c.id) {
       case 'assassin': case 'thief': case 'witch': case 'magician':
       case 'magistrate': case 'spy': case 'blackmailer': case 'wizard': return true;
-      case 'abbot': return true;
       case 'tax_collector': return true;
       case 'warlord': {
         const p = state.players[idx];
@@ -347,6 +346,13 @@
     return null;
   }
 
+  // 宗教线的资源份数：与引擎 countColorForIncome(p,'blue','blue') 同口径
+  // （宗教建筑数 + 「可当任意颜色」的加成建筑）。
+  function countReligiousBuildings(state, p) {
+    return p.city.filter(d => d.color === 'blue').length +
+      p.city.filter(d => d.purple && d.purple.effect === 'anyColorIncome').length;
+  }
+
   /* ------------------------ 多步能力决策 ------------------------ */
   function pendingDecision(state, idx, t, level, rnd) {
     const rand = typeof rnd === 'function' ? rnd : Math.random;
@@ -406,8 +412,6 @@
       }
       case 'wizard_choice':
         return { type: p.gold >= (pd.card && pd.card.cost || 0) ? 'wizard_build' : 'wizard_take' };
-      case 'abbot_declare':
-        return { type: 'abbot_resource', gold: (p.city || []).filter(d => d.color === 'blue').length, cards: 0 };
       case 'tax_collect':
         return { type: 'tax_collect' };
       case 'assassin': {
@@ -490,6 +494,7 @@
         let best = null, bv = -1, bestTarget = null;
         state.players.forEach((tp, i) => {
           if (tp.city.length >= state.config.endDistricts) return;
+          if (i !== idx && Engine.isAbbotProtected(state, i)) return;   // 住持保护，选了也白选
           if (i !== idx && tp.chars.some(x => x === 'bishop') &&
               state.effects.assassinated !== 5 && state.effects.bewitched !== 5) return;
           tp.city.forEach(card => {
@@ -512,6 +517,7 @@
         state.players.forEach((tp, i) => {
           if (i === idx) return;
           if (tp.city.length >= state.config.endDistricts) return;
+          if (Engine.isAbbotProtected(state, i)) return;                // 住持保护，选了也白选
           tp.city.forEach(card => {
             if (card.cost > 3) return;
             if (card.purple && card.purple.effect === 'immune') return;
@@ -540,6 +546,7 @@
         let best = null, bt = null, bv = -1;
         state.players.forEach((tp, i) => {
           if (i === idx) return;
+          if (Engine.isAbbotProtected(state, i)) return;                // 住持保护，选了也白选
           tp.city.forEach(card => {
             if (card.purple && card.purple.effect === 'immune') return;
             if (p.city.filter(d => d.name === card.name).length >= maxSame(p, card.name)) return;
@@ -576,9 +583,21 @@
         });
         return { type: 'scholar_pick', uid: (best || pd.cards[0]).uid };
       }
+      case 'bishop_repay': {
+        // 别人代付了建造费，要交出等量的手牌偿还：挑对建造最没用的那几张，且不能用那栋建筑本身
+        const need = Math.max(0, pd.amount || 0);
+        const pool = p.hand.filter(card => card.uid !== pd.uid)
+          .slice().sort((a, b) => buildValue(state, p, a) - buildValue(state, p, b));
+        return { type: 'choose_cards', uids: pool.slice(0, need).map(c => c.uid) };
+      }
+      case 'abbot_declare': {
+        // 与修士同构：宗教建筑数决定可领的资源份数，金币够就直接全取金币
+        const n = countReligiousBuildings(state, p);
+        const cards = (p.gold >= 6 || p.hand.length <= 1) ? Math.min(n, 2) : 0;
+        return { type: 'abbot_resource', gold: n - cards, cards: cards };
+      }
       case 'monk_declare': {
-        const n = p.city.filter(d => d.color === 'blue').length +
-                  p.city.filter(d => d.purple && d.purple.effect === 'anyColorIncome').length;
+        const n = countReligiousBuildings(state, p);
         const cards = (p.gold >= 6 || p.hand.length <= 1) ? Math.min(n, 2) : 0;
         return { type: 'monk_resource', gold: n - cards, cards: cards };
       }
@@ -616,7 +635,9 @@
         return { type: 'draw_keep', uid: (best || pd.cards[0]).uid };
       }
     }
-    return { type: 'end_turn' };
+    // 兜底：未知的多步步骤不能返回 end_turn（pending 还在，会被引擎拒绝，
+    // 训练里就直接演化成「没有合法行动」报错）。放弃该能力总是安全的。
+    return { type: 'ability_skip' };
   }
 
   return { decide: decide, draftDecision: draftDecision, charValue: charValue, bestBuildCard: bestBuildCard };

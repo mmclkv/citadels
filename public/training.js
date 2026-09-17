@@ -95,7 +95,7 @@ function updateMctsEvaluatorUI() {
   const evaluator = resolveMctsEvaluator();
   // 评估器不再是独立选项，提示改挂在「神经网络框架」下面，说明它会推导出什么
   $('neural-framework-hint').textContent = native
-    ? (framework === 'libtorch' ? '✓ C++ MCTS 在搜索进程内使用 LibTorch 评估' : '✓ C++ MCTS 通过 PyTorch 桥评估网络')
+    ? (framework === 'libtorch' ? '✓ C++ MCTS 与完整角色规则在搜索进程内运行，使用 LibTorch 评估' : '✓ C++ MCTS 与完整角色规则运行于搜索进程，通过 PyTorch 桥评估网络')
     : (evaluator === 'gpu' ? '✓ JS MCTS 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
   document.querySelectorAll('.native-only').forEach(el => { el.style.display = native ? '' : 'none'; });
   // 切换框架会改变推导出的评估器，单步耗时估算要跟着刷新
@@ -421,6 +421,7 @@ $('stop-training').onclick = async () => {
 };
 $('profile').onchange = () => { if (latest) render(latest); };
 $('rules-engine').onchange = updateMctsEvaluatorUI;
+$('char-set').onchange = updateMctsEvaluatorUI;
 $('mcts-engine').onchange = updateMctsEvaluatorUI;
 $('neural-network-framework').onchange = updateMctsEvaluatorUI;
 $('device').onchange = updateMctsEvaluatorUI;

@@ -18,11 +18,11 @@ const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
 const STATE_SIZE = 672;
 const ACTION_SIZE = 256;
-const STATE_ENCODING_VERSION = 4;
-const ACTION_ENCODING_VERSION = 4;
+const STATE_ENCODING_VERSION = 6;
+const ACTION_ENCODING_VERSION = 6;
 const ROLE_IDS = ['assassin', 'witch', 'thief', 'magician', 'prophet', 'king', 'emperor', 'noble',
   'bishop', 'monk', 'merchant', 'alchemist', 'businessman', 'architect', 'navigator', 'scholar',
-  'warlord', 'diplomat', 'marshal', 'queen', 'artist'];
+  'warlord', 'diplomat', 'marshal', 'queen', 'artist', 'magistrate', 'spy', 'blackmailer', 'wizard', 'abbot', 'tax_collector'];
 const PHASE_CODES = { lobby: 0, draft: 1, action: 2, reaction: 3, roundConfirm: 4, gameover: 5 };
 const TURN_PHASE_CODES = { main: 0, witch_resume: 1, draw_keep: 2, scholar_pick: 3 };
 const PENDING_CODES = {
@@ -30,17 +30,25 @@ const PENDING_CODES = {
   magician_redraw: 6, warlord_destroy: 7, marshal_seize: 8, artist: 9,
   navigator_bonus: 10, monk_declare: 11, emperor_crown: 12, emperor_take: 13,
   prophet_give: 14, draw_keep: 15, scholar_pick: 16, diplomat_mine: 17,
-  diplomat_theirs: 18
+  diplomat_theirs: 18, magistrate_declare: 19, magistrate_second: 20, magistrate_third: 21,
+  blackmailer_declare: 22, blackmailer_second: 23, blackmailer_signed: 24, blackmailer_threat: 25,
+  spy_target: 26, spy_color: 27, wizard_target: 28, wizard_card: 29, wizard_choice: 30,
+  abbot_declare: 31, tax_collect: 32, bishop_repay: 33
 };
 const ACTION_TYPES = [
-  'ability_skip', 'ability', 'artist_done', 'build', 'choose_cards', 'choose_char',
+  'ability_skip', 'ability', 'abbot_resource', 'artist_done', 'blackmailer_bribe',
+  'blackmailer_refuse', 'blackmailer_signed', 'blackmailer_char', 'build', 'choose_cards', 'choose_char',
   'choose_district', 'choose_player', 'confirm_round', 'draft_discard', 'draft_pick',
   'draw_keep', 'emperor_crown', 'emperor_take', 'end_turn', 'income', 'lab',
-  'magician_mode', 'monk_resource', 'monk_take', 'museum', 'navigator_bonus',
-  'pending_back', 'prophet_give', 'reaction', 'scholar_pick', 'smithy',
-  'take_cards', 'take_gold'
+  'magician_mode', 'magistrate_signed', 'magistrate_char', 'monk_resource', 'monk_take', 'museum',
+  'navigator_bonus', 'pending_back', 'prophet_give', 'reaction', 'scholar_pick',
+  'smithy', 'spy_color', 'spy_target', 'take_cards', 'take_gold', 'tax_collect',
+  'wizard_build', 'wizard_card', 'wizard_take', 'wizard_target'
 ];
 const IGNORE_KEYS = new Set(['log', 'notices', 'available', 'roomName', 'name', 'label', 'desc', 'resumeToken']);
+function nativeMctsSupportsGame(state) {
+  return !!state && Array.isArray(state.charDeck) && state.charDeck.every(role => ROLE_IDS.includes(role));
+}
 
 function observationContext(view, playerId) {
   const players = view.players || [];
@@ -94,7 +102,7 @@ function encodeState(view, playerId) {
   vector[15] = (Array.isArray(roundConfirm.confirmed) ? roundConfirm.confirmed.filter(Boolean).length : 0) / 8;
   vector[16] = turn.pending && turn.pending.targetIdx != null ? (rel(turn.pending.targetIdx) + 1) / 9 : 0;
   vector[17] = turn.pending && turn.pending.fromCrownIdx != null ? (rel(turn.pending.fromCrownIdx) + 1) / 9 : 0;
-  vector[18] = turn.pending && PENDING_CODES[turn.pending.kind] ? PENDING_CODES[turn.pending.kind] / 32 : 0;
+  vector[18] = turn.pending && PENDING_CODES[turn.pending.kind] ? PENDING_CODES[turn.pending.kind] / 33 : 0;
   vector[19] = (TURN_PHASE_CODES[turn.phase] == null ? 4 : TURN_PHASE_CODES[turn.phase]) / 4;
   vector[20] = (Number(view.turnsCompleted) || 0) / 100;
   vector[21] = turn.takenResources ? 1 : 0;
@@ -105,7 +113,7 @@ function encodeState(view, playerId) {
   vector[26] = turn.usedSmithy ? 1 : 0;
   vector[27] = turn.usedMuseum ? 1 : 0;
   vector[28] = turn.bonusDone ? 1 : 0;
-  vector[29] = turn.pending && Number(turn.pending.count) ? Number(turn.pending.count) / 8 : 0;
+  vector[29] = turn.pending && Number(turn.pending.amount || turn.pending.count) ? Number(turn.pending.amount || turn.pending.count) / 8 : 0;
   vector[30] = Number(turn.builds) / 4 || 0;
   vector[31] = Number(turn.spentOnBuild) / 20 || 0;
   // Entity layout: global[0..31], then 8 player slots x 80 dimensions.
@@ -144,14 +152,11 @@ function encodeState(view, playerId) {
     const colorIndex = { yellow: 0, blue: 1, green: 2, red: 3, purple: 4 };
     city.forEach((card, i) => {
       if (i >= 8) return;
-      const slot = base + 49 + i * 3;
+      const slot = base + 56 + i * 3;
       vector[slot] = Math.min(1, Math.max(0, Number(card.cost) || 0) / 8);
       vector[slot + 1] = colorIndex[card.color] == null ? 0 : (colorIndex[card.color] + 1) / 5;
       vector[slot + 2] = Math.min(1, Math.max(0, Number(card.scoreValue) || Number(card.cost) || 0) / 10);
     });
-    for (let cost = 0; cost <= 7; cost++) {
-      vector[base + 73 + cost] = city.filter(card => Number(card.cost) === cost).length / 8;
-    }
   }
   return { vector, context };
 }
@@ -163,34 +168,42 @@ function encodeAction(action, context) {
   const typeIndex = ACTION_TYPES.indexOf(type);
   if (typeIndex >= 0) vector[1 + typeIndex] = 1;
   const targetRel = context && context.playerIds ? context.playerIds.get(action && action.target) : null;
-  if (targetRel != null && targetRel >= 0 && targetRel < 8) vector[32 + targetRel] = 1;
+  if (targetRel != null && targetRel >= 0 && targetRel < 8) vector[42 + targetRel] = 1;
   const role = String(action && (action.charId != null ? action.charId : action.name) || '');
   const roleNum = Number(action && action.num) || { assassin: 1, witch: 1, thief: 2, magician: 3, prophet: 3, king: 4, emperor: 4,
-    noble: 4, bishop: 5, monk: 5, merchant: 6, alchemist: 6, businessman: 6,
+    noble: 4, bishop: 5, monk: 5, abbot: 5, merchant: 6, alchemist: 6, businessman: 6,
     architect: 7, navigator: 7, scholar: 7, warlord: 8, diplomat: 8, marshal: 8,
-    queen: 9, artist: 9 }[role];
-  if (roleNum) vector[40 + roleNum - 1] = 1;
+    queen: 9, artist: 9, magistrate: 1, spy: 2, blackmailer: 2, wizard: 3, tax_collector: 9 }[role];
+  if (roleNum) vector[50 + roleNum - 1] = 1;
   const exactRoleIndex = ROLE_IDS.indexOf(role);
-  if (exactRoleIndex >= 0) vector[60 + exactRoleIndex] = 1;
+  if (exactRoleIndex >= 0) vector[68 + exactRoleIndex] = 1;
   const mode = String(action && (action.mode != null ? action.mode : action.effect != null ? action.effect : action.use != null ? (action.use ? 'use' : 'skip') : '') || '');
   const modes = ['gold', 'cards', 'card', 'swap', 'redraw', 'use', 'skip', 'take', 'destroy'];
   const modeIndex = modes.indexOf(mode);
-  if (modeIndex >= 0) vector[50 + modeIndex] = 1;
+  if (modeIndex >= 0) vector[59 + modeIndex] = 1;
   const card = context && context.cards ? context.cards.get(action && action.uid) : null;
   const cost = card ? Number(card.cost) : NaN;
-  if (Number.isFinite(cost) && cost >= 0 && cost <= 7) vector[60 + cost] = 1;
+  if (Number.isFinite(cost)) vector[105] = Math.min(1, Math.max(0, cost / 8));
+  const colorIndex = { yellow: 0, blue: 1, green: 2, red: 3, purple: 4 };
+  if (action && colorIndex[action.color] != null) vector[95 + colorIndex[action.color]] = 1;
+  if (card && colorIndex[card.color] != null) vector[100 + colorIndex[card.color]] = 1;
+  if (card) vector[106] = Math.min(1, Math.max(0, (Number(card.scoreValue) || Number(card.cost) || 0) / 10));
+  if (Number.isFinite(Number(action && action.num))) vector[107] = Math.max(0, Math.min(1, Number(action.num) / 9));
+  if (Number.isFinite(Number(action && action.gold))) vector[108] = Math.max(0, Math.min(1, Number(action.gold) / 20));
+  if (Number.isFinite(Number(action && action.cards))) vector[109] = Math.max(0, Math.min(1, Number(action.cards) / 8));
+  if (action && action.use != null) vector[110] = action.use ? 1 : 0;
   const selected = Array.isArray(action && action.uids) ? action.uids : [];
-  vector[68] = Math.min(1, selected.length / 8);
-  vector[69] = action && action.uid ? 1 : 0;
-  vector[70] = action && (action.secondaryUid || action.discardUid || action.cardUid) ? 1 : 0;
+  vector[111] = action && action.uid ? 1 : 0;
+  vector[112] = action && (action.secondaryUid || action.discardUid || action.cardUid) ? 1 : 0;
+  vector[113] = Math.min(1, selected.length / 8);
   // Stable entity-reference slots preserve card identity without hashing arbitrary JSON.
   const uidNumber = uid => {
     const match = String(uid || '').match(/(\d+)$/);
     return match ? Math.min(1, Number(match[1]) / 64) : 0;
   };
-  vector[71] = uidNumber(action && action.uid);
-  vector[72] = uidNumber(action && (action.secondaryUid || action.discardUid || action.cardUid));
-  selected.slice(0, 8).forEach((uid, i) => { vector[80 + i] = uidNumber(uid); });
+  vector[114] = uidNumber(action && action.uid);
+  vector[115] = uidNumber(action && (action.secondaryUid || action.discardUid || action.cardUid));
+  selected.slice(0, 8).forEach((uid, i) => { vector[116 + i] = uidNumber(uid); });
   normalizeVector(vector);
   return vector;
 }
@@ -225,6 +238,20 @@ function redrawCandidates(action, hand) {
   return out;
 }
 
+function exactCardCandidates(action, hand, count, excludedUid) {
+  const cards = (hand || []).filter(card => card.uid !== excludedUid);
+  const result = [];
+  const selected = [];
+  const visit = start => {
+    if (selected.length === count) { result.push({ ...action, uids: selected.slice() }); return; }
+    for (let i = start; i < cards.length; i++) {
+      selected.push(cards[i].uid); visit(i + 1); selected.pop();
+    }
+  };
+  if (count >= 0 && count <= cards.length) visit(0);
+  return result;
+}
+
 function enumerateLegalActions(state, playerId) {
   const available = Engine.getAvailableActions(state, playerId);
   const player = state.players.find(p => p.id === playerId);
@@ -235,6 +262,8 @@ function enumerateLegalActions(state, playerId) {
       for (const card of player.hand) candidates.push({ ...action, discardUid: card.uid });
     } else if (action.type === 'museum') {
       for (const card of player.hand) candidates.push({ ...action, cardUid: card.uid });
+    } else if (action.type === 'choose_cards' && state.turn && state.turn.pending && state.turn.pending.kind === 'bishop_repay') {
+      candidates.push(...exactCardCandidates(action, player.hand, state.turn.pending.amount, state.turn.pending.uid));
     } else if (action.type === 'choose_cards') candidates.push(...redrawCandidates(action, player.hand));
     else candidates.push(clone(action));
   }
@@ -351,15 +380,28 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     charSetMode: charSet, seed: config.seed + gameIndex * 7919, seats
   });
   Engine.startGame(state);
+  const useNativeMcts = !!nativeSearch && (config.mctsEngine === 'cpp' || config.backend === 'native') &&
+    nativeMctsSupportsGame(state);
   const transitions = [];
   let steps = 0, inferenceMs = 0, fallbackCount = 0;
   const startedAt = Date.now();
   while (state.phase !== 'gameover' && steps < config.maxSteps) {
     if (shouldStop()) break;
     const actor = currentActor(state);
-    if (!actor) throw new Error('游戏停滞：当前没有行动玩家（阶段 ' + state.phase + '）');
+    // 「某一步没有合法行动」是引擎不应出现的死角。以前这里直接抛异常，一次偶发
+    // 就把整轮训练打断；现在改成跳过这一局（返回 null），上层会把局数不计、
+    // 只打一条警告日志——既不丢整个训练任务，也不至于把这口井完全静音。
+    if (!actor) {
+      console.warn('[train] 跳过第 ' + gameIndex + ' 局：没有行动玩家（阶段 ' + state.phase + '）');
+      return null;
+    }
     const legal = enumerateLegalActions(state, actor.id);
-    if (!legal.length) throw new Error('游戏停滞：' + actor.name + ' 没有合法行动');
+    if (!legal.length) {
+      console.warn('[train] 跳过第 ' + gameIndex + ' 局：' + actor.name + ' 没有合法行动，' +
+        'pending=' + JSON.stringify(state.turn && state.turn.pending) +
+        ' reaction=' + JSON.stringify(state.reaction));
+      return null;
+    }
     const view = Engine.sanitize(state, actor.id);
     const encoded = encodeState(view, actor.id);
     const actionVectors = legal.map(action => encodeAction(action, encoded.context));
@@ -376,7 +418,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       let chosen = heuristicKey ? legal.findIndex(action => JSON.stringify(action) === heuristicKey) : -1;
       if (chosen < 0) chosen = 0;
       decision = { chosen, probability: 1 / legal.length, value: 0, entropy: 0 };
-    } else if ((config.mctsEngine === 'cpp' || config.backend === 'native') && nativeSearch) {
+    } else if (useNativeMcts) {
       const nativeResult = await nativeSearch.search(state, actor.id, legal, config.modelVersion || 0);
       piVector = nativeResult.policy;
       mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
@@ -387,6 +429,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue,
         entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
     } else if (config.mctsSimulations > 0) {
+      const jsFallbackEvaluator = config.mctsEngine === 'cpp' && config.neuralNetworkFramework === 'libtorch'
+        ? null : evaluator;
       const mctsResult = await mcts.search({
         rootState: state,
         rootPlayerId: actor.id,
@@ -403,7 +447,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         dirichletEpsilon: config.mctsDirichletEpsilon != null ? config.mctsDirichletEpsilon : 0.03,
         maxDepth: config.mctsMaxDepth,
         rng,
-        evaluator
+        evaluator: jsFallbackEvaluator
       });
       piVector = mctsResult.pi;
       mctsValueVector = normalizeValueVector(mctsResult.valueVector, mctsResult.value);
@@ -449,7 +493,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   }
   if (state.phase !== 'gameover') {
     if (shouldStop()) return { stopped: true, transitions: [] };
-    throw new Error('游戏超过最大步数 ' + config.maxSteps);
+    console.warn('[train] 跳过第 ' + gameIndex + ' 局：超过最大步数 ' + config.maxSteps);
+    return null;
   }
   const rewards = gameRewards(state);
   transitions.forEach(tr => {
@@ -463,11 +508,15 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     transitions, steps, rounds: state.round, durationMs: Date.now() - startedAt,
     avgInferenceMs: inferenceMs / Math.max(1, steps), fallbackCount, playerCount, charSet,
     networkPlayerCount,
+    mctsEngineUsed: config.mctsSimulations > 0 ? (useNativeMcts ? 'cpp' : 'js') : 'none',
     rewards: Array.from(rewards.values()), scores: state.scores.map(s => s.total), winners: winning
   };
 }
 
 function sanitizeConfig(input = {}) {
+  if (input.rulesEngine === 'cpp') {
+    throw new Error('C++ 规则引擎尚未实现完整对局规则；请使用 JS 规则引擎。');
+  }
   const minPlayers = Math.max(2, Math.min(8, Number(input.minPlayers) || 4));
   const maxPlayers = Math.max(minPlayers, Math.min(8, Number(input.maxPlayers) || minPlayers));
   const mctsSimulations = Math.max(0, Math.min(10000, Number(input.mctsSimulations) || 0));
@@ -646,6 +695,7 @@ async function train(rawConfig, hooks = {}) {
   // 训练批次按“完成的对局数”计数，而不是按 worker 池是否存在计数。
   // worker 一次返回多少局属于并行调度细节，不应覆盖控制台里的 batchGames 配置。
   let gamesSinceUpdate = 0;
+  let loggedDarkNativeFallback = false;
   if (torch && !stopping) {
     const nativeGpuSearch = config.mctsEngine === 'cpp' && config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu';
     if (nativeGpuSearch) {
@@ -667,13 +717,13 @@ async function train(rawConfig, hooks = {}) {
     const poolOpts = { root: ROOT, config,
       size: Math.min(config.workers, config.batchGames), onLog: text => log(text) };
     if (config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu') {
+      // 若某局未创建原生 worker，JS MCTS 仍通过主进程 PyTorch 桥批量评估。
+      poolOpts.batchForward = (stateVectors, actionVectorsList) =>
+        torch.batchForward({ stateVectors, actionVectorsList });
       if (!nativeGpuSearch) {
-        // JS MCTS 的 worker 把批量 forward 转发给训练主进程，再由 PyTorch 桥串行消费。
-        poolOpts.batchForward = (stateVectors, actionVectorsList) =>
-          torch.batchForward({ stateVectors, actionVectorsList });
         log('MCTS 评估：worker → torch.batchForward（PyTorch）');
       } else {
-        log('MCTS 评估：C++ worker → 共享内存队列 → 独立 PyTorch/GPU daemon');
+        log('MCTS 评估：C++ 规则/MCTS worker 走共享内存 GPU daemon（含新增暗版角色）');
       }
     } else if (config.mctsSimulations > 0) {
       log('MCTS 评估：worker 内本地 JS 网络 forward（mctsEvaluator=js）');
@@ -688,6 +738,8 @@ async function train(rawConfig, hooks = {}) {
       device: accelerator.device, torch: accelerator.torch, cuda: accelerator.cuda, gpu: accelerator.gpu } });
 
   try {
+  // 连续「一局都跑不出来」的次数：偶发死角跳过就好，连续卡住说明引擎有问题，提前收尾。
+  let emptyBatches = 0;
   while (completedGames < config.targetGames && !shouldStop()) {
     let results;
     if (pool) {
@@ -696,10 +748,24 @@ async function train(rawConfig, hooks = {}) {
       results = await pool.run(indices, torch.modelPath, completedGames);
     } else {
       const result = await runSelfPlayGame(model, config, completedGames + 1, rng, shouldStop);
-      results = result.stopped ? [] : [{ gameIndex: completedGames + 1, ...result }];
+      results = (!result || result.stopped) ? [] : [{ gameIndex: completedGames + 1, ...result }];
     }
-    if (!results.length) break;
+    if (!results.length) {
+      // 收到停止信号就真的停下；否则说明这一批/这一局跑不通（无合法行动、超步数），
+      // 记一次数后继续下一局，别让偶发死角把整次训练打断。
+      if (shouldStop() || ++emptyBatches > 20) {
+        if (emptyBatches > 20) log('连续多局无法跑完，训练提前结束（详见 worker 警告日志）');
+        break;
+      }
+      if (!pool) completedGames++;
+      continue;
+    }
+    emptyBatches = 0;
     for (const result of results) {
+      if (!loggedDarkNativeFallback && config.mctsEngine === 'cpp' && result.mctsEngineUsed === 'js') {
+        log('本局未启用原生 MCTS worker，已使用 JS MCTS 回退');
+        loggedDarkNativeFallback = true;
+      }
       completedGames++;
       gamesSinceUpdate++;
       rollout.push(...result.transitions);
@@ -819,9 +885,9 @@ if (require.main === module) {
 
 module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
-  STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES,
+  STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES, ACTION_TYPES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
-  resolveNetworkPlayerCount, heuristicLevelFor,
+  resolveNetworkPlayerCount, heuristicLevelFor, nativeMctsSupportsGame,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR
 };

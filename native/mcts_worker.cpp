@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "game_adapter.hpp"
@@ -50,10 +51,25 @@ NativeSearchAction decode_action(const JsonValue& value) {
   if (name.empty()) name = string_field(value, "mode");
   auto effect = string_field(value, "effect");
   if (effect.empty() && value.get("use")) effect = bool_field(value, "use") ? "use" : "skip";
-  return {parsed.value_or(ActionType::EndTurn), string_field(value, "uid"),
-          name, effect, string_field(value, "target"),
-          string_array_field(value, "uids"), string_field(value, "discardUid").empty()
-            ? string_field(value, "cardUid") : string_field(value, "discardUid")};
+  NativeSearchAction action;
+  action.type = parsed.value_or(ActionType::EndTurn);
+  action.uid = string_field(value, "uid");
+  action.name = std::move(name);
+  action.effect = std::move(effect);
+  if (action.name.empty() && action.type == ActionType::Reaction) action.name = action.effect;
+  action.target = string_field(value, "target");
+  action.selected_uids = string_array_field(value, "uids");
+  action.secondary_uid = string_field(value, "discardUid");
+  if (action.secondary_uid.empty()) action.secondary_uid = string_field(value, "cardUid");
+  action.mode = string_field(value, "mode");
+  action.color = string_field(value, "color");
+  if (const auto* field = value.get("num"); field && field->is_number()) {
+    action.num = static_cast<int>(field->as_number()); action.has_num = true;
+  }
+  if (const auto* field = value.get("gold"); field && field->is_number()) action.gold = static_cast<int>(field->as_number());
+  if (const auto* field = value.get("cards"); field && field->is_number()) action.cards = static_cast<int>(field->as_number());
+  action.use = bool_field(value, "use");
+  return action;
 }
 
 void emit_error(const std::string& id, const std::string& message) {
@@ -157,7 +173,13 @@ int main() {
               (!supplied[i].secondary_uid.empty() &&
                native_actions[i].secondary_uid != supplied[i].secondary_uid) ||
               (!supplied[i].selected_uids.empty() &&
-               native_actions[i].selected_uids != supplied[i].selected_uids)) {
+               native_actions[i].selected_uids != supplied[i].selected_uids) ||
+              (supplied[i].has_num && native_actions[i].num != supplied[i].num) ||
+              (supplied[i].gold >= 0 && native_actions[i].gold != supplied[i].gold) ||
+              (supplied[i].cards >= 0 && native_actions[i].cards != supplied[i].cards) ||
+              (supplied[i].type == ActionType::SpyColor && native_actions[i].color != supplied[i].color) ||
+              (!supplied[i].name.empty() && native_actions[i].name != supplied[i].name) ||
+              (supplied[i].type == ActionType::Reaction && native_actions[i].name != supplied[i].name)) {
             actions_match = false;
             mismatch_index = static_cast<int>(i);
             break;

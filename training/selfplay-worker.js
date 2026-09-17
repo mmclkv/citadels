@@ -8,7 +8,8 @@ const { BatchEvaluator } = require('./evaluator.js');
 const { NativeSearchClient } = require('./native-search.js');
 
 const model = new PolicyValueNetwork({ profile: workerData.config.profile,
-  stateSize: 672, actionSize: 256, seed: workerData.config.seed ^ (workerData.workerId * 2654435761) });
+  stateSize: 672, actionSize: 256, encodingVersion: 6,
+  seed: workerData.config.seed ^ (workerData.workerId * 2654435761) });
 let modelVersion = -1;
 let stopping = false;
 
@@ -100,9 +101,17 @@ parentPort.on('message', async message => {
     if (nativeSearch) nativeSearch.setModelPath(message.modelPath);
     const rng = mulberry32(workerData.config.seed ^ (message.gameIndex * 2246822519));
     const evaluator = workerData.config.mctsEvaluator === 'gpu' ? getMctsEvaluator() : null;
-    const nativeEvaluator = (workerData.config.mctsEngine === 'cpp' || workerData.config.backend === 'native') ? getNativeSearch() : null;
+    const nativeEvaluator = workerData.config.mctsSimulations > 0 &&
+      (workerData.config.mctsEngine === 'cpp' || workerData.config.backend === 'native')
+      ? getNativeSearch() : null;
     workerData.config.modelVersion = message.modelVersion;
     const result = await runSelfPlayGame(model, workerData.config, message.gameIndex, rng, () => stopping, evaluator, nativeEvaluator);
+    // 跑不通（无合法行动 / 超步数）的局会被 train.js 置为 null：丢弃它并打一条日志，
+    // 既不让整次训练崩掉，也不会让这类死角悄无声息地消失。
+    if (!result) {
+      parentPort.postMessage({ type: 'log',
+        text: '[worker] 游戏 #' + message.gameIndex + ' 无法跑完，已跳过该局（未计入数据）' });
+    }
     // 慢局（>10s）才往上推一条，避免淹没日志
     if (result && result.durationMs > 10000) {
       parentPort.postMessage({ type: 'log',

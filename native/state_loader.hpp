@@ -117,6 +117,24 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     state.thief_player = int_field(*effects, "thiefBy", -1);
     state.bewitched = int_field(*effects, "bewitched", -1);
     state.witch_player = int_field(*effects, "witchBy", -1);
+    state.tax_collector_gold = int_field(*effects, "taxCollectorGold", 0);
+    const auto* magistrate = effects->get("magistrate");
+    if (magistrate && magistrate->is_object()) {
+      state.magistrate_signed = int_field(*magistrate, "signed", -1);
+      state.magistrate_player = int_field(*magistrate, "playerIdx", -1);
+      state.magistrate_claimed = bool_field(*magistrate, "claimed");
+      const auto* nums = magistrate->get("nums");
+      if (nums && nums->is_array()) for (const auto& value : nums->as_array()) if (value.is_number()) state.magistrate_nums.push_back(static_cast<int>(value.as_number()));
+    }
+    const auto* blackmailer = effects->get("blackmailer");
+    if (blackmailer && blackmailer->is_object()) {
+      state.blackmailer_signed = int_field(*blackmailer, "signed", -1);
+      state.blackmailer_player = int_field(*blackmailer, "playerIdx", -1);
+      const auto* nums = blackmailer->get("nums");
+      if (nums && nums->is_array()) for (const auto& value : nums->as_array()) if (value.is_number()) state.blackmailer_nums.push_back(static_cast<int>(value.as_number()));
+      const auto* done = blackmailer->get("done");
+      if (done && done->is_array()) for (const auto& value : done->as_array()) if (value.is_number()) state.blackmailer_done.push_back(static_cast<int>(value.as_number()));
+    }
   }
 
   const auto& players = required_field(snapshot, "players");
@@ -181,10 +199,22 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (pending && pending->is_object()) {
       state.pending_kind = string_field(*pending, "kind");
       state.pending_target = int_field(*pending, "targetIdx", -1);
+      state.pending_amount = int_field(*pending, "amount");
       state.pending_from_crown = int_field(*pending, "_fromCrownIdx", -1);
       state.pending_uid = string_field(*pending, "mineUid");
+      if (state.pending_uid.empty()) state.pending_uid = string_field(*pending, "uid");
+      state.pending_first = int_field(*pending, "first", -1);
+      state.pending_signed = int_field(*pending, "signed", -1);
+      if (const auto* signed_value = pending->get("signed"); signed_value && signed_value->is_bool())
+        state.pending_signed = signed_value->as_bool() ? 1 : 0;
+      const auto* nums = pending->get("nums");
+      if (nums && nums->is_array()) for (const auto& value : nums->as_array()) if (value.is_number()) state.pending_nums.push_back(static_cast<int>(value.as_number()));
+      const auto* used = pending->get("used");
+      if (used && used->is_array()) for (const auto& value : used->as_array()) if (value.is_number()) state.pending_nums.push_back(static_cast<int>(value.as_number()));
       const auto* cards = pending->get("cards");
       if (cards && cards->is_array()) state.pending_cards = load_cards(*cards);
+      const auto* card = pending->get("card");
+      if (card && card->is_object()) state.pending_cards = {load_card(*card)};
       state.pending_selected = string_array_field(*pending, "selected");
       const auto* queue = pending->get("queue");
       if (queue && queue->is_array()) for (const auto& value : queue->as_array())
@@ -230,6 +260,17 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (queue && queue->is_array()) for (const auto& value : queue->as_array()) if (value.is_number()) state.reaction_queue.push_back(static_cast<int>(value.as_number()));
     const auto* card = reaction->get("card");
     if (card && card->is_object()) { state.reaction_card = load_card(*card); state.has_reaction_card = true; }
+    const auto* build = reaction->get("build");
+    if (build && build->is_object()) {
+      state.reaction_uid = string_field(*build, "uid");
+      state.reaction_build = true;
+    }
+    state.reaction_num = int_field(*reaction, "num", -1);
+    if (state.reaction_kind == "blackmailer") {
+      state.pending_kind = "blackmailer_threat";
+      state.pending_first = state.reaction_num;
+      state.pending_signed = state.blackmailer_signed == state.reaction_num ? 1 : 0;
+    }
   }
   const auto* pending_destroy = snapshot.get("pendingDestroy");
   if (pending_destroy && pending_destroy->is_object()) {

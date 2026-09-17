@@ -21,7 +21,7 @@
         <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option></select></label>
         <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
-        <label><span>规则引擎</span><select id="rules-engine"><option value="js" selected>JS</option><option value="cpp">C++</option></select><small>负责推进游戏状态和校验动作</small></label>
+        <label><span>规则引擎</span><select id="rules-engine"><option value="js" selected>JS</option><option value="cpp" disabled>C++（尚未支持完整规则）</option></select><small>当前只有 JS 规则引擎支持完整对局；C++ 规则选项暂不可用</small></label>
         <label><span>MCTS 引擎</span><select id="mcts-engine"><option value="js" selected>JS</option><option value="cpp">C++</option></select><small>负责搜索和生成访问分布</small></label>
         <label><span>神经网络框架</span><select id="neural-network-framework"><option value="pytorch" selected>PyTorch</option><option value="libtorch">LibTorch（C++）</option></select><small id="neural-framework-hint">用于神经网络推理</small></label>
         <label><span>计算设备</span><select id="device"><option value="cuda" selected>GPU</option><option value="cpu">CPU</option></select></label>
@@ -105,6 +105,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=13"></script>
+  <script src="./training.js?v=15"></script>
 </body>
 </html>
