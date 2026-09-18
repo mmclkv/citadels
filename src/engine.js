@@ -388,6 +388,7 @@
     // 被施咒：受害者只能领资源，随后女巫接管
     if (state.effects.bewitched === entry.num) {
       state.turn = newTurn(state, entry, 'bewitched');
+      applyNum4TurnStart(state, entry);
       const vp = state.players[entry.playerIdx];
       log(state, '【' + entry.num + ' ' + charOf(entry.charId).name + '】被施咒，' +
         vp.name + ' 只能领取资源。', 'magic');
@@ -427,17 +428,35 @@
       // 不写 signed：中没中真标记正是受害者要赌的信息，客户端也不该在响应前拿到。
       notify(state, 'blackmailer_threat', { playerIdx: entry.playerIdx, playerId: target.id,
         playerName: target.name });
+      // 勒索只是插到回合开头问一句，角色本身的回合已经开始了 —— 4 号的即时收益照给。
+      applyNum4TurnStart(state, entry);
       return;
     }
 
     state.turn = newTurn(state, entry, 'main');
 
-    // 4 号角色立刻获得皇冠
+    // 4 号角色的即时收益（皇冠 / 贵族抽牌）
     const c = charOf(entry.charId);
-    if (entry.num === 4 && (c.id === 'king' || c.id === 'noble')) {
-      setCrown(state, entry.playerIdx);
-    }
+    applyNum4TurnStart(state, entry);
     if (c.id === 'queen') resolveQueen(state, entry);
+  }
+
+  /**
+   * 4 号角色「被叫到号」这一瞬间结算的持有者收益：皇冠，以及贵族的皇家建筑抽牌。
+   *
+   * 为什么必须单独抽出来：这两项都不是「回合内的一个行动」，而是叫号瞬间就落定的
+   * 被动收益，所以只要该角色被叫到号就该结算 —— 不管回合随后被打断成什么形态。
+   * 女巫接管的是「剩余行动」（建造、主动能力），勒索者只是插到回合开头问一句，
+   * 两者都不该把已经结算过的被动收益吞掉或转走。
+   *
+   * 被刺杀时【不】调用：那一整个回合被跳过，皇冠改在轮末（endRound）补发，
+   * 贵族的抽牌则随回合一起失去（与官方「被刺杀角色失去整回合」一致）。
+   */
+  function applyNum4TurnStart(state, entry) {
+    if (entry.num !== 4) return;
+    const c = charOf(entry.charId);
+    if (c.id === 'king' || c.id === 'noble') setCrown(state, entry.playerIdx);
+    // 贵族：每 1 栋皇家（黄）建筑抽 1 张。归角色持有者本人，不随接管/打断转移。
     if (c.id === 'noble') doNobleIncome(state);
   }
 
@@ -2218,12 +2237,8 @@
       usedLab: false, usedSmithy: false, usedMuseum: false,
       pending: null, bonusDone: true
     };
-    // 若被施咒者是 4 号（国王/贵族），女巫不获得皇冠，但国王仍获得皇冠
-    if (entry.num === 4 && (c.id === 'king' || c.id === 'noble')) {
-      setCrown(state, entry.playerIdx);
-      log(state, '被施咒的国王/贵族仍然获得皇冠（女巫无法取得）。', 'crown');
-    }
-    if (c.id === 'noble') doNobleIncome(state);
+    // 皇冠与贵族抽牌已在叫号瞬间结算给角色持有者（applyNum4TurnStart），
+    // 这里不重复发放 —— 女巫接管的是剩余行动，不是已经落定的被动收益。
     log(state, '【女巫】' + state.players[witchIdx].name + ' 接管『' + c.name + '』的剩余行动。', 'magic');
     return ok();
   }
