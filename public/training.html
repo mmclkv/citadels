@@ -35,10 +35,14 @@
         <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" max="2048" step="32" value="256"></label>
         <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="100"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
-        <label><span>继续已有训练</span><select id="resume-checkpoint"><option value="">从头训练</option></select></label>
+        <label><span>继续已有训练</span><select id="resume-checkpoint"></select><small id="resume-checkpoint-file-name">未选择权重文件</small></label>
+        <!-- 选「加载权重继续训练」时用它弹出系统文件管理器；选完立刻上传，
+             文件名登记在下面这个隐藏域里，提交训练时当作 resumeCheckpoint。 -->
+        <input type="file" id="resume-checkpoint-file" accept=".json.gz,.gz,.pt,.pth,.bin" hidden>
+        <input type="hidden" id="resume-checkpoint-name" value="">
         <div class="checkpoint-load">
-          <button type="button" id="load-checkpoint-config">从存档读取参数</button>
-          <small id="checkpoint-load-message">读取所选存档保存的超参数，填回本页所有选项（不改动上方所选存档）</small>
+          <button type="button" id="load-checkpoint-config">从权重读取参数</button>
+          <small id="checkpoint-load-message">读取所选权重里保存的超参数，填回本页所有选项（不改动上方所选权重）</small>
         </div>
       </form>
       <section class="composition-section">
@@ -113,6 +117,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=20"></script>
+  <script src="./training.js?v=21"></script>
 </body>
 </html>

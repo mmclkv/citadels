@@ -677,6 +677,28 @@ function readJsonBody(req, limit = 65536) {
   });
 }
 
+// 上传权重时直接把原始字节当请求体发过来（gzip 后的存档本身），
+// 省掉在 server.js 里手写一个 multipart 解析器。上限按「最大档位存档 × 十几倍」取。
+const CHECKPOINT_UPLOAD_LIMIT = 256 * 1024 * 1024;
+
+function readRawBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error('文件过大，上限 ' + Math.round(limit / 1024 / 1024) + ' MB'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 function isLoopback(req) {
   const address = req.socket && req.socket.remoteAddress || '';
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
@@ -703,11 +725,21 @@ const server = http.createServer(async (req, res) => {
     if (!isLoopback(req)) return sendJson(res, 403, { error: '训练只能从服务器本机停止' });
     return sendJson(res, 200, trainingManager.stop());
   }
-  // 读取某个存档里保存的超参数（供训练页「从存档读取参数」一键回填面板）
+  // 读取某个存档里保存的超参数（供训练页「从权重读取参数」一键回填面板）
   if (pathname === '/api/training/checkpoint' && req.method === 'GET') {
     const name = new URL(req.url, 'http://127.0.0.1').searchParams.get('name') || '';
     try { return sendJson(res, 200, trainingManager.checkpointConfig(name)); }
     catch (error) { return sendJson(res, 400, { error: error.message }); }
+  }
+  // 训练页「加载权重继续训练」：把用户从文件管理器里选的权重收进 training-data，
+  // 之后它就只是一个普通存档，start() 按 resumeCheckpoint 照常续训。
+  if (pathname === '/api/training/checkpoint/upload' && req.method === 'POST') {
+    if (!isLoopback(req)) return sendJson(res, 403, { error: '权重只能从服务器本机上传' });
+    const name = new URL(req.url, 'http://127.0.0.1').searchParams.get('name') || '';
+    try {
+      const bytes = await readRawBody(req, CHECKPOINT_UPLOAD_LIMIT);
+      return sendJson(res, 200, trainingManager.importCheckpoint(name, bytes));
+    } catch (error) { return sendJson(res, 400, { error: error.message }); }
   }
   if (req.url === '/api/agent/status') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
