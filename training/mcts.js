@@ -16,6 +16,22 @@ function asValueVector(value, scalar = 0) {
  * 设计目标：复用现有神经网络的自对弈流水线，在每一步走子前展开若干
  * 模拟，得到一个关于合法动作的访问分布 π，作为 PPO 训练的更稳策略目标。
  *
+ * 隐藏信息（不完美信息）：
+ *  富饶之城是隐藏信息博弈 —— 对手手牌、牌库顺序、还没打出的角色牌都不可见。
+ *  早先的做法是 PIMC：先随机猜一个（或几个）确定的世界，每个世界各建一棵树
+ *  搜完，再把几棵树的根访问分布平均起来。它有两个已知毛病：
+ *   ① strategy fusion —— 在每个世界里各自最优、平均出来的动作，在真实世界里
+ *      可能全线次优（"两个世界各有一手必胜，但不知道在哪个世界"）；
+ *   ② 模拟预算被切成 N 份，同一信息集的经验分散在 N 棵树上，谁都攒不起统计量。
+ *  现在改成 ISMCTS（Information-Set MCTS）：调用方传入一组「粒子」（若干个与
+ *  公开信息一致的确定化世界），**每条模拟按权重抽一个粒子**，而搜索树只有一棵、
+ *  按信息集聚合 —— 节点身份是「从视角玩家看可观测的状态」，不是某个具体世界。
+ *  于是"猜"不再发生在搜索之前（一次性钉死），而是内含在搜索的每一次展开里。
+ *  聚合的合法性由评估层保证：evaluator 先 sanitize(state, playerId) 再编码，
+ *  隐藏信息根本不进网络，所以同一信息集节点无论落到哪个粒子上评估都得到同一个
+ *  (P, V)。粒子权重目前默认均匀（等价于采样），后续可换成由策略网络算出的
+ *  观测似然，把"根据可观测状态推理"接进来而不动搜索结构。
+ *
  * 关键约定：
  *  - `node.value` 永远表示「当前轮到该节点玩家时，其期望终局回报」。
  *  - `backup` 做一次坐标系变换：先把叶子的估值折算到根节点玩家（"我"）的视角，
@@ -40,6 +56,10 @@ function asValueVector(value, scalar = 0) {
  * 接口：
  *   const { pi, value, visits } = mcts.search({
  *     rootState, rootPlayerId, model, Engine,
+ *     rootStates: [s0, s1, s2],      // 可选：粒子池（与 rootState 二选一，优先它）
+ *     particleWeights: [3, 1, 1],    // 可选：粒子权重，缺省全 1（均匀采样）
+ *     infosetKeyFn,                  // 可选：(state, playerId) => string，启用严格信息集
+ *                                    //       校验（默认关闭，省下每步一次哈希的开销）
  *     simulate: 200,                 // 模拟次数
  *     cPuct: 1.0,                    // UCB 探索常数
  *     dirichletAlpha: 0.3,           // 根节点 Dirichlet 混合比例，0 表示关闭
@@ -140,6 +160,24 @@ class Search {
     this.rng = opts.rng || Math.random;
     // 节点快照的深拷贝实现：默认掐掉 log / notices；注入普通深拷贝即退回旧行为
     this.cloneState = typeof opts.cloneState === 'function' ? opts.cloneState : cloneTrimmed;
+    // —— 隐藏信息：粒子池 ——
+    // rootStates 优先；只给 rootState 时退化成「单粒子」，行为与改造前逐字一致。
+    this.rawParticles = Array.isArray(opts.rootStates) && opts.rootStates.length
+      ? opts.rootStates
+      : (opts.rootState ? [opts.rootState] : []);
+    const weights = Array.isArray(opts.particleWeights) ? opts.particleWeights : null;
+    this.particleWeights = this.rawParticles.map((_, i) => {
+      const w = Number(weights ? weights[i] : 1);
+      return Number.isFinite(w) && w > 0 ? w : 1;
+    });
+    this.weightTotal = this.particleWeights.reduce((sum, w) => sum + w, 0);
+    // 严格信息集校验的注入点：默认关闭（每步一次哈希太贵），测试与调试时打开
+    this.infosetKeyFn = typeof opts.infosetKeyFn === 'function' ? opts.infosetKeyFn : null;
+    // 软超时：模拟循环里逐条检查，到点就停。以前是「每棵树跑之前检查一次」，现在
+    // 只有一棵树，粒度必须落到单条模拟上，否则临场推理就没了 deadline 保护。
+    // 停下来的 π 依然可用 —— 它只是访问次数少一些，不是半棵坏树。
+    this.deadlineAt = Number.isFinite(Number(opts.deadlineAt)) ? Number(opts.deadlineAt) : 0;
+    this.simIndex = -1;
     this.cacheHits = 0;
     this.expansions = 0;
     // 测量用：单次 search 内各 return 路径的模拟计数
@@ -147,6 +185,9 @@ class Search {
     this.simDepthCapped = 0;    // 撞到 maxDepth 截断
     this.simLeaf = 0;           // 命中未展开叶子（正常 MCTS 叶子）
     this.simOther = 0;          // 无合法动作 / 落子失败等兜底
+    this.simReplayFail = 0;     // 重放路径上的动作，在本次抽到的粒子里走不通
+    this.simInfoSetMismatch = 0;// 该粒子与节点所属信息集不合，放弃这条模拟
+    this.particleDraws = null;  // search() 里初始化：每个粒子被抽中的次数
     // 根节点玩家（"我"）：backup 的视角换算以他为基准，在 search() 开始时注入
     this.rootPlayerId = null;
     this.playerOrder = [];
@@ -295,12 +336,40 @@ class Search {
     }
   }
 
+  /**
+   * 按权重抽一个粒子。权重全相等时就是均匀采样（现阶段行为）；后续把权重换成
+   * 「策略网络给出的观测似然」，这里一行都不用改 —— 信念的升级不碰搜索结构。
+   */
+  pickParticleIndex() {
+    const pool = (this.particles && this.particles.length ? this.particles : this.rawParticles) || [];
+    const n = pool.length;
+    if (n <= 1) return 0;
+    if (!(this.weightTotal > 0)) return Math.min(n - 1, Math.floor(this.rng() * n));
+    let r = this.rng() * this.weightTotal;
+    for (let i = 0; i < n; i++) {
+      r -= this.particleWeights[i];
+      if (r <= 0) return i;
+    }
+    return n - 1;
+  }
+
   async runOne(root) {
     // 增量落子：整棵搜索树不再为每个节点存一份完整状态快照，而是只保存「走到这里的动作」，
     // 用一份 working 状态从根节点沿路径重放动作来还原当前节点。这样每个模拟只需要 1 次
     // 根快照（cloneState），其余都是原地 apply / 重放，省掉了原先每个新节点一次的深拷贝，
     // 也把内存从「每节点 ~10KB 快照」降到「每节点几个字段」。详情见 training/undo.js。
-    let working = this.cloneState(root.state);   // 根节点状态的独立副本（已掐掉 log/notices）
+    //
+    // ISMCTS 的关键就在这里：**每条模拟重新抽一个粒子**。世界只在本次模拟里有效，
+    // 树节点不属于任何特定世界 —— 它属于信息集。于是「猜」不是搜索前的一次性动作，
+    // 而是内含在每一次展开里。
+    const particleIndex = this.pickParticleIndex();
+    if (this.particleDraws) this.particleDraws[particleIndex]++;
+    // 本条模拟的序号：只用它判断节点是不是「本次刚建的」（见下面的信息集校验）
+    const simIndex = ++this.simIndex;
+    // 池子由 search() 用掐掉 log/notices 的副本填好；直接调 runOne 的调用方（测试桩）
+    // 没走 search，这里退回原始粒子 / root.state，保证旧用法照样能跑。
+    const pool = (this.particles && this.particles.length ? this.particles : this.rawParticles) || [];
+    let working = this.cloneState(pool[particleIndex] || root.state);
     const path = [root];
     let current = root;
     let depth = 0;
@@ -308,7 +377,34 @@ class Search {
       // 从父节点重放走到 current 的动作（根节点无需重放）
       if (current !== root) {
         const parent = current.parent;
-        this.Engine.applyAction(working, parent.playerId, current.incomingAction);
+        // 在本次抽到的世界里走这条路径。走不通说明这个粒子与路径不合，放弃这条模拟 ——
+        // 硬推下去会把别的世界的统计量写进不属于它的节点里。
+        let replayed = false;
+        try {
+          const applied = this.Engine.applyAction(working, parent.playerId, current.incomingAction);
+          replayed = !!(applied && applied.ok);
+        } catch (_) { replayed = false; }
+        // 信息集校验。只针对「别的模拟留下的节点」：本次刚建的节点用的是同一个粒子，
+        // 状态必然一致，再算一次哈希纯属浪费。
+        //   廉价版：重放后行动方应与节点记录的一致（几乎免费，始终开着）。
+        //   严格版：infosetKeyFn 算出的可观测状态哈希要相等（默认关闭，每步一次哈希太贵）。
+        const foreign = current.bornSim !== undefined && current.bornSim !== simIndex;
+        let mismatch = false;
+        if (foreign) {
+          const replayActor = replayed ? this.nextActor(working) : null;
+          if (replayed && replayActor && replayActor.id !== current.playerId) mismatch = true;
+          if (!mismatch && this.infosetKeyFn && current.infosetKey != null &&
+              this.infosetKeyFn(working, current.playerId) !== current.infosetKey) {
+            mismatch = true;
+          }
+        }
+        if (!replayed || mismatch) {
+          if (!replayed) this.simReplayFail++; else this.simInfoSetMismatch++;
+          // 只回传到 current 的父节点：current 在这个粒子下不该被访问，不该被计数。
+          // 路径前缀属于同一信息集，照常计数。
+          this.backup(path.slice(0, -1), this.currentValue(path[path.length - 2] || current));
+          return;
+        }
       }
       // 终局判定要放在扩展之前：真实胜负是唯一有监督信号的量，优先级高于网络估值。
       if (working.phase === 'gameover') {
@@ -344,6 +440,9 @@ class Search {
         child = makeNode(nextPlayerId, legalActions);
         child.incomingAction = current.legalActions[actionIdx];
         child.parent = current;
+        child.bornSim = simIndex;
+        // 记录所属信息集：后续模拟重放到这个节点时会拿它做一致性校验
+        if (this.infosetKeyFn) child.infosetKey = this.infosetKeyFn(working, nextPlayerId);
         current.children.set(actionIdx, child);
         undo();
       }
@@ -369,15 +468,23 @@ class Search {
 
   async search(rootState, rootPlayerId) {
     this.rootPlayerId = rootPlayerId;
-    this.playerOrder = (rootState.players || []).map(player => player.id);
+    // 粒子池：预先掐掉 log / notices 各存一份，之后每条模拟只要从池里 clone 一个，
+    // 不必每次再处理那几十 KB 的 UI 战报。只给了 rootState 时就是单粒子（旧行为）。
+    const pool = this.rawParticles.length ? this.rawParticles : (rootState ? [rootState] : []);
+    this.particles = pool.map(state => this.cloneState(state));
+    this.particleDraws = new Array(this.particles.length).fill(0);
+    const seedState = this.particles.length ? this.particles[0] : rootState;
+    this.playerOrder = ((seedState && seedState.players) || []).map(player => player.id);
     this.vectorMode = false;
-    const rootLegal = this.legalFn(rootState, rootPlayerId);
+    const rootLegal = this.legalFn(seedState, rootPlayerId);
     if (!rootLegal.length) {
       return { pi: null, value: 0, valueVector: new Float32Array(VALUE_SLOTS), visits: 0, fallback: true, expansions: 0 };
     }
     const root = makeNode(rootPlayerId, rootLegal);
-    root.state = rootState;
-    await this.expand(root, rootState);
+    // 根节点评估用哪个粒子都一样：evaluator 先 sanitize 再编码，隐藏信息不进网络。
+    // 这正是「树按信息集聚合」成立的原因。
+    root.state = seedState;
+    await this.expand(root, seedState);
     // Dirichlet 噪声混合到 priors，仅根节点施加
     if (this.dirichletAlpha > 0 && rootLegal.length > 1 && root.P) {
       const noise = sampleDirichlet(rootLegal.length, Math.max(1e-3, this.dirichletEpsilon), this.rng);
@@ -390,7 +497,14 @@ class Search {
     this.simDepthCapped = 0;
     this.simLeaf = 0;
     this.simOther = 0;
-    for (let sim = 0; sim < this.simulate; sim++) await this.runOne(root);
+    this.simReplayFail = 0;
+    this.simInfoSetMismatch = 0;
+    let completed = 0;
+    for (let sim = 0; sim < this.simulate; sim++) {
+      if (this.deadlineAt && Date.now() >= this.deadlineAt) break;
+      await this.runOne(root);
+      completed++;
+    }
     if (this.evaluator.flush) await this.evaluator.flush();
     const pi = new Float32Array(rootLegal.length);
     let total = 0;
@@ -421,6 +535,12 @@ class Search {
       simDepthCapped: this.simDepthCapped,
       simLeaf: this.simLeaf,
       simOther: this.simOther,
+      simReplayFail: this.simReplayFail,
+      simInfoSetMismatch: this.simInfoSetMismatch,
+      simulations: completed,
+      timedOut: !!(this.deadlineAt && Date.now() >= this.deadlineAt),
+      particles: this.particles.length,
+      particleDraws: this.particleDraws ? this.particleDraws.slice() : [],
     };
   }
 }
