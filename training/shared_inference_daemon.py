@@ -12,6 +12,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gpu_trainer import PolicyValueNet, binary_batch_eval
 import torch
 
+# 实测（2026-09-18 诊断）：daemon 默认用满所有核做 intra-op 并行（6 核机器上
+# 400-490% CPU），而 GPU 利用率只有 20-40% —— 小模型小批量下多线程互相拖累，
+# 还把同机的 Node worker / 规则引擎饿死，自对弈需求一涨就整体饱和变慢。
+# 收敛到 2 线程，核留给自对弈进程。
+torch.set_num_threads(2)
+try:
+    torch.set_num_interop_threads(1)
+except RuntimeError:
+    pass  # 并行池已初始化后不允许再改，忽略即可
+
 MAGIC = 0x314D5343  # CSM1
 VERSION = 1
 SLOT_FREE, SLOT_REQUEST, SLOT_READY, SLOT_RESPONSE = 0, 1, 2, 3

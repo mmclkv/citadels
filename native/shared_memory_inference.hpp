@@ -53,20 +53,57 @@ class SharedMemoryInferenceClient {
 
   ~SharedMemoryInferenceClient() { close(); }
 
-  BatchEvaluationResult evaluate(const std::vector<std::vector<float>>& states,
-                                 const std::vector<std::vector<std::vector<float>>>& actions) {
-    // The pipe client uses CTB1 framing, while a shared-memory slot stores
-    // only the command payload. Strip the frame before handing it to Python.
-    const auto frame = encode_binary_batch_eval_request(states, actions);
+    BatchEvaluationResult evaluate(const std::vector<std::vector<float>>& states,
+                                   const std::vector<std::vector<std::vector<float>>>& actions) {
+      return evaluate_range(states, actions, 0, states.size());
+    }
+
+  void close() {
+    if (view_) UnmapViewOfFile(view_);
+    if (mapping_) CloseHandle(static_cast<HANDLE>(mapping_));
+    view_ = nullptr; mapping_ = nullptr;
+  }
+
+ private:
+  // 一次批请求编码后可能超过单个槽位容量（动作数多的对局会把 padding 撑大）。
+  // 之前直接抛错会让整次训练崩掉；这里改成二分拆成多次槽位事务，结果按原序拼回。
+  BatchEvaluationResult evaluate_range(const std::vector<std::vector<float>>& states,
+                                       const std::vector<std::vector<std::vector<float>>>& actions,
+                                       size_t begin, size_t end) {
+    std::vector<std::vector<float>> sub_states(states.begin() + begin, states.begin() + end);
+    std::vector<std::vector<std::vector<float>>> sub_actions(actions.begin() + begin, actions.begin() + end);
+    const auto frame = encode_binary_batch_eval_request(sub_states, sub_actions);
     if (frame.size() < 8) throw std::runtime_error("共享内存推理请求帧不完整");
     uint32_t magic = 0, frame_size = 0;
     std::memcpy(&magic, frame.data(), sizeof(magic));
     std::memcpy(&frame_size, frame.data() + 4, sizeof(frame_size));
     if (magic != kGpuBinaryMagic || frame_size != frame.size() - 8)
       throw std::runtime_error("共享内存推理请求帧头错误");
+    const size_t capacity = slot_bytes_ - kSharedSlotHeaderBytes;
+    const size_t payload_size = frame.size() - 8;
+    if (payload_size > capacity && end - begin > 1) {
+      const size_t mid = begin + (end - begin) / 2;
+      auto head = evaluate_range(states, actions, begin, mid);
+      auto tail = evaluate_range(states, actions, mid, end);
+      head.policies.insert(head.policies.end(),
+        std::make_move_iterator(tail.policies.begin()), std::make_move_iterator(tail.policies.end()));
+      head.values.insert(head.values.end(), tail.values.begin(), tail.values.end());
+      head.value_vectors.insert(head.value_vectors.end(), tail.value_vectors.begin(), tail.value_vectors.end());
+      return head;
+    }
+    if (payload_size > capacity)
+      throw std::runtime_error("单个状态编码后仍超过共享内存槽位容量（" +
+        std::to_string(payload_size) + " > " + std::to_string(capacity) + " 字节）");
     const std::vector<uint8_t> payload(frame.begin() + 8, frame.end());
-    if (payload.size() > slot_bytes_ - kSharedSlotHeaderBytes)
-      throw std::runtime_error("共享内存推理请求超过槽位容量");
+    std::vector<size_t> counts;
+    counts.reserve(sub_actions.size());
+    for (const auto& group : sub_actions) counts.push_back(group.size());
+    auto result = slot_transaction(payload, counts);
+    return result;
+  }
+
+  BatchEvaluationResult slot_transaction(const std::vector<uint8_t>& payload,
+                                         const std::vector<size_t>& counts) {
     uint8_t* slot = nullptr;
     for (;;) {
       for (uint32_t i = 0; i < slot_count_; ++i) {
@@ -97,19 +134,9 @@ class SharedMemoryInferenceClient {
     std::memcpy(response.data(), slot + kSharedSlotHeaderBytes, response_size);
     MemoryBarrier();
     *reinterpret_cast<volatile LONG*>(slot) = kSharedSlotFree;
-    std::vector<size_t> counts;
-    counts.reserve(actions.size());
-    for (const auto& group : actions) counts.push_back(group.size());
     return decode_binary_batch_eval_response(response, counts);
   }
 
-  void close() {
-    if (view_) UnmapViewOfFile(view_);
-    if (mapping_) CloseHandle(static_cast<HANDLE>(mapping_));
-    view_ = nullptr; mapping_ = nullptr;
-  }
-
- private:
   uint8_t* slot_ptr(uint32_t index) const {
     return view_ + sizeof(SharedInferenceLayout) + static_cast<size_t>(index) * slot_bytes_;
   }
