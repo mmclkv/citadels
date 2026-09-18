@@ -513,6 +513,35 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   };
 }
 
+// 每批对局的上限：该值决定单次 PPO 更新的样本量与训练进程的内存峰值。
+// 256 局一批约合 12 万条 transition，是这台 8GB 机器上仍安全的量级；
+// 超过它的配置会在清洗时被夹到该上限，并由启动横幅显式告知（不再静默改写）。
+const MAX_BATCH_GAMES = 256;
+
+// 会被 sanitizeConfig 夹逼、且值得在启动时回报给用户的数值配置项。
+const ADJUSTED_CONFIG_FIELDS = [
+  ['targetGames', '目标局数'], ['batchGames', '每批对局'], ['ppoEpochs', 'PPO 轮数'],
+  ['miniBatch', 'GPU 小批量'], ['workers', '并行自对弈进程'], ['maxSteps', '单步上限'],
+  ['checkpointEvery', '每隔多少局存档'], ['learningRate', '学习率'],
+  ['temperatureStart', '起始温度'], ['temperatureEnd', '结束温度'],
+  ['mctsSimulations', 'MCTS 模拟数'], ['mctsBatchSize', 'MCTS 批量'],
+  ['mctsMaxWaitMs', 'MCTS 等待毫秒'], ['mctsMaxDepth', 'MCTS 最大深度'],
+  ['mctsCacheSize', 'MCTS 缓存'],
+];
+
+// 列出「用户填了但被 sanitizeConfig 改写过」的数值项，供启动日志回报。
+// 纯函数，便于测试：raw 缺省/非数字的项不算改写。
+function adjustedConfigFields(rawConfig, config) {
+  const changed = [];
+  for (const [key, label] of ADJUSTED_CONFIG_FIELDS) {
+    const raw = Number(rawConfig ? rawConfig[key] : undefined);
+    if (Number.isFinite(raw) && raw !== config[key]) {
+      changed.push({ key, label, from: raw, to: config[key] });
+    }
+  }
+  return changed;
+}
+
 function sanitizeConfig(input = {}) {
   if (input.rulesEngine === 'cpp') {
     throw new Error('C++ 规则引擎尚未实现完整对局规则；请使用 JS 规则引擎。');
@@ -544,7 +573,7 @@ function sanitizeConfig(input = {}) {
       ? (neuralNetworkFramework === 'libtorch' ? 'libtorch' : 'python-binary')
       : (['python-binary', 'libtorch'].includes(input.nativeInferenceBackend) ? input.nativeInferenceBackend : 'python-binary'),
     learningRate: Math.max(1e-6, Math.min(0.01, Number(input.learningRate) || 0.0003)),
-    batchGames: Math.max(1, Math.min(32, Number(input.batchGames) || 4)),
+    batchGames: Math.max(1, Math.min(MAX_BATCH_GAMES, Number(input.batchGames) || 4)),
     ppoEpochs: Math.max(1, Math.min(6, Number(input.ppoEpochs) || 2)),
     miniBatch: Math.max(32, Math.min(2048, Number(input.miniBatch) || 256)),
     workers: Math.max(1, Math.min(6, Number(input.workers) || Math.max(1, Math.min(4, os.cpus().length - 2)))),
@@ -672,6 +701,12 @@ async function train(rawConfig, hooks = {}) {
         : 'worker 内 JS 网络同步 forward') + '）');
   } else {
     log('MCTS 未启用，自对弈按网络 softmax 采样');
+  }
+  // sanitizeConfig 会把越界值夹到合法区间，而且是静默的。用户看到自己填的数
+  // 被丢掉会以为「参数根本没生效」（例：每批对局填 64/128 都会被压到上限）。
+  // 这里逐项对比原始输入，把被改写的数值项显式写进事件日志。
+  for (const item of adjustedConfigFields(rawConfig, config)) {
+    log('配置调整：' + item.label + ' ' + item.from + ' 超出可用范围，已按 ' + item.to + ' 执行');
   }
   if (config.resumeCheckpoint) {
     log('从存档继续：' + config.resumeCheckpoint + '（已训 ' + restored.game + ' 局，历史 ' + restored.history.length + ' 帧）');
@@ -889,5 +924,6 @@ module.exports = {
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
   resolveNetworkPlayerCount, heuristicLevelFor, nativeMctsSupportsGame,
   sampleHistory, redrawCandidates,
-  cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR
+  cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR,
+  MAX_BATCH_GAMES, adjustedConfigFields
 };
