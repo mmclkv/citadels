@@ -1,5 +1,6 @@
 """Persistent PyTorch PPO trainer used by the Node.js self-play coordinator."""
 import array
+import gc
 import gzip
 import json
 import os
@@ -7,6 +8,7 @@ import struct
 import sys
 import time
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -235,62 +237,174 @@ class PolicyValueNet(nn.Module):
 
 
 def load_rollout(filename):
+    """加载 rollout 并转为紧凑的 numpy 缓冲。
+
+    内存说明：旧实现 json.load 一次性把整批样本物化为 Python 对象（每个
+    浮点 ~32 字节），再按批内全局最大动作数 pad 出 (N, max, width) 的巨型
+    嵌套列表，模型更新瞬间峰值可达数 GB，且整批 data 在训练结束后仍被
+    主循环变量持有到下一批。现在改为流式逐行解析直接填 float32 numpy
+    缓冲，动作/π 不做全局 padding，由 build_minibatch 按 mini-batch 内
+    最大动作数现场 pad——数学语义与超参数完全不变，峰值内存降一个量级。
+    """
     with gzip.open(filename, "rt", encoding="utf-8") as handle:
-        rows = json.load(handle)
-    maximum = max(len(row["actions"]) for row in rows)
-    states, actions, masks = [], [], []
-    chosen, old_probs, old_values, rewards, value_masks, temperatures = [], [], [], [], [], []
-    pi_targets = []
-    has_pi = False
-    for row in rows:
+        text = handle.read()
+    decoder = json.JSONDecoder()
+    position = 0
+    size = len(text)
+
+    def skip_blanks():
+        nonlocal position
+        while position < size and text[position] in " \t\r\n":
+            position += 1
+
+    skip_blanks()
+    if position >= size or text[position] != "[":
+        raise ValueError("rollout 文件不是 JSON 数组")
+    position += 1
+
+    states_rows, actions_rows, pi_rows = [], [], []
+    chosen, old_probs, temperatures = [], [], []
+    old_values, rewards, value_masks = [], [], []
+    while True:
+        skip_blanks()
+        if position < size and text[position] == ",":
+            position += 1
+            skip_blanks()
+        if position < size and text[position] == "]":
+            break
+        if position >= size:
+            raise ValueError("rollout JSON 数组未闭合")
+        row, position = decoder.raw_decode(text, position)
         count = len(row["actions"])
-        states.append(row["state"])
-        actions.append(row["actions"] + [[0.0] * ACTION_SIZE for _ in range(maximum - count)])
-        masks.append([True] * count + [False] * (maximum - count))
-        chosen.append(row["chosen"])
-        old_probs.append(row["oldProb"])
-        old_values.append((list(row.get("oldValueVector", [row.get("oldValue", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS])
-        rewards.append((list(row.get("rewardVector", [row.get("reward", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS])
-        value_masks.append((list(row.get("valueMask", [1.0])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS])
-        temperatures.append(row.get("temperature", 1.0))
-        if "pi" in row and row["pi"]:
-            row_pi = list(row["pi"]) + [0.0] * (maximum - len(row["pi"]))
-            pi_targets.append(row_pi)
-            has_pi = True
+        states_rows.append(np.asarray(row["state"], dtype=np.float32))
+        if count:
+            actions_rows.append(np.asarray(row["actions"], dtype=np.float32).reshape(count, -1))
         else:
-            pi_targets.append([0.0] * maximum)
-    result = {
-        "states": torch.tensor(states, dtype=torch.float32),
-        "actions": torch.tensor(actions, dtype=torch.float32),
-        "masks": torch.tensor(masks, dtype=torch.bool),
-        "chosen": torch.tensor(chosen, dtype=torch.long),
-        "old_probs": torch.tensor(old_probs, dtype=torch.float32),
-        "old_values": torch.tensor(old_values, dtype=torch.float32),
-        "rewards": torch.tensor(rewards, dtype=torch.float32),
-        "value_masks": torch.tensor(value_masks, dtype=torch.float32),
-        "temperatures": torch.tensor(temperatures, dtype=torch.float32),
-    }
+            actions_rows.append(None)
+        pi = row.get("pi")
+        if pi:
+            pi_arr = np.zeros(count, dtype=np.float32)
+            usable = min(count, len(pi))
+            pi_arr[:usable] = np.asarray(pi[:usable], dtype=np.float32)
+            pi_rows.append(pi_arr)
+        else:
+            pi_rows.append(None)
+        chosen.append(int(row["chosen"]))
+        old_probs.append(float(row["oldProb"]))
+        temperatures.append(float(row.get("temperature", 1.0)))
+        old_values.append(np.asarray(
+            (list(row.get("oldValueVector", [row.get("oldValue", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS],
+            dtype=np.float32))
+        rewards.append(np.asarray(
+            (list(row.get("rewardVector", [row.get("reward", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS],
+            dtype=np.float32))
+        value_masks.append(np.asarray(
+            (list(row.get("valueMask", [1.0])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS],
+            dtype=np.float32))
+    del text, decoder
+    gc.collect()
+
+    n = len(states_rows)
+    if n == 0:
+        raise ValueError("rollout 为空")
+    action_width = next((a.shape[1] for a in actions_rows if a is not None), ACTION_SIZE)
+    actions_rows = [a if a is not None else np.zeros((0, action_width), np.float32) for a in actions_rows]
+    counts = np.asarray([a.shape[0] for a in actions_rows], dtype=np.int64)
+    offsets = np.zeros(n + 1, dtype=np.int64)
+    np.cumsum(counts, out=offsets[1:])
+    actions_flat = np.concatenate(actions_rows) if actions_rows else np.zeros((0, action_width), np.float32)
+    del actions_rows
+
+    has_pi = any(p is not None for p in pi_rows)
+    pi_flat, pi_offsets, pi_lengths = None, None, None
     if has_pi:
+        pi_lengths = np.asarray([p.shape[0] if p is not None else 0 for p in pi_rows], dtype=np.int64)
+        pi_offsets = np.zeros(n + 1, dtype=np.int64)
+        np.cumsum(pi_lengths, out=pi_offsets[1:])
+        present = [p for p in pi_rows if p is not None]
+        pi_flat = np.concatenate(present) if present else np.zeros(0, np.float32)
+        del present
+    del pi_rows
+
+    result = {
+        "states": torch.from_numpy(np.stack(states_rows)),
+        "chosen": torch.from_numpy(np.asarray(chosen, dtype=np.int64)),
+        "old_probs": torch.from_numpy(np.asarray(old_probs, dtype=np.float32)),
+        "old_values": torch.from_numpy(np.stack(old_values)),
+        "rewards": torch.from_numpy(np.stack(rewards)),
+        "value_masks": torch.from_numpy(np.stack(value_masks)),
+        "temperatures": torch.from_numpy(np.asarray(temperatures, dtype=np.float32)),
+        # 变宽字段：mini-batch 组装时才 pad
+        "actions_flat": actions_flat,
+        "lengths": counts,
+        "offsets": offsets,
+        "action_width": action_width,
+        "pi_flat": pi_flat,
+        "pi_offsets": pi_offsets,
+        "pi_lengths": pi_lengths,
+    }
+    del states_rows, old_values, rewards, value_masks
+    gc.collect()
+    return result
+
+
+def build_minibatch(data, indices, device):
+    """按 mini-batch 组装训练批并搬上 device。
+
+    动作/mask/π 的列数对齐到本 mini-batch 内的最大动作数（旧实现是对齐
+    全批最大值）：mask 屏蔽 padding、π 在 padding 位为 0，与旧全局 padding
+    在数学上等价，但省掉跨批驻留的大块 CPU 内存。
+    """
+    batch = {
+        "states": data["states"][indices].to(device, non_blocking=True),
+        "chosen": data["chosen"][indices].to(device, non_blocking=True),
+        "old_probs": data["old_probs"][indices].to(device, non_blocking=True),
+        "old_values": data["old_values"][indices].to(device, non_blocking=True),
+        "rewards": data["rewards"][indices].to(device, non_blocking=True),
+        "value_masks": data["value_masks"][indices].to(device, non_blocking=True),
+        "temperatures": data["temperatures"][indices].to(device, non_blocking=True),
+    }
+    lengths = data["lengths"][indices]
+    m = len(indices)
+    max_len = max(1, int(lengths.max()))
+    actions = np.zeros((m, max_len, data["action_width"]), np.float32)
+    flat, offsets = data["actions_flat"], data["offsets"]
+    for j, i in enumerate(indices):
+        ln = int(lengths[j])
+        if ln:
+            actions[j, :ln] = flat[offsets[i]:offsets[i] + ln]
+    batch["actions"] = torch.from_numpy(actions).to(device, non_blocking=True)
+    mask = np.arange(max_len, dtype=np.int64)[None, :] < lengths[:, None]
+    batch["masks"] = torch.from_numpy(mask).to(device, non_blocking=True)
+    if data["pi_flat"] is not None:
+        pi = np.zeros((m, max_len), np.float32)
+        pi_flat, pi_offsets = data["pi_flat"], data["pi_offsets"]
+        for j, i in enumerate(indices):
+            pl = int(data["pi_lengths"][i])
+            if pl:
+                pi[j, :pl] = pi_flat[pi_offsets[i]:pi_offsets[i] + pl]
         # 混合批次中若个别动作没有 MCTS 访问分布，用实际选择动作的一热分布补齐，
         # 避免 auto 模式把该样本误当成全零目标而产生无效梯度。
-        for index, target in enumerate(pi_targets):
-            if sum(target) <= 0 and 0 <= chosen[index] < len(target):
-                target[chosen[index]] = 1.0
-        result["pi"] = torch.tensor(pi_targets, dtype=torch.float32)
-    return result
+        for j, i in enumerate(indices):
+            if pi[j].sum() <= 0:
+                c = int(data["chosen"][i])
+                if 0 <= c < max_len:
+                    pi[j, c] = 1.0
+        batch["pi"] = torch.from_numpy(pi).to(device, non_blocking=True)
+    return batch
 
 
 def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_loss_mode="auto"):
     total = {"policy": 0.0, "value": 0.0, "entropy": 0.0, "clip": 0.0,
              "kl": 0.0, "gradient": 0.0, "samples": 0}
-    has_pi = "pi" in data
+    has_pi = data["pi_flat"] is not None
     use_mcts_ce = policy_loss_mode == "mcts_ce" or (policy_loss_mode == "auto" and has_pi)
     size = len(data["rewards"])
     advantages = data["rewards"][:, 0] - data["old_values"][:, 0]
     advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
     for _ in range(epochs):
         for indices in torch.randperm(size).split(batch_size):
-            batch = {key: value[indices].to(device, non_blocking=True) for key, value in data.items()}
+            batch = build_minibatch(data, indices.numpy(), device)
             adv = advantages[indices].to(device, non_blocking=True)
             logits, values = model(batch["states"], batch["actions"], batch["masks"], batch["temperatures"])
             probs = torch.softmax(logits, dim=-1)
@@ -395,10 +509,16 @@ def main():
                 data = load_rollout(command["rolloutPath"])
                 metrics = train_ppo(model, optimizer, device, data, command["epochs"], command.get("miniBatch", 256),
                                     command.get("policyLossMode", "auto"))
-                model.save_flat(command["modelPath"])
                 if device.type == "cuda":
                     metrics["gpuMemoryMB"] = torch.cuda.max_memory_allocated() / 1048576
+                # 立刻释放整批样本：旧实现把它一直持有到下一批 train，
+                # 自对弈阶段平白多驻留一整批 rollout（数百 MB 级）。
+                del data
+                gc.collect()
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
                     torch.cuda.reset_peak_memory_stats()
+                model.save_flat(command["modelPath"])
                 reply({"ok": True, "metrics": metrics})
             elif command["cmd"] == "batch_eval":
                 # MCTS 批量前向：一次性跑若干 (state, [actions]) 对，返回 probsList 与 values。

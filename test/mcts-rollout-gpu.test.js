@@ -15,9 +15,9 @@ if (!fs.existsSync(python)) {
 }
 
 const N = 8;          // transitions 数量
-const NA = 6;         // 每条 transition 的合法动作数量（≤64）
-const STATE = 192;
-const ACT = 64;
+const NA = 6;         // 每条 transition 的合法动作数量（≤ ACTION_SIZE）
+const STATE = 672;    // 与 gpu_trainer.STATE_SIZE 一致
+const ACT = 256;      // 与 gpu_trainer.ACTION_SIZE 一致（PolicyValueNet 固定尺寸）
 
 const transitions = [];
 for (let i = 0; i < N; i++) {
@@ -59,7 +59,8 @@ model = PolicyValueNet('fast')
 for p in model.parameters(): p.data = (torch.randn_like(p.data) * 0.02)
 optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
 data = load_rollout(${JSON.stringify(rolloutPath.replace(/\\/g, '/'))})
-print('pi present:', 'pi' in data, 'pi shape:', tuple(data['pi'].shape) if 'pi' in data else 'absent')
+pi_rows = int((data['pi_lengths'] > 0).sum())
+print('pi present:', data['pi_flat'] is not None, 'pi rows:', pi_rows, '/', len(data['rewards']))
 metrics = train_ppo(model, optimizer, torch.device('cpu'), data, epochs=1, batch_size=4)
 print('METRICS', json.dumps(metrics))
 `.trim();
