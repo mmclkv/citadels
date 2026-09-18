@@ -37,9 +37,14 @@ node server.js 9000       # 指定端口
 
 ```text
 GET  /api/training/status
+GET  /api/training/checkpoint?name=<存档文件名>
 POST /api/training/start
 POST /api/training/stop
 ```
+
+控制台的「从存档读取参数」按钮会调用 `GET /api/training/checkpoint`，把所选存档里保存的那份
+训练配置（目标局数、网络规模、MCTS、PPO、阵容与课程等 30 余项）一键填回面板——换电脑或隔了
+几天想按同一套超参数续训时，不必再凭记忆手抄。它只读配置、不改动所选存档，也不下发模型权重。
 
 建议先进行 100～500 局短跑，确认平均整局耗时和损失变化正常，再启动 10,000 局正式训练。
 浏览器页面可以关闭，后台训练不会停止；重新打开控制台即可继续查看进度。

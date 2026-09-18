@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=7">
+  <link rel="stylesheet" href="./training.css?v=9">
 </head>
 <body>
   <header class="train-header">
@@ -36,6 +36,10 @@
         <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="100"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"><option value="">从头训练</option></select></label>
+        <div class="checkpoint-load">
+          <button type="button" id="load-checkpoint-config">从存档读取参数</button>
+          <small id="checkpoint-load-message">读取所选存档保存的超参数，填回本页所有选项（不改动上方所选存档）</small>
+        </div>
       </form>
       <section class="composition-section">
         <h2>自对弈阵容与课程训练</h2>
@@ -105,6 +109,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=15"></script>
+  <script src="./training.js?v=17"></script>
 </body>
 </html>

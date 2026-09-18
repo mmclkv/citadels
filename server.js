@@ -690,6 +690,12 @@ const server = http.createServer(async (req, res) => {
     if (!isLoopback(req)) return sendJson(res, 403, { error: '训练只能从服务器本机停止' });
     return sendJson(res, 200, trainingManager.stop());
   }
+  // 读取某个存档里保存的超参数（供训练页「从存档读取参数」一键回填面板）
+  if (pathname === '/api/training/checkpoint' && req.method === 'GET') {
+    const name = new URL(req.url, 'http://127.0.0.1').searchParams.get('name') || '';
+    try { return sendJson(res, 200, trainingManager.checkpointConfig(name)); }
+    catch (error) { return sendJson(res, 400, { error: error.message }); }
+  }
   if (req.url === '/api/agent/status') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
     return res.end(JSON.stringify(agentStatus()));

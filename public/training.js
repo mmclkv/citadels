@@ -63,6 +63,82 @@ function formConfig() {
   };
 }
 
+// 存档里保存的 config → 面板控件。新增配置项时同步这张表，否则
+// 「从存档读取参数」会静默漏填该字段（test/training-checkpoint-config.test.js 会盯着）。
+const CONFIG_FIELDS = [
+  ['targetGames', 'target-games', 'number'],
+  ['minPlayers', 'min-players', 'select'],
+  ['maxPlayers', 'max-players', 'select'],
+  ['charSet', 'char-set', 'select'],
+  ['profile', 'profile', 'select'],
+  ['rulesEngine', 'rules-engine', 'select'],
+  ['mctsEngine', 'mcts-engine', 'select'],
+  ['neuralNetworkFramework', 'neural-network-framework', 'select'],
+  ['device', 'device', 'select'],
+  ['endDistricts', 'end-districts', 'select'],
+  ['maxSteps', 'max-steps', 'number'],
+  ['temperatureStart', 'temperature-start', 'number'],
+  ['temperatureEnd', 'temperature-end', 'number'],
+  ['learningRate', 'learning-rate', 'number'],
+  ['batchGames', 'batch-games', 'number'],
+  ['workers', 'workers', 'number'],
+  ['miniBatch', 'mini-batch', 'number'],
+  ['checkpointEvery', 'checkpoint-every', 'number'],
+  ['seed', 'seed', 'number'],
+  ['mctsSimulations', 'mcts-simulations', 'number'],
+  ['mctsC_puct', 'mcts-cpuct', 'number'],
+  ['mctsDirichletAlpha', 'mcts-dirichlet', 'number'],
+  ['mctsDirichletEpsilon', 'mcts-diri-eps', 'number'],
+  ['mctsMaxDepth', 'mcts-max-depth', 'number'],
+  ['mctsBatchSize', 'mcts-batch-size', 'number'],
+  ['mctsMaxWaitMs', 'mcts-max-wait', 'number'],
+  ['mctsCacheSize', 'mcts-cache-size', 'number'],
+  ['selfPlayMode', 'self-play-mode', 'select'],
+  ['networkPlayerCount', 'network-player-count', 'number'],
+  ['heuristicDifficulty', 'heuristic-difficulty', 'select'],
+  ['curriculumStartPlayers', 'curriculum-start-players', 'number'],
+  ['curriculumEndPlayers', 'curriculum-end-players', 'number'],
+  ['curriculumStepGames', 'curriculum-step-games', 'number'],
+  ['trainNetworkOnly', 'train-network-only', 'bool']
+];
+
+// 不参与回填的键：resumeCheckpoint 是「读哪个存档」本身；backend /
+// nativeInferenceBackend / mctsEvaluator 由面板其他选项推导，不能被存档值反向覆盖。
+const CONFIG_DERIVED = ['resumeCheckpoint', 'backend', 'nativeInferenceBackend', 'mctsEvaluator'];
+
+// 把存档里的 config 填回面板。返回实际写入项数与跳过项，
+// 便于在按钮下方如实告知「哪些没读到」而不是假装全部成功。
+function applyCheckpointConfig(config) {
+  let applied = 0;
+  const skipped = [];
+  CONFIG_FIELDS.forEach(([key, id, kind]) => {
+    const el = $(id);
+    const value = config[key];
+    if (!el || value == null) { skipped.push(key); return; }
+    if (kind === 'bool') el.value = value ? 'true' : 'false';
+    else if (kind === 'number') {
+      if (!Number.isFinite(Number(value))) { skipped.push(key); return; }
+      el.value = String(value);
+    } else {
+      // 枚举：存档取值在当前面板上不存在时（例如旧版本的选项）保留现值，不清空
+      if (!Array.from(el.options).some(option => option.value === String(value))) { skipped.push(key); return; }
+      el.value = String(value);
+    }
+    applied += 1;
+  });
+  // 填完要刷新派生 UI：评估器提示、阵容联动、单步耗时估算都依赖这些值
+  updateMctsEvaluatorUI();
+  updateCompositionUI();
+  estimateMCTS();
+  return { applied, skipped };
+}
+
+// 没有选中存档或训练正在跑时，按钮不可用（训练中面板整体只读）
+function syncCheckpointLoadButton() {
+  const button = $('load-checkpoint-config');
+  if (button) button.disabled = !!(latest && latest.running) || !$('resume-checkpoint').value;
+}
+
 // 不再单独提供「神经网络评估器」选项：其值由「神经网络框架」推导，
 // 推导规则与 training/train.js 的 sanitizeConfig 保持一致：
 //   PyTorch  → gpu（经 PyTorch 桥批量 forward）
@@ -108,6 +184,7 @@ function setControls(status) {
   $('stop-training').disabled = !running || status.stopping;
   document.querySelectorAll('#train-form input,#train-form select').forEach(el => { el.disabled = running; });
   document.querySelectorAll('#mcts-form input').forEach(el => { el.disabled = running; });
+  syncCheckpointLoadButton();
 }
 
 function stateLabel(state) {
@@ -419,6 +496,24 @@ $('stop-training').onclick = async () => {
   try { render(await api('./api/training/stop', { method: 'POST' })); }
   catch (error) { $('control-message').textContent = error.message; }
 };
+// 「从存档读取参数」：读取选中存档里保存的那份 config，一键填回面板所有选项。
+// 不改动「继续已有训练」的选择，用户读完可以直接点开始训练从该存档续训。
+$('load-checkpoint-config').onclick = async () => {
+  const name = $('resume-checkpoint').value;
+  const out = $('checkpoint-load-message');
+  if (!name) { out.textContent = '请先在上方「继续已有训练」里选择一个存档'; return; }
+  out.textContent = '正在读取 ' + name + ' …';
+  try {
+    const data = await api('./api/training/checkpoint?name=' + encodeURIComponent(name));
+    const result = applyCheckpointConfig(data.config || {});
+    if (latest) render(latest);
+    out.textContent = '已从 ' + data.name + '（已训 ' + integer(data.game) + ' 局）读入 ' + result.applied + ' 项参数' +
+      (result.skipped.length ? '；' + result.skipped.length + ' 项该存档未记录或面板无此选项，保持当前值' : '');
+  } catch (error) {
+    out.textContent = error.message;
+  }
+};
+$('resume-checkpoint').onchange = syncCheckpointLoadButton;
 $('profile').onchange = () => { if (latest) render(latest); };
 $('rules-engine').onchange = updateMctsEvaluatorUI;
 $('char-set').onchange = updateMctsEvaluatorUI;
@@ -438,5 +533,6 @@ $('self-play-mode').onchange = updateCompositionUI;
 estimateMCTS();
 updateMctsEvaluatorUI();
 updateCompositionUI();
+syncCheckpointLoadButton();
 window.addEventListener('resize', () => { if (latest) render(latest); });
 refresh(); setInterval(refresh, 1000);
