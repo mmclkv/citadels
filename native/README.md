@@ -83,12 +83,36 @@ worker 拿到的是一份完整游戏状态，里面写了谁的手牌、牌库�
 隐藏信息的安全完全取决于调用方：**JS 侧每次搜索前都必须先把根局面确定化**，
 即把对手手牌、牌库顺序、暗置移除、对手未打出的角色换成一份与公开信息一致的随机猜测，
 再在猜测局面上重新枚举合法动作一并送进来。两个调用点分别是
-`training/train.js`（`alignedDeterminization`，JS 与 native 两条分支共用）与
-`lib/local-neural-bot.js`（实战神经网络电脑平均 4 份猜测）。
-`test/train-search-blindness.test.js` 会逐个搜索调用比对「交进搜索的根 == 确定化产出的克隆」。
+`training/train.js`（`alignedParticlePool`，JS 与 native 两条分支共用）与
+`lib/local-neural-bot.js`（实战神经网络电脑）。
+`test/train-search-blindness.test.js` 会逐个搜索调用比对「交进搜索的每份粒子 == 确定化产出的克隆」。
+
+## 粒子池：整池一棵树（ISMCTS），不是每份各建一棵树
+
+调用方一次送来的不是一份猜测，而是**若干份**（`mctsParticles`，默认 4）：
+`encodeSearchRequest` 把第一份放进 `state`、其余放进 `particles`，
+`mcts_worker` 收到后整池交给 `Mcts::search` / `BatchedMcts::search` 的
+`std::vector<State>` 重载 —— **每条模拟随机抽一份往下走，所有粒子共用同一棵树、同一批
+统计量**。JS 侧 `training/mcts.js` 的 `rootStates` 是同一套语义。
+
+不要退回「每个世界各搜一次再平均根访问分布」（PIMC）：那会因为 strategy fusion
+选出在任一世界里都不最优的动作，而且模拟预算被切成 N 份，同一信息集的经验分散在
+N 棵树上谁都攒不起统计量。
+
+共用一棵树的前提有两条，缺一条统计就会串味：
+1. 同一信息集内合法动作集恒定 —— `mcts_worker` 对**每一份粒子**都跑一遍
+   `actions_aligned`，对不上的直接丢掉（`particlesUsed` 会如实回报剩下几份）；
+2. 叶节点评估只看得到公开信息 —— 特征里是 `hand_count` 而不是牌面。
 
 动作列表必须在**同一份**猜测局面上枚举：建造/法师/行政官等动作带实体 uid，用真局面的
 列表配猜测局面的树会让 `mcts_worker.cpp` 的合法性比对失败，退化成均匀先验。
+
+规则判定同样只能用公开信息，否则两边会在猜测世界里分叉。例如住持对 8 号角色的保护，
+JS 的 `isAbbotProtected` 与 C++ 的 `protected_from_rank8` 都读**本轮已打出的角色**
+（`played` / `NativePlayer::played`，回合结束才登记、轮初清空），而不是「手里握着哪个角色」：
+后者是隐藏信息，会让 8 号角色的候选目标列表直接显示谁拿到了住持；而确定化又会把还没打出
+的角色随机挪动，一旦某个猜测把住持塞进某人的手牌，两边给出的目标列表就不一样，根节点动作
+对不上同样是均匀先验。`test/abbot-privacy.test.js` 钉住这两条。
 
 六个新增暗版角色已接入原生 MCTS 规则模拟：行政官逮捕令及建造响应、间谍调查/取牌、
 勒索者威胁标记/赎回/揭示、法师查看/取牌/立即建造、住持的宗教建筑金币收入与8号角色保护，

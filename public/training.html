@@ -72,6 +72,7 @@
           <label><span>GPU 批量大小</span><input id="mcts-batch-size" type="number" min="1" max="256" step="1" value="32"><small>GPU 评估时使用；JS 评估时保留此配置以便切换后端</small></label>
           <label><span>最长等待</span><input id="mcts-max-wait" type="number" min="0" max="50" step="1" value="1"><small>毫秒；超过也立即发送（0 = 严格攒满才发）</small></label>
           <label><span>状态缓存</span><input id="mcts-cache-size" type="number" min="0" max="1048576" step="1024" value="65536"><small>前向结果 LRU 缓存条数（0 = 关闭，重算更准但更慢）</small></label>
+          <label><span>隐藏信息粒子数</span><input id="mcts-particles" type="number" min="1" max="16" step="1" value="4"><small>对未知手牌的猜测份数。整池共用一棵搜索树、每条模拟抽一份（1 = 猜一次钉死整棵树）</small></label>
         </form>
       </section>
       <div class="control-row">
@@ -112,6 +113,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=19"></script>
+  <script src="./training.js?v=20"></script>
 </body>
 </html>

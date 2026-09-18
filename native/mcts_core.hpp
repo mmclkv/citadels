@@ -94,18 +94,43 @@ class Mcts {
        Evaluator<State, Action>& evaluator, Config config = {})
       : game_(game), evaluator_(evaluator), config_(config), rng_(config.seed) {}
 
+  // 单世界搜索：退化成「粒子池只有一份」。
   Result search(const State& root_state, int root_player) {
+    return search(std::vector<State>{root_state}, root_player, {});
+  }
+
+  /**
+   * 信息集搜索（ISMCTS）：root_states 是同一个公开局面的若干份「隐藏信息猜测」，
+   * 每条模拟随机抽一份往下走，但所有粒子共用同一棵树、同一批统计量。
+   *
+   * 这与「每个世界各建一棵树再平均根访问分布」（PIMC）不同：PIMC 会因为
+   * strategy fusion 选出一个在任一世界里都不最优的动作，而且模拟预算被切成
+   * N 份，同一信息集的经验分散在 N 棵树上谁都攒不起统计量。
+   *
+   * 树能共用的前提：同一信息集内合法动作集恒定（由调用方校验），且叶节点评估
+   * 只看得到公开信息（特征里是 hand_count 而不是牌面）。
+   */
+  Result search(const std::vector<State>& root_states, int root_player,
+                const std::vector<float>& particle_weights = {}) {
+    if (root_states.empty()) return {};
+    roots_ = &root_states;
+    weights_ = &particle_weights;
+    weight_total_ = 0.0f;
+    for (float weight : particle_weights) if (weight > 0.0f) weight_total_ += weight;
+    if (weights_->size() != root_states.size()) weight_total_ = 0.0f;
     expansions_ = 0;
     node_count_ = 1;
-    player_count_ = state_player_count(root_state, 0);
+    const State& seed_state = root_states.front();
+    player_count_ = state_player_count(seed_state, 0);
     Node root;
     root.player = root_player;
-    root.actions = game_.legal_actions(root_state, root_player);
+    root.actions = game_.legal_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
-    expand(root, root_state);
+    expand(root, seed_state);
 
     for (int i = 0; i < config_.simulations; ++i) {
-      State state = root_state;
+      // 每条模拟重新抽一个粒子：世界只在本次模拟内有效，不是被钉死在树上
+      State state = root_states[pick_particle()];
       std::vector<Node*> path{&root};
       Node* node = &root;
       bool backed_up = false;
@@ -236,10 +261,30 @@ class Mcts {
 
   float random_unit() { return std::generate_canonical<float, 24>(rng_); }
 
+  // 按权重抽一个粒子；权重缺失 / 全 0 / 长度对不上时退化为均匀采样
+  size_t pick_particle() {
+    const size_t n = roots_ ? roots_->size() : 0;
+    if (n <= 1) return 0;
+    if (weight_total_ > 0.0f) {
+      std::uniform_real_distribution<float> dist(0.0f, weight_total_);
+      float remaining = dist(rng_);
+      for (size_t i = 0; i < n; ++i) {
+        remaining -= (*weights_)[i] > 0.0f ? (*weights_)[i] : 0.0f;
+        if (remaining <= 0.0f) return i;
+      }
+      return n - 1;
+    }
+    std::uniform_int_distribution<size_t> dist(0, n - 1);
+    return dist(rng_);
+  }
+
   const GameAdapter<State, Action>& game_;
   Evaluator<State, Action>& evaluator_;
   Config config_;
   std::mt19937 rng_;
+  const std::vector<State>* roots_ = nullptr;
+  const std::vector<float>* weights_ = nullptr;
+  float weight_total_ = 0.0f;
   int expansions_ = 0;
   size_t node_count_ = 0;
   size_t player_count_ = 0;
@@ -257,15 +302,32 @@ class BatchedMcts {
               BatchedEvaluator<State, Action>& evaluator, Config config = {})
       : game_(game), evaluator_(evaluator), config_(config) {}
 
+  // 单世界搜索：退化成「粒子池只有一份」。
   Result search(const State& root_state, int root_player, int batch_size) {
+    return search(std::vector<State>{root_state}, root_player, batch_size, {});
+  }
+
+  /**
+   * 信息集搜索（ISMCTS），语义同 Mcts::search 的粒子池版本：整池共用一棵树，
+   * 每条模拟抽一份。分批评估只在「收集叶节点」这一层做，不影响粒子语义。
+   */
+  Result search(const std::vector<State>& root_states, int root_player, int batch_size,
+                const std::vector<float>& particle_weights = {}) {
     if (batch_size < 1) batch_size = 1;
-    player_count_ = state_player_count(root_state, 0);
+    if (root_states.empty()) return {};
+    roots_ = &root_states;
+    weights_ = &particle_weights;
+    weight_total_ = 0.0f;
+    for (float weight : particle_weights) if (weight > 0.0f) weight_total_ += weight;
+    if (weights_->size() != root_states.size()) weight_total_ = 0.0f;
+    const State& seed_state = root_states.front();
+    player_count_ = state_player_count(seed_state, 0);
     node_count_ = 1;
     Node root;
     root.player = root_player;
-    root.actions = game_.legal_actions(root_state, root_player);
+    root.actions = game_.legal_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
-    expand(root, root_state);
+    expand(root, seed_state);
     for (int offset = 0; offset < config_.simulations; offset += batch_size) {
       const int count = std::min(batch_size, config_.simulations - offset);
       std::vector<State> states;
@@ -275,7 +337,8 @@ class BatchedMcts {
       std::vector<std::array<float, kValueSlots>> terminal_values;
       std::vector<bool> terminal;
       for (int i = 0; i < count; ++i) {
-        State state = root_state;
+        // 每条模拟重新抽一个粒子：世界只在本次模拟内有效
+        State state = root_states[pick_particle()];
         Node* node = &root;
         std::vector<Node*> path{&root};
         bool collected = false;
@@ -402,7 +465,27 @@ class BatchedMcts {
     output.value = output.value_vector[0];
     return output;
   }
+  // 按权重抽一个粒子；权重缺失 / 全 0 / 长度对不上时退化为均匀采样
+  size_t pick_particle() {
+    const size_t n = roots_ ? roots_->size() : 0;
+    if (n <= 1) return 0;
+    if (weight_total_ > 0.0f) {
+      std::uniform_real_distribution<float> dist(0.0f, weight_total_);
+      float remaining = dist(rng_);
+      for (size_t i = 0; i < n; ++i) {
+        remaining -= (*weights_)[i] > 0.0f ? (*weights_)[i] : 0.0f;
+        if (remaining <= 0.0f) return i;
+      }
+      return n - 1;
+    }
+    std::uniform_int_distribution<size_t> dist(0, n - 1);
+    return dist(rng_);
+  }
   const GameAdapter<State, Action>& game_; BatchedEvaluator<State, Action>& evaluator_; Config config_;
+  std::mt19937 rng_{config_.seed};
+  const std::vector<State>* roots_ = nullptr;
+  const std::vector<float>* weights_ = nullptr;
+  float weight_total_ = 0.0f;
   size_t player_count_ = 0;
   size_t node_count_ = 0;
 };

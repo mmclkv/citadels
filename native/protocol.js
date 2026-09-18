@@ -13,18 +13,26 @@ function stableFingerprint(value) {
  * 生成发给 native worker 的一条 NDJSON 请求。
  * 搜索状态去掉 log/notices，避免把 UI 历史带入每个 MCTS 节点；动作仍保留完整
  * JSON 字段，保证技能选择、目标玩家和 card uid 不会因压缩协议丢失。
+ *
+ * state 可以传单个局面，也可以传「粒子池」数组（对未知手牌的若干份猜测）。
+ * 传数组时第一份仍是 state，其余放进 particles —— 旧 worker 不认识 particles，
+ * 只会按第一份搜，于是天然退化成单粒子而不会报错。
  */
 function encodeSearchRequest(state, rootPlayerId, legalActions, requestId) {
-  const snapshot = cloneTrimmed(state);
-  return JSON.stringify({
+  const pool = (Array.isArray(state) ? state : [state]).map(entry => cloneTrimmed(entry));
+  const [primary, ...particles] = pool;
+  const request = {
     v: PROTOCOL_VERSION,
     t: 'search',
     id: String(requestId),
     rootPlayerId,
-    state: snapshot,
+    state: primary,
     legalActions: Array.isArray(legalActions) ? legalActions : [],
-    stateHash: stableFingerprint(snapshot)
-  }) + '\n';
+    // 覆盖整池而不只是第一份：粒子被截断/串位同样是灾难（会把错的世界当成真的）
+    stateHash: stableFingerprint(pool)
+  };
+  if (particles.length) request.particles = particles;
+  return JSON.stringify(request) + '\n';
 }
 
 function decodeSearchRequest(line) {
@@ -43,7 +51,20 @@ function decodeSearchRequest(line) {
   if (typeof request.stateHash !== 'string' || !/^[0-9a-f]{64}$/.test(request.stateHash)) {
     throw new Error('native 搜索请求缺少有效 stateHash');
   }
-  if (stableFingerprint(request.state) !== request.stateHash) {
+  // 粒子池 = state + particles（顺序与 encodeSearchRequest 一致），哈希覆盖整池
+  const particles = Array.isArray(request.particles) ? request.particles : null;
+  if (particles) {
+    particles.forEach((particle, i) => {
+      if (!particle || typeof particle !== 'object' || Array.isArray(particle)) {
+        throw new Error('native 搜索请求 particles[' + i + '] 不是完整 state');
+      }
+      if (!Array.isArray(particle.players) || !particle.players.length) {
+        throw new Error('native 搜索请求 particles[' + i + '] 缺少 players');
+      }
+    });
+  }
+  const pool = particles ? [request.state, ...particles] : [request.state];
+  if (stableFingerprint(pool) !== request.stateHash) {
     throw new Error('native 搜索请求 stateHash 不匹配');
   }
   if (!request.state.players || !Array.isArray(request.state.players)) {

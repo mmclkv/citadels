@@ -292,21 +292,35 @@ function enumerateLegalActions(state, playerId) {
 }
 
 /**
- * 搜索用的根局面：把隐藏信息换成随机猜测（./determinize.js），并要求猜测复现了
- * 真局面的合法动作列表 —— π 是按列表下标写进训练样本的，下标错位比不搜索更糟。
- * 返回 null 表示几次猜测都没对上，此时宁可用纯策略网络走子，也不能把真 state
+ * 搜索用的根局面粒子池：把隐藏信息换成若干份随机猜测（./determinize.js），并要求每份
+ * 猜测都复现真局面的合法动作列表 —— π 是按列表下标写进训练样本的，下标错位比不搜索更糟。
+ *
+ * 所有粒子进同一棵搜索树（ISMCTS）：每条模拟随机挑一份往下走，树按信息集聚合。于是
+ * 「猜」不再发生在搜索之前，也不再是「每个世界各建一棵树再平均根访问分布」（PIMC
+ * 的 strategy fusion：在每个世界里各自最优、平均出来的那一手在真实世界里可能全线次优）。
+ *
+ * 每份猜测都必须是「同一个信息集」—— 合法动作列表与真局面逐字一致，否则它描述的根本
+ * 不是当前这个公开局面，混进同一棵树会让节点对应上不同的动作下标。所以返回的数组可以
+ * 比 count 短，也可以为空：一个粒子都对不上时宁可用纯策略网络走子，也不能把真 state
  * 交给 MCTS（那就是让电脑偷看对手的手牌和牌库）。
  */
-function alignedDeterminization(state, playerId, legal, rng, attempts = 4) {
+function alignedParticlePool(state, playerId, legal, rng, count = 1, attempts = 4) {
   const baseline = JSON.stringify(legal);
-  for (let i = 0; i < attempts; i++) {
+  const want = Math.max(1, Number(count) || 1);
+  const pool = [];
+  for (let i = 0; i < attempts * want && pool.length < want; i++) {
     const guess = determinize(state, playerId, rng);
     const actions = enumerateLegalActions(guess, playerId);
     if (actions.length === legal.length && JSON.stringify(actions) === baseline) {
-      return { state: guess, legal: actions };
+      pool.push({ state: guess, legal: actions });
     }
   }
-  return null;
+  return pool;
+}
+
+/** 只要一份猜测的旧接口，供评测脚本与回归测试使用。 */
+function alignedDeterminization(state, playerId, legal, rng, attempts = 4) {
+  return alignedParticlePool(state, playerId, legal, rng, 1, attempts)[0] || null;
 }
 
 function currentActor(state) {
@@ -430,18 +444,18 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     const view = Engine.sanitize(state, actor.id);
     const encoded = encodeState(view, actor.id);
     const actionVectors = legal.map(action => encodeAction(action, encoded.context));
-    // 搜索只能看人类玩家看得到的信息：把根局面的隐藏部分换成随机猜测（确定化）。
+    // 搜索只能看人类玩家看得到的信息：把根局面的隐藏部分换成若干份随机猜测（确定化）。
     // 直接把真 state 交给 MCTS（无论 JS 还是 native）等于让电脑看着对手的手牌和牌库
     // 顺序做决策，学到的不是策略而是偷看。详见 ./determinize.js。
+    // 粒子是「池」不是「几棵树」：整池交给一次搜索，每条模拟抽一份，共用一棵树。
     const willSearch = actor.botType !== 'heuristic' && (useNativeMcts || config.mctsSimulations > 0);
-    let searchRoot = null;
-    if (willSearch) {
-      searchRoot = alignedDeterminization(state, actor.id, legal, rng);
-      if (!searchRoot) {
-        console.warn('[train] 第 ' + gameIndex + ' 局：' + steps + ' 步的确定化猜测无法复现合法动作列表，' +
-          '本步不搜索（阶段 ' + state.phase + ' · 待定 ' +
-          JSON.stringify(state.turn && state.turn.pending && state.turn.pending.kind) + '）');
-      }
+    const searchPool = willSearch
+      ? alignedParticlePool(state, actor.id, legal, rng, config.mctsParticles) : [];
+    const searchRoot = searchPool.length ? searchPool[0] : null;
+    if (willSearch && !searchRoot) {
+      console.warn('[train] 第 ' + gameIndex + ' 局：' + steps + ' 步的确定化猜测无法复现合法动作列表，' +
+        '本步不搜索（阶段 ' + state.phase + ' · 待定 ' +
+        JSON.stringify(state.turn && state.turn.pending && state.turn.pending.kind) + '）');
     }
     const t0 = performance.now();
     const temperatureProgress = Math.min(1, gameIndex / Math.max(1, config.targetGames * 0.7));
@@ -457,8 +471,9 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       if (chosen < 0) chosen = 0;
       decision = { chosen, probability: 1 / legal.length, value: 0, entropy: 0 };
     } else if (useNativeMcts && searchRoot) {
-      const nativeResult = await nativeSearch.search(searchRoot.state, actor.id, searchRoot.legal,
-        config.modelVersion || 0);
+      // 整池一起交给 native：那边同样是一条模拟抽一个粒子、共用一棵树。
+      const nativeResult = await nativeSearch.search(searchPool.map(p => p.state), actor.id,
+        searchRoot.legal, config.modelVersion || 0);
       piVector = nativeResult.policy;
       mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
       mctsValue = mctsValueVector[0];
@@ -471,7 +486,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       const jsFallbackEvaluator = config.mctsEngine === 'cpp' && config.neuralNetworkFramework === 'libtorch'
         ? null : evaluator;
       const mctsResult = await mcts.search({
-        rootState: searchRoot.state,
+        // 整池进同一棵树；池里只有一份时与旧的单 rootState 完全等价
+        rootStates: searchPool.map(entry => entry.state),
         rootPlayerId: actor.id,
         model,
         Engine,
@@ -571,6 +587,11 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
 // 超过它的配置会在清洗时被夹到该上限，并由启动横幅显式告知（不再静默改写）。
 const MAX_BATCH_GAMES = 256;
 
+// 隐藏信息粒子数上限。粒子共用一棵树、每条模拟抽一份，所以加粒子的代价是「每步多几次
+// 深拷贝 + 重洗」，不是「模拟预算被切成几份」—— 这正是 ISMCTS 相对 PIMC 的关键差别。
+// 超过 16 之后边际收益很小（同一信息集的统计量已经够密），而确定化开销是线性的。
+const MAX_MCTS_PARTICLES = 16;
+
 // 会被 sanitizeConfig 夹逼、且值得在启动时回报给用户的数值配置项。
 const ADJUSTED_CONFIG_FIELDS = [
   ['targetGames', '目标局数'], ['batchGames', '每批对局'], ['ppoEpochs', 'PPO 轮数'],
@@ -580,7 +601,7 @@ const ADJUSTED_CONFIG_FIELDS = [
   ['temperatureStart', '起始温度'], ['temperatureEnd', '结束温度'],
   ['mctsSimulations', 'MCTS 模拟数'], ['mctsBatchSize', 'MCTS 批量'],
   ['mctsMaxWaitMs', 'MCTS 等待毫秒'], ['mctsMaxDepth', 'MCTS 最大深度'],
-  ['mctsCacheSize', 'MCTS 缓存'],
+  ['mctsCacheSize', 'MCTS 缓存'], ['mctsParticles', 'MCTS 粒子数'],
 ];
 
 // 列出「用户填了但被 sanitizeConfig 改写过」的数值项，供启动日志回报。
@@ -650,6 +671,9 @@ function sanitizeConfig(input = {}) {
     // 0 是合法值，表示"不限制等待"（等满批或显式 flush 才发）；仅 undefined/NaN 取默认 1
     mctsMaxWaitMs: Math.max(0, Math.min(50, Number.isFinite(Number(input.mctsMaxWaitMs)) ? Number(input.mctsMaxWaitMs) : 1)),
     mctsCacheSize: Math.max(0, Math.min(1048576, Number(input.mctsCacheSize) || 65536)),
+    // 隐藏信息粒子数：整池进同一棵树，每条模拟随机抽一份往下走（ISMCTS）。
+    // 1 份 = 退化为改造前的「猜一次钉死一棵树」。
+    mctsParticles: clampInteger(input.mctsParticles, 1, MAX_MCTS_PARTICLES, 4),
     policyLossMode: ['auto', 'ppo', 'mcts_ce'].includes(input.policyLossMode) ? input.policyLossMode : 'auto',
     // 自对弈阵容：默认保持历史行为（所有座位均由策略网络控制）。
     selfPlayMode: ['all-network', 'network-vs-heuristic', 'curriculum'].includes(input.selfPlayMode)
@@ -753,6 +777,7 @@ async function train(rawConfig, hooks = {}) {
       ' · α=' + config.mctsDirichletAlpha + ' · ε=' + config.mctsDirichletEpsilon +
       ' · maxDepth=' + config.mctsMaxDepth +
       ' · 根局面已确定化（搜索看不到对手手牌/牌库顺序）' +
+      ' · 粒子=' + config.mctsParticles + '（同一棵树，每条模拟抽一份）' +
       ' · 评估器=' + config.mctsEvaluator + '（' +
       (config.mctsEvaluator === 'gpu'
         ? 'GPU 批量 forward 走 PyTorch 桥，批 ' + config.mctsBatchSize + ' · 等待 ' + config.mctsMaxWaitMs + 'ms'
@@ -1011,9 +1036,9 @@ module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
   STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES, ACTION_TYPES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
-  alignedDeterminization,
+  alignedDeterminization, alignedParticlePool,
   resolveNetworkPlayerCount, heuristicLevelFor, nativeMctsSupportsGame,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR,
-  MAX_BATCH_GAMES, adjustedConfigFields
+  MAX_BATCH_GAMES, MAX_MCTS_PARTICLES, adjustedConfigFields
 };

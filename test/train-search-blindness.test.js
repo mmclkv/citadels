@@ -49,8 +49,10 @@ async function runWithJsSearch(config) {
   probes.length = 0;
   const roots = [];
   mcts.search = async options => {
-    const legal = options.legalFn(options.rootState, options.rootPlayerId);
-    roots.push({ root: options.rootState, playerId: options.rootPlayerId, legal });
+    // 现在是「粒子池」：整池进同一棵树，每个粒子都得是确定化出来的克隆
+    const pool = options.rootStates || [options.rootState];
+    const legal = options.legalFn(pool[0], options.rootPlayerId);
+    roots.push({ pool, playerId: options.rootPlayerId, legal });
     return { pi: uniformPolicy(legal.length), value: 0, valueVector: null, visits: legal.length,
       expansions: 1, simTerminal: 0, simDepthCapped: 0, simLeaf: 0, simOther: 0 };
   };
@@ -64,61 +66,66 @@ async function runWithJsSearch(config) {
   return roots;
 }
 
-function assertBlind(roots, label) {
+function assertBlind(roots, label, particles) {
   assert(roots.length >= 3, label + '：应记录到若干次搜索调用');
-  assert.equal(probes.length, roots.length, label + '：每次搜索恰好消费一份确定化根局面');
+  assert.ok(probes.length >= roots.length * particles,
+    label + '：每次搜索至少要消费 ' + particles + ' 份确定化粒子（实得 ' + probes.length + '）');
+  // determinize 可能因为「动作列表对不上」被丢掉重来，所以按身份查表而不是按序号配对
+  const guessSet = new Set(probes.map(probe => probe.guess));
   let randomized = 0;
   roots.forEach((entry, i) => {
-    const probe = probes[i];
-    assert(probe.publicViewEqual, label + '：第 ' + i + ' 次搜索的根局面公开信息与真局面一字不差');
-    assert.strictEqual(entry.root, probe.guess, label + '：第 ' + i + ' 次搜索用的就是确定化出来的那份克隆');
-    assert.equal(hiddenSignature(entry.root), probe.guessHidden,
-      label + '：搜索期间根局面没有被换回真牌');
-    assert.deepEqual(entry.legal, Train.enumerateLegalActions(entry.root, entry.playerId),
-      label + '：交给搜索的动作列表与根局面自枚举结果一致');
-    if (entry.playerId === probe.playerId && probe.truthHidden !== probe.guessHidden) randomized++;
+    assert.equal(entry.pool.length, particles,
+      label + '：第 ' + i + ' 次搜索拿到 ' + particles + ' 个粒子，实得 ' + entry.pool.length);
+    assert.strictEqual(new Set(entry.pool).size, entry.pool.length,
+      label + '：第 ' + i + ' 次搜索的粒子互不重复');
+    entry.pool.forEach((root, k) => {
+      assert.ok(guessSet.has(root),
+        label + '：第 ' + i + ' 次搜索的粒子 ' + k + ' 必须是确定化产出的克隆，不是真局面');
+      const probe = probes.find(item => item.guess === root);
+      assert(probe.publicViewEqual,
+        label + '：第 ' + i + ' 次搜索粒子 ' + k + ' 的公开信息与真局面一字不差');
+      assert.equal(hiddenSignature(root), probe.guessHidden,
+        label + '：第 ' + i + ' 次搜索粒子 ' + k + ' 没有被换回真牌');
+      assert.deepEqual(entry.legal, Train.enumerateLegalActions(root, entry.playerId),
+        label + '：第 ' + i + ' 次搜索粒子 ' + k + ' 的动作列表与真局面一致（下标才不会错位）');
+      if (probe.truthHidden !== probe.guessHidden) randomized++;
+    });
   });
-  assert(randomized >= Math.min(2, roots.length),
-    label + '：确定化必须真的换掉隐藏牌堆（' + randomized + '/' + roots.length + '）');
+  assert(randomized >= 1, label + '：确定化必须真的换掉隐藏牌堆（' + randomized + ' 份）');
 }
 
 (async () => {
   const base = { targetGames: 1, minPlayers: 3, maxPlayers: 3, charSet: 'base', profile: 'fast',
     batchGames: 1, ppoEpochs: 1, seed: 42, endDistricts: 7, selfPlayMode: 'all-network' };
 
+  // 粒子数：每次搜索要消费几份确定化猜测（整池进同一棵树）
+  const PARTICLES = 3;
+
   // ---- JS MCTS ----
   const jsRoots = await runWithJsSearch(Train.sanitizeConfig(Object.assign({}, base, {
-    mctsSimulations: 8, mctsEngine: 'js', mctsMaxDepth: 30
+    mctsSimulations: 8, mctsEngine: 'js', mctsMaxDepth: 30, mctsParticles: PARTICLES
   })));
-  assertBlind(jsRoots, 'JS MCTS');
+  assertBlind(jsRoots, 'JS MCTS', PARTICLES);
 
   // ---- native(C++) MCTS：用假 client 截获 encodeSearchRequest 之前的三个参数 ----
   probes.length = 0;
   const sent = [];
   const fakeNative = {
     search: async (state, playerId, legal, modelVersion) => {
-      sent.push({ state, playerId, legal, modelVersion });
+      sent.push({ pool: Array.isArray(state) ? state : [state], playerId, legal, modelVersion });
       return { policy: Array.from(uniformPolicy(legal.length)), value: 0, visits: legal.length,
         expansions: 1, valueVector: null };
     }
   };
   const nativeConfig = Train.sanitizeConfig(Object.assign({}, base, {
     mctsSimulations: 8, mctsEngine: 'cpp', backend: 'native',
-    neuralNetworkFramework: 'libtorch', mctsMaxDepth: 30
+    neuralNetworkFramework: 'libtorch', mctsMaxDepth: 30, mctsParticles: PARTICLES
   }));
   let nativeSearches = 0;
   await Train.runSelfPlayGame(new PolicyValueNetwork({ profile: 'fast', seed: 8 }), nativeConfig, 1,
     Math.random, () => ++nativeSearches >= 6 && sent.length >= 5, null, fakeNative);
-  assert.equal(sent.length, probes.length, 'native：每次搜索只消耗一份确定化根局面');
-  sent.forEach((entry, i) => {
-    const probe = probes[i];
-    assert(probe.publicViewEqual, 'native：第 ' + i + ' 次搜索的根局面公开信息与真局面一字不差');
-    assert.strictEqual(entry.state, probe.guess, 'native：送给 C++ worker 的是确定化后的克隆，不是真局面');
-    assert.deepEqual(entry.legal, Train.enumerateLegalActions(probe.guess, entry.playerId),
-      'native：动作列表在确定化局面上重新枚举（uid 类动作下标才不会错位）');
-  });
-  assert(sent.some((entry, i) => probes[i].truthHidden !== probes[i].guessHidden),
-    'native：确定化确实换掉了隐藏牌堆');
+  assertBlind(sent, 'native', PARTICLES);
+  assert.equal(nativeConfig.mctsParticles, PARTICLES, '粒子数配置项要能穿透 sanitizeConfig');
 
   // ---- alignedDeterminization：动作列表对不上时必须拒绝，而不是回退成真局面 ----
   const state = Engine.createGame({ roomId: 'aligned', endDistricts: 7, charSetMode: 'base',

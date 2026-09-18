@@ -40,6 +40,37 @@ int player_index(const NativeGameState& state, const std::string& id) {
   return -1;
 }
 
+// JS 侧上报的合法动作 vs 本机规则算出来的合法动作。supplied 里留空的字段表示
+// 「不关心」，只比对方填了的那些。抽出来是因为现在要比两次：主局面一次，
+// 每个粒子一次 —— 粒子只有在动作列表逐项对得上时才允许进同一棵树，否则同一
+// 棵树上的节点会对应不同的动作下标，统计量直接串味。
+bool actions_aligned(const std::vector<NativeSearchAction>& native_actions,
+                     const std::vector<NativeSearchAction>& supplied, int* mismatch_index = nullptr) {
+  if (native_actions.size() != supplied.size()) {
+    if (mismatch_index) *mismatch_index = 0;
+    return false;
+  }
+  for (size_t i = 0; i < supplied.size(); ++i) {
+    if (native_actions[i].type != supplied[i].type ||
+        (!supplied[i].uid.empty() && native_actions[i].uid != supplied[i].uid) ||
+        (!supplied[i].target.empty() && native_actions[i].target != supplied[i].target) ||
+        (!supplied[i].secondary_uid.empty() &&
+         native_actions[i].secondary_uid != supplied[i].secondary_uid) ||
+        (!supplied[i].selected_uids.empty() &&
+         native_actions[i].selected_uids != supplied[i].selected_uids) ||
+        (supplied[i].has_num && native_actions[i].num != supplied[i].num) ||
+        (supplied[i].gold >= 0 && native_actions[i].gold != supplied[i].gold) ||
+        (supplied[i].cards >= 0 && native_actions[i].cards != supplied[i].cards) ||
+        (supplied[i].type == ActionType::SpyColor && native_actions[i].color != supplied[i].color) ||
+        (!supplied[i].name.empty() && native_actions[i].name != supplied[i].name) ||
+        (supplied[i].type == ActionType::Reaction && native_actions[i].name != supplied[i].name)) {
+      if (mismatch_index) *mismatch_index = static_cast<int>(i);
+      return false;
+    }
+  }
+  return true;
+}
+
 NativeSearchAction decode_action(const JsonValue& value) {
   if (!value.is_object()) throw std::runtime_error("合法动作必须是对象");
   const auto type = string_field(value, "type");
@@ -109,8 +140,20 @@ int main() {
       if (!actions_value.is_array() || actions_value.as_array().empty())
         throw std::runtime_error("legalActions 不能为空");
       NativeGameState state = load_native_state(state_value);
+      // 粒子池：其余几份「隐藏信息猜测」。整池进同一棵搜索树，每条模拟抽一份
+      // （ISMCTS）；动作列表对不上的会在下面对齐校验里被丢掉。
+      std::vector<NativeGameState> particles;
+      if (const auto* particles_value = request.get("particles")) {
+        if (particles_value->is_array()) {
+          particles.reserve(particles_value->as_array().size());
+          for (const auto& value : particles_value->as_array()) {
+            if (value.is_object()) particles.push_back(load_native_state(value));
+          }
+        }
+      }
       context += " · 玩家=" + std::to_string(state.players.size()) +
-        " · round=" + std::to_string(state.round);
+        " · round=" + std::to_string(state.round) +
+        " · 粒子=" + std::to_string(1 + particles.size());
       const int root = player_index(state, root_id);
       if (root < 0) throw std::runtime_error("rootPlayerId 不存在");
       std::vector<NativeSearchAction> supplied;
@@ -177,54 +220,43 @@ int main() {
       float root_value = 0.0f;
       std::array<float, kValueSlots> root_value_vector{};
       int visits = 0, expansions = 0;
-      bool actions_match = native_actions.size() == supplied.size();
-      int mismatch_index = actions_match ? -1 : 0;
+      int mismatch_index = -1;
+      const bool actions_match = actions_aligned(native_actions, supplied, &mismatch_index);
+      // 只有动作列表对得上的粒子才能进同一棵树；一个都不剩就回退成均匀策略，
+      // 绝不能拿主局面以外的世界去搜（那就是把错的世界当真的）。
+      std::vector<NativeGameState> pool;
+      size_t particles_used = 0;
       if (actions_match) {
-        for (size_t i = 0; i < supplied.size(); ++i) {
-          if (native_actions[i].type != supplied[i].type ||
-              (!supplied[i].uid.empty() && native_actions[i].uid != supplied[i].uid) ||
-              (!supplied[i].target.empty() && native_actions[i].target != supplied[i].target) ||
-              (!supplied[i].secondary_uid.empty() &&
-               native_actions[i].secondary_uid != supplied[i].secondary_uid) ||
-              (!supplied[i].selected_uids.empty() &&
-               native_actions[i].selected_uids != supplied[i].selected_uids) ||
-              (supplied[i].has_num && native_actions[i].num != supplied[i].num) ||
-              (supplied[i].gold >= 0 && native_actions[i].gold != supplied[i].gold) ||
-              (supplied[i].cards >= 0 && native_actions[i].cards != supplied[i].cards) ||
-              (supplied[i].type == ActionType::SpyColor && native_actions[i].color != supplied[i].color) ||
-              (!supplied[i].name.empty() && native_actions[i].name != supplied[i].name) ||
-              (supplied[i].type == ActionType::Reaction && native_actions[i].name != supplied[i].name)) {
-            actions_match = false;
-            mismatch_index = static_cast<int>(i);
-            break;
-          }
+        pool.push_back(std::move(state));
+        for (auto& particle : particles) {
+          const auto particle_actions = game.legal_actions(particle, root);
+          if (actions_aligned(particle_actions, supplied)) pool.push_back(std::move(particle));
         }
-        if (actions_match) {
-          Mcts<NativeGameState, NativeSearchAction>::Result result;
+        particles_used = pool.size();
+        Mcts<NativeGameState, NativeSearchAction>::Result result;
 #ifdef CITADELS_LIBTORCH
-          if (direct_neural) {
-            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
-              .search(state, root, batch_size);
-          } else if (shared_neural) {
-            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
-              .search(state, root, batch_size);
-          } else if (neural) {
+        if (direct_neural) {
+          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
+            .search(pool, root, batch_size);
+        } else if (shared_neural) {
+          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
+            .search(pool, root, batch_size);
+        } else if (neural) {
 #else
-          if (shared_neural) {
-            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
-              .search(state, root, batch_size);
-          } else if (neural) {
+        if (shared_neural) {
+          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
+            .search(pool, root, batch_size);
+        } else if (neural) {
 #endif
-            result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
-              .search(state, root, batch_size);
-          } else {
-            result = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
-              .search(state, root);
-          }
-          policy = result.policy; visits = result.visits; expansions = result.expansions;
-          root_value = result.value;
-          root_value_vector = result.value_vector;
+          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
+            .search(pool, root, batch_size);
+        } else {
+          result = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
+            .search(pool, root);
         }
+        policy = result.policy; visits = result.visits; expansions = result.expansions;
+        root_value = result.value;
+        root_value_vector = result.value_vector;
       }
       if (policy.size() != supplied.size()) policy.assign(supplied.size(), 1.0f / supplied.size());
       std::cout << "{\"v\":1,\"t\":\"search_result\",\"id\":\"" << escape(id)
@@ -241,6 +273,7 @@ int main() {
       std::cout << "],\"value\":" << root_value << ",\"visits\":" << visits
                 << ",\"expansions\":" << expansions
                 << ",\"fallback\":" << (actions_match ? "false" : "true")
+                << ",\"particlesUsed\":" << particles_used
                 << ",\"nativeActionCount\":" << native_actions.size()
                 << ",\"mismatchIndex\":" << mismatch_index
                 << ",\"nativeActionTypes\":[";
