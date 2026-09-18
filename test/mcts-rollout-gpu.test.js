@@ -1,11 +1,11 @@
 'use strict';
-// 端到端验证：构造一批带 π 的 transition → 序列化（按 torch-bridge 的方式）→ 喂给 gpu_trainer.py
-// 让它在新代码路径（交叉熵 against π）下跑通，并打印关键指标。
+// 端到端验证：构造一批带 π 的 transition → 用生产编码器写成二进制 rollout → 喂给
+// gpu_trainer.py，让它在新代码路径（交叉熵 against π）下跑通，并打印关键指标。
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
 const { spawnSync } = require('child_process');
+const { writeRollout } = require('../training/rollout-format.js');
 
 const root = path.join(__dirname, '..');
 const python = path.join(root, '.python', 'python.exe');
@@ -25,28 +25,28 @@ for (let i = 0; i < N; i++) {
   for (let j = 0; j < NA; j++) {
     const v = new Float32Array(ACT);
     for (let k = 0; k < ACT; k++) v[k] = ((i + j + k) % 17) / 17;
-    actions.push(Array.from(v));
+    actions.push(v);
   }
   const pi = new Float32Array(NA);
   let s = 0;
   for (let j = 0; j < NA; j++) { pi[j] = ((i * 3 + j) % 7) / 7 + 0.1; s += pi[j]; }
   for (let j = 0; j < NA; j++) pi[j] /= s;
   transitions.push({
-    state: Array.from(new Float32Array(STATE).map((_, k) => ((i + k) % 11) / 11 - 0.5)),
+    state: Float32Array.from({ length: STATE }, (_, k) => ((i + k) % 11) / 11 - 0.5),
     actions,
     chosen: i % NA,
     oldProb: pi[i % NA],
     oldValue: (i % 7) / 7 - 0.5,
     reward: ((i % 13) / 13 - 0.5) * 1.6,
     temperature: 1,
-    pi: Array.from(pi),
+    pi,
     mctsValue: (i % 7) / 7 - 0.5
   });
 }
 
-const rolloutPath = path.join(root, 'training-data', 'mcts-rollout-smoke.json.gz');
+const rolloutPath = path.join(root, 'training-data', 'mcts-rollout-smoke.bin');
 fs.mkdirSync(path.dirname(rolloutPath), { recursive: true });
-fs.writeFileSync(rolloutPath, zlib.gzipSync(JSON.stringify(transitions), { level: 1 }));
+writeRollout(rolloutPath, transitions);
 
 // 用 Python 直接对 rollout 做 load_rollout + train_ppo (CPU 模式即可)
 const pyScript = `

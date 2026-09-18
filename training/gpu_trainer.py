@@ -1,7 +1,6 @@
 """Persistent PyTorch PPO trainer used by the Node.js self-play coordinator."""
 import array
 import gc
-import gzip
 import json
 import os
 import struct
@@ -236,116 +235,98 @@ class PolicyValueNet(nn.Module):
                 time.sleep(0.025 * (attempt + 1))
 
 
+ROLLOUT_MAGIC = b"CTRL"
+ROLLOUT_VERSION = 1
+ROLLOUT_HEADER = struct.Struct("<4s7I")
+
+
 def load_rollout(filename):
-    """加载 rollout 并转为紧凑的 numpy 缓冲。
+    """读取二进制 rollout，转成训练用的 numpy/torch 缓冲。
 
-    内存说明：旧实现 json.load 一次性把整批样本物化为 Python 对象（每个
-    浮点 ~32 字节），再按批内全局最大动作数 pad 出 (N, max, width) 的巨型
-    嵌套列表，模型更新瞬间峰值可达数 GB，且整批 data 在训练结束后仍被
-    主循环变量持有到下一批。现在改为流式逐行解析直接填 float32 numpy
-    缓冲，动作/π 不做全局 padding，由 build_minibatch 按 mini-batch 内
-    最大动作数现场 pad——数学语义与超参数完全不变，峰值内存降一个量级。
+    内存说明：旧实现是 gzip + 整段 JSON。`handle.read()` 先把解压后的全文
+    读成一整条字符串（256 局批次实测 387 MB），再逐行 raw_decode 物化出
+    Python 浮点对象（每个 ~32 字节），最后才 np.asarray 成 float32——同一份
+    数据在内存里同时存在「文本 + Python 对象 + float32」三份。现在文件本身
+    就是扁平 float32（见 training/rollout-format.js 的布局说明），这里只用
+    np.fromfile 顺序读块，torch.from_numpy 与 numpy 缓冲共享内存，不再有文本
+    与 Python 浮点对象这两份中间物；输出字典的键与旧实现完全一致，因此
+    build_minibatch / train_ppo 一行都不用改。
     """
-    with gzip.open(filename, "rt", encoding="utf-8") as handle:
-        text = handle.read()
-    decoder = json.JSONDecoder()
-    position = 0
-    size = len(text)
+    with open(filename, "rb") as handle:
+        header = handle.read(ROLLOUT_HEADER.size)
+        if len(header) != ROLLOUT_HEADER.size:
+            raise ValueError("rollout 头部长度不足")
+        (magic, version, row_count, action_slots, state_size, action_size,
+         value_slots, pi_slots) = ROLLOUT_HEADER.unpack(header)
+        if magic != ROLLOUT_MAGIC:
+            raise ValueError("rollout 魔数不匹配：%r" % (magic,))
+        if version != ROLLOUT_VERSION:
+            raise ValueError("rollout 版本不支持：%d" % version)
+        if not row_count:
+            raise ValueError("rollout 为空")
 
-    def skip_blanks():
-        nonlocal position
-        while position < size and text[position] in " \t\r\n":
-            position += 1
+        def read_f32(count):
+            values = np.fromfile(handle, dtype="<f4", count=count)
+            if values.size != count:
+                raise ValueError("rollout 数据不完整")
+            return values
 
-    skip_blanks()
-    if position >= size or text[position] != "[":
-        raise ValueError("rollout 文件不是 JSON 数组")
-    position += 1
+        def read_i32(count):
+            values = np.fromfile(handle, dtype="<i4", count=count)
+            if values.size != count:
+                raise ValueError("rollout 数据不完整")
+            return values
 
-    states_rows, actions_rows, pi_rows = [], [], []
-    chosen, old_probs, temperatures = [], [], []
-    old_values, rewards, value_masks = [], [], []
-    while True:
-        skip_blanks()
-        if position < size and text[position] == ",":
-            position += 1
-            skip_blanks()
-        if position < size and text[position] == "]":
-            break
-        if position >= size:
-            raise ValueError("rollout JSON 数组未闭合")
-        row, position = decoder.raw_decode(text, position)
-        count = len(row["actions"])
-        states_rows.append(np.asarray(row["state"], dtype=np.float32))
-        if count:
-            actions_rows.append(np.asarray(row["actions"], dtype=np.float32).reshape(count, -1))
-        else:
-            actions_rows.append(None)
-        pi = row.get("pi")
-        if pi:
-            pi_arr = np.zeros(count, dtype=np.float32)
-            usable = min(count, len(pi))
-            pi_arr[:usable] = np.asarray(pi[:usable], dtype=np.float32)
-            pi_rows.append(pi_arr)
-        else:
-            pi_rows.append(None)
-        chosen.append(int(row["chosen"]))
-        old_probs.append(float(row["oldProb"]))
-        temperatures.append(float(row.get("temperature", 1.0)))
-        old_values.append(np.asarray(
-            (list(row.get("oldValueVector", [row.get("oldValue", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS],
-            dtype=np.float32))
-        rewards.append(np.asarray(
-            (list(row.get("rewardVector", [row.get("reward", 0.0)])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS],
-            dtype=np.float32))
-        value_masks.append(np.asarray(
-            (list(row.get("valueMask", [1.0])) + [0.0] * VALUE_SLOTS)[:VALUE_SLOTS],
-            dtype=np.float32))
-    del text, decoder
-    gc.collect()
+        states = read_f32(row_count * state_size).reshape(row_count, state_size)
+        actions_flat = read_f32(action_slots * action_size).reshape(action_slots, action_size)
+        counts = read_i32(row_count)
+        chosen = read_i32(row_count)
+        old_probs = read_f32(row_count)
+        temperatures = read_f32(row_count)
+        read_f32(row_count)  # mctsValues：保留布局完整性，训练侧不使用
+        pi_flat = read_f32(pi_slots)
+        has_pi = np.fromfile(handle, dtype="u1", count=row_count)
+        if has_pi.size != row_count:
+            raise ValueError("rollout 数据不完整")
+        old_values = read_f32(row_count * value_slots).reshape(row_count, value_slots)
+        rewards = read_f32(row_count * value_slots).reshape(row_count, value_slots)
+        value_masks = read_f32(row_count * value_slots).reshape(row_count, value_slots)
+        read_f32(row_count * value_slots)  # mctsValueVectors：同上
+        trailing = handle.read(1)
+        if trailing:
+            raise ValueError("rollout 尾部有多余字节")
 
-    n = len(states_rows)
-    if n == 0:
-        raise ValueError("rollout 为空")
-    action_width = next((a.shape[1] for a in actions_rows if a is not None), ACTION_SIZE)
-    actions_rows = [a if a is not None else np.zeros((0, action_width), np.float32) for a in actions_rows]
-    counts = np.asarray([a.shape[0] for a in actions_rows], dtype=np.int64)
-    offsets = np.zeros(n + 1, dtype=np.int64)
+    offsets = np.zeros(row_count + 1, dtype=np.int64)
     np.cumsum(counts, out=offsets[1:])
-    actions_flat = np.concatenate(actions_rows) if actions_rows else np.zeros((0, action_width), np.float32)
-    del actions_rows
-
-    has_pi = any(p is not None for p in pi_rows)
-    pi_flat, pi_offsets, pi_lengths = None, None, None
-    if has_pi:
-        pi_lengths = np.asarray([p.shape[0] if p is not None else 0 for p in pi_rows], dtype=np.int64)
-        pi_offsets = np.zeros(n + 1, dtype=np.int64)
+    use_pi = bool(pi_slots)
+    if use_pi:
+        pi_lengths = np.where(has_pi.astype(bool), counts, 0).astype(np.int64)
+        pi_offsets = np.zeros(row_count + 1, dtype=np.int64)
         np.cumsum(pi_lengths, out=pi_offsets[1:])
-        present = [p for p in pi_rows if p is not None]
-        pi_flat = np.concatenate(present) if present else np.zeros(0, np.float32)
-        del present
-    del pi_rows
+        if int(pi_offsets[-1]) != pi_flat.size:
+            raise ValueError("rollout 的 π 槽位数与索引不一致")
+    else:
+        pi_flat = None
+        pi_offsets = None
+        pi_lengths = None
 
-    result = {
-        "states": torch.from_numpy(np.stack(states_rows)),
-        "chosen": torch.from_numpy(np.asarray(chosen, dtype=np.int64)),
-        "old_probs": torch.from_numpy(np.asarray(old_probs, dtype=np.float32)),
-        "old_values": torch.from_numpy(np.stack(old_values)),
-        "rewards": torch.from_numpy(np.stack(rewards)),
-        "value_masks": torch.from_numpy(np.stack(value_masks)),
-        "temperatures": torch.from_numpy(np.asarray(temperatures, dtype=np.float32)),
+    return {
+        "states": torch.from_numpy(states),
+        "chosen": torch.from_numpy(chosen.astype(np.int64)),
+        "old_probs": torch.from_numpy(old_probs),
+        "old_values": torch.from_numpy(old_values),
+        "rewards": torch.from_numpy(rewards),
+        "value_masks": torch.from_numpy(value_masks),
+        "temperatures": torch.from_numpy(temperatures),
         # 变宽字段：mini-batch 组装时才 pad
         "actions_flat": actions_flat,
-        "lengths": counts,
+        "lengths": counts.astype(np.int64),
         "offsets": offsets,
-        "action_width": action_width,
+        "action_width": int(action_size),
         "pi_flat": pi_flat,
         "pi_offsets": pi_offsets,
         "pi_lengths": pi_lengths,
     }
-    del states_rows, old_values, rewards, value_masks
-    gc.collect()
-    return result
 
 
 def build_minibatch(data, indices, device):
@@ -506,6 +487,17 @@ def main():
                 model.eval()
                 reply({"ok": True})
             elif command["cmd"] == "train":
+                # 训练器与 Node 侧总是同版本部署，格式标记只用于挡住「旧 trainer
+                # 配新 bridge」这类错配；字节数是廉价但有效的截断写校验。
+                declared = command.get("rolloutFormat")
+                if declared and declared != "ctrl-binary":
+                    raise ValueError("rollout 格式不支持：%s" % declared)
+                expected_bytes = command.get("rolloutBytes")
+                if expected_bytes:
+                    actual_bytes = os.path.getsize(command["rolloutPath"])
+                    if actual_bytes != expected_bytes:
+                        raise ValueError(
+                            "rollout 文件字节数不符：%d != %d" % (actual_bytes, expected_bytes))
                 data = load_rollout(command["rolloutPath"])
                 metrics = train_ppo(model, optimizer, device, data, command["epochs"], command.get("miniBatch", 256),
                                     command.get("policyLossMode", "auto"))

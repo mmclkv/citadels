@@ -808,7 +808,14 @@ async function train(rawConfig, hooks = {}) {
       totalInferenceMs += result.avgInferenceMs * result.steps;
       totalFallbacks += result.fallbackCount;
       result.winners.forEach(seat => { if (seat >= 0 && seat < winSeats.length) winSeats[seat]++; });
-      recentGames.push(result);
+      // recentGames 只用来算近期耗时/分数/轮数，必须只留统计量：一局约 300 条
+      // 样本（每条 ~6 KB），窗口 50 局就是 ~100 MB —— 旧实现把整个 result（含
+      // transitions）塞进来，导致整批训练结束后这 100 MB 仍然常驻。
+      recentGames.push({
+        gameIndex: result.gameIndex, durationMs: result.durationMs, steps: result.steps,
+        playerCount: result.playerCount, rounds: result.rounds,
+        scores: result.scores, rewards: result.rewards
+      });
       if (recentGames.length > 50) recentGames.shift();
       // 异常局：单局时间显著高于近期均值时打印一次，便于训练者定位慢局
       const SLOW_GAME_FACTOR = 5;

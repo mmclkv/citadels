@@ -2,9 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
 const readline = require('readline');
 const { spawn } = require('child_process');
+const { writeRollout } = require('./rollout-format.js');
 
 class TorchBridge {
   constructor({ root, model, config, onLog = () => {} }) {
@@ -98,25 +98,14 @@ class TorchBridge {
   }
 
   async _trainCore(transitions) {
-    const rolloutPath = path.join(this.dataDir, 'rollout-' + process.pid + '.json.gz');
-    const serializable = transitions.map(row => {
-      const out = {
-        state: Array.from(row.state), actions: row.actions.map(action => Array.from(action)),
-        chosen: row.chosen, oldProb: row.oldProb, oldValue: row.oldValue,
-        reward: row.reward, temperature: row.temperature || 1
-      };
-      if (row.oldValueVector) out.oldValueVector = row.oldValueVector;
-      if (row.rewardVector) out.rewardVector = row.rewardVector;
-      if (row.valueMask) out.valueMask = row.valueMask;
-      // MCTS 模式：把访问分布 π 一起序列化，让 GPU 训练侧用交叉熵替代比例裁剪
-      if (row.pi) out.pi = row.pi;
-      if (row.mctsValue != null) out.mctsValue = row.mctsValue;
-      if (row.mctsValueVector) out.mctsValueVector = row.mctsValueVector;
-      return out;
-    });
-    fs.writeFileSync(rolloutPath, zlib.gzipSync(JSON.stringify(serializable), { level: 1 }));
+    const rolloutPath = path.join(this.dataDir, 'rollout-' + process.pid + '.bin');
+    // 直写二进制：整批样本经一个 4MB 复用缓冲分块落盘，不再有
+    // Array.from 副本 / JSON 巨型字符串 / gzip 缓冲这三份中间物。
+    // 实测 256 局一批：旧路径序列化阶段额外驻留 2676 MB，现在只剩写入缓冲。
+    const rollout = writeRollout(rolloutPath, transitions);
     try {
-      const response = await this.request({ cmd: 'train', rolloutPath, modelPath: this.modelPath,
+      const response = await this.request({ cmd: 'train', rolloutPath, rolloutFormat: 'ctrl-binary',
+        rolloutBytes: rollout.bytes, modelPath: this.modelPath,
         epochs: this.config.ppoEpochs, miniBatch: this.config.miniBatch,
         policyLossMode: this.config.policyLossMode || 'auto' });
       this.readModel();
