@@ -12,6 +12,7 @@ const { SharedInferenceDaemon } = require('./shared-inference.js');
 const { SelfPlayPool } = require('./selfplay-pool.js');
 const { cloneTrimmed } = require('./search-state.js');
 const { applyRecorded } = require('./undo.js');
+const { determinize } = require('./determinize.js');
 const mcts = require('./mcts.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -290,6 +291,24 @@ function enumerateLegalActions(state, playerId) {
   return candidates;
 }
 
+/**
+ * 搜索用的根局面：把隐藏信息换成随机猜测（./determinize.js），并要求猜测复现了
+ * 真局面的合法动作列表 —— π 是按列表下标写进训练样本的，下标错位比不搜索更糟。
+ * 返回 null 表示几次猜测都没对上，此时宁可用纯策略网络走子，也不能把真 state
+ * 交给 MCTS（那就是让电脑偷看对手的手牌和牌库）。
+ */
+function alignedDeterminization(state, playerId, legal, rng, attempts = 4) {
+  const baseline = JSON.stringify(legal);
+  for (let i = 0; i < attempts; i++) {
+    const guess = determinize(state, playerId, rng);
+    const actions = enumerateLegalActions(guess, playerId);
+    if (actions.length === legal.length && JSON.stringify(actions) === baseline) {
+      return { state: guess, legal: actions };
+    }
+  }
+  return null;
+}
+
 function currentActor(state) {
   if (state.phase === 'draft' && state.draft) {
     const step = state.draft.steps[state.draft.stepIdx];
@@ -411,6 +430,19 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     const view = Engine.sanitize(state, actor.id);
     const encoded = encodeState(view, actor.id);
     const actionVectors = legal.map(action => encodeAction(action, encoded.context));
+    // 搜索只能看人类玩家看得到的信息：把根局面的隐藏部分换成随机猜测（确定化）。
+    // 直接把真 state 交给 MCTS（无论 JS 还是 native）等于让电脑看着对手的手牌和牌库
+    // 顺序做决策，学到的不是策略而是偷看。详见 ./determinize.js。
+    const willSearch = actor.botType !== 'heuristic' && (useNativeMcts || config.mctsSimulations > 0);
+    let searchRoot = null;
+    if (willSearch) {
+      searchRoot = alignedDeterminization(state, actor.id, legal, rng);
+      if (!searchRoot) {
+        console.warn('[train] 第 ' + gameIndex + ' 局：' + steps + ' 步的确定化猜测无法复现合法动作列表，' +
+          '本步不搜索（阶段 ' + state.phase + ' · 待定 ' +
+          JSON.stringify(state.turn && state.turn.pending && state.turn.pending.kind) + '）');
+      }
+    }
     const t0 = performance.now();
     const temperatureProgress = Math.min(1, gameIndex / Math.max(1, config.targetGames * 0.7));
     const temperature = config.temperatureStart + (config.temperatureEnd - config.temperatureStart) * temperatureProgress;
@@ -424,8 +456,9 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       let chosen = heuristicKey ? legal.findIndex(action => JSON.stringify(action) === heuristicKey) : -1;
       if (chosen < 0) chosen = 0;
       decision = { chosen, probability: 1 / legal.length, value: 0, entropy: 0 };
-    } else if (useNativeMcts) {
-      const nativeResult = await nativeSearch.search(state, actor.id, legal, config.modelVersion || 0);
+    } else if (useNativeMcts && searchRoot) {
+      const nativeResult = await nativeSearch.search(searchRoot.state, actor.id, searchRoot.legal,
+        config.modelVersion || 0);
       piVector = nativeResult.policy;
       mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
       mctsValue = mctsValueVector[0];
@@ -434,11 +467,11 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       for (let i = 0; i < piVector.length; i++) { r -= piVector[i]; if (r <= 0) { chosen = i; break; } }
       decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue,
         entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
-    } else if (config.mctsSimulations > 0) {
+    } else if (config.mctsSimulations > 0 && searchRoot) {
       const jsFallbackEvaluator = config.mctsEngine === 'cpp' && config.neuralNetworkFramework === 'libtorch'
         ? null : evaluator;
       const mctsResult = await mcts.search({
-        rootState: state,
+        rootState: searchRoot.state,
         rootPlayerId: actor.id,
         model,
         Engine,
@@ -719,6 +752,7 @@ async function train(rawConfig, hooks = {}) {
     log('MCTS 已启用：每步 ' + config.mctsSimulations + ' 模拟 · c_puct=' + config.mctsC_puct +
       ' · α=' + config.mctsDirichletAlpha + ' · ε=' + config.mctsDirichletEpsilon +
       ' · maxDepth=' + config.mctsMaxDepth +
+      ' · 根局面已确定化（搜索看不到对手手牌/牌库顺序）' +
       ' · 评估器=' + config.mctsEvaluator + '（' +
       (config.mctsEvaluator === 'gpu'
         ? 'GPU 批量 forward 走 PyTorch 桥，批 ' + config.mctsBatchSize + ' · 等待 ' + config.mctsMaxWaitMs + 'ms'
@@ -977,6 +1011,7 @@ module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
   STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES, ACTION_TYPES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
+  alignedDeterminization,
   resolveNetworkPlayerCount, heuristicLevelFor, nativeMctsSupportsGame,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR,

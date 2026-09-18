@@ -7,8 +7,9 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const Engine = require('../src/engine.js');
 const { PolicyValueNetwork } = require('../training/neural-policy.js');
-const { currentActor } = require('../training/train.js');
-const { createLocalNeuralBot, MAX_INFERENCE_MS, TTA_VARIANTS } = require('../lib/local-neural-bot.js');
+const { currentActor, enumerateLegalActions } = require('../training/train.js');
+const { createLocalNeuralBot, normalizeMcts, MAX_INFERENCE_MS, TTA_VARIANTS,
+  MCTS_MAX_SIMULATIONS, MCTS_MAX_DEPTH_CAP } = require('../lib/local-neural-bot.js');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'citadels-neural-bot-'));
 let bot;
@@ -74,8 +75,36 @@ let bot;
     assert.equal(inference.variants, TTA_VARIANTS, 'TTA 聚合全部语义等价视图');
     assert.equal(inference.timedOut, false, '正常局面在预算内完成 TTA 推理');
     assert(inference.durationMs <= MAX_INFERENCE_MS, '推理没有超过二十秒预算');
+    assert.equal(inference.method, 'tta', '默认（模拟数 0）不搜索，行为与旧版一致');
 
-    console.log('本地神经网络电脑：checkpoint、TTA 聚合、硬超时与合法行动全部通过');
+    // 确定化 MCTS：房主填了模拟数才启用
+    const mctsStatus = bot.status().mcts;
+    assert.equal(mctsStatus.determinizations >= 1, true, '状态接口报告确定化份数');
+    assert.equal(mctsStatus.maxSimulations, MCTS_MAX_SIMULATIONS);
+    assert.equal(mctsStatus.maxDepthCap, MCTS_MAX_DEPTH_CAP);
+    assert.equal(normalizeMcts(undefined), null, '不传设置 = 关闭搜索');
+    assert.equal(normalizeMcts({ simulations: 0 }), null, '模拟数 0 = 关闭搜索');
+    assert.equal(normalizeMcts({ simulations: -5 }), null, '负数按关闭处理');
+    assert.deepEqual(normalizeMcts({ simulations: 10 }), { simulations: 10, maxDepth: 60 },
+      '最大深度 0 表示用默认值');
+    assert.equal(normalizeMcts({ simulations: 9e9 }).simulations, MCTS_MAX_SIMULATIONS, '模拟数有上限');
+    assert.equal(normalizeMcts({ simulations: 10, maxDepth: 9e9 }).maxDepth, MCTS_MAX_DEPTH_CAP, '深度有上限');
+
+    const searchState = JSON.stringify(state);
+    const nextActor = currentActor(state);
+    const nextLegal = enumerateLegalActions(state, nextActor.id);
+    assert(nextLegal.length, '推进一手后仍有可决策的玩家');
+    const searched = await bot.decide(state, nextActor.id, { mcts: { simulations: 48, maxDepth: 12 } });
+    assert(searched && searched.type, '确定化搜索同样给出行动');
+    assert.equal(JSON.stringify(state), searchState, '搜索只在猜测出的副本上进行，不改权威状态');
+    const searchInference = bot.status().tta.lastInference;
+    assert.equal(searchInference.method, 'mcts', '开启后走确定化 MCTS');
+    assert(searchInference.determinizations >= 1, '至少完成一份确定化的搜索');
+    assert(searchInference.visits >= 1, '搜索确实访问了节点');
+    assert(nextLegal.some(item => JSON.stringify(item) === JSON.stringify(searched)), true,
+      '搜索结果仍是当前合法动作');
+
+    console.log('本地神经网络电脑：checkpoint、TTA 聚合、确定化 MCTS、硬超时与合法行动全部通过');
   } finally {
     if (bot) bot.close();
     fs.rmSync(root, { recursive: true, force: true });

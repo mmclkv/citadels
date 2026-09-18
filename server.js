@@ -16,6 +16,7 @@ const AgentModule = require('./src/agent.js');
 const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
 const TrainingManagerModule = require('./lib/training-manager.js');
 const LocalNeuralBotModule = require('./lib/local-neural-bot.js');
+const { MCTS_MAX_SIMULATIONS, MCTS_MAX_DEPTH_CAP } = LocalNeuralBotModule;
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -77,6 +78,14 @@ function botTypeError(type) {
   if (type === 'agent' && !agentStatus().configured) return agentStatus().message;
   if (type === 'neural' && !localNeuralBot.status().configured) return localNeuralBot.status().message;
   return '';
+}
+
+// 确定化 MCTS 只对策略神经网络电脑生效；模拟数 0 = 关闭（默认），此时纯策略网络走子。
+function clampMctsSimulations(value) {
+  return Math.max(0, Math.min(MCTS_MAX_SIMULATIONS, Math.floor(Number(value) || 0)));
+}
+function clampMctsDepth(value) {
+  return Math.max(0, Math.min(MCTS_MAX_DEPTH_CAP, Math.floor(Number(value) || 0)));
 }
 
 /* ------------------------------ 静态资源 ------------------------------ */
@@ -166,7 +175,9 @@ function createRoom(hostName, config) {
       botLevel: config.botLevel || 'normal',
       botType: normalizeBotType(config.botType),
       // 房主在开局设置里选的节奏（= 普通动作的间隔毫秒），服务器上的机器人按它减速
-      botPace: Number(config.botPace) || 430
+      botPace: Number(config.botPace) || 430,
+      mctsSimulations: clampMctsSimulations(config.mctsSimulations),
+      mctsMaxDepth: clampMctsDepth(config.mctsMaxDepth)
     },
     state: null,
     createdAt: Date.now(),
@@ -511,6 +522,8 @@ function handle(ws, info, msg) {
         if (msg.config.charSetMode) r.config.charSetMode = msg.config.charSetMode;
         if (msg.config.botLevel) r.config.botLevel = msg.config.botLevel;
         if (msg.config.botPace) r.config.botPace = Number(msg.config.botPace) || r.config.botPace;
+        if (msg.config.mctsSimulations != null) r.config.mctsSimulations = clampMctsSimulations(msg.config.mctsSimulations);
+        if (msg.config.mctsMaxDepth != null) r.config.mctsMaxDepth = clampMctsDepth(msg.config.mctsMaxDepth);
         if (msg.config.playerCount) {
           const t = Math.max(2, Math.min(8, msg.config.playerCount));
           r.config.playerCount = t;

@@ -6,7 +6,7 @@ const zlib = require('zlib');
 const Engine = require('../src/engine.js');
 const AI = require('../src/ai.js');
 const { PolicyValueNetwork } = require('../training/neural-policy.js');
-const { enumerateLegalActions, currentActor } = require('../training/train.js');
+const { enumerateLegalActions, currentActor, alignedDeterminization } = require('../training/train.js');
 const { NativeSearchClient } = require('../training/native-search.js');
 const { SharedInferenceDaemon } = require('../training/shared-inference.js');
 
@@ -69,12 +69,15 @@ async function main() {
         let action;
         if (actor.id === 'nn') {
           const searchStarted = Date.now();
-          const result = await client.search(state, actor.id, legal, game);
+          // 与训练一致：搜索只看在公开信息上采样出来的猜测局面，不看真牌。
+          const root = alignedDeterminization(state, actor.id, legal, Math.random);
+          if (!root) throw new Error('确定化无法复现合法动作列表，game=' + game + ' step=' + steps);
+          const result = await client.search(root.state, actor.id, root.legal, game);
           searchMs += Date.now() - searchStarted;
           let best = 0;
           for (let i = 1; i < result.policy.length; i++)
             if (result.policy[i] > result.policy[best]) best = i;
-          action = legal[best];
+          action = root.legal[best];
         } else {
           action = AI.decide(state, actor.id) || legal[0];
         }

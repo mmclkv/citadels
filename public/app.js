@@ -244,6 +244,21 @@
       return false;
     } finally { clearTimeout(timer); }
   }
+  // 「策略神经网络」电脑专属的 MCTS 配置：0 = 关闭搜索（按网络策略直接走子）。
+  // 上限与服务器的 clamp 一致，客户端只是提前拦住明显越界的输入。
+  function readMctsConfig(simsId, depthId) {
+    const clamp = (id, max) => Math.max(0, Math.min(max, Math.floor(Number($(id) && $(id).value) || 0)));
+    return { mctsSimulations: clamp(simsId, 2000), mctsMaxDepth: clamp(depthId, 200) };
+  }
+  function syncNeuralOnlyFields() {
+    [['#screen-setup', '#cfg-bot-type'], ['#lobby-pre', '#net-bot-type']].forEach(pair => {
+      const root = $(pair[0]);
+      const select = $(pair[1]);
+      if (!root || !select) return;
+      const show = select.value === 'neural';
+      Array.from(root.querySelectorAll('.neural-only')).forEach(node => { node.hidden = !show; });
+    });
+  }
   async function startServerBotSingle(cfg) {
     const available = cfg.botType === 'agent' ? await checkAgentServer() : await checkNeuralServer();
     if (!available) return;
@@ -252,10 +267,10 @@
     Net.name = cfg.name;
     Net.connect(() => {
       Net.autoStart = true;
-      Net.send({ t: 'createRoom', name: cfg.name, config: {
+      Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
         playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
         endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act
-      } });
+      }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth')) });
     });
   }
   function showScreen(id) {
@@ -3981,6 +3996,13 @@
     $('#btn-speed').onclick = cycleSpeed;
     syncSpeedBtn();
 
+    // MCTS 两项只在电脑类型选「策略神经网络」时才露出来
+    ['#cfg-bot-type', '#net-bot-type'].forEach(id => {
+      const node = $(id);
+      if (node) node.onchange = syncNeuralOnlyFields;
+    });
+    syncNeuralOnlyFields();
+
     $('#btn-start-single').onclick = () => {
       const cfg = {
         players: Number($('#cfg-players').value),
@@ -4006,7 +4028,7 @@
       Net.name = ($('#net-name').value || '玩家').trim();
       Net.connect(() => {
         Net.send({
-          t: 'createRoom', name: Net.name, config: {
+          t: 'createRoom', name: Net.name, config: Object.assign({
             playerCount: Number($('#net-players').value),
             bots: Number($('#net-bots').value),
             endDistricts: Number($('#net-end').value),
@@ -4015,7 +4037,7 @@
             botType: $('#net-bot-type').value,
             // 房主的节奏偏好决定服务器上机器人的行动间隔
             botPace: pace().act
-          }
+          }, readMctsConfig('#net-mcts-sims', '#net-mcts-depth'))
         });
       });
       App.mode = 'net';

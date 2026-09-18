@@ -25,12 +25,15 @@ node server.js 9000       # 指定端口
 
 - 支持开始、优雅停止与从 checkpoint 继续训练；停止时会保存当前模型。
 - 所有座位使用同一个策略价值网络，并且网络输入来自 `Engine.sanitize`，不会读取对手手牌、隐藏角色或牌库顺序。
+- 开 MCTS 时的搜索同样看不到真牌：交给 JS 与 C++ 两个搜索引擎的根局面都由 `training/determinize.js` 换成一份随机猜测（对手手牌、牌库与弃牌堆顺序、暗置移除、对手未打出的角色、真逮捕令），再在猜测局面上重新枚举合法动作一并送进来；训练每步用 1 份猜测，实战神经网络电脑平均 4 份。
 - 使用合法动作枚举与动作掩码，策略只在通过引擎校验的行动中采样。
 - 默认由 4 个 Node worker 并行生成自对弈轨迹，再由 PyTorch 在 CUDA GPU 上批量执行 PPO 更新；也可选择 PyTorch CPU 或旧版 JavaScript CPU 兼容模式。
 - 使用 PPO 裁剪目标、价值损失与探索熵；控制台把策略损失放在独立纵轴，并实时显示 KL 散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
 - `fast`、`balanced`、`large` 三档约为 12.4 万、32.1 万、61.6 万参数；当前电脑建议先用 `balanced` 跑 100 局基准，再决定是否使用 `large`。
 - 训练过程的模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
-- 已训练 10000 局的默认推理权重发布在 `models/policy-default.json.gz`。新拉取的仓库无需复制 checkpoint，创建房间时选择“策略神经网络（仓库自带权重）”即可使用。服务器优先加载这个版本化模型；仅当它缺失时，才回退到 `training-data` 中局数最高的本地 checkpoint。
+- 已训练 29582 局的 `large` 档默认推理权重发布在 `models/policy-default.json.gz`（配套元数据 `policy-default.meta.json`）。新拉取的仓库无需复制 checkpoint，创建房间时选择“策略神经网络（仓库自带权重）”即可使用。服务器优先加载这个版本化模型；仅当它缺失时，才回退到 `training-data` 中局数最高的本地 checkpoint。
+- 部署用的模型是从训练 checkpoint 精简而来的：删掉 `history`、`config` 只留 `profile`、权重四舍五入到 6 位小数（8.5 MB → 3.1 MB；40 个真实局面的 argmax 全一致，最大 logit 偏差 4.3e-4）。同编号的 `.optimizer.pt` 是 GPU 续训用的 optimizer 状态，推理不读它，因此留在 `training-data/`（不入库）。
+- 开局面板把电脑类型选成「策略神经网络」时，会额外出现两项 MCTS 设置（模拟次数 / 最大搜索深度），默认都是 0 = 关闭。关闭时电脑按策略网络的 TTA 投票走子；打开后服务器先把隐藏信息（对手手牌、牌库与弃牌堆顺序、对手未打出的角色牌、真逮捕令）换成 4 份随机猜测，在每份猜测上做确定化 MCTS，再平均根节点访问分布选动作 —— 电脑不会因此偷看到真牌。模拟次数上限 2000、深度上限 200，超范围由服务器截断。
 - GPU optimizer 状态保存在同编号的 `.optimizer.pt` 文件中；旧 JavaScript checkpoint 可以直接迁移到 GPU 训练。
 
 训练控制接口只允许服务器本机调用：

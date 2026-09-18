@@ -15,6 +15,7 @@ const HeuristicAI = require('../src/ai.js');
 const mcts = require('./mcts.js');
 const { cloneTrimmed } = require('./search-state.js');
 const { applyRecorded } = require('./undo.js');
+const { determinize } = require('./determinize.js');
 const { encodeState, encodeAction } = require('./train.js');
 
 function uniqueActions(list) {
@@ -134,10 +135,14 @@ async function main() {
     while (state.phase !== 'gameover' && steps < 60000) {
       const actor = currentActor(state);
       if (!actor) throw new Error('no actor, phase=' + state.phase);
-      const legal = enumerateLegalActions(state, actor.id);
+      // 与训练一致：喂给 MCTS 的根只能是确定化后的猜测局面（本脚本只统计模拟路径
+      // 占比，猜测与真牌对分布没有影响）。π 的下标取自猜测局面的动作列表；万一这一步
+      // 猜出的动作在真局面上走不通，下面的兜底逻辑会换一个真正合法的动作。
+      const rootState = determinize(state, actor.id);
+      const legal = enumerateLegalActions(rootState, actor.id);
       if (!legal.length) throw new Error('no legal actions for ' + actor.name);
       const res = await mcts.search({
-        rootState: state,
+        rootState,
         rootPlayerId: actor.id,
         model,
         Engine,
