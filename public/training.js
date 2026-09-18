@@ -213,6 +213,12 @@ function render(status) {
   $('m-steps').textContent = integer(point.steps);
   $('m-rounds').textContent = num(point.avgRounds, 1);
   $('m-score').textContent = num(point.avgScore, 1);
+  // 课程式早期只有个别座位是策略网络，avg_reward（同桌零和均值）不反映它的强弱，
+  // 因此单独展示网络座位自己的名次分与第一率。
+  $('m-nn-reward').textContent = num(point.networkReward, 2);
+  $('m-nn-win').textContent = Number.isFinite(Number(point.networkWinRate))
+    ? num(point.networkWinRate * 100, 0) + '%' : '—';
+  $('nn-now').textContent = '名次分 ' + num(point.networkReward, 2) + ' · 第一率 ' + num(point.networkWinRate * 100, 0) + '%';
   $('m-fallbacks').textContent = integer(point.fallbacks);
   $('value-loss-now').textContent = '价值损失 ' + num(point.valueLoss, 4);
   $('total-loss-now').textContent = '总损失 ' + num(point.totalLoss, 4);
@@ -241,6 +247,11 @@ function render(status) {
   drawLines($('approx-kl-chart'), history, [
     { key: 'approxKl', color: '#9d7bff', label: 'KL 散度' }
   ], { digits: 4, zeroBased: true });
+  // 名次分区间 [-1,1]、第一率 [0,1]，两条线共用一个刻度轴即可对比趋势
+  drawLines($('network-chart'), history, [
+    { key: 'networkReward', color: '#35dcff', label: '名次分' },
+    { key: 'networkWinRate', color: '#ffd36a', label: '第一率' }
+  ]);
   drawLines($('speed-chart'), history, [
     { key: 'avgGameMs', color: '#35dcff', label: '整局毫秒', scale: .001 },
     { key: 'avgInferenceMs', color: '#ff4fc7', label: '单步毫秒' }
@@ -268,6 +279,7 @@ function renderRuntime(status) {
     ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch（C++）' : (c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—')],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
+    ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['启发式难度', c.heuristicDifficulty || '—'],
     ['样本来源', c.trainNetworkOnly === false ? '全部玩家' : '仅策略网络玩家'],
     ['MCTS', mctsLabel],

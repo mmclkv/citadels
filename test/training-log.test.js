@@ -73,6 +73,7 @@ async function runAndCaptureLogs(config) {
   assert.ok(progressLog, '应有进度日志');
   assert.ok(progressLog.includes('局/分'), '进度日志应含速率');
   assert.ok(progressLog.includes('avg_score'), '进度日志应含平均分');
+  assert.ok(progressLog.includes('网络玩家'), '进度日志应含网络玩家自身指标');
   assert.ok(progressLog.includes('预计剩余'), '进度日志应含 ETA');
 
   // 6) 存档行：每 checkpointEvery + 最终一次

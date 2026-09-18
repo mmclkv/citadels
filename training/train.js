@@ -363,7 +363,13 @@ function heuristicLevelFor(config, seatIndex, gameIndex) {
   return levels[(Math.abs((config.seed || 0) + gameIndex * 17 + seatIndex * 31) % levels.length)];
 }
 
+// 单局回合数上限的默认值；正常自对弈局平均十几到二十几回合结束，留足余量。
+const DEFAULT_MAX_ROUNDS = 100;
+
 async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evaluator = null, nativeSearch = null) {
+  // 超长局几乎都出自规则死循环（实测过 rounds=929 · 31301 步 · 100s 的局），
+  // 既吃训练吞吐又抬高内存峰值，到上限就中断这一局并丢弃数据，不等它自己结束。
+  const maxRounds = config.maxRounds || DEFAULT_MAX_ROUNDS;
   const playerCount = config.minPlayers + Math.floor(rng() * (config.maxPlayers - config.minPlayers + 1));
   const charSets = config.charSet === 'random' ? ['base', 'dark', 'mixed'] : [config.charSet];
   const charSet = charSets[Math.floor(rng() * charSets.length)];
@@ -385,7 +391,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   const transitions = [];
   let steps = 0, inferenceMs = 0, fallbackCount = 0;
   const startedAt = Date.now();
-  while (state.phase !== 'gameover' && steps < config.maxSteps) {
+  while (state.phase !== 'gameover' && steps < config.maxSteps && state.round <= maxRounds) {
     if (shouldStop()) break;
     const actor = currentActor(state);
     // 「某一步没有合法行动」是引擎不应出现的死角。以前这里直接抛异常，一次偶发
@@ -493,6 +499,9 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   }
   if (state.phase !== 'gameover') {
     if (shouldStop()) return { stopped: true, transitions: [] };
+    if (state.round > maxRounds)
+      return { dropped: true, reason: '回合数 ' + state.round + ' 超过上限 ' + maxRounds,
+        rounds: state.round, steps, durationMs: Date.now() - startedAt };
     console.warn('[train] 跳过第 ' + gameIndex + ' 局：超过最大步数 ' + config.maxSteps);
     return null;
   }
@@ -504,10 +513,21 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     tr.reward = target.values[0];
   });
   const winning = state.winner == null ? [] : [state.winner];
+  // avg_reward 把同桌所有人的名次分取平均，按构造≈0，看不出课程早期那一名网络
+  // 玩家的强弱；这里单独统计网络座位自己的名次分、得分和是否（并列）第一。
+  const networkIds = new Set(seats.slice(0, networkPlayerCount).map(seat => seat.id));
+  const mean = values => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const networkRows = state.scores.filter(row =>
+    networkIds.has(state.players[row.playerIdx] && state.players[row.playerIdx].id));
+  const rewardOf = row => rewards.get(state.players[row.playerIdx].id) || 0;
   return {
     transitions, steps, rounds: state.round, durationMs: Date.now() - startedAt,
     avgInferenceMs: inferenceMs / Math.max(1, steps), fallbackCount, playerCount, charSet,
     networkPlayerCount,
+    networkReward: mean(networkRows.map(rewardOf)),
+    networkScore: mean(networkRows.map(row => row.total)),
+    // 名次第一的奖励恒为 +1（并列第一同样拿 +1），据此判断是否夺冠
+    networkWin: networkRows.some(row => rewardOf(row) >= 1) ? 1 : 0,
     mctsEngineUsed: config.mctsSimulations > 0 ? (useNativeMcts ? 'cpp' : 'js') : 'none',
     rewards: Array.from(rewards.values()), scores: state.scores.map(s => s.total), winners: winning
   };
@@ -522,6 +542,7 @@ const MAX_BATCH_GAMES = 256;
 const ADJUSTED_CONFIG_FIELDS = [
   ['targetGames', '目标局数'], ['batchGames', '每批对局'], ['ppoEpochs', 'PPO 轮数'],
   ['miniBatch', 'GPU 小批量'], ['workers', '并行自对弈进程'], ['maxSteps', '单步上限'],
+  ['maxRounds', '单局回合上限'],
   ['checkpointEvery', '每隔多少局存档'], ['learningRate', '学习率'],
   ['temperatureStart', '起始温度'], ['temperatureEnd', '结束温度'],
   ['mctsSimulations', 'MCTS 模拟数'], ['mctsBatchSize', 'MCTS 批量'],
@@ -580,6 +601,7 @@ function sanitizeConfig(input = {}) {
     checkpointEvery: Math.max(1, Math.min(10000, Number(input.checkpointEvery) || 100)),
     seed: Math.floor(Number(input.seed) || 20260913),
     maxSteps: Math.max(1000, Math.min(100000, Number(input.maxSteps) || 60000)),
+    maxRounds: Math.max(1, Math.min(10000, Number(input.maxRounds) || DEFAULT_MAX_ROUNDS)),
     temperatureStart: Math.max(0.2, Math.min(2, Number(input.temperatureStart) || 1.1)),
     temperatureEnd: Math.max(0.15, Math.min(1.5, Number(input.temperatureEnd) || 0.65)),
     resumeCheckpoint: input.resumeCheckpoint ? path.basename(String(input.resumeCheckpoint)) : '',
@@ -690,7 +712,9 @@ async function train(rawConfig, hooks = {}) {
       : ('课程：' + config.curriculumStartPlayers + '→' + (config.curriculumEndPlayers || '全员') +
         '，每 ' + config.curriculumStepGames + ' 局增加 1 人');
   log('自对弈阵容：' + composition + ' · 启发式难度=' + config.heuristicDifficulty +
-    ' · 训练样本=' + (config.trainNetworkOnly ? '仅策略网络玩家' : '全部玩家')); 
+    ' · 训练样本=' + (config.trainNetworkOnly ? '仅策略网络玩家' : '全部玩家'));
+  log('指标说明：avg_reward 是同桌所有人名次奖励的均值，零和所以长期≈0，与网络强弱无关；' +
+    '看进步请用「策略网络战力」曲线的 networkReward / 第一率');
   if (config.mctsSimulations > 0) {
     log('MCTS 已启用：每步 ' + config.mctsSimulations + ' 模拟 · c_puct=' + config.mctsC_puct +
       ' · α=' + config.mctsDirichletAlpha + ' · ε=' + config.mctsDirichletEpsilon +
@@ -733,7 +757,11 @@ async function train(rawConfig, hooks = {}) {
   let loggedDarkNativeFallback = false;
   if (torch && !stopping) {
     const nativeGpuSearch = config.mctsEngine === 'cpp' && config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu';
-    if (nativeGpuSearch) {
+    // LibTorch 直连的 C++ worker 不会收到 sharedMemoryName（native-search.js 显式跳过下发），
+    // 起了 daemon 也没人消费，白白多一份 Python+PyTorch 进程和一份 CUDA context。
+    // 8GB 内存的机器上这份死重量就是 bad allocation 崩溃现场的一部分。
+    const useSharedMemoryDaemon = nativeGpuSearch && config.nativeInferenceBackend !== 'libtorch';
+    if (useSharedMemoryDaemon) {
       sharedInference = new SharedInferenceDaemon({
         root: ROOT, modelPath: torch.modelPath, profile: config.profile,
         device: config.device || 'cuda', onLog: log
@@ -748,6 +776,8 @@ async function train(rawConfig, hooks = {}) {
         throw error;
       }
       log('原生 GPU MCTS：' + config.workers + ' 个 C++ worker → 1 个共享内存 GPU 推理进程');
+    } else if (nativeGpuSearch) {
+      log('原生 GPU MCTS：' + config.workers + ' 个 C++ worker 走 LibTorch 直连推理，未启动共享内存 daemon');
     }
     const poolOpts = { root: ROOT, config,
       size: Math.min(config.workers, config.batchGames), onLog: text => log(text) };
@@ -757,8 +787,10 @@ async function train(rawConfig, hooks = {}) {
         torch.batchForward({ stateVectors, actionVectorsList });
       if (!nativeGpuSearch) {
         log('MCTS 评估：worker → torch.batchForward（PyTorch）');
-      } else {
+      } else if (useSharedMemoryDaemon) {
         log('MCTS 评估：C++ 规则/MCTS worker 走共享内存 GPU daemon（含新增暗版角色）');
+      } else {
+        log('MCTS 评估：C++ 规则/MCTS worker 走 LibTorch 直连（含新增暗版角色）');
       }
     } else if (config.mctsSimulations > 0) {
       log('MCTS 评估：worker 内本地 JS 网络 forward（mctsEvaluator=js）');
@@ -783,10 +815,13 @@ async function train(rawConfig, hooks = {}) {
       results = await pool.run(indices, torch.modelPath, completedGames);
     } else {
       const result = await runSelfPlayGame(model, config, completedGames + 1, rng, shouldStop);
-      results = (!result || result.stopped) ? [] : [{ gameIndex: completedGames + 1, ...result }];
+      if (result && result.dropped) log('游戏 #' + (completedGames + 1) + ' ' + result.reason +
+        '，已丢弃该局（未计入数据）· ' + result.steps + ' 步 · ' +
+        ((result.durationMs || 0) / 1000).toFixed(1) + 's');
+      results = (!result || result.stopped || result.dropped) ? [] : [{ gameIndex: completedGames + 1, ...result }];
     }
     if (!results.length) {
-      // 收到停止信号就真的停下；否则说明这一批/这一局跑不通（无合法行动、超步数），
+      // 收到停止信号就真的停下；否则说明这一批/这一局跑不通（无合法行动、超步数、超回合上限），
       // 记一次数后继续下一局，别让偶发死角把整次训练打断。
       if (shouldStop() || ++emptyBatches > 20) {
         if (emptyBatches > 20) log('连续多局无法跑完，训练提前结束（详见 worker 警告日志）');
@@ -814,7 +849,10 @@ async function train(rawConfig, hooks = {}) {
       recentGames.push({
         gameIndex: result.gameIndex, durationMs: result.durationMs, steps: result.steps,
         playerCount: result.playerCount, rounds: result.rounds,
-        scores: result.scores, rewards: result.rewards
+        scores: result.scores, rewards: result.rewards,
+        networkPlayers: result.networkPlayerCount,
+        networkReward: result.networkReward, networkScore: result.networkScore,
+        networkWin: result.networkWin
       });
       if (recentGames.length > 50) recentGames.shift();
       // 异常局：单局时间显著高于近期均值时打印一次，便于训练者定位慢局
@@ -853,6 +891,11 @@ async function train(rawConfig, hooks = {}) {
     const recentDuration = recentGames.reduce((sum, g) => sum + g.durationMs, 0) / recentGames.length;
     const recentScore = recentGames.reduce((sum, g) => sum + g.scores.reduce((a, b) => a + b, 0) / g.scores.length, 0) / recentGames.length;
     const recentReward = recentGames.reduce((sum, g) => sum + g.rewards.reduce((a, b) => a + b, 0) / g.rewards.length, 0) / recentGames.length;
+    // 只统计策略网络座位（课程早期是一名人）：avg_reward 是同桌零和均值，掩盖了
+    // 网络自身的强弱，networkReward / networkWinRate 才是「有没有变强」的信号。
+    const networkGames = recentGames.filter(g => Number.isFinite(g.networkReward));
+    const networkMean = key => networkGames.length
+      ? networkGames.reduce((sum, g) => sum + (g[key] || 0), 0) / networkGames.length : 0;
     const point = {
       game: completedGames, elapsedMs, steps: totalSteps, policyLoss: losses.policyLoss,
       valueLoss: losses.valueLoss, totalLoss: losses.totalLoss, entropy: losses.entropy,
@@ -861,6 +904,8 @@ async function train(rawConfig, hooks = {}) {
       gamesPerMinute: (completedGames - initialCompletedGames) / Math.max(1e-6, elapsedMs / 60000),
       avgGameMs: recentDuration, avgInferenceMs: totalInferenceMs / Math.max(1, totalSteps),
       avgScore: recentScore, avgReward: recentReward, fallbacks: totalFallbacks,
+      networkReward: networkMean('networkReward'), networkScore: networkMean('networkScore'),
+      networkWinRate: networkMean('networkWin'), networkPlayers: Math.round(networkMean('networkPlayers')),
       avgRounds: recentGames.reduce((sum, g) => sum + g.rounds, 0) / recentGames.length,
       winSeats: winSeats.slice(0, config.maxPlayers),
       mctsSimulations: config.mctsSimulations,
@@ -877,7 +922,10 @@ async function train(rawConfig, hooks = {}) {
       log('进度 ' + completedGames + '/' + config.targetGames + ' 局（' + pct + '%）· ' +
         '整局 ' + (point.avgGameMs / 1000).toFixed(2) + 's · 单步 ' + point.avgInferenceMs.toFixed(2) + 'ms · ' +
         point.gamesPerMinute.toFixed(1) + ' 局/分 · avg_score=' + point.avgScore.toFixed(1) +
-        ' · avg_reward=' + point.avgReward.toFixed(2) + ' · rounds=' + point.avgRounds.toFixed(1) +
+        ' · avg_reward=' + point.avgReward.toFixed(2) +
+        ' · 网络玩家 名次分=' + point.networkReward.toFixed(2) +
+        ' 得分=' + point.networkScore.toFixed(1) + ' 第一率=' + Math.round(point.networkWinRate * 100) + '%' +
+        ' · rounds=' + point.avgRounds.toFixed(1) +
         etaStr);
     }
     if (checkpointDue) {

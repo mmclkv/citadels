@@ -3,6 +3,7 @@
 #endif
 #include <array>
 #include <iostream>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -94,21 +95,28 @@ int main() {
   int gpu_model_version = -1;
   while (std::getline(std::cin, line)) {
     std::string id;
+    // 出错时把请求规模一起回传：只有一句「bad allocation」定位不到是哪个状态。
+    std::string context;
     try {
       const auto request = parse_json(line);
+      context = "行长=" + std::to_string(line.size());
       const auto& id_value = required_field(request, "id");
       id = id_value.as_string();
+      context += " · id=" + id;
       const auto& state_value = required_field(request, "state");
       const auto& actions_value = required_field(request, "legalActions");
       const auto root_id = string_field(request, "rootPlayerId");
       if (!actions_value.is_array() || actions_value.as_array().empty())
         throw std::runtime_error("legalActions 不能为空");
       NativeGameState state = load_native_state(state_value);
+      context += " · 玩家=" + std::to_string(state.players.size()) +
+        " · round=" + std::to_string(state.round);
       const int root = player_index(state, root_id);
       if (root < 0) throw std::runtime_error("rootPlayerId 不存在");
       std::vector<NativeSearchAction> supplied;
       supplied.reserve(actions_value.as_array().size());
       for (const auto& value : actions_value.as_array()) supplied.push_back(decode_action(value));
+      context += " · 动作=" + std::to_string(supplied.size());
 
       NativeGameAdapter game;
       UniformNativeEvaluator evaluator;
@@ -158,7 +166,13 @@ int main() {
       config.c_puct = static_cast<float>(number_field(request, "cPuct", 1.0));
       config.seed = static_cast<uint32_t>(int_field(request, "seed", 1));
       const int batch_size = std::max(1, int_field(request, "batchSize", 32));
+      context += " · 模拟=" + std::to_string(config.simulations) +
+        " · maxDepth=" + std::to_string(config.max_depth) +
+        " · maxNodes=" + std::to_string(config.max_nodes) +
+        " · batch=" + std::to_string(batch_size) +
+        " · 后端=" + inference_backend;
       const auto native_actions = game.legal_actions(state, root);
+      context += " · 原生动作=" + std::to_string(native_actions.size());
       std::vector<float> policy;
       float root_value = 0.0f;
       std::array<float, kValueSlots> root_value_vector{};
@@ -240,8 +254,13 @@ int main() {
         std::cout << '"' << action_type_name(supplied[i].type) << '"';
       }
       std::cout << "],\"backend\":\"native-mcts\"}\n" << std::flush;
+    } catch (const std::bad_alloc& error) {
+      // MSVC 下 bad_alloc::what() 固定是「bad allocation」，即主机内存申请失败；
+      // CUDA 显存不足走下面的 std::exception 分支，文本是 torch 自己的报错。
+      emit_error(id, std::string("native 搜索进程内存不足（") + error.what() + "）· " + context +
+        " · 处理建议：降低 maxDepth / 模拟数 / batch 或减少 C++ worker 数");
     } catch (const std::exception& error) {
-      emit_error(id, error.what());
+      emit_error(id, std::string(error.what()) + (context.empty() ? std::string() : " · " + context));
     }
   }
 }

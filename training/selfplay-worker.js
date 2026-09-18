@@ -117,6 +117,15 @@ parentPort.on('message', async message => {
     const result = await runSelfPlayGame(model, workerData.config, message.gameIndex, rng, () => stopping, evaluator, nativeEvaluator);
     // 跑不通（无合法行动 / 超步数）的局会被 train.js 置为 null：丢弃它并打一条日志，
     // 既不让整次训练崩掉，也不会让这类死角悄无声息地消失。
+    // 超回合上限的局带 reason，同样丢数据、立刻接下一局。
+    if (result && result.dropped) {
+      parentPort.postMessage({ type: 'log',
+        text: '[worker] 游戏 #' + message.gameIndex + ' ' + result.reason +
+          '，已丢弃该局（未计入数据）· ' + result.steps + ' 步 · ' +
+          ((result.durationMs || 0) / 1000).toFixed(1) + 's' });
+      parentPort.postMessage({ type: 'result', taskId: message.taskId, gameIndex: message.gameIndex, result: null });
+      return;
+    }
     if (!result) {
       parentPort.postMessage({ type: 'log',
         text: '[worker] 游戏 #' + message.gameIndex + ' 无法跑完，已跳过该局（未计入数据）' });

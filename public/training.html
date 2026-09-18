@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=9">
+  <link rel="stylesheet" href="./training.css?v=10">
 </head>
 <body>
   <header class="train-header">
@@ -91,6 +91,8 @@
       <article><span>总决策步</span><strong id="m-steps">0</strong><small>步</small></article>
       <article><span>平均轮数</span><strong id="m-rounds">—</strong><small>轮</small></article>
       <article><span>平均分数</span><strong id="m-score">—</strong><small>分</small></article>
+      <article><span>网络名次分</span><strong id="m-nn-reward">—</strong><small>-1~1</small></article>
+      <article><span>网络第一率</span><strong id="m-nn-win">—</strong><small>近 50 局</small></article>
       <article><span>非法行动兜底</span><strong id="m-fallbacks">0</strong><small>次</small></article>
     </section>
 
@@ -99,6 +101,7 @@
       <article class="panel chart-panel"><div class="section-title"><div><h2>总损失</h2><p>训练目标的总损失变化趋势</p></div><span id="total-loss-now">—</span></div><canvas id="total-loss-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>KL 散度</h2><p>MCTS 策略与网络策略的近似散度，突升代表更新过猛</p></div><span id="approx-kl-now">—</span></div><canvas id="approx-kl-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略网络战力</h2><p>只统计策略网络座位的名次分与（并列）第一比例，不受同桌零和均值影响</p></div><span id="nn-now">—</span></div><canvas id="network-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>座位胜局</h2><p>用于观察先后手与座位偏差</p></div></div><canvas id="seat-chart"></canvas></article>
     </section>
@@ -109,6 +112,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=17"></script>
+  <script src="./training.js?v=19"></script>
 </body>
 </html>

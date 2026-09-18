@@ -32,6 +32,26 @@ const Train = require('../training/train.js');
   assert.strictEqual(result.fallbackCount, 0, '整局没有非法行动兜底');
   assert.ok(result.transitions.length > 10, '收集到可训练的多选行动轨迹');
   assert.ok(result.avgInferenceMs < 30, '单步神经网络推理低于 30ms');
+  assert.strictEqual(Train.sanitizeConfig({}).maxRounds, 100, '未配置时单局回合上限默认 100');
+  const capped = Train.sanitizeConfig({ targetGames: 1, minPlayers: 2, maxPlayers: 2,
+    charSet: 'base', profile: 'fast', batchGames: 1, seed: 42, endDistricts: 7, maxRounds: 1 });
+  const cappedResult = await Train.runSelfPlayGame(model, capped, 1, () => 0.42, () => false);
+  assert.ok(cappedResult && cappedResult.dropped, '超过回合上限的局被丢弃，不产出训练数据');
+  assert.match(cappedResult.reason, /回合数/, '丢弃原因写明超回合上限');
+  assert.ok(cappedResult.rounds > 1 && cappedResult.rounds <= 2, '到上限立即中断，不等这一局跑完');
+  // 课程首段只有一人用策略网络：网络指标必须是那名玩家自己的名次分/得分，
+  // 不能是同桌均值（那种数按构造≈0，衡量不出进步）。
+  const solo = Train.sanitizeConfig({ targetGames: 1, minPlayers: 4, maxPlayers: 4,
+    charSet: 'base', profile: 'fast', batchGames: 1, seed: 42, endDistricts: 7,
+    selfPlayMode: 'curriculum', curriculumStartPlayers: 1, curriculumStepGames: 100000 });
+  const soloResult = await Train.runSelfPlayGame(model, solo, 1, () => 0.42, () => false);
+  assert.strictEqual(soloResult.networkPlayerCount, 1, '课程首段每局只有一名网络玩家');
+  assert.ok(soloResult.rewards.includes(soloResult.networkReward),
+    'networkReward 等于那名网络玩家的名次奖励');
+  assert.ok(soloResult.scores.includes(soloResult.networkScore),
+    'networkScore 等于那名网络玩家的得分');
+  assert.strictEqual(soloResult.networkWin, soloResult.networkReward >= 1 ? 1 : 0,
+    'networkWin 与名次分一致（第一名奖励为 +1）');
   const before = model.policyOut.w[0];
   const loss = model.trainPPO(result.transitions.slice(0, 24), { epochs: 1, learningRate: 0.0003 });
   assert.ok(Object.values(loss).every(Number.isFinite), 'PPO 损失指标均为有限数值');
