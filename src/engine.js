@@ -424,8 +424,9 @@
       state.turn.pending = { kind: 'blackmailer_threat', targetIdx: entry.playerIdx,
         signed: threat.signed === entry.num };
       log(state, '【勒索者】' + target.name + ' 受到威胁，可支付一半金币赎回。', 'bad');
+      // 不写 signed：中没中真标记正是受害者要赌的信息，客户端也不该在响应前拿到。
       notify(state, 'blackmailer_threat', { playerIdx: entry.playerIdx, playerId: target.id,
-        playerName: target.name, signed: threat.signed === entry.num });
+        playerName: target.name });
       return;
     }
 
@@ -1099,9 +1100,15 @@
     return out;
   }
 
+  /**
+   * 住持保护只看公开信息（played 对所有观看者都公开）。
+   * 8 号角色一定晚于 5 号被叫到，所以「手握住持」和「已打出住持」在可到达的
+   * 局面里是同一件事；用 chars 判断会让候选目标列表少掉一整名玩家，
+   * 等于把「谁拿到住持」这个隐藏信息直接告诉行动者。
+   */
   function isAbbotProtected(state, pidx) {
     const p = state.players[pidx];
-    if (!p.chars.some(c => c === 'abbot')) return false;
+    if (!(p.played || []).some(c => c === 'abbot')) return false;
     return state.effects.assassinated !== 5 && state.effects.bewitched !== 5;
   }
   function destroyCost(state, tpidx, card) {
@@ -2390,6 +2397,26 @@
   }
 
   /* ---------------------------- 隐藏信息 ---------------------------- */
+  /**
+   * 事件提示偶尔带着只该发给某一家看的牌面（贵族刚抽到的牌、间谍看到的对手手牌构成）。
+   * 客户端拿到的是通知全文，所以裁剪必须发生在服务端：否则人类玩家翻一下网络面板就能读出别人的牌。
+   * @param {object} n 原始通知 @param {number} idx 观看者座位（-1 表示观战）
+   */
+  function noticeForViewer(n, idx) {
+    if (idx >= 0) {
+      if (n.kind === 'noble_draw' && n.playerIdx === idx) return n;
+      if (n.kind === 'spy_result' && n.byIdx === idx) return n;
+    }
+    if (n.kind !== 'noble_draw' && n.kind !== 'spy_result') return n;
+    const copy = {};
+    for (const key in n) {
+      if (!Object.prototype.hasOwnProperty.call(n, key)) continue;
+      if (key === 'cardNames' || key === 'matching' || key === 'cards') continue;
+      copy[key] = n[key];
+    }
+    return copy;
+  }
+
   function sanitize(state, playerId) {
     repairState(state);
     const idx = playerIdx(state, playerId);
@@ -2478,8 +2505,8 @@
       },
       firstToFinish: state.firstToFinish,
       log: state.log.slice(-120),
-      // 关键事件（公开信息），客户端据此弹提示
-      notices: (state.notices || []).slice(-12),
+      // 关键事件，客户端据此弹提示；带私人牌面的几条按观看者裁剪后再发出
+      notices: (state.notices || []).slice(-12).map(n => noticeForViewer(n, idx)),
       // 实时计分（城区是公开信息，任何人都能随时查看各玩家得分与明细）
       scores: computeScores(state),
       winner: state.winner,
