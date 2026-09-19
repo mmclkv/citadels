@@ -293,7 +293,8 @@ function render(status) {
   $('m-nn-reward').textContent = num(point.networkReward, 2);
   $('m-nn-win').textContent = Number.isFinite(Number(point.networkWinRate))
     ? num(point.networkWinRate * 100, 0) + '%' : '—';
-  $('nn-now').textContent = '名次分 ' + num(point.networkReward, 2) + ' · 第一率 ' + num(point.networkWinRate * 100, 0) + '%';
+  $('nn-reward-now').textContent = perCountText(point, 'reward', v => num(v, 2));
+  $('nn-win-now').textContent = perCountText(point, 'winRate', v => num(v * 100, 0) + '%');
   $('m-fallbacks').textContent = integer(point.fallbacks);
   $('value-loss-now').textContent = '价值损失 ' + num(point.valueLoss, 4);
   $('total-loss-now').textContent = '总损失 ' + num(point.totalLoss, 4);
@@ -322,16 +323,21 @@ function render(status) {
   drawLines($('approx-kl-chart'), history, [
     { key: 'approxKl', color: '#9d7bff', label: 'KL 散度' }
   ], { digits: 4, zeroBased: true });
-  // 名次分区间 [-1,1]、第一率 [0,1]，两条线共用一个刻度轴即可对比趋势
-  drawLines($('network-chart'), history, [
-    { key: 'networkReward', color: '#35dcff', label: '名次分' },
-    { key: 'networkWinRate', color: '#ffd36a', label: '第一率' }
-  ]);
+  // 战力按人数拆线：4 人局拿第一比 8 人局容易得多，不同人数的基线本来就不一样，
+  // 混在一起的趋势会被「这段时间主要在跑几人局」牵着走。
+  // 最新一点也纳入：它是刚跑完的那批，可能第一次出现某种人数
+  const counts = playerCountsWithNetwork(history.concat([point]));
+  drawLines($('network-reward-chart'), history, counts.map((n, i) => ({
+    label: n + ' 人', color: countColor(i), pick: row => networkStat(row, n, 'reward')
+  })));
+  drawLines($('network-win-chart'), history, counts.map((n, i) => ({
+    label: n + ' 人', color: countColor(i), pick: row => networkStat(row, n, 'winRate')
+  })), { digits: 2, zeroBased: true });
   drawLines($('speed-chart'), history, [
     { key: 'avgGameMs', color: '#35dcff', label: '整局毫秒', scale: .001 },
     { key: 'avgInferenceMs', color: '#ff4fc7', label: '单步毫秒' }
   ]);
-  drawBars($('seat-chart'), point.winSeats || []);
+  drawSeatGroups($('seat-chart'), seatGroups(point.winSeatsByPlayers));
   syncResumeUI();
 }
 
@@ -482,16 +488,38 @@ function prepareCanvas(canvas) {
   const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio); return { ctx, width: rect.width, height: rect.height };
 }
 
-function movingAverage(rows, key, windowSize, scale = 1) {
+// 一条曲线取值的唯一入口：普通系列读 row[key]，按人数拆分的系列用 pick(row)，
+// 两种情况都要再乘 scale。
+function seriesValue(row, series) {
+  const raw = series.pick ? series.pick(row) : row[series.key];
+  return Number(raw) * (series.scale || 1);
+}
+
+function movingAverage(rows, series, windowSize) {
   return rows.map((row, index) => {
     const start = Math.max(0, index - windowSize + 1);
     let sum = 0, count = 0;
     for (let i = start; i <= index; i++) {
-      const value = Number(rows[i][key]) * scale;
+      const value = seriesValue(rows[i], series);
       if (Number.isFinite(value)) { sum += value; count++; }
     }
     return count ? sum / count : NaN;
   });
+}
+
+// 图例按可用宽度自动换行：按人数拆线后最多 7 条，一行摆不下会挤到画布外。
+function drawLegend(ctx, series, x0, y0, maxWidth) {
+  if (!series.length) return 1;
+  ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const suffix = series.length <= 2 ? '（均线）' : '';
+  const itemWidth = Math.min(110, Math.max(46, ...series.map(s => ctx.measureText(s.label + suffix).width + 20)));
+  const perRow = Math.max(1, Math.floor(maxWidth / itemWidth));
+  series.forEach((s, i) => {
+    const x = x0 + (i % perRow) * itemWidth, y = y0 + Math.floor(i / perRow) * 13;
+    ctx.fillStyle = s.color; ctx.fillRect(x, y - 3, 12, 3);
+    ctx.fillStyle = '#8aaaba'; ctx.fillText(s.label + suffix, x + 17, y);
+  });
+  return Math.ceil(series.length / perRow);
 }
 
 function drawLines(canvas, history, series, options) {
@@ -499,11 +527,15 @@ function drawLines(canvas, history, series, options) {
   // digits：Y 轴刻度小数位。KL 这类量级很小的指标需要更高精度，否则刻度会被压成同一个数。
   const digits = Number.isFinite(opts.digits) ? opts.digits : 2;
   const { ctx, width, height } = prepareCanvas(canvas), pad = { l: 48, r: 16, t: 22, b: 38 };
-  const plotWidth = width - pad.l - pad.r, plotHeight = height - pad.t - pad.b;
-  ctx.clearRect(0, 0, width, height); ctx.strokeStyle = '#174861'; ctx.lineWidth = 1;
+  const plotWidth = width - pad.l - pad.r;
+  ctx.clearRect(0, 0, width, height);
+  // 图例可能占多行（按人数拆线时最多 7 条），先把它的高度让出来再定绘图区
+  pad.t += (drawLegend(ctx, series, pad.l, 10, plotWidth) - 1) * 13;
+  const plotHeight = height - pad.t - pad.b;
+  ctx.strokeStyle = '#174861'; ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) { const y = pad.t + plotHeight * i / 4; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(width - pad.r, y); ctx.stroke(); }
   const values = [];
-  history.forEach(row => series.forEach(s => { const v = Number(row[s.key]) * (s.scale || 1); if (Number.isFinite(v)) values.push(v); }));
+  history.forEach(row => series.forEach(s => { const v = seriesValue(row, s); if (Number.isFinite(v)) values.push(v); }));
   let min = values.length ? Math.min(...values) : 0, max = values.length ? Math.max(...values) : 1;
   // zeroBased：恒正指标（如 KL）把下界锚到 0，避免基线悬空、看不出绝对值大小
   if (opts.zeroBased && min > 0) min = 0;
@@ -526,37 +558,104 @@ function drawLines(canvas, history, series, options) {
   }
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   const averageWindow = Math.max(3, Math.ceil(history.length / 40));
-  series.forEach((s, si) => {
+  series.forEach(s => {
     ctx.strokeStyle = s.color; ctx.globalAlpha = .25; ctx.lineWidth = 1; ctx.beginPath(); let started = false;
     history.forEach((row, i) => {
-      const v = Number(row[s.key]) * (s.scale || 1); if (!Number.isFinite(v)) return;
+      const v = seriesValue(row, s); if (!Number.isFinite(v)) return;
       started ? ctx.lineTo(xFor(row, i), yFor(v)) : ctx.moveTo(xFor(row, i), yFor(v)); started = true;
     });
     ctx.stroke();
-    const average = movingAverage(history, s.key, averageWindow, s.scale || 1);
+    const average = movingAverage(history, s, averageWindow);
     ctx.globalAlpha = 1; ctx.lineWidth = 2.3; ctx.beginPath(); started = false;
     average.forEach((value, i) => {
       if (!Number.isFinite(value)) return;
       started ? ctx.lineTo(xFor(history[i], i), yFor(value)) : ctx.moveTo(xFor(history[i], i), yFor(value)); started = true;
     });
-    ctx.stroke(); ctx.fillStyle = s.color; ctx.fillRect(pad.l + si * 112, 5, 12, 3);
-    ctx.fillText(s.label + '（均线）', pad.l + 17 + si * 112, 10);
+    ctx.stroke();
   });
   ctx.globalAlpha = 1;
   if (!history.length) { ctx.fillStyle = '#8aaaba'; ctx.textAlign = 'center'; ctx.fillText('等待训练数据', width / 2, height / 2); ctx.textAlign = 'left'; }
 }
 
-function drawBars(canvas, values) {
-  const { ctx, width, height } = prepareCanvas(canvas), pad = 30;
-  ctx.clearRect(0, 0, width, height); const max = Math.max(1, ...values); const gap = 8;
-  const barWidth = (width - pad * 2 - gap * Math.max(0, values.length - 1)) / Math.max(1, values.length);
-  values.forEach((value, i) => {
-    const h = (height - 55) * value / max, x = pad + i * (barWidth + gap), y = height - 28 - h;
-    const grad = ctx.createLinearGradient(0, y, 0, height - 28); grad.addColorStop(0, '#ff4fc7'); grad.addColorStop(1, '#35dcff');
-    ctx.fillStyle = grad; ctx.fillRect(x, y, barWidth, h); ctx.fillStyle = '#8aaaba'; ctx.textAlign = 'center';
-    ctx.fillText('座位' + (i + 1), x + barWidth / 2, height - 9); ctx.fillStyle = '#eafaff'; ctx.fillText(String(value), x + barWidth / 2, Math.max(12, y - 5));
+// 人数分组用的配色：同一人数在两个战力图里同色，方便跨图对照
+const PLAYER_COUNT_COLORS = ['#35dcff', '#ffd36a', '#ff4fc7', '#7dff9b', '#9d7bff', '#ff9f6a', '#6affd8'];
+// 面板右上角只放得下前几种人数，后面用省略号收尾
+const HEADER_COUNTS = 4;
+
+function countColor(index) { return PLAYER_COUNT_COLORS[index % PLAYER_COUNT_COLORS.length]; }
+
+function seatGroups(byPlayers) {
+  const bucket = byPlayers || {};
+  return Object.keys(bucket).map(Number)
+    .filter(n => n >= 2 && bucket[n] && bucket[n].wins && bucket[n].wins.length)
+    .sort((a, b) => a - b)
+    .map(n => ({ players: n, games: Number(bucket[n].games) || 0, wins: bucket[n].wins.map(Number) }));
+}
+
+function networkStat(row, players, field) {
+  const bucket = row && row.networkByPlayers ? row.networkByPlayers[players] : null;
+  return bucket && Number(bucket.games) > 0 ? Number(bucket[field]) : NaN;
+}
+
+function playerCountsWithNetwork(rows) {
+  const set = new Set();
+  rows.forEach(row => {
+    const bucket = (row && row.networkByPlayers) || {};
+    Object.keys(bucket).forEach(key => { if (Number(bucket[key].games) > 0) set.add(Number(key)); });
   });
-  if (!values.length) { ctx.fillStyle = '#8aaaba'; ctx.textAlign = 'center'; ctx.fillText('等待胜局数据', width / 2, height / 2); }
+  return [...set].sort((a, b) => a - b);
+}
+
+function perCountText(point, field, format) {
+  const counts = playerCountsWithNetwork([point]);
+  if (!counts.length) return '—';
+  const bucket = point.networkByPlayers || {};
+  const shown = counts.slice(0, HEADER_COUNTS);
+  return shown.map(n => n + '人 ' + format(Number(bucket[n][field]))).join(' · ') +
+    (counts.length > shown.length ? ' …' : '');
+}
+
+// 座位胜局按人数分组：4 人局与 8 人局的「座位 1」不是同一个概念，混在一起统计
+// 只会得到一条按人数分布加权出来的假曲线。这里每种人数一组小图，组内仍按座位排。
+function drawSeatGroups(canvas, groups) {
+  const { ctx, width, height } = prepareCanvas(canvas);
+  ctx.clearRect(0, 0, width, height);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  if (!groups.length) {
+    ctx.fillStyle = '#8aaaba'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('等待胜局数据', width / 2, height / 2); ctx.textAlign = 'left'; return;
+  }
+  const padX = 12, gap = 16, top = 34, bottom = 24;
+  const groupWidth = (width - padX * 2 - gap * (groups.length - 1)) / groups.length;
+  groups.forEach((group, gi) => {
+    const x0 = padX + gi * (groupWidth + gap), baseY = height - bottom, maxH = baseY - top;
+    // 组内按该人数座位里的最高胜局归一：跨人数不可比（总局数与获胜人数都不同），
+    // 组内形状才是「这个人数下有没有先后手偏差」。
+    const groupMax = Math.max(1, ...group.wins);
+    ctx.font = '11px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#8aaaba';
+    ctx.fillText(group.players + ' 人 · ' + integer(group.games) + ' 局', x0 + groupWidth / 2, 14);
+    const seats = group.wins.length, inner = 5;
+    const barGap = seats > 1 ? Math.min(4, (groupWidth - inner * 2) / (seats * 3)) : 0;
+    const barWidth = Math.max(2, (groupWidth - inner * 2 - barGap * (seats - 1)) / seats);
+    // 分隔线：把每组框出来，避免相邻组看成一个连续的长条序列
+    ctx.strokeStyle = '#12384c'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x0 + inner, baseY + 1); ctx.lineTo(x0 + groupWidth - inner, baseY + 1); ctx.stroke();
+    group.wins.forEach((value, i) => {
+      const h = maxH * value / groupMax, x = x0 + inner + i * (barWidth + barGap), y = baseY - h;
+      const grad = ctx.createLinearGradient(0, y, 0, baseY);
+      grad.addColorStop(0, '#ff4fc7'); grad.addColorStop(1, '#35dcff');
+      ctx.fillStyle = grad; ctx.fillRect(x, y, barWidth, Math.max(1, h));
+      if (barWidth >= 15) {
+        ctx.font = '9px system-ui'; ctx.fillStyle = '#eafaff'; ctx.textAlign = 'center';
+        ctx.fillText(String(value), x + barWidth / 2, Math.max(11, y - 4));
+      }
+    });
+    ctx.font = '9px system-ui'; ctx.fillStyle = '#8aaaba'; ctx.textAlign = 'center';
+    if (barWidth >= 11) group.wins.forEach((_, i) => {
+      ctx.fillText(String(i + 1), x0 + inner + i * (barWidth + barGap) + barWidth / 2, baseY + 13);
+    });
+    else ctx.fillText('座位 1–' + seats, x0 + groupWidth / 2, baseY + 13);
+  });
   ctx.textAlign = 'left';
 }
 

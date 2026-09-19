@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=10">
+  <link rel="stylesheet" href="./training.css?v=11">
 </head>
 <body>
   <header class="train-header">
@@ -107,9 +107,10 @@
       <article class="panel chart-panel"><div class="section-title"><div><h2>总损失</h2><p>训练目标的总损失变化趋势</p></div><span id="total-loss-now">—</span></div><canvas id="total-loss-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>KL 散度</h2><p>MCTS 策略与网络策略的近似散度，突升代表更新过猛</p></div><span id="approx-kl-now">—</span></div><canvas id="approx-kl-chart"></canvas></article>
-      <article class="panel chart-panel"><div class="section-title"><div><h2>策略网络战力</h2><p>只统计策略网络座位的名次分与（并列）第一比例，不受同桌零和均值影响</p></div><span id="nn-now">—</span></div><canvas id="network-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略网络战力 · 名次分</h2><p>按对局人数分线，每种人数取该人数最近 50 局的策略网络座位名次分</p></div><span id="nn-reward-now">—</span></div><canvas id="network-reward-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略网络战力 · 第一率</h2><p>按对局人数分线，每种人数取该人数最近 50 局的（并列）第一比例</p></div><span id="nn-win-now">—</span></div><canvas id="network-win-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
-      <article class="panel chart-panel"><div class="section-title"><div><h2>座位胜局</h2><p>用于观察先后手与座位偏差</p></div></div><canvas id="seat-chart"></canvas></article>
+      <article class="panel chart-panel wide"><div class="section-title"><div><h2>座位胜局（按人数分组）</h2><p>每种人数一组，组内为该人数各座位的累计胜局；柱高按组内最高归一，跨人数不可比</p></div></div><canvas id="seat-chart"></canvas></article>
     </section>
 
     <section class="detail-grid">
@@ -118,6 +119,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=22"></script>
+  <script src="./training.js?v=23"></script>
 </body>
 </html>

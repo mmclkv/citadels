@@ -899,7 +899,11 @@ async function train(rawConfig, hooks = {}) {
   const rng = mulberry32(config.seed ^ 0xA53C9E11);
   let history = restored.history.slice();
   const recentGames = [];
-  const winSeats = Array(8).fill(0);
+  // 座位胜局必须按人数分开记：4 人局的座位 1 和 8 人局的座位 1 不是同一件事，
+  // 混在一起统计只会得到一条被人数分布加权过的假曲线。
+  const winSeatsByPlayers = {};   // { 玩家数: { games, wins: number[] } }，全程累计
+  // 战力曲线同理按人数分开取窗口：某种人数最近 50 局的均值。
+  const recentByPlayers = {};     // { 玩家数: stat[] }，每种人数各留 50 局
   let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0;
   let rollout = [];
   // 训练批次按“完成的对局数”计数，而不是按 worker 池是否存在计数。
@@ -1012,19 +1016,33 @@ async function train(rawConfig, hooks = {}) {
       totalSteps += result.steps;
       totalInferenceMs += result.avgInferenceMs * result.steps;
       totalFallbacks += result.fallbackCount;
-      result.winners.forEach(seat => { if (seat >= 0 && seat < winSeats.length) winSeats[seat]++; });
+      const seatCount = Number(result.playerCount) || 0;
+      if (seatCount >= 2) {
+        if (!winSeatsByPlayers[seatCount]) {
+          winSeatsByPlayers[seatCount] = { games: 0, wins: Array(seatCount).fill(0) };
+        }
+        const bucket = winSeatsByPlayers[seatCount];
+        bucket.games++;
+        result.winners.forEach(seat => { if (seat >= 0 && seat < bucket.wins.length) bucket.wins[seat]++; });
+      }
       // recentGames 只用来算近期耗时/分数/轮数，必须只留统计量：一局约 300 条
       // 样本（每条 ~6 KB），窗口 50 局就是 ~100 MB —— 旧实现把整个 result（含
       // transitions）塞进来，导致整批训练结束后这 100 MB 仍然常驻。
-      recentGames.push({
+      const gameStat = {
         gameIndex: result.gameIndex, durationMs: result.durationMs, steps: result.steps,
         playerCount: result.playerCount, rounds: result.rounds,
         scores: result.scores, rewards: result.rewards,
         networkPlayers: result.networkPlayerCount,
         networkReward: result.networkReward, networkScore: result.networkScore,
         networkWin: result.networkWin
-      });
+      };
+      recentGames.push(gameStat);
       if (recentGames.length > 50) recentGames.shift();
+      if (seatCount >= 2) {
+        const byCount = recentByPlayers[seatCount] || (recentByPlayers[seatCount] = []);
+        byCount.push(gameStat);
+        if (byCount.length > 50) byCount.shift();
+      }
       // 异常局：单局时间显著高于近期均值时打印一次，便于训练者定位慢局
       const SLOW_GAME_FACTOR = 5;
       const slowThreshold = recentGames.length > 1
@@ -1067,6 +1085,22 @@ async function train(rawConfig, hooks = {}) {
     const networkGames = recentGames.filter(g => Number.isFinite(g.networkReward));
     const networkMean = key => networkGames.length
       ? networkGames.reduce((sum, g) => sum + (g[key] || 0), 0) / networkGames.length : 0;
+    // 按人数分桶导出：座位胜局（全程累计）与策略网络战力（该人数最近 50 局）
+    const seatStatsByPlayers = {};
+    for (const key of Object.keys(winSeatsByPlayers)) {
+      const bucket = winSeatsByPlayers[key];
+      seatStatsByPlayers[key] = { games: bucket.games, wins: bucket.wins.slice() };
+    }
+    const networkByPlayers = {};
+    for (const key of Object.keys(recentByPlayers)) {
+      const withNetwork = recentByPlayers[key].filter(g => Number.isFinite(g.networkReward));
+      const mean = field => withNetwork.length
+        ? withNetwork.reduce((sum, g) => sum + (g[field] || 0), 0) / withNetwork.length : 0;
+      networkByPlayers[key] = {
+        games: withNetwork.length,
+        reward: mean('networkReward'), score: mean('networkScore'), winRate: mean('networkWin')
+      };
+    }
     const point = {
       game: completedGames, elapsedMs, steps: totalSteps, policyLoss: losses.policyLoss,
       valueLoss: losses.valueLoss, totalLoss: losses.totalLoss, entropy: losses.entropy,
@@ -1078,7 +1112,7 @@ async function train(rawConfig, hooks = {}) {
       networkReward: networkMean('networkReward'), networkScore: networkMean('networkScore'),
       networkWinRate: networkMean('networkWin'), networkPlayers: Math.round(networkMean('networkPlayers')),
       avgRounds: recentGames.reduce((sum, g) => sum + g.rounds, 0) / recentGames.length,
-      winSeats: winSeats.slice(0, config.maxPlayers),
+      winSeatsByPlayers: seatStatsByPlayers, networkByPlayers,
       mctsSimulations: config.mctsSimulations,
       mctsC_puct: config.mctsC_puct,
       mctsDirichletAlpha: config.mctsDirichletAlpha
