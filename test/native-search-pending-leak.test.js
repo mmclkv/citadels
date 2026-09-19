@@ -107,3 +107,43 @@ test('子进程不回包时请求会超时并重启 worker，而不是永久挂�
     client.close();
   }
 });
+
+test('成功的请求必须清掉自己的超时定时器（不能过点后重启误杀后续请求）', async t => {
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_SEARCH_WORKER'); return; }
+  // 事故（2026-09-20 探针实测）：#onData 成功路径先 pending.delete 再调 resolve，
+  // 而 #settle 靠 pending.get 找 waiter 清 timer —— 永远查不到。于是每个成功请求
+  // 都漏一个活 timer，闭包里钉着整份请求（含粒子池 state）直到超时窗结束；timer
+  // 到点还会照常 fire 去 restart 子进程，把当下正在飞的请求全部 reject。
+  // 探针 2400 次：修复前 heap 269MB 锯齿漂移 + 37% 请求被误杀；修复后 4.1MB / 0 误杀。
+  const Engine = require('../src/engine.js');
+  const { enumerateLegalActions } = require('../training/train.js');
+  const seats = Array.from({ length: 4 }, (_, i) => ({
+    id: 'p' + i, name: 'P' + i, isBot: true, botType: 'heuristic', botLevel: 'normal'
+  }));
+  const state = Engine.createGame({ roomId: 'leak-timer', endDistricts: 8,
+    charSetMode: 'base', seed: 42, seats });
+  Engine.startGame(state);
+  const legal = Engine.getAvailableActions(state, state.players[0].id).actions;
+  assert.ok(legal.length, '测试局面必须有合法动作');
+
+  const client = makeClient({ searchTimeoutMs: 150 });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const childAfterBoot = client.child;
+    for (let i = 0; i < 5; i++) {
+      const result = await client.search(state, 'p0', legal, 0, null);
+      assert.ok(Array.isArray(result.policy) && result.policy.length === legal.length,
+        '第 ' + i + ' 次搜索应当成功');
+    }
+    // 越过超时窗：若 timer 没清，这里会 fire 出 restart，把 child 换掉
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.equal(client.child, childAfterBoot,
+      '成功请求的定时器必须被清掉，不能过点后重启子进程');
+    assert.equal(client.pending.size, 0, 'pending 仍必须为空');
+    // 清干净之后，后续请求必须落在同一个健康进程上
+    const result = await client.search(state, 'p0', legal, 0, null);
+    assert.ok(Array.isArray(result.policy), '后续请求不应被历史定时器误杀');
+  } finally {
+    client.close();
+  }
+});

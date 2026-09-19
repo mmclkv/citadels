@@ -214,11 +214,23 @@ class NativeSearchClient {
       // waiter 自己也持有「怎么删掉我」的知识：任何一条出口（回包 / 报错 / 超时
       // / 批量 fail）都必须把条目从 pending 里摘掉。留在 Map 里的 waiter 会一直
       // 抓着调用方这一帧不放 —— pending 无界增长就是那次 worker heap OOM 的全部来源。
+      // timer 必须在 waiter 自己手里清，不能靠 #settle 查 pending：#onData 成功路径
+      // 会先把条目从 pending 摘掉再调 resolve，那时 #settle 已经查不到 waiter，
+      // clearTimeout 就永远不会执行 —— 每个成功请求都漏一个 timer，闭包里钉着
+      // 整份请求（含 4 份粒子 state）；timer 到点还会照常 fire 去重启子进程，
+      // 把当下健康的请求全部误杀（2026-09-20 探针实测：纯 JS 链路 37% 请求
+      // 被「因显存不足重启」误伤，heap 随超时窗口锯齿漂移）。
       const waiter = {
         resolve: value => { this.#settle(id); resolve(value); },
         reject: error => { this.#settle(id); reject(error); },
         timer: null
       };
+      waiter.settle = () => {
+        this.#settle(id);
+        if (waiter.timer) { clearTimeout(waiter.timer); waiter.timer = null; }
+      };
+      waiter.resolve = value => { waiter.settle(); resolve(value); };
+      waiter.reject = error => { waiter.settle(); reject(error); };
       this.pending.set(id, waiter);
       if (this.searchTimeoutMs > 0) {
         waiter.timer = setTimeout(() => {
