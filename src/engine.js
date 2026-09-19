@@ -180,6 +180,8 @@
         magistrate: null, blackmailer: null, taxCollectorGold: 0 },
       firstToFinish: -1,
       pendingQueen: null,
+      // 信念观测账本：每位玩家一条，全部由公开量派生（见 recordObservation）
+      observations: [],
       log: [],
       notices: [],
       noticeSeq: 0,
@@ -624,6 +626,8 @@
   // 但如果 draft 数据在同步时丢失，而每位玩家已经拿到本轮所需角色，
   // 可以根据玩家手上的角色安全重建行动阶段。
   function repairState(state) {
+    // 老存档 / 手工构造的局面没有观测账本，补上空数组让信念层可以无条件读
+    if (!Array.isArray(state.observations)) state.observations = [];
     if (state.phase === 'draft') {
       const expected = state.players.length <= 3 ? 2 : 1;
       const allChosen = state.players.length > 0 &&
@@ -2244,11 +2248,50 @@
   }
 
   /* ---------------------------- 回合结束 ---------------------------- */
+  /**
+   * 信念观测账本：把每位玩家「回合结束时公开可见的事实」记下来，供搜索的信念层
+   * （training/belief.js）给对手手牌的猜测加权。
+   *
+   * 记的是这条人类天天在用、而均匀采样完全丢弃的推理：一个玩家手上还有钱、建造
+   * 次数也没用完，却选择不建造 —— 那他手里就没有他买得起的牌。这是从「他没做的
+   * 事」反推出来的信息，比任何先验都强。反过来说，下面几种情况这句话不成立，
+   * 必须排除，否则会把真世界判成不可能、信念反而变差：
+   *   - 航海家：本回合根本不能建造，不建不代表任何事；
+   *   - 主教：可以忽略金币建造，没钱也能建，推不出「手里没有便宜牌」；
+   *   - 建造次数已用完（普通角色建满 1 栋）：不能再建了，同样推不出；
+   *   - 女巫接管（witch_resume）：花的是女巫的钱、进女巫的城区，账记不到角色
+   *     持有者头上。
+   * 金币取「建造结算后、回合末补贴（炼金术士回收）之前」的数目 —— 那才是他做
+   * 建造决策时真正面对的预算，所以本函数必须在退款之前调用。
+   *
+   * 只写公开量（金币 / 手牌张数 / 建造次数 / 角色），不含任何牌面，因此即使随
+   * sanitize 下发也不泄密（当前并未下发，客户端用不到）。
+   */
+  function recordObservation(state, t, p, c) {
+    if (!Array.isArray(state.observations)) state.observations = [];
+    if (!t || !p || !c) return;
+    if (t.phase === 'witch_resume') return;
+    if (c.id === 'navigator' || c.id === 'bishop') return;
+    // 已经建满了：不建是因为不能再建，不是因为买不起
+    if (t.builds >= buildLimitFor(state, t)) return;
+    if (!(p.gold >= 1)) return;
+    state.observations[t.playerIdx] = {
+      round: state.round,
+      gold: p.gold,
+      handSize: Array.isArray(p.hand) ? p.hand.length : 0,
+      // 生意人的绿色建筑不受建造限额约束，所以他「没建」推不出绿色牌的信息
+      freeColors: c.id === 'businessman' ? ['green'] : []
+    };
+  }
+
   function endTurn(state) {
     const t = state.turn;
     if (!t) return err('没有进行中的回合');
     const p = state.players[t.playerIdx];
     const c = charOf(t.charId);
+
+    // 必须在炼金术士退款之前：退款会把金币抬回建造前的水平，那不是他的决策预算
+    recordObservation(state, t, p, c);
 
     // 炼金术士回收建造花费。
     // 女巫接管被施咒的炼金术士时，是以炼金术士的身份继续该回合：用女巫自己的金币
@@ -2703,6 +2746,8 @@
     log: log,
     blackmailerBlockedNums: blackmailerBlockedNums,
     blackmailerValidNums: blackmailerValidNums,
-    isAbbotProtected: isAbbotProtected
+    isAbbotProtected: isAbbotProtected,
+    // 导出供信念层的回归测试直接构造场景（train/belief.js 只读它写下的账本）
+    recordBeliefObservation: recordObservation
   };
 });

@@ -110,7 +110,9 @@ test('CONFIG_FIELDS 覆盖 formConfig 提交的每一个字段', () => {
 
   const table = js.match(/const CONFIG_FIELDS = \[[\s\S]*?\n\];/);
   assert.ok(table, '必须定义 CONFIG_FIELDS 映射表');
-  const mapped = new Set([...table[0].matchAll(/\['([A-Za-z_][\w]*)',\s*'([\w-]+)',\s*'(number|select|bool)'\]/g)].map(m => m[1]));
+  // kind 的合法取值：number/select 写 value，bool 写 'true'/'false'（给 select 用），
+  // checked 写 el.checked（给 checkbox 用，例如 mctsBelief）
+  const mapped = new Set([...table[0].matchAll(/\['([A-Za-z_][\w]*)',\s*'([\w-]+)',\s*'(number|select|bool|checked)'\]/g)].map(m => m[1]));
   const derived = new Set((js.match(/const CONFIG_DERIVED = \[([^\]]*)\]/) || [, ''])[1]
     .split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean));
 
@@ -121,7 +123,7 @@ test('CONFIG_FIELDS 覆盖 formConfig 提交的每一个字段', () => {
   assert.deepStrictEqual(duplicated, [], '映射表里不应有重复键');
   // 每个映射目标 id 都得真实存在于页面上，否则回填时会静默跳过
   const html = read('public/training.html');
-  for (const [, , id] of table[0].matchAll(/\['([A-Za-z_][\w]*)',\s*'([\w-]+)',\s*'(?:number|select|bool)'\]/g)) {
+  for (const [, , id] of table[0].matchAll(/\['([A-Za-z_][\w]*)',\s*'([\w-]+)',\s*'(?:number|select|bool|checked)'\]/g)) {
     assert.ok(html.includes('id="' + id + '"'), '映射表指向的控件 ' + id + ' 在 training.html 里不存在');
   }
 });

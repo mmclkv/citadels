@@ -56,6 +56,7 @@ function formConfig() {
     mctsMaxWaitMs: +$('mcts-max-wait').value,
     mctsCacheSize: +$('mcts-cache-size').value,
     mctsParticles: Math.max(1, +$('mcts-particles').value || 1),
+    mctsBelief: !!$('mcts-belief') && $('mcts-belief').checked,
     selfPlayMode: $('self-play-mode').value,
     networkPlayerCount: +$('network-player-count').value,
     heuristicDifficulty: $('heuristic-difficulty').value,
@@ -97,6 +98,7 @@ const CONFIG_FIELDS = [
   ['mctsMaxWaitMs', 'mcts-max-wait', 'number'],
   ['mctsCacheSize', 'mcts-cache-size', 'number'],
   ['mctsParticles', 'mcts-particles', 'number'],
+  ['mctsBelief', 'mcts-belief', 'checked'],
   ['selfPlayMode', 'self-play-mode', 'select'],
   ['networkPlayerCount', 'network-player-count', 'number'],
   ['heuristicDifficulty', 'heuristic-difficulty', 'select'],
@@ -120,6 +122,7 @@ function applyCheckpointConfig(config) {
     const value = config[key];
     if (!el || value == null) { skipped.push(key); return; }
     if (kind === 'bool') el.value = value ? 'true' : 'false';
+    else if (kind === 'checked') el.checked = !!value;
     else if (kind === 'number') {
       if (!Number.isFinite(Number(value))) { skipped.push(key); return; }
       el.value = String(value);

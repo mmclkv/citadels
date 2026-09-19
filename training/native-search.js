@@ -96,10 +96,11 @@ class NativeSearchClient {
    *   传数组时整池进同一棵搜索树，每条模拟抽一份 —— 与 JS 侧 mcts.search 的
    *   rootStates 语义一致。传单个局面即退化为改造前的单世界搜索。
    */
-  search(state, rootPlayerId, legalActions, modelVersion = 0) {
+  search(state, rootPlayerId, legalActions, modelVersion = 0, particleWeights = null) {
     if (this.closed) return Promise.reject(new Error('native mcts_worker 已关闭'));
     const id = String(this.nextId++);
-    const request = JSON.parse(encodeSearchRequest(state, rootPlayerId, legalActions, id));
+    const request = JSON.parse(encodeSearchRequest(state, rootPlayerId, legalActions, id,
+      particleWeights));
     request.simulations = this.simulations;
     request.maxDepth = this.maxDepth;
     request.batchSize = this.batchSize;

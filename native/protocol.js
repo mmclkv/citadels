@@ -18,7 +18,7 @@ function stableFingerprint(value) {
  * 传数组时第一份仍是 state，其余放进 particles —— 旧 worker 不认识 particles，
  * 只会按第一份搜，于是天然退化成单粒子而不会报错。
  */
-function encodeSearchRequest(state, rootPlayerId, legalActions, requestId) {
+function encodeSearchRequest(state, rootPlayerId, legalActions, requestId, particleWeights) {
   const pool = (Array.isArray(state) ? state : [state]).map(entry => cloneTrimmed(entry));
   const [primary, ...particles] = pool;
   const request = {
@@ -32,6 +32,10 @@ function encodeSearchRequest(state, rootPlayerId, legalActions, requestId) {
     stateHash: stableFingerprint(pool)
   };
   if (particles.length) request.particles = particles;
+  // 长度对不上就不发：宁可让那边均匀采样，也不能把权重套到错的世界头上
+  if (Array.isArray(particleWeights) && particleWeights.length === pool.length) {
+    request.particleWeights = particleWeights.map(w => Number(w) || 0);
+  }
   return JSON.stringify(request) + '\n';
 }
 
@@ -66,6 +70,13 @@ function decodeSearchRequest(line) {
   const pool = particles ? [request.state, ...particles] : [request.state];
   if (stableFingerprint(pool) !== request.stateHash) {
     throw new Error('native 搜索请求 stateHash 不匹配');
+  }
+  if (request.particleWeights != null) {
+    if (!Array.isArray(request.particleWeights) ||
+        request.particleWeights.length !== pool.length ||
+        request.particleWeights.some(w => !Number.isFinite(Number(w)) || Number(w) < 0)) {
+      throw new Error('native 搜索请求 particleWeights 必须是与粒子池等长的非负数组');
+    }
   }
   if (!request.state.players || !Array.isArray(request.state.players)) {
     throw new Error('native 搜索请求 state 缺少 players');

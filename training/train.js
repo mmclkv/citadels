@@ -13,6 +13,7 @@ const { SelfPlayPool } = require('./selfplay-pool.js');
 const { cloneTrimmed } = require('./search-state.js');
 const { applyRecorded } = require('./undo.js');
 const { determinize } = require('./determinize.js');
+const { beliefWeights } = require('./belief.js');
 const mcts = require('./mcts.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -323,6 +324,20 @@ function alignedDeterminization(state, playerId, legal, rng, attempts = 4) {
   return alignedParticlePool(state, playerId, legal, rng, 1, attempts)[0] || null;
 }
 
+/**
+ * 粒子池的信念权重。
+ *
+ * 均匀重洗出来的每个世界在边际上都合法 —— 看不见的牌确实只在对手手里 / 牌库 /
+ * 弃牌堆里。但它完全不看对手做了什么：一个玩家攥着 6 块钱却没建任何东西，这种
+ * 世界里「他手里恰好有一张 1 费牌」的可能性就该被压下去。见 ./belief.js。
+ *
+ * 池里只有一份时权重没有意义（单粒子无论权重多少都必被抽中），返回 null。
+ */
+function particleBeliefWeights(pool, playerId, decay) {
+  if (!pool || pool.length < 2) return null;
+  return beliefWeights(pool.map(entry => entry.state), playerId, { decay });
+}
+
 function currentActor(state) {
   if (state.phase === 'draft' && state.draft) {
     const step = state.draft.steps[state.draft.stepIdx];
@@ -452,6 +467,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     const searchPool = willSearch
       ? alignedParticlePool(state, actor.id, legal, rng, config.mctsParticles) : [];
     const searchRoot = searchPool.length ? searchPool[0] : null;
+    const searchWeights = config.mctsBelief
+      ? particleBeliefWeights(searchPool, actor.id, BELIEF_DECAY) : null;
     if (willSearch && !searchRoot) {
       console.warn('[train] 第 ' + gameIndex + ' 局：' + steps + ' 步的确定化猜测无法复现合法动作列表，' +
         '本步不搜索（阶段 ' + state.phase + ' · 待定 ' +
@@ -473,7 +490,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     } else if (useNativeMcts && searchRoot) {
       // 整池一起交给 native：那边同样是一条模拟抽一个粒子、共用一棵树。
       const nativeResult = await nativeSearch.search(searchPool.map(p => p.state), actor.id,
-        searchRoot.legal, config.modelVersion || 0);
+        searchRoot.legal, config.modelVersion || 0, searchWeights);
       piVector = nativeResult.policy;
       mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
       mctsValue = mctsValueVector[0];
@@ -488,6 +505,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       const mctsResult = await mcts.search({
         // 整池进同一棵树；池里只有一份时与旧的单 rootState 完全等价
         rootStates: searchPool.map(entry => entry.state),
+        // 信念权重：与公开事实矛盾的世界少被抽到（null = 均匀采样）
+        particleWeights: searchWeights || undefined,
         rootPlayerId: actor.id,
         model,
         Engine,
@@ -591,6 +610,9 @@ const MAX_BATCH_GAMES = 256;
 // 深拷贝 + 重洗」，不是「模拟预算被切成几份」—— 这正是 ISMCTS 相对 PIMC 的关键差别。
 // 超过 16 之后边际收益很小（同一信息集的统计量已经够密），而确定化开销是线性的。
 const MAX_MCTS_PARTICLES = 16;
+// 信念强度：粒子每违反一张「他有钱却没建」的牌，权重乘一次这个数。
+// 1 = 关掉信念（退回均匀采样）；越小越相信「对手是理性的」。
+const BELIEF_DECAY = 0.15;
 
 // 会被 sanitizeConfig 夹逼、且值得在启动时回报给用户的数值配置项。
 const ADJUSTED_CONFIG_FIELDS = [
@@ -674,6 +696,8 @@ function sanitizeConfig(input = {}) {
     // 隐藏信息粒子数：整池进同一棵树，每条模拟随机抽一份往下走（ISMCTS）。
     // 1 份 = 退化为改造前的「猜一次钉死一棵树」。
     mctsParticles: clampInteger(input.mctsParticles, 1, MAX_MCTS_PARTICLES, 4),
+    // 信念：按公开事实（谁有钱却没建）给粒子加权。关掉就是均匀采样。
+    mctsBelief: input.mctsBelief !== false,
     policyLossMode: ['auto', 'ppo', 'mcts_ce'].includes(input.policyLossMode) ? input.policyLossMode : 'auto',
     // 自对弈阵容：默认保持历史行为（所有座位均由策略网络控制）。
     selfPlayMode: ['all-network', 'network-vs-heuristic', 'curriculum'].includes(input.selfPlayMode)
@@ -778,6 +802,7 @@ async function train(rawConfig, hooks = {}) {
       ' · maxDepth=' + config.mctsMaxDepth +
       ' · 根局面已确定化（搜索看不到对手手牌/牌库顺序）' +
       ' · 粒子=' + config.mctsParticles + '（同一棵树，每条模拟抽一份）' +
+      (config.mctsBelief ? ' · 信念加权（按公开事实压低矛盾世界）' : ' · 信念关闭（均匀采样）') +
       ' · 评估器=' + config.mctsEvaluator + '（' +
       (config.mctsEvaluator === 'gpu'
         ? 'GPU 批量 forward 走 PyTorch 桥，批 ' + config.mctsBatchSize + ' · 等待 ' + config.mctsMaxWaitMs + 'ms'
@@ -1036,9 +1061,9 @@ module.exports = {
   train, runSelfPlayGame, sanitizeConfig, encodeState, encodeAction,
   STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES, ACTION_TYPES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
-  alignedDeterminization, alignedParticlePool,
+  alignedDeterminization, alignedParticlePool, particleBeliefWeights,
   resolveNetworkPlayerCount, heuristicLevelFor, nativeMctsSupportsGame,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR,
-  MAX_BATCH_GAMES, MAX_MCTS_PARTICLES, adjustedConfigFields
+  MAX_BATCH_GAMES, MAX_MCTS_PARTICLES, BELIEF_DECAY, adjustedConfigFields
 };

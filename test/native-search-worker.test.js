@@ -130,6 +130,45 @@ test('原生搜索 worker 接受粒子池：整池进同一棵树，动作对不
   assert.ok(result.policy.every(value => Number.isFinite(value) && value >= 0));
 });
 
+test('信念权重随粒子池一起进 worker，并按权重抽样', async t => {
+  const executable = process.env.CITADELS_NATIVE_SEARCH_WORKER;
+  if (!executable) { t.skip('未设置 CITADELS_NATIVE_SEARCH_WORKER，跳过信念权重检查'); return; }
+  const seats = [0, 1, 2, 3].map(i => ({ id: 'pp' + i, name: 'P' + i, isBot: true, botType: 'neural' }));
+  const state = Engine.createGame({ seats, seed: 98, charSetMode: 'base' });
+  Engine.startGame(state);
+  finishDraft(state);
+  const actor = train.currentActor(state);
+  const legal = train.enumerateLegalActions(state, actor.id);
+  const pool = train.alignedParticlePool(state, actor.id, legal, mulberry32(6), 3);
+  assert.equal(pool.length, 3, '三份粒子都对齐了');
+
+  const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const response = new Promise((resolve, reject) => {
+    let data = '';
+    child.stdout.on('data', chunk => {
+      data += chunk;
+      const line = data.split(/\r?\n/)[0];
+      if (line) resolve(JSON.parse(line));
+    });
+    child.on('error', reject);
+  });
+  // 权重悬殊到接近「只抽第 0 份」，worker 应当照单全收并回报 belief=true
+  const request = JSON.parse(encodeSearchRequest(pool.map(entry => entry.state), actor.id, legal,
+    'worker-belief-1', [1000, 1e-3, 1e-3]));
+  assert.deepEqual(request.particleWeights, [1000, 0.001, 0.001], '权重随池一起发出去');
+  request.simulations = 8;
+  request.maxDepth = 8;
+  child.stdin.write(JSON.stringify(request) + '\n');
+  child.stdin.end();
+  const raw = await response;
+  child.kill();
+  const result = decodeSearchResponse(raw);
+  assert.equal(result.fallback, false, '信念不影响动作对齐');
+  assert.equal(result.particlesUsed, 3, '三份粒子都进了树（权重低不等于被丢弃）');
+  assert.equal(result.belief, true, 'worker 确认按权重抽样');
+  assert.equal(result.policy.length, legal.length);
+});
+
 test('6 人 mixed 完整对局中 native 与 JS 合法动作列表不发生 fallback', async t => {
   const executable = process.env.CITADELS_NATIVE_SEARCH_WORKER;
   if (!executable) { t.skip('未设置 CITADELS_NATIVE_SEARCH_WORKER，跳过完整动作对齐检查'); return; }

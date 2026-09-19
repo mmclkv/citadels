@@ -221,42 +221,64 @@ int main() {
       std::array<float, kValueSlots> root_value_vector{};
       int visits = 0, expansions = 0;
       int mismatch_index = -1;
+      bool belief_applied = false;
       const bool actions_match = actions_aligned(native_actions, supplied, &mismatch_index);
       // 只有动作列表对得上的粒子才能进同一棵树；一个都不剩就回退成均匀策略，
       // 绝不能拿主局面以外的世界去搜（那就是把错的世界当真的）。
+      //
+      // 信念权重（与池等长，下标 0 是主局面）：粒子被丢弃时必须同步丢掉它的权重，
+      // 否则权重会整体错位、套到别的世界上 —— 比没有信念更糟。
+      std::vector<float> raw_weights;
+      if (const auto* weights_value = request.get("particleWeights")) {
+        if (weights_value->is_array()) {
+          for (const auto& value : weights_value->as_array()) {
+            raw_weights.push_back(value.is_number() ? static_cast<float>(value.as_number()) : 0.0f);
+          }
+        }
+      }
+      const auto weight_at = [&](size_t i) {
+        return i < raw_weights.size() ? raw_weights[i] : 1.0f;
+      };
       std::vector<NativeGameState> pool;
+      std::vector<float> pool_weights;
       size_t particles_used = 0;
       if (actions_match) {
         pool.push_back(std::move(state));
-        for (auto& particle : particles) {
-          const auto particle_actions = game.legal_actions(particle, root);
-          if (actions_aligned(particle_actions, supplied)) pool.push_back(std::move(particle));
+        pool_weights.push_back(weight_at(0));
+        for (size_t i = 0; i < particles.size(); ++i) {
+          const auto particle_actions = game.legal_actions(particles[i], root);
+          if (!actions_aligned(particle_actions, supplied)) continue;
+          pool.push_back(std::move(particles[i]));
+          pool_weights.push_back(weight_at(i + 1));
         }
         particles_used = pool.size();
+        bool belief_used = false;
+        for (float weight : pool_weights) if (weight > 0.0f && weight != 1.0f) belief_used = true;
         Mcts<NativeGameState, NativeSearchAction>::Result result;
 #ifdef CITADELS_LIBTORCH
         if (direct_neural) {
           result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
-            .search(pool, root, batch_size);
+            .search(pool, root, batch_size, pool_weights);
         } else if (shared_neural) {
           result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
-            .search(pool, root, batch_size);
+            .search(pool, root, batch_size, pool_weights);
         } else if (neural) {
 #else
         if (shared_neural) {
           result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
-            .search(pool, root, batch_size);
+            .search(pool, root, batch_size, pool_weights);
         } else if (neural) {
 #endif
           result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
-            .search(pool, root, batch_size);
+            .search(pool, root, batch_size, pool_weights);
         } else {
           result = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
-            .search(pool, root);
+            .search(pool, root, pool_weights);
         }
         policy = result.policy; visits = result.visits; expansions = result.expansions;
         root_value = result.value;
         root_value_vector = result.value_vector;
+        belief_applied = belief_used && particles_used > 1;
       }
       if (policy.size() != supplied.size()) policy.assign(supplied.size(), 1.0f / supplied.size());
       std::cout << "{\"v\":1,\"t\":\"search_result\",\"id\":\"" << escape(id)
@@ -274,6 +296,7 @@ int main() {
                 << ",\"expansions\":" << expansions
                 << ",\"fallback\":" << (actions_match ? "false" : "true")
                 << ",\"particlesUsed\":" << particles_used
+                << ",\"belief\":" << (belief_applied ? "true" : "false")
                 << ",\"nativeActionCount\":" << native_actions.size()
                 << ",\"mismatchIndex\":" << mismatch_index
                 << ",\"nativeActionTypes\":[";
