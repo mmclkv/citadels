@@ -60,6 +60,10 @@ const wizard = manifest.cards.roles.wizard;
 if (!/wizard\.webp\?v=2$/.test(wizard.thumb) || !/wizard\.webp\?v=2$/.test(wizard.full)) {
   throw new Error('法师更新卡图缺少缓存版本标记');
 }
+const bishop = manifest.cards.roles.bishop;
+if (!/bishop\.webp\?v=2$/.test(bishop.thumb) || !/bishop\.webp\?v=2$/.test(bishop.full)) {
+  throw new Error('主教更新卡图缺少缓存版本标记');
+}
 
 const roleKeys = Object.keys(manifest.cards.roles);
 const districtKeys = Object.keys(manifest.cards.districts);
