@@ -444,11 +444,33 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   // 策略继续走；连续失败说明搜索通道真的坏了，才丢弃这一局交给上层判死。
   const SEARCH_FAILURE_LIMIT = 8;
   let searchFailures = 0;
+  // 每局最多逐条打 3 条失败日志：日志里刷几百条同名错误既看不清现场，本身也是
+  // 一批不小的字符串垃圾。之后只记数，不再逐条报。
+  const SEARCH_FAILURE_LOG_LIMIT = 3;
+  // 「跨局」熔断阈值。单局失败 8 步就丢这一局是够的，但丢完之后失败计数器清零、
+  // 下一局又会从头再试 —— 子进程真的没了（段错误 / IPC 断线）时，训练就卡在
+  // 「每局丢 8 步 → 换下一局」的高速空转里，一局也跑不完。累计到这个数就认定
+  // 搜索通道坏了，本局剩下的步退化为网络直选。
+  const SEARCH_CHANNEL_FAILURE_LIMIT = 64;
+  const searchChannel = nativeSearch || null;
+  let channelBroken = false;
   const handleSearchFailure = error => {
     searchFailures++;
     fallbackCount++;
-    console.warn('[train] 第 ' + gameIndex + ' 局：' + steps + ' 步搜索失败，本步改用均匀策略（' +
-      String((error && error.message) || error).split('\n')[0] + '）');
+    if (searchChannel) searchChannel.searchFailureStreak = (searchChannel.searchFailureStreak || 0) + 1;
+    if (searchFailures <= SEARCH_FAILURE_LOG_LIMIT) {
+      console.warn('[train] 第 ' + gameIndex + ' 局：' + steps + ' 步搜索失败，本步改用均匀策略（' +
+        String((error && error.message) || error).split('\n')[0] + '）');
+    } else if (searchFailures === SEARCH_FAILURE_LOG_LIMIT + 1) {
+      console.warn('[train] 第 ' + gameIndex + ' 局：搜索失败持续发生，本局后续不再逐条打印');
+    }
+    if (searchChannel && !channelBroken &&
+        searchChannel.searchFailureStreak >= SEARCH_CHANNEL_FAILURE_LIMIT) {
+      channelBroken = true;
+      console.warn('[train] 搜索通道连续 ' + searchChannel.searchFailureStreak + ' 次失败，' +
+        '本局剩余步改用网络直选（native mcts_worker 多半已经崩溃）：这一局的 π 目标会退化，' +
+        '但至少还能产出价值分样本');
+    }
     if (searchFailures >= SEARCH_FAILURE_LIMIT) {
       console.warn('[train] 丢弃第 ' + gameIndex + ' 局：连续 ' + searchFailures + ' 步搜索失败');
       return false;
@@ -504,7 +526,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       let chosen = heuristicKey ? legal.findIndex(action => JSON.stringify(action) === heuristicKey) : -1;
       if (chosen < 0) chosen = 0;
       decision = { chosen, probability: 1 / legal.length, value: 0, entropy: 0 };
-    } else if (useNativeMcts && searchRoot) {
+    } else if (useNativeMcts && searchRoot && !channelBroken) {
       // 整池一起交给 native：那边同样是一条模拟抽一个粒子、共用一棵树。
       let nativeResult = null;
       try {
@@ -514,6 +536,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         if (!handleSearchFailure(error)) return null;
       }
       if (nativeResult) {
+        searchFailures = 0;
+        if (searchChannel) searchChannel.searchFailureStreak = 0;
         piVector = nativeResult.policy;
         mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
         mctsValue = mctsValueVector[0];
@@ -523,7 +547,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue,
           entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
       }
-    } else if (config.mctsSimulations > 0 && searchRoot) {
+    } else if (config.mctsSimulations > 0 && searchRoot && !channelBroken) {
       const jsFallbackEvaluator = config.mctsEngine === 'cpp' && config.neuralNetworkFramework === 'libtorch'
         ? null : evaluator;
       let mctsResult = null;
@@ -553,6 +577,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         if (!handleSearchFailure(error)) return null;
       }
       if (mctsResult) {
+        searchFailures = 0;
+        if (searchChannel) searchChannel.searchFailureStreak = 0;
         piVector = mctsResult.pi;
         mctsValueVector = normalizeValueVector(mctsResult.valueVector, mctsResult.value);
         mctsValue = mctsValueVector[0];
@@ -578,16 +604,19 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     }
     inferenceMs += performance.now() - t0;
     if (legal.length > 1 && (actor.botType === 'neural' || !config.trainNetworkOnly)) {
+      // 这些向量统一保持 Float32Array：每局 300 条、每条几个向量，装箱成 number[]
+      // 后堆占用翻倍（每元素 8 字节且逐个装箱），worker→主进程 postMessage 的
+      // 结构化克隆也慢一倍（TypedArray 是整块 memcpy）。落盘的 rollout 写入器
+      // 本来就有 f32Bytes(...)，两种表示都吃得下。
       const transition = {
         playerId: actor.id, state: encoded.vector, actions: actionVectors, chosen: decision.chosen,
         oldProb: decision.probability, oldValue: decision.value,
-        oldValueVector: Array.from(normalizeValueVector(decision.valueVector, decision.value)), temperature
+        oldValueVector: normalizeValueVector(decision.valueVector, decision.value), temperature
       };
       if (piVector) {
-        // 序列化为普通数组以便后续 JSON 序列化（MCTS 模式向 GPU 训练侧暴露 π 目标）
-        transition.pi = Array.from(piVector);
+        transition.pi = piVector;
         transition.mctsValue = mctsValue;
-        transition.mctsValueVector = Array.from(normalizeValueVector(mctsValueVector, mctsValue));
+        transition.mctsValueVector = normalizeValueVector(mctsValueVector, mctsValue);
       }
       transitions.push(transition);
     }
@@ -614,8 +643,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   const rewards = gameRewards(state);
   transitions.forEach(tr => {
     const target = relativeRewardVector(state, tr.playerId, rewards);
-    tr.rewardVector = Array.from(target.values);
-    tr.valueMask = Array.from(target.mask);
+    tr.rewardVector = target.values;
+    tr.valueMask = target.mask;
     tr.reward = target.values[0];
   });
   const winning = state.winner == null ? [] : [state.winner];

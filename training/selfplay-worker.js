@@ -136,6 +136,18 @@ parentPort.on('message', async message => {
         text: '[worker] 游戏 #' + message.gameIndex + ' 慢局 ' + (result.durationMs / 1000).toFixed(1) + 's · ' +
           result.steps + ' 步 · rounds=' + result.rounds });
     }
+    // 定期报一次 worker 自己的内存。跑几万局的长训练里这是唯一的判据：heap 曲线
+    // 平是稳态、斜着往上走就是泄漏（2026-09-19 那次 native worker 崩溃后，每局
+    // 泄漏一整份样本，heap 一路爬到 V8 上限把 worker 打死）。
+    if (message.gameIndex % 200 === 0) {
+      const memory = process.memoryUsage();
+      const mb = bytes => (bytes / 1024 / 1024).toFixed(0) + 'MB';
+      parentPort.postMessage({ type: 'log',
+        text: '[worker] 内存 · 第 ' + message.gameIndex + ' 局 · heapUsed=' + mb(memory.heapUsed) +
+          ' · arrayBuffers=' + mb(memory.arrayBuffers) + ' · rss=' + mb(memory.rss) +
+          (nativeSearch && nativeSearch.searchFailureStreak
+            ? ' · 连续搜索失败=' + nativeSearch.searchFailureStreak : '') });
+    }
     parentPort.postMessage({ type: 'result', taskId: message.taskId, gameIndex: message.gameIndex, result });
   } catch (error) {
     parentPort.postMessage({ type: 'error', taskId: message.taskId, error: error.message, stack: error.stack });

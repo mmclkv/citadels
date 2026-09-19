@@ -2,18 +2,22 @@
 
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { encodeSearchRequest, decodeSearchResponse } = require('../native/protocol.js');
+const { buildSearchRequest, decodeSearchResponse } = require('../native/protocol.js');
 
 // 显存不足（CUDA OOM）时的重启上限与冷却时间。6GB 显卡还要和桌面合成器共享
 // 显存，偶发 OOM 不该中断训练；但真的持续 OOM 时也不能无限重启把机器拖垮。
 const MAX_OOM_RESTARTS = 3;
 const OOM_RESTART_COOLDOWN_MS = 30000;
+// 单个搜索请求的等待上限：子进程卡死（死循环、驱动掉卡、被系统暂停）时这条请求
+// 再也不会回来，waiter 会一直挂在 pending 里连带把调用方那一整帧钉在堆上。
+// 0 = 不限制。
+const DEFAULT_SEARCH_TIMEOUT_MS = 120000;
 
 class NativeSearchClient {
   constructor({ root, executable, simulations = 50, maxDepth = 200, batchSize = 32, cPuct = 1, seed = 1,
     gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda',
     inferenceBackend = 'python-binary', sharedMemoryName = '', sharedMemorySlots = 8,
-    sharedMemorySlotBytes = 8 * 1024 * 1024 }) {
+    sharedMemorySlotBytes = 8 * 1024 * 1024, searchTimeoutMs = DEFAULT_SEARCH_TIMEOUT_MS }) {
     const binary = executable || process.env.CITADELS_NATIVE_SEARCH_WORKER;
     if (!binary) throw new Error('backend:native 需要 CITADELS_NATIVE_SEARCH_WORKER 指向已编译的 mcts_worker');
     const environment = { ...process.env };
@@ -47,8 +51,16 @@ class NativeSearchClient {
     this.modelPath = '';
     this.nextId = 1;
     this.pending = new Map();
+    // 连续搜索失败数：跨请求累计，调用方（runSelfPlayGame）据此判断这条搜索通道
+    // 是不是真的坏了，成功一次就清零。
+    this.searchFailureStreak = 0;
+    this.searchTimeoutMs = Math.max(0, Number(searchTimeoutMs) || 0);
     this.buffer = '';
     this.closed = false;
+    // 子进程已经没了（崩溃 /段错误 / OOM 重启前）：置位后 search() 立即失败，
+    // 不再往已销毁的 stdin 上写、也不再往 pending 里堆永远结算不掉的 waiter。
+    this.childExited = false;
+    this.lastExitError = '';
     // stderr 必须有人读：管道建了却不读，数据会无上限堆在流的内部缓冲里（内存泄漏），
     // 而且管道一旦写满，子进程会阻塞在写 stderr 上（实测 4MB 就卡死）——LibTorch /
     // torch 初始化警告、Python traceback 都往这里打，不读迟早出事。
@@ -64,6 +76,8 @@ class NativeSearchClient {
   // 等于把 CUDA 上下文和缓存一起还回去，比任何「清缓存」都彻底。
   #startChild() {
     this.buffer = '';
+    this.childExited = false;
+    this.lastExitError = '';
     this.child = spawn(this.binary, [], { cwd: this.root, env: this.environment,
       stdio: ['pipe', 'pipe', 'pipe'] });
     const child = this.child;
@@ -76,10 +90,18 @@ class NativeSearchClient {
     const isCurrent = () => child === this.child;
     child.on('error', error => { if (isCurrent()) this.#fail(error); });
     child.on('exit', code => {
-      if (!isCurrent() || this.closed || code === 0) return;
+      if (!isCurrent() || code === 0) return;
+      // 子进程没了：后续请求绝不可能完成。以前这里只 reject 当时在飞的那几个，
+      // 没有留下「通道已死」的痕迹，于是每步照写 stdin → 拿一条
+      // ERR_STREAM_DESTROYED → 把 waiter 留在 pending 里再也删不掉，而 waiter
+      // 抓着的正是调用方整个 async 帧（一局几百条训练样本）。自对弈 worker 就是
+      // 这么被吃到 heap OOM 的（2026-09-19 训练日志：2128 局 native worker
+      // 段错误退出，2187 局 worker JS heap 爆掉，一小时的样本全丢）。
+      this.childExited = true;
       const tail = this.lastStderr();
-      this.#fail(new Error('native mcts_worker 异常退出 code=' + code +
-        (tail ? ' · stderr: ' + tail : '')));
+      this.lastExitError = 'native mcts_worker 异常退出 code=' + code +
+        (tail ? ' · stderr: ' + tail : '');
+      if (!this.closed) this.#fail(new Error(this.lastExitError));
     });
   }
 
@@ -128,7 +150,7 @@ class NativeSearchClient {
         if (!waiter) continue;
         this.pending.delete(String(result.id));
         if (result.t === 'error') waiter.reject(new Error(result.error || 'native 搜索失败'));
-        else waiter.resolve(decodeSearchResponse(result));
+        else { this.searchFailureStreak = 0; waiter.resolve(decodeSearchResponse(result)); }
       } catch (error) { this.#fail(error); }
     }
     // 兜底：子进程吐了大量没有换行的输出时（异常日志风暴），别让 buffer 无限膨胀。
@@ -142,8 +164,14 @@ class NativeSearchClient {
   lastStderr() { return this.stderrTail.trim(); }
 
   #fail(error) {
-    for (const waiter of this.pending.values()) waiter.reject(error);
+    // 这些请求都没机会完成了，算进失败 streak 让上层有机会熔断
+    this.searchFailureStreak += this.pending.size;
+    const waiters = [...this.pending.values()];
     this.pending.clear();
+    for (const waiter of waiters) {
+      if (waiter.timer) clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
   }
 
   /**
@@ -153,9 +181,15 @@ class NativeSearchClient {
    */
   search(state, rootPlayerId, legalActions, modelVersion = 0, particleWeights = null) {
     if (this.closed) return Promise.reject(new Error('native mcts_worker 已关闭'));
+    // 子进程已经退出：直接失败，别再往销毁的 stdin 上写，也别再往 pending 里堆。
+    // 失败同样计入 streak —— 上层靠它判断「这条通道是不是彻底坏了」，这里漏计
+    // 就会让熔断永远不触发。
+    if (this.childExited) {
+      this.searchFailureStreak++;
+      return Promise.reject(new Error(this.lastExitError || 'native mcts_worker 已退出'));
+    }
     const id = String(this.nextId++);
-    const request = JSON.parse(encodeSearchRequest(state, rootPlayerId, legalActions, id,
-      particleWeights));
+    const request = buildSearchRequest(state, rootPlayerId, legalActions, id, particleWeights);
     request.simulations = this.simulations;
     request.maxDepth = this.maxDepth;
     request.batchSize = this.batchSize;
@@ -177,10 +211,37 @@ class NativeSearchClient {
       }
     }
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(JSON.stringify(request) + '\n', error => { if (error) reject(error); });
+      // waiter 自己也持有「怎么删掉我」的知识：任何一条出口（回包 / 报错 / 超时
+      // / 批量 fail）都必须把条目从 pending 里摘掉。留在 Map 里的 waiter 会一直
+      // 抓着调用方这一帧不放 —— pending 无界增长就是那次 worker heap OOM 的全部来源。
+      const waiter = {
+        resolve: value => { this.#settle(id); resolve(value); },
+        reject: error => { this.#settle(id); reject(error); },
+        timer: null
+      };
+      this.pending.set(id, waiter);
+      if (this.searchTimeoutMs > 0) {
+        waiter.timer = setTimeout(() => {
+          this.searchFailureStreak++;
+          waiter.reject(new Error('native 搜索超时 ' + this.searchTimeoutMs + 'ms'));
+          // 子进程多半已经卡死（死循环 / 掉卡 / 被系统暂停）：整个换掉，既回收它
+          // 占的资源，也让后面的请求能落到健康的进程上。
+          this.restart();
+        }, this.searchTimeoutMs);
+      }
+      this.child.stdin.write(JSON.stringify(request) + '\n',
+        error => { if (error) waiter.reject(error); });
     }).catch(error => this.#retryAfterOom(error,
       () => this.search(state, rootPlayerId, legalActions, modelVersion, particleWeights)));
+  }
+
+  // 从 pending 里摘掉一条已经结算的请求（含它的超时定时器）。用 identity 比对，
+  // 免得把同 id 的后来者误删。
+  #settle(id) {
+    const waiter = this.pending.get(id);
+    if (!waiter) return;
+    this.pending.delete(id);
+    if (waiter.timer) clearTimeout(waiter.timer);
   }
 
   setModelPath(modelPath) { this.modelPath = modelPath || ''; }

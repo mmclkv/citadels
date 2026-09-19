@@ -214,9 +214,12 @@ class PolicyValueNetwork {
         const tr = transitions[k];
         const out = this.forward(tr.state, tr.actions, tr.temperature || 1);
         const selected = tr.chosen;
-        const useMctsCe = policyLossMode === 'mcts_ce' || (policyLossMode === 'auto' && Array.isArray(tr.pi));
+        // π 目标既可能是 number[] 也可能是 Float32Array：自对弈侧为了省内存和省
+        // postMessage 的克隆开销，发的就是 TypedArray，按「有没有长度」判断即可。
+        const hasPi = !!(tr.pi && tr.pi.length);
+        const useMctsCe = policyLossMode === 'mcts_ce' || (policyLossMode === 'auto' && hasPi);
         const target = new Float32Array(out.probs.length);
-        if (useMctsCe && Array.isArray(tr.pi)) {
+        if (useMctsCe && hasPi) {
           let total = 0;
           for (let i = 0; i < target.length; i++) { target[i] = Math.max(0, Number(tr.pi[i]) || 0); total += target[i]; }
           if (total > 0) for (let i = 0; i < target.length; i++) target[i] /= total;

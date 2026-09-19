@@ -18,7 +18,15 @@ function stableFingerprint(value) {
  * 传数组时第一份仍是 state，其余放进 particles —— 旧 worker 不认识 particles，
  * 只会按第一份搜，于是天然退化成单粒子而不会报错。
  */
-function encodeSearchRequest(state, rootPlayerId, legalActions, requestId, particleWeights) {
+/**
+ * 构造一条发给 native worker 的搜索请求。
+ *
+ * 返回对象而不是 JSON 串：调用方（NativeSearchClient）还要往里追加
+ * simulations/maxDepth 等字段，以前的做法是 stringify 完再 parse 回来改，
+ * 等于把整份游戏状态在堆上多造一棵对象树 —— 每步一次，纯属浪费。
+ * 需要 NDJSON 时用下面的 encodeSearchRequest。
+ */
+function buildSearchRequest(state, rootPlayerId, legalActions, requestId, particleWeights) {
   const pool = (Array.isArray(state) ? state : [state]).map(entry => cloneTrimmed(entry));
   const [primary, ...particles] = pool;
   const request = {
@@ -36,7 +44,12 @@ function encodeSearchRequest(state, rootPlayerId, legalActions, requestId, parti
   if (Array.isArray(particleWeights) && particleWeights.length === pool.length) {
     request.particleWeights = particleWeights.map(w => Number(w) || 0);
   }
-  return JSON.stringify(request) + '\n';
+  return request;
+}
+
+function encodeSearchRequest(state, rootPlayerId, legalActions, requestId, particleWeights) {
+  return JSON.stringify(buildSearchRequest(state, rootPlayerId, legalActions,
+    requestId, particleWeights)) + '\n';
 }
 
 function decodeSearchRequest(line) {
@@ -104,5 +117,6 @@ function decodeSearchResponse(line) {
 }
 
 module.exports = {
-  PROTOCOL_VERSION, stableFingerprint, encodeSearchRequest, decodeSearchRequest, decodeSearchResponse
+  PROTOCOL_VERSION, stableFingerprint,
+  buildSearchRequest, encodeSearchRequest, decodeSearchRequest, decodeSearchResponse
 };

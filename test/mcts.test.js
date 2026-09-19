@@ -100,7 +100,9 @@ test('自对弈接 MCTS 时 transition 上有 pi 且求和为 1', async () => {
   const transitions = result.transitions;
   assert.ok(transitions.length > 0, '产生了一些 transitions');
   for (const tr of transitions.slice(0, 5)) {
-    assert.ok(Array.isArray(tr.pi), '每条 transition 都有 pi 数组');
+    // π 目标保持 Float32Array（省一半堆占用也让 postMessage 的克隆变成整块 memcpy），
+    // 所以这里按「有长度的浮点序列」判断，不要求它是普通数组
+    assert.ok(tr.pi && tr.pi.length, '每条 transition 都有 pi 序列');
     let sum = 0;
     for (let i = 0; i < tr.pi.length; i++) {
       assert.ok(tr.pi[i] >= 0, 'pi 元素非负');
@@ -108,6 +110,8 @@ test('自对弈接 MCTS 时 transition 上有 pi 且求和为 1', async () => {
     }
     assert.ok(Math.abs(sum - 1) < 1e-4, 'pi 求和 ≈ 1，sum=' + sum);
     assert.ok(tr.mctsValue != null, 'mctsValue 有值');
+    assert.ok(tr.rewardVector instanceof Float32Array && tr.rewardVector.length === 8,
+      'rewardVector 是 8 维 Float32Array');
     assert.ok(tr.oldProb > 0 && tr.oldProb <= 1, 'oldProb 在 (0,1]');
   }
 });
