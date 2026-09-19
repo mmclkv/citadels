@@ -64,6 +64,10 @@ const bishop = manifest.cards.roles.bishop;
 if (!/bishop\.webp\?v=3$/.test(bishop.thumb) || !/bishop\.webp\?v=3$/.test(bishop.full)) {
   throw new Error('主教更新卡图缺少缓存版本标记');
 }
+const spy = manifest.cards.roles.spy;
+if (!/spy\.webp\?v=2$/.test(spy.thumb) || !/spy\.webp\?v=2$/.test(spy.full)) {
+  throw new Error('间谍更新卡图缺少缓存版本标记');
+}
 
 const roleKeys = Object.keys(manifest.cards.roles);
 const districtKeys = Object.keys(manifest.cards.districts);
