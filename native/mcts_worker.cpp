@@ -1,6 +1,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <new>
@@ -32,6 +33,14 @@ std::string escape(const std::string& value) {
     out.push_back(ch);
   }
   return out;
+}
+
+// 显存不足（CUDA OOM）不是逻辑错误：6GB 显卡还要和桌面合成器共享，浏览器/系统
+// 一动就可能把剩下的连续块吃掉。这类错误值得先回收缓存再重试一次，而不是让
+// 一次搜索失败顺着 IPC 传回去把整轮训练掀翻（2026-09-19 训练日志：跑到第 6326
+// 局因 OOM 直接中断，1h46m 的样本没存档）。
+bool is_cuda_oom(const std::string& message) {
+  return message.find("out of memory") != std::string::npos;
 }
 
 int player_index(const NativeGameState& state, const std::string& id) {
@@ -254,26 +263,37 @@ int main() {
         particles_used = pool.size();
         bool belief_used = false;
         for (float weight : pool_weights) if (weight > 0.0f && weight != 1.0f) belief_used = true;
-        Mcts<NativeGameState, NativeSearchAction>::Result result;
+        // 搜索可能因显存不足失败（评估发生在搜索内部）。先按原批跑；OOM 就清一次
+        // 缓存、把评估批缩到 8 再跑一次。仍然失败才真正报错 —— 缩小批次只是让
+        // 这一步慢一点，不会改变搜索语义（分批只影响叶节点收集）。
+        auto run_search = [&](int batch) {
 #ifdef CITADELS_LIBTORCH
-        if (direct_neural) {
-          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
-            .search(pool, root, batch_size, pool_weights);
-        } else if (shared_neural) {
-          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
-            .search(pool, root, batch_size, pool_weights);
-        } else if (neural) {
-#else
-        if (shared_neural) {
-          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
-            .search(pool, root, batch_size, pool_weights);
-        } else if (neural) {
+          if (direct_neural) {
+            return BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
+              .search(pool, root, batch, pool_weights);
+          }
 #endif
-          result = BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
-            .search(pool, root, batch_size, pool_weights);
-        } else {
-          result = Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
+          if (shared_neural) {
+            return BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
+              .search(pool, root, batch, pool_weights);
+          }
+          if (neural) {
+            return BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
+              .search(pool, root, batch, pool_weights);
+          }
+          return Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
             .search(pool, root, pool_weights);
+        };
+        Mcts<NativeGameState, NativeSearchAction>::Result result;
+        try {
+          result = run_search(batch_size);
+        } catch (const std::exception& error) {
+          if (!is_cuda_oom(error.what())) throw;
+          // 缓存分配器手里可能还攒着「已释放但没还给驱动」的块，这里没有别的
+          // 回收手段（清缓存要引 CUDA 头文件，反而让编译多一条依赖），只能靠缩
+          // 小评估批降低峰值；真正彻底的重置交给 JS 侧：它会把整个 worker 进程
+          // 重启一次（连 CUDA 上下文一起还回去）再重试。
+          result = run_search(std::min(batch_size, 8));
         }
         policy = result.policy; visits = result.visits; expansions = result.expansions;
         root_value = result.value;

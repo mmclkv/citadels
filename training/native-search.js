@@ -4,6 +4,11 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { encodeSearchRequest, decodeSearchResponse } = require('../native/protocol.js');
 
+// 显存不足（CUDA OOM）时的重启上限与冷却时间。6GB 显卡还要和桌面合成器共享
+// 显存，偶发 OOM 不该中断训练；但真的持续 OOM 时也不能无限重启把机器拖垮。
+const MAX_OOM_RESTARTS = 3;
+const OOM_RESTART_COOLDOWN_MS = 30000;
+
 class NativeSearchClient {
   constructor({ root, executable, simulations = 50, maxDepth = 200, batchSize = 32, cPuct = 1, seed = 1,
     gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda',
@@ -22,7 +27,9 @@ class NativeSearchClient {
         environment.PYTORCH_CUDA_ALLOC_CONF = 'expandable_segments:True';
       }
     }
-    this.child = spawn(binary, [], { cwd: root, env: environment, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.root = root;
+    this.binary = binary;
+    this.environment = environment;
     this.simulations = simulations;
     this.maxDepth = maxDepth;
     this.batchSize = Math.max(1, Number(batchSize) || 32);
@@ -42,23 +49,71 @@ class NativeSearchClient {
     this.pending = new Map();
     this.buffer = '';
     this.closed = false;
-    this.child.stdout.setEncoding('utf8');
-    this.child.stdout.on('data', chunk => this.#onData(chunk));
     // stderr 必须有人读：管道建了却不读，数据会无上限堆在流的内部缓冲里（内存泄漏），
     // 而且管道一旦写满，子进程会阻塞在写 stderr 上（实测 4MB 就卡死）——LibTorch /
     // torch 初始化警告、Python traceback 都往这里打，不读迟早出事。
     // 这里只保留最后一段用于报错定位，不让它无限增长。
     this.stderrTail = '';
-    this.child.stderr.setEncoding('utf8');
-    this.child.stderr.on('data', chunk => this.#onStderr(chunk));
-    this.child.on('error', error => this.#fail(error));
-    this.child.on('exit', code => {
-      if (!this.closed && code !== 0) {
-        const tail = this.lastStderr();
-        this.#fail(new Error('native mcts_worker 异常退出 code=' + code +
-          (tail ? ' · stderr: ' + tail : '')));
-      }
+    this.oomRestarts = 0;
+    this.lastOomRestartAt = 0;
+    this.#startChild();
+  }
+
+  // 起（或重启）子进程。抽出来是因为显存不足时要整个换一个进程：PyTorch 的缓存
+  // 分配器只进不出，同一个进程里再怎么重试，显存块也不会回到驱动手里；换进程
+  // 等于把 CUDA 上下文和缓存一起还回去，比任何「清缓存」都彻底。
+  #startChild() {
+    this.buffer = '';
+    this.child = spawn(this.binary, [], { cwd: this.root, env: this.environment,
+      stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = this.child;
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => this.#onData(chunk));
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', chunk => this.#onStderr(chunk));
+    // 旧进程是「被重启换掉的」，它之后报的错 / 非 0 退出码都与当前进程无关，
+    // 不能拿去 reject 现在这批请求。
+    const isCurrent = () => child === this.child;
+    child.on('error', error => { if (isCurrent()) this.#fail(error); });
+    child.on('exit', code => {
+      if (!isCurrent() || this.closed || code === 0) return;
+      const tail = this.lastStderr();
+      this.#fail(new Error('native mcts_worker 异常退出 code=' + code +
+        (tail ? ' · stderr: ' + tail : '')));
     });
+  }
+
+  // 显存不足时重启子进程并重试。次数和频率都设了上限：真的一直 OOM 就别无限
+  // 重启把机器拖垮，把错误交回上层（那边会退化成本步不搜索）。
+  #retryAfterOom(error, retry) {
+    const message = (error && error.message) || String(error);
+    if (this.closed || !/out of memory/i.test(message)) return Promise.reject(error);
+    if (this.oomRestarts >= MAX_OOM_RESTARTS) return Promise.reject(error);
+    const now = Date.now();
+    if (now - this.lastOomRestartAt < OOM_RESTART_COOLDOWN_MS) return Promise.reject(error);
+    this.oomRestarts++;
+    this.lastOomRestartAt = now;
+    this.restart();
+    return retry();
+  }
+
+  restart() {
+    const previous = this.child;
+    this.#fail(new Error('native mcts_worker 因显存不足重启'));
+    try { this.#killTree(previous); } catch (_) { /* 进程可能已退出 */ }
+    this.#startChild();
+  }
+
+  #killTree(child) {
+    if (!child || child.exitCode != null) return;
+    if (process.platform === 'win32' && child.pid) {
+      try {
+        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
+          { windowsHide: true, stdio: 'ignore' });
+        return;
+      } catch (_) { /* taskkill 不可用，走下面的普通 kill */ }
+    }
+    child.kill();
   }
 
   #onData(chunk) {
@@ -124,7 +179,8 @@ class NativeSearchClient {
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.child.stdin.write(JSON.stringify(request) + '\n', error => { if (error) reject(error); });
-    });
+    }).catch(error => this.#retryAfterOom(error,
+      () => this.search(state, rootPlayerId, legalActions, modelVersion, particleWeights)));
   }
 
   setModelPath(modelPath) { this.modelPath = modelPath || ''; }

@@ -438,6 +438,23 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     nativeMctsSupportsGame(state);
   const transitions = [];
   let steps = 0, inferenceMs = 0, fallbackCount = 0;
+  // 搜索失败（最常见的是 CUDA OOM：6GB 显卡还要和桌面合成器共享显存）不该掀翻
+  // 整轮训练 —— 一次失败就丢掉上万局样本太亏（2026-09-19 实测：跑到 6326 局被
+  // 一次 OOM 打断，且因为没有存档路径，1h46m 全部作废）。偶发失败降级成均匀
+  // 策略继续走；连续失败说明搜索通道真的坏了，才丢弃这一局交给上层判死。
+  const SEARCH_FAILURE_LIMIT = 8;
+  let searchFailures = 0;
+  const handleSearchFailure = error => {
+    searchFailures++;
+    fallbackCount++;
+    console.warn('[train] 第 ' + gameIndex + ' 局：' + steps + ' 步搜索失败，本步改用均匀策略（' +
+      String((error && error.message) || error).split('\n')[0] + '）');
+    if (searchFailures >= SEARCH_FAILURE_LIMIT) {
+      console.warn('[train] 丢弃第 ' + gameIndex + ' 局：连续 ' + searchFailures + ' 步搜索失败');
+      return false;
+    }
+    return true;
+  };
   const startedAt = Date.now();
   while (state.phase !== 'gameover' && steps < config.maxSteps && state.round <= maxRounds) {
     if (shouldStop()) break;
@@ -489,20 +506,29 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
       decision = { chosen, probability: 1 / legal.length, value: 0, entropy: 0 };
     } else if (useNativeMcts && searchRoot) {
       // 整池一起交给 native：那边同样是一条模拟抽一个粒子、共用一棵树。
-      const nativeResult = await nativeSearch.search(searchPool.map(p => p.state), actor.id,
-        searchRoot.legal, config.modelVersion || 0, searchWeights);
-      piVector = nativeResult.policy;
-      mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
-      mctsValue = mctsValueVector[0];
-      let r = rng();
-      let chosen = Math.max(0, piVector.length - 1);
-      for (let i = 0; i < piVector.length; i++) { r -= piVector[i]; if (r <= 0) { chosen = i; break; } }
-      decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue,
-        entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
+      let nativeResult = null;
+      try {
+        nativeResult = await nativeSearch.search(searchPool.map(p => p.state), actor.id,
+          searchRoot.legal, config.modelVersion || 0, searchWeights);
+      } catch (error) {
+        if (!handleSearchFailure(error)) return null;
+      }
+      if (nativeResult) {
+        piVector = nativeResult.policy;
+        mctsValueVector = normalizeValueVector(nativeResult.valueVector, nativeResult.value);
+        mctsValue = mctsValueVector[0];
+        let r = rng();
+        let chosen = Math.max(0, piVector.length - 1);
+        for (let i = 0; i < piVector.length; i++) { r -= piVector[i]; if (r <= 0) { chosen = i; break; } }
+        decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue,
+          entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
+      }
     } else if (config.mctsSimulations > 0 && searchRoot) {
       const jsFallbackEvaluator = config.mctsEngine === 'cpp' && config.neuralNetworkFramework === 'libtorch'
         ? null : evaluator;
-      const mctsResult = await mcts.search({
+      let mctsResult = null;
+      try {
+        mctsResult = await mcts.search({
         // 整池进同一棵树；池里只有一份时与旧的单 rootState 完全等价
         rootStates: searchPool.map(entry => entry.state),
         // 信念权重：与公开事实矛盾的世界少被抽到（null = 均匀采样）
@@ -522,21 +548,33 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         maxDepth: config.mctsMaxDepth,
         rng,
         evaluator: jsFallbackEvaluator
-      });
-      piVector = mctsResult.pi;
-      mctsValueVector = normalizeValueVector(mctsResult.valueVector, mctsResult.value);
-      mctsValue = mctsValueVector[0];
-      // 按访问分布比例抽样；既然分布已含 Dirichlet 噪声，这里不再额外加 temperature
-      let r = rng();
-      let chosen = Math.max(0, piVector.length - 1);
-      for (let i = 0; i < piVector.length; i++) {
-        r -= piVector[i];
-        if (r <= 0) { chosen = i; break; }
+        });
+      } catch (error) {
+        if (!handleSearchFailure(error)) return null;
       }
-      decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue, entropy: 0,
-        mctsVisits: mctsResult.visits, mctsExpansions: mctsResult.expansions };
+      if (mctsResult) {
+        piVector = mctsResult.pi;
+        mctsValueVector = normalizeValueVector(mctsResult.valueVector, mctsResult.value);
+        mctsValue = mctsValueVector[0];
+        // 按访问分布比例抽样；既然分布已含 Dirichlet 噪声，这里不再额外加 temperature
+        let r = rng();
+        let chosen = Math.max(0, piVector.length - 1);
+        for (let i = 0; i < piVector.length; i++) {
+          r -= piVector[i];
+          if (r <= 0) { chosen = i; break; }
+        }
+        decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue, entropy: 0,
+          mctsVisits: mctsResult.visits, mctsExpansions: mctsResult.expansions };
+      }
     } else {
       decision = model.choose(encoded.vector, actionVectors, temperature);
+    }
+    // 搜索这一步没拿到结果（失败降级）：均匀随机走一步，不写 π 目标 —— 拿假的
+    // 访问分布当监督信号比没有更糟。
+    if (!decision) {
+      const chosen = Math.min(legal.length - 1, Math.floor(rng() * legal.length));
+      decision = { chosen, probability: 1 / legal.length, value: 0,
+        entropy: Math.log(Math.max(2, legal.length)) };
     }
     inferenceMs += performance.now() - t0;
     if (legal.length > 1 && (actor.botType === 'neural' || !config.trainNetworkOnly)) {
@@ -891,12 +929,31 @@ async function train(rawConfig, hooks = {}) {
   try {
   // 连续「一局都跑不出来」的次数：偶发死角跳过就好，连续卡住说明引擎有问题，提前收尾。
   let emptyBatches = 0;
+  // 整批自对弈失败（worker 异常退出 / GPU 故障）的连续次数。单批偶发失败跳过即可，
+  // 连着几批都不行就是通道坏了，不能再闷头跑下去。
+  const MAX_BATCH_FAILURES = 3;
+  let batchFailures = 0;
+  // 存档不能写成「局数能被 checkpointEvery 整除」：每批 64 局时局数只会落在 64 的
+  // 倍数上，100 这样的间隔永远命中不了 —— 2026-09-19 那次跑到 6326 局、1h46m，
+  // 一次 OOM 中断后一个存档都没有。改成「距上次存档够 N 局就存」。
+  let lastCheckpointGame = completedGames;
   while (completedGames < config.targetGames && !shouldStop()) {
     let results;
     if (pool) {
       const count = Math.min(config.batchGames, config.targetGames - completedGames);
       const indices = Array.from({ length: count }, (_, i) => completedGames + i + 1);
-      results = await pool.run(indices, torch.modelPath, completedGames);
+      try {
+        results = await pool.run(indices, torch.modelPath, completedGames);
+      } catch (error) {
+        // 整批失败（worker 崩了、显存被打满）也不该静默：连着几批都跑不出来就
+        // 认定通道坏了，把错误抛给下面（那里会先存档再抛）。
+        batchFailures++;
+        log('第 ' + (completedGames + 1) + ' 批自对弈失败（连续 ' + batchFailures + ' 次）：' +
+          String((error && error.message) || error).split('\n')[0]);
+        if (batchFailures >= MAX_BATCH_FAILURES) throw error;
+        continue;
+      }
+      batchFailures = 0;
     } else {
       const result = await runSelfPlayGame(model, config, completedGames + 1, rng, shouldStop);
       if (result && result.dropped) log('游戏 #' + (completedGames + 1) + ' ' + result.reason +
@@ -969,7 +1026,8 @@ async function train(rawConfig, hooks = {}) {
       // 本批没有可训练样本时也要消费掉批次数，避免下一批被错误合并。
       gamesSinceUpdate = 0;
     }
-    const checkpointDue = completedGames % config.checkpointEvery === 0 || completedGames === config.targetGames;
+    const checkpointDue = completedGames - lastCheckpointGame >= config.checkpointEvery ||
+      completedGames === config.targetGames;
     let checkpoint = '';
     const elapsedMs = Date.now() - startedAt;
     const recentDuration = recentGames.reduce((sum, g) => sum + g.durationMs, 0) / recentGames.length;
@@ -1014,6 +1072,7 @@ async function train(rawConfig, hooks = {}) {
     }
     if (checkpointDue) {
       checkpoint = saveCheckpoint(model, config, completedGames, history);
+      lastCheckpointGame = completedGames;
       if (torch) await torch.checkpoint(checkpoint);
       const sizeKB = (fs.statSync(path.join(DATA_DIR, checkpoint)).size / 1024).toFixed(0);
       log('存档：' + checkpoint + '（' + sizeKB + ' KB）');
@@ -1037,6 +1096,19 @@ async function train(rawConfig, hooks = {}) {
   log('训练' + reason + '：共 ' + completedGames + ' / ' + config.targetGames + ' 局 · 用时 ' + elapsedMin + ' 分钟 · ' +
     'checkpoint=' + (finalCheckpoint || '(无)'));
   return final;
+  } catch (error) {
+    // 异常中断也要留档：一次搜索 OOM 打断 1h46m、6000+ 局样本全丢太亏
+    // （2026-09-19 实测）。能存就存，存不下也不掩盖真正的错误。
+    if (completedGames > 0) {
+      try {
+        const emergency = saveCheckpoint(model, config, completedGames, history);
+        if (torch) await torch.checkpoint(emergency);
+        log('训练异常中断，已保存存档：' + emergency + '（共 ' + completedGames + ' 局）');
+      } catch (saveError) {
+        log('训练异常中断，存档失败：' + String((saveError && saveError.message) || saveError));
+      }
+    }
+    throw error;
   } finally {
     if (pool) await pool.close();
     if (sharedInference) await sharedInference.close();
