@@ -16,6 +16,10 @@
 #include "neural_evaluator.hpp"
 #include "shared_memory_inference.hpp"
 #include "state_loader.hpp"
+#ifdef _WIN32
+#include <windows.h>
+#include <dbghelp.h>
+#endif
 #ifdef CITADELS_LIBTORCH
 #include "libtorch_evaluator.hpp"
 #endif
@@ -120,7 +124,41 @@ void emit_error(const std::string& id, const std::string& message) {
 
 }  // namespace
 
+#ifdef _WIN32
+namespace {
+
+// 段错误（0xC0000005）一发生进程就没了，stderr 一个字都来不及写 —— 2026-09-19
+// 训练里 worker 跑了 59 分钟后段错误，现场全靠猜。这里在进程死掉前把 minidump
+// 落到 exe 同目录（native/crash-<pid>.dmp），下次再崩就能拿到崩溃线程的栈。
+LONG WINAPI write_crash_dump(EXCEPTION_POINTERS* info) {
+  char exe_path[MAX_PATH] = {};
+  GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
+  std::string dir(exe_path);
+  const size_t slash = dir.find_last_of("\\/");
+  dir = (slash == std::string::npos) ? "." : dir.substr(0, slash);
+  const std::string dump_path = dir + "\\crash-" + std::to_string(GetCurrentProcessId()) + ".dmp";
+  HANDLE file = CreateFileA(dump_path.c_str(), GENERIC_WRITE, 0, nullptr,
+                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file != INVALID_HANDLE_VALUE) {
+    MINIDUMP_EXCEPTION_INFORMATION dump_info{};
+    dump_info.ThreadId = GetCurrentThreadId();
+    dump_info.ExceptionPointers = info;
+    dump_info.ClientPointers = FALSE;
+    MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+                      MiniDumpNormal, info ? &dump_info : nullptr, nullptr, nullptr);
+    CloseHandle(file);
+  }
+  // CONTINUE_SEARCH：让默认处理继续，退出码保持原本的异常码（Node 侧仍能看到 3221225477）。
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+}  // namespace
+#endif
+
 int main() {
+#ifdef _WIN32
+  SetUnhandledExceptionFilter(write_crash_dump);
+#endif
   std::string line;
   std::shared_ptr<GpuTrainerClient> gpu;
   std::unique_ptr<BatchEvaluator> batch;
