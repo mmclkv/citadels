@@ -61,7 +61,7 @@ if (!/wizard\.webp\?v=2$/.test(wizard.thumb) || !/wizard\.webp\?v=2$/.test(wizar
   throw new Error('法师更新卡图缺少缓存版本标记');
 }
 const bishop = manifest.cards.roles.bishop;
-if (!/bishop\.webp\?v=2$/.test(bishop.thumb) || !/bishop\.webp\?v=2$/.test(bishop.full)) {
+if (!/bishop\.webp\?v=3$/.test(bishop.thumb) || !/bishop\.webp\?v=3$/.test(bishop.full)) {
   throw new Error('主教更新卡图缺少缓存版本标记');
 }
 

@@ -29,7 +29,9 @@
       (folder === 'roles' && (key === 'blackmailer' || key === 'magician' || key === 'wizard' || key === 'bishop'));
     const version = folder === 'roles' && key === 'magician'
       ? '?v=3'
-      : (versioned ? '?v=2' : '');
+      : (folder === 'roles' && key === 'bishop'
+        ? '?v=3'
+        : (versioned ? '?v=2' : ''));
     return {
       thumb: base + folder + '/thumb/' + key + '.webp' + version,
       full: base + folder + '/full/' + key + '.webp' + version
