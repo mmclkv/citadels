@@ -31,7 +31,9 @@
       ? '?v=3'
       : (folder === 'roles' && key === 'bishop'
         ? '?v=3'
-        : (versioned ? '?v=2' : ''));
+        : (folder === 'roles' && key === 'spy'
+          ? '?v=3'
+          : (versioned ? '?v=2' : '')));
     return {
       thumb: base + folder + '/thumb/' + key + '.webp' + version,
       full: base + folder + '/full/' + key + '.webp' + version
