@@ -72,9 +72,13 @@ test('主教可让一名玩家支付建造差额，并按每金币一张手牌�
     { uid: 'repay-2', name: '要塞', color: 'red', cost: 3, scoreValue: 3 }
   ];
   state.players[1].gold = 5;
-  const build = Engine.getAvailableActions(state, 'p0').actions.find(action => action.type === 'build' && action.uid === 'build-me' && action.target === 'p1');
-  assert.ok(build, '应提供代付建造选项');
+  const build = Engine.getAvailableActions(state, 'p0').actions.find(action => action.type === 'build' && action.uid === 'build-me');
+  assert.ok(build && !build.target, '第一步应只选择要建造的建筑');
   assert.equal(Engine.applyAction(state, 'p0', build).ok, true);
+  assert.equal(state.turn.pending.kind, 'bishop_payer');
+  const payer = Engine.getAvailableActions(state, 'p0').actions.find(action => action.type === 'choose_player' && action.target === 'p1');
+  assert.ok(payer, '第二步应选择代偿玩家');
+  assert.equal(Engine.applyAction(state, 'p0', payer).ok, true);
   assert.equal(state.turn.pending.kind, 'bishop_repay');
   const result = Engine.applyAction(state, 'p0', { type: 'choose_cards', uids: ['repay-1', 'repay-2'] });
   assert.equal(result.ok, true, result.error);
@@ -93,11 +97,13 @@ test('主教偿还手牌数量必须与代付金币差额一致', () => {
     { uid: 'repay-2', name: '要塞', color: 'red', cost: 3 }
   ];
   state.players[1].gold = 2;
-  const build = Engine.getAvailableActions(state, 'p0').actions.find(action => action.type === 'build' && action.uid === 'build-me' && action.target === 'p1');
+  const build = Engine.getAvailableActions(state, 'p0').actions.find(action => action.type === 'build' && action.uid === 'build-me');
   assert.ok(build);
   assert.equal(state.players[0].gold, 1);
   assert.equal(state.players[0].hand.find(card => card.uid === 'build-me').cost, 3);
   assert.equal(Engine.applyAction(state, 'p0', build).ok, true);
+  assert.equal(state.turn.pending.kind, 'bishop_payer');
+  assert.equal(Engine.applyAction(state, 'p0', { type: 'choose_player', target: 'p1' }).ok, true);
   assert.equal(state.turn.pending.amount, 2);
   const result = Engine.applyAction(state, 'p0', { type: 'choose_cards', uids: [] });
   assert.equal(result.ok, false);

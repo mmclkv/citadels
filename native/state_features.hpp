@@ -48,14 +48,14 @@ inline int role_number(const std::string& id) {
 }
 
 inline int pending_kind_code(const std::string& kind) {
-  static const std::array<const char*, 33> names = {
+  static const std::array<const char*, 34> names = {
     "assassin", "thief", "witch_target", "magician_choice", "magician_swap",
     "magician_redraw", "warlord_destroy", "marshal_seize", "artist",
     "navigator_bonus", "monk_declare", "emperor_crown", "emperor_take",
     "prophet_give", "draw_keep", "scholar_pick", "diplomat_mine", "diplomat_theirs",
     "magistrate_declare", "magistrate_second", "magistrate_third", "blackmailer_declare",
     "blackmailer_second", "blackmailer_signed", "blackmailer_threat", "spy_target", "spy_color",
-    "wizard_target", "wizard_card", "wizard_choice", "abbot_declare", "tax_collect", "bishop_repay"
+    "wizard_target", "wizard_card", "wizard_choice", "abbot_declare", "tax_collect", "bishop_payer", "bishop_repay"
   };
   for (size_t i = 0; i < names.size(); ++i) if (kind == names[i]) return static_cast<int>(i + 1);
   return 0;
@@ -109,7 +109,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[15] = static_cast<float>(state.round_confirm_count) / 8.0f;
   features[16] = state.pending_target < 0 ? 0.0f : static_cast<float>(rel(state.pending_target) + 1) / 9.0f;
   features[17] = state.pending_from_crown < 0 ? 0.0f : static_cast<float>(rel(state.pending_from_crown) + 1) / 9.0f;
-  features[18] = static_cast<float>(pending_kind_code(state.pending_kind)) / 33.0f;
+  features[18] = static_cast<float>(pending_kind_code(state.pending_kind)) / 34.0f;
   features[19] = static_cast<float>(state.has_turn ? turn_phase_code(state.turn_phase) : 4) / 4.0f;
   features[20] = static_cast<float>(state.turns_completed) / 100.0f;
   features[21] = state.resources_taken ? 1.0f : 0.0f;

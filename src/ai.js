@@ -604,6 +604,13 @@
           .slice().sort((a, b) => buildValue(state, p, a) - buildValue(state, p, b));
         return { type: 'choose_cards', uids: pool.slice(0, need).map(c => c.uid) };
       }
+      case 'bishop_payer': {
+        const payers = state.players.map((payer, i) => ({ payer, i }))
+          .filter(({ payer, i }) => i !== idx && payer.gold >= (pd.amount || 0));
+        if (!payers.length) return { type: 'ability_skip' };
+        payers.sort((a, b) => b.payer.gold - a.payer.gold);
+        return { type: 'choose_player', target: payers[0].payer.id };
+      }
       case 'abbot_declare': {
         // 与修士同构：宗教建筑数决定可领的资源份数，金币够就直接全取金币
         const n = countReligiousBuildings(state, p);

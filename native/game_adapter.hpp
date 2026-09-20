@@ -230,6 +230,17 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       }
       return actions;
     }
+    if (state.pending_kind == "bishop_payer") {
+      if (player != state.active_player) return {};
+      std::vector<NativeSearchAction> actions;
+      for (size_t i = 0; i < state.players.size(); ++i) {
+        if (static_cast<int>(i) == player || state.players[i].gold < state.pending_amount) continue;
+        NativeSearchAction action; action.type = ActionType::ChoosePlayer;
+        action.target = state.players[i].id;
+        actions.push_back(std::move(action));
+      }
+      return actions;
+    }
     if (state.pending_kind == "magistrate_declare" || state.pending_kind == "magistrate_second" || state.pending_kind == "magistrate_third") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
@@ -546,10 +557,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           if (!can_build(state, funded, card)) continue;
           const int shortfall = card.cost - p->gold;
           if (static_cast<int>(p->hand.size()) - 1 < shortfall) continue;
+          bool has_payer = false;
           for (size_t payer = 0; payer < state.players.size(); ++payer) {
             if (static_cast<int>(payer) == player || state.players[payer].gold < shortfall) continue;
+            has_payer = true; break;
+          }
+          if (has_payer) {
             NativeSearchAction action; action.type = ActionType::Build; action.uid = card.uid;
-            action.name = card.name; action.effect = card.purple_effect; action.target = state.players[payer].id;
+            action.name = card.name; action.effect = card.purple_effect;
             actions.push_back(std::move(action));
           }
         }
@@ -674,6 +689,19 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       state.players[target].hand = std::move(hands.target);
       state.pending_kind.clear();
       state.ability_used = true;
+      return true;
+    }
+    if (action.type == ActionType::ChoosePlayer && state.pending_kind == "bishop_payer") {
+      if (player != state.active_player) return false;
+      const int payer = state.find_player(action.target);
+      if (payer < 0 || payer == player || state.players[payer].gold < state.pending_amount) return false;
+      const auto card = std::find_if(state.players[player].hand.begin(), state.players[player].hand.end(),
+        [&](const DistrictCard& value) { return value.uid == state.pending_uid; });
+      if (card == state.players[player].hand.end()) return false;
+      NativePlayer funded = state.players[player]; funded.gold = card->cost;
+      if (!can_build(state, funded, *card)) return false;
+      state.pending_target = payer;
+      state.pending_kind = "bishop_repay";
       return true;
     }
     if (action.type == ActionType::ChooseCards && state.pending_kind == "magician_redraw") {
@@ -833,18 +861,23 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       case ActionType::MonkTake: return state.monk_take();
       case ActionType::Ability: return state.start_ability();
       case ActionType::Build: {
-        if (state.players[player].role_id == "bishop" && !action.target.empty()) {
+        if (state.players[player].role_id == "bishop") {
           const auto card = std::find_if(state.players[player].hand.begin(), state.players[player].hand.end(),
             [&](const DistrictCard& value) { return value.uid == action.uid; });
-          const int payer = state.find_player(action.target);
-          if (card == state.players[player].hand.end() || payer < 0 || payer == player || card->cost <= state.players[player].gold) return false;
-          const int amount = card->cost - state.players[player].gold;
-          if (state.players[payer].gold < amount || static_cast<int>(state.players[player].hand.size()) - 1 < amount) return false;
-          NativePlayer funded = state.players[player]; funded.gold = card->cost;
-          if (!can_build(state, funded, *card)) return false;
-          state.pending_kind = "bishop_repay"; state.pending_uid = card->uid;
-          state.pending_target = payer; state.pending_amount = amount;
-          return true;
+          if (card == state.players[player].hand.end()) return false;
+          if (card->cost > state.players[player].gold) {
+            const int amount = card->cost - state.players[player].gold;
+            if (static_cast<int>(state.players[player].hand.size()) - 1 < amount) return false;
+            NativePlayer funded = state.players[player]; funded.gold = card->cost;
+            if (!can_build(state, funded, *card)) return false;
+            bool has_payer = false;
+            for (size_t i = 0; i < state.players.size(); ++i)
+              if (static_cast<int>(i) != player && state.players[i].gold >= amount) { has_payer = true; break; }
+            if (!has_payer) return false;
+            state.pending_kind = "bishop_payer"; state.pending_uid = card->uid;
+            state.pending_target = -1; state.pending_amount = amount;
+            return true;
+          }
         }
         const int builder_num = char_number(state.players[player].role_id);
         if (state.magistrate_player >= 0 && !state.magistrate_claimed && state.magistrate_signed == builder_num &&

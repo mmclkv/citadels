@@ -788,11 +788,13 @@
                     color: card.color });
       } else if (c.id === 'bishop' && card.cost > p.gold && canBuildIgnoringGold(state, p, card, turnSafe(t))) {
         const shortfall = card.cost - p.gold;
-        if (p.hand.length - 1 >= shortfall) state.players.forEach((payer, payerIdx) => {
-          if (payerIdx !== idx && payer.gold >= shortfall) acts.push({ type: 'build', uid: card.uid,
-            target: payer.id, label: '建造『' + card.name + '』（请 ' + payer.name + ' 垫付 ' + shortfall + ' 金，偿还 ' + shortfall + ' 张手牌）',
+        if (p.hand.length - 1 >= shortfall && state.players.some((payer, payerIdx) =>
+          payerIdx !== idx && payer.gold >= shortfall)) {
+          /* 三段式流程的第一步只选择建筑，代偿玩家在下一步再选。 */
+          acts.push({ type: 'build', uid: card.uid,
+            label: '建造『' + card.name + '』（先选择代偿玩家，再偿还 ' + shortfall + ' 张手牌）',
             color: card.color });
-        });
+        }
       }
     });
 
@@ -941,6 +943,14 @@
         return { prompt: '【主教】选择 ' + pd.amount + ' 张手牌，偿还 ' + state.players[pd.payerIdx].name + ' 代付的 ' + pd.amount + ' 金',
           actions: [{ type: 'choose_cards', uids: [], label: '确认交出所选手牌' }],
           selectable: 'hand', multi: true, max: pd.amount };
+      case 'bishop_payer': {
+        const card = p.hand.find(c => c.uid === pd.uid);
+        if (!card) return { prompt: '【主教】建筑牌已不存在', actions: [] };
+        const payers = otherPlayers(state, t.playerIdx).filter(i => state.players[i].gold >= pd.amount);
+        return { prompt: '【主教】选择为『' + card.name + '』代偿 ' + pd.amount + ' 金的玩家', actions:
+          payers.map(i => ({ type: 'choose_player', target: state.players[i].id,
+            label: state.players[i].name + '（支付 ' + pd.amount + ' 金）' })) };
+      }
       case 'magician_choice':
         return { prompt: '【魔术师】选择一种能力', actions: [
           { type: 'magician_mode', mode: 'swap', label: '与一位玩家交换全部手牌' },
@@ -1362,11 +1372,10 @@
         if (!card) return err('手牌中没有这张建筑牌');
         if (card.cost > p.gold && c.id === 'bishop') {
           if (!canBuildIgnoringGold(state, p, card, t)) return err('无法建造该建筑（超出建造限额或已有同名建筑）');
-          const payerIdx = playerIdx(state, action.target);
           const amount = card.cost - p.gold;
-          if (payerIdx < 0 || payerIdx === idx || state.players[payerIdx].gold < amount || p.hand.length - 1 < amount)
-            return err('指定的代付玩家或偿还手牌数量不符合要求');
-          t.pending = { kind: 'bishop_repay', uid: card.uid, payerIdx: payerIdx, targetIdx: payerIdx, amount: amount };
+          if (p.hand.length - 1 < amount || !state.players.some((payer, payerIdx) =>
+            payerIdx !== idx && payer.gold >= amount)) return err('没有符合条件的代偿玩家或偿还手牌不足');
+          t.pending = { kind: 'bishop_payer', uid: card.uid, amount: amount };
           return ok();
         }
         if (!canBuildCard(state, p, card, t)) return err('无法建造该建筑（金币不足、超出建造限额或已有同名建筑）');
@@ -1682,6 +1691,15 @@
       }
       case 'choose_player': {
         const pd = t.pending;
+        if (pd && pd.kind === 'bishop_payer') {
+          const payerIdx = playerIdx(state, action.target);
+          if (payerIdx < 0 || payerIdx === idx || state.players[payerIdx].gold < pd.amount) return err('无效的代偿玩家');
+          const card = p.hand.find(x => x.uid === pd.uid);
+          if (!card || !canBuildIgnoringGold(state, p, card, t)) return err('建筑状态已改变，无法继续代偿建造');
+          t.pending = { kind: 'bishop_repay', uid: pd.uid, payerIdx: payerIdx,
+            targetIdx: payerIdx, amount: pd.amount };
+          return ok();
+        }
         if (!pd || pd.kind !== 'magician_swap') return err('当前无需选择玩家');
         const ti = playerIdx(state, action.target);
         if (ti < 0 || ti === idx) return err('无效的目标玩家');
@@ -2717,6 +2735,9 @@
       case 'bishop_repay':
         return { kind: pd.kind, targetIdx: isActor ? pd.payerIdx : null,
           amount: isActor ? pd.amount : 0, uid: isActor ? pd.uid : '' };
+      case 'bishop_payer':
+        return { kind: pd.kind, prompt: pendingPrompt(pd.kind), targetIdx: null,
+          amount: isActor ? pd.amount : 0, uid: isActor ? pd.uid : '' };
       default:
         return { kind: pd.kind, prompt: pendingPrompt(pd.kind), targetIdx: pd.targetIdx ?? null,
           fromCrownIdx: pd._fromCrownIdx ?? null };
@@ -2738,7 +2759,8 @@
       spy_target: '选择间谍调查对象', spy_color: '选择间谍调查类型',
       wizard_target: '选择法师查看对象', wizard_card: '选择法师取得的牌', wizard_choice: '选择法师牌的去向',
       emperor_crown: '选择皇冠归属', emperor_take: '选择拿取金币或手牌',
-      prophet_give: '选择归还的手牌', draw_keep: '选择保留的建筑牌', scholar_pick: '选择 1 张建筑牌'
+      prophet_give: '选择归还的手牌', draw_keep: '选择保留的建筑牌', scholar_pick: '选择 1 张建筑牌',
+      bishop_payer: '选择主教建筑的代偿玩家', bishop_repay: '选择偿还代偿的手牌'
     };
     return map[kind] || '';
   }

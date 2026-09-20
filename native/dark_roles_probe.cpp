@@ -104,8 +104,15 @@ int main() {
     bishop.players[0].hand = {{"house", "red", 3, "Tower"}, {"pay1", "blue", 2, "Chapel"}, {"pay2", "green", 2, "Market"}};
     NativeGameAdapter bishop_game;
     auto build_options = bishop_game.legal_actions(bishop, 0);
-    auto subsidy = std::find_if(build_options.begin(), build_options.end(), [](const NativeSearchAction& a) { return a.type == ActionType::Build && a.target == "payer"; });
-    require(subsidy != build_options.end() && bishop_game.apply(bishop, 0, *subsidy), "bishop selects payer for build");
+    auto subsidy = std::find_if(build_options.begin(), build_options.end(), [](const NativeSearchAction& a) {
+      return a.type == ActionType::Build && a.uid == "house" && a.target.empty();
+    });
+    require(subsidy != build_options.end() && bishop_game.apply(bishop, 0, *subsidy), "bishop selects building");
+    auto payer_options = bishop_game.legal_actions(bishop, 0);
+    auto payer = std::find_if(payer_options.begin(), payer_options.end(), [](const NativeSearchAction& a) {
+      return a.type == ActionType::ChoosePlayer && a.target == "payer";
+    });
+    require(payer != payer_options.end() && bishop_game.apply(bishop, 0, *payer), "bishop selects payer");
     auto repay_options = bishop_game.legal_actions(bishop, 0);
     require(repay_options.size() == 1 && repay_options.front().type == ActionType::ChooseCards, "bishop selects exact repayment cards");
     require(bishop_game.apply(bishop, 0, repay_options.front()), "bishop repays subsidy with hand cards");

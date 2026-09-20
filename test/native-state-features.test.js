@@ -136,7 +136,7 @@ test('JS 编码为全部 6 个新角色及其专属状态/动作分配独立槽�
   const typeNames = ['abbot_resource', 'blackmailer_bribe', 'blackmailer_refuse', 'blackmailer_signed',
     'blackmailer_char', 'magistrate_signed', 'magistrate_char', 'spy_color', 'spy_target', 'tax_collect', 'wizard_build', 'wizard_card',
     'wizard_take', 'wizard_target'];
-  assert.equal(train.STATE_ENCODING_VERSION, 7);
+  assert.equal(train.STATE_ENCODING_VERSION, 8);
   assert.equal(train.ACTION_ENCODING_VERSION, 6);
   for (const role of newRoles) {
     assert.ok(train.ROLE_IDS.includes(role), `${role} role feature`);
@@ -150,7 +150,7 @@ test('JS 编码为全部 6 个新角色及其专属状态/动作分配独立槽�
   }
   for (const pending of ['magistrate_declare', 'magistrate_second', 'magistrate_third',
     'blackmailer_declare', 'blackmailer_second', 'blackmailer_signed', 'blackmailer_threat',
-    'spy_target', 'spy_color', 'wizard_target', 'wizard_card', 'wizard_choice', 'abbot_declare', 'tax_collect', 'bishop_repay'])
+    'spy_target', 'spy_color', 'wizard_target', 'wizard_card', 'wizard_choice', 'abbot_declare', 'tax_collect', 'bishop_payer', 'bishop_repay'])
     assert.ok(train.PENDING_CODES[pending], `${pending} pending feature`);
 });
 

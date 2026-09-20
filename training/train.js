@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
 const STATE_SIZE = 672;
 const ACTION_SIZE = 256;
-const STATE_ENCODING_VERSION = 7;
+const STATE_ENCODING_VERSION = 8;
 const ACTION_ENCODING_VERSION = 6;
 const ROLE_IDS = ['assassin', 'witch', 'thief', 'magician', 'prophet', 'king', 'emperor', 'noble',
   'bishop', 'monk', 'merchant', 'alchemist', 'businessman', 'architect', 'navigator', 'scholar',
@@ -36,7 +36,7 @@ const PENDING_CODES = {
   diplomat_theirs: 18, magistrate_declare: 19, magistrate_second: 20, magistrate_third: 21,
   blackmailer_declare: 22, blackmailer_second: 23, blackmailer_signed: 24, blackmailer_threat: 25,
   spy_target: 26, spy_color: 27, wizard_target: 28, wizard_card: 29, wizard_choice: 30,
-  abbot_declare: 31, tax_collect: 32, bishop_repay: 33
+  abbot_declare: 31, tax_collect: 32, bishop_payer: 33, bishop_repay: 34
 };
 const ACTION_TYPES = [
   'ability_skip', 'ability', 'abbot_resource', 'artist_done', 'blackmailer_bribe',
@@ -105,7 +105,7 @@ function encodeState(view, playerId) {
   vector[15] = (Array.isArray(roundConfirm.confirmed) ? roundConfirm.confirmed.filter(Boolean).length : 0) / 8;
   vector[16] = turn.pending && turn.pending.targetIdx != null ? (rel(turn.pending.targetIdx) + 1) / 9 : 0;
   vector[17] = turn.pending && turn.pending.fromCrownIdx != null ? (rel(turn.pending.fromCrownIdx) + 1) / 9 : 0;
-  vector[18] = turn.pending && PENDING_CODES[turn.pending.kind] ? PENDING_CODES[turn.pending.kind] / 33 : 0;
+  vector[18] = turn.pending && PENDING_CODES[turn.pending.kind] ? PENDING_CODES[turn.pending.kind] / 34 : 0;
   vector[19] = (TURN_PHASE_CODES[turn.phase] == null ? 4 : TURN_PHASE_CODES[turn.phase]) / 4;
   vector[20] = (Number(view.turnsCompleted) || 0) / 100;
   vector[21] = turn.takenResources ? 1 : 0;
