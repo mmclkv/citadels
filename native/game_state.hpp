@@ -419,7 +419,9 @@ struct NativeGameState {
     used_smithy = false;
     used_museum = false;
     ability_used = false;
-    bonus_done = true;
+    // 航海家的额外奖励属于资源选择后的剩余行动，女巫接管后仍应可领取。
+    // 其他角色没有这个待领取奖励，保持已处理状态，避免错误地重复触发被动收益。
+    bonus_done = entry.char_id != "navigator";
     pending_kind.clear();
     pending_cards.clear();
     pending_queue.clear();

@@ -2246,7 +2246,9 @@
       takenResources: true, incomeTaken: false, abilityUsed: false,
       builds: 0, spentOnBuild: 0,
       usedLab: false, usedSmithy: false, usedMuseum: false,
-      pending: null, bonusDone: true
+      // 航海家的额外奖励属于资源选择后的剩余行动，女巫接管后仍应可领取。
+      // 其他角色没有这个待领取奖励，保持已处理状态，避免错误地重复触发被动收益。
+      pending: null, bonusDone: c.id !== 'navigator'
     };
     // 皇冠与贵族抽牌已在叫号瞬间结算给角色持有者（applyNum4TurnStart），
     // 这里不重复发放 —— 女巫接管的是剩余行动，不是已经落定的被动收益。
