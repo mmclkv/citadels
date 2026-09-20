@@ -3908,6 +3908,7 @@
       grid.appendChild(d);
     });
     $('#btn-net-start').style.display = amHost ? '' : 'none';
+    $('#btn-net-shuffle').style.display = amHost ? '' : 'none';
   }
 
   /* ============================== 事件绑定 ============================== */
@@ -4086,6 +4087,7 @@
       Net.send({ t: 'listRooms' });
     };
     $('#btn-net-start').onclick = () => Net.send({ t: 'startGame' });
+    $('#btn-net-shuffle').onclick = () => Net.send({ t: 'shuffleSeats' });
     ['r-players', 'r-end', 'r-chars'].forEach(id => {
       $('#' + id).onchange = () => {
         Net.send({

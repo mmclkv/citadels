@@ -222,6 +222,19 @@ function restoreSeat(r, seat) {
   if (player) player.isBot = false;
 }
 
+// 房主可以在大厅里重新随机安排除房主外的座位。
+// 保留 0 号座位不动，否则房主身份（r.seats[0]）会随座位变化而丢失。
+function shuffleRoomSeats(r) {
+  if (!r || r.seats.length < 3) return false;
+  for (let i = r.seats.length - 1; i > 1; i--) {
+    const j = 1 + Math.floor(Math.random() * i);
+    const tmp = r.seats[i];
+    r.seats[i] = r.seats[j];
+    r.seats[j] = tmp;
+  }
+  return true;
+}
+
 function startRoom(r) {
   if (r.state) return { error: '该房间已开局' };
   const seats = r.seats.filter(s => s.taken);
@@ -532,6 +545,19 @@ function handle(ws, info, msg) {
           while (r.seats.length > t && r.seats[r.seats.length - 1].taken === false) r.seats.pop();
         }
       }
+      sendPersonal(r);
+      break;
+    }
+
+    case 'shuffleSeats': {
+      const r = rooms[info.roomId];
+      if (!r || r.state) {
+        wsSend(ws, JSON.stringify({ t: 'error', error: '只能在开局前打乱座位' })); break;
+      }
+      if (!r.seats[0] || r.seats[0].id !== info.id) {
+        wsSend(ws, JSON.stringify({ t: 'error', error: '仅房主可打乱座位' })); break;
+      }
+      shuffleRoomSeats(r);
       sendPersonal(r);
       break;
     }
