@@ -132,6 +132,31 @@
     return best;
   }
 
+  /**
+   * 电脑和人类看同一份行动清单：需要「有哪些可选目标」时问引擎要。
+   * 直接翻 state.callQueue（谁握着哪个还没叫到的号）、别人手里的 chars 或手牌，
+   * 都是人类玩家看不到的隐藏信息，那样赢来的不是棋力而是作弊。
+   */
+  function choicesOf(state, playerId, type) {
+    const res = Engine.getAvailableActions(state, playerId) || {};
+    return (res.actions || []).filter(a => a.type === type && !a.disabled);
+  }
+  function charByNum(state, num) {
+    const id = (state.charDeck || []).find(cid => {
+      const c = Engine.charOf(cid);
+      return c && c.num === num;
+    });
+    return id ? Engine.charOf(id) : null;
+  }
+  /** 某玩家城里最多的建筑颜色：手牌看不到，城区是公开的，只能这样猜。 */
+  function topCityColor(player, fallback) {
+    const counts = {};
+    player.city.forEach(d => { counts[d.color] = (counts[d.color] || 0) + 1; });
+    let best = null, bv = 0;
+    Object.keys(counts).forEach(color => { if (counts[color] > bv) { bv = counts[color]; best = color; } });
+    return bv > 0 ? best : fallback;
+  }
+
   /* --------------------------- 选角决策 --------------------------- */
   // rnd: 可选的 [0,1) 随机源。默认 Math.random()，保持既有行为；
   //     传入确定性函数（如基于 seed）即可让同一局的 AI 决策完全可复现。
@@ -362,13 +387,12 @@
 
     switch (pd.kind) {
       case 'magistrate_declare': {
-        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num);
-        return { type: 'magistrate_signed', num: choices[0] || 1 };
+        const nums = choicesOf(state, p.id, 'magistrate_signed').map(a => a.num);
+        return { type: 'magistrate_signed', num: nums[0] || 1 };
       }
       case 'magistrate_second': case 'magistrate_third': {
-        const used = pd.used || [];
-        const choices = state.callQueue.map(e => e.num).filter(n => n !== t.num && !used.includes(n));
-        return { type: 'magistrate_char', num: choices[0] || 1 };
+        const nums = choicesOf(state, p.id, 'magistrate_char').map(a => a.num);
+        return { type: 'magistrate_char', num: nums[0] || 1 };
       }
       case 'blackmailer_declare': case 'blackmailer_second': {
         // 1 号角色 / 被刺杀 / 被施咒 / 已有逮捕令者都不能当威胁目标，必须走引擎同一套过滤
@@ -378,15 +402,10 @@
         return { type: 'blackmailer_char', num: choices[0] };
       }
       case 'blackmailer_signed': {
-        // 两个目标已定，由 AI 指定真威胁标记：优先给金币更多的那个，威胁才有意义
-        const nums = pd.nums || [];
-        let best = nums[0]; let bestGold = -1;
-        nums.forEach(n => {
-          const entry = (state.callQueue || []).find(e => e.num === n);
-          const gold = entry && state.players[entry.playerIdx] ? state.players[entry.playerIdx].gold : 0;
-          if (gold > bestGold) { bestGold = gold; best = n; }
-        });
-        return { type: 'blackmailer_signed', num: best };
+        // 哪个人握哪个号是隐藏的，勒索者看不出被标的是穷人还是富人；
+        // 真标记只能在这两个公开编号里随机指定，猜错才是要害。
+        const nums = choicesOf(state, p.id, 'blackmailer_signed').map(a => a.num);
+        return { type: 'blackmailer_signed', num: nums[Math.floor(rand() * nums.length)] || nums[0] || 1 };
       }
       case 'blackmailer_threat':
         // 赎金是一半金币，被真标记命中是全没了 —— 期望上两者相当，
@@ -397,9 +416,11 @@
         return { type: 'spy_target', target: target && target.id };
       }
       case 'spy_color': {
-        const target = state.players[pd.targetIdx]; const counts = {};
-        (target.hand || []).forEach(card => { counts[card.color] = (counts[card.color] || 0) + 1; });
-        const color = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || 'blue';
+        // 对手手牌看不到：只能按公开信息猜他最可能攒着哪种颜色。
+        const target = state.players[pd.targetIdx];
+        const guess = target ? topCityColor(target, null) : null;
+        const options = choicesOf(state, p.id, 'spy_color').map(a => a.color);
+        const color = options.indexOf(guess) >= 0 ? guess : (options[0] || 'blue');
         return { type: 'spy_color', color };
       }
       case 'wizard_target': {
@@ -416,29 +437,28 @@
         return { type: 'tax_collect' };
       case 'assassin': {
         const pref = { 7: 3.2, 4: 2.6, 6: 2.2, 5: 2.0, 8: 2.4, 3: 1.8, 2: 1.6, 9: 0.8 };
-        const leader = leaderIdx(state);
+        const opts = choicesOf(state, p.id, 'choose_char');
+        if (!opts.length) return { type: 'ability_skip' };
         let best = null, bv = -1;
-        state.callQueue.forEach(e => {
-          if (e.num === 1 || e.num === t.num) return;
-          let v = pref[e.num] != null ? pref[e.num] : 1;
-          if (e.playerIdx === leader) v += 1.6;
-          if (e.num === 8 && state.players[idx].city.length >= 5) v += 1.0;
-          if (e.num === 2 && p.gold >= 5) v += 1.2;
+        // 「几号在谁手上」是隐藏的，所以只能按角色本身的价值挑，不能挑 leader 那张。
+        opts.forEach(a => {
+          let v = pref[a.num] != null ? pref[a.num] : 1;
+          if (a.num === 8 && p.city.length >= 5) v += 1.0;
+          if (a.num === 2 && p.gold >= 5) v += 1.2;
           v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
-          if (v > bv) { bv = v; best = e.num; }
+          if (v > bv) { bv = v; best = a.num; }
         });
-        return { type: 'choose_char', num: best != null ? best : 1 };
+        return { type: 'choose_char', num: best != null ? best : opts[0].num };
       }
       case 'thief': {
+        const opts = choicesOf(state, p.id, 'choose_char');
+        if (!opts.length) return { type: 'ability_skip' };
         let best = null, bv = -1;
-        state.callQueue.forEach(e => {
-          if (e.num === 1 || e.num === t.num) return;
-          if (state.effects.assassinated === e.num) return;
-          if (state.effects.bewitched === e.num) return;
-          const cc = CHAR_MAP[e.charId];
+        opts.forEach(a => {
+          const cc = charByNum(state, a.num);
           let v = 0.6;
           // 收入型角色往往是富人的选择
-          if (cc.income) {
+          if (cc && cc.income) {
             let mx = 0;
             state.players.forEach((o, i) => {
               if (i === idx) return;
@@ -453,20 +473,21 @@
             v += mx * 0.25;
           }
           v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
-          if (v > bv) { bv = v; best = e.num; }
+          if (v > bv) { bv = v; best = a.num; }
         });
-        return { type: 'choose_char', num: best != null ? best : 3 };
+        return { type: 'choose_char', num: best != null ? best : opts[0].num };
       }
       case 'witch_target': {
         const pref = { 7: 3.0, 6: 2.6, 5: 2.4, 4: 2.0, 8: 2.2, 3: 1.6, 2: 1.4, 9: 1.0 };
+        const opts = choicesOf(state, p.id, 'choose_char');
+        if (!opts.length) return { type: 'ability_skip' };
         let best = null, bv = -1;
-        state.callQueue.forEach(e => {
-          if (e.num === 1 || e.num === t.num) return;
-          let v = pref[e.num] != null ? pref[e.num] : 1;
+        opts.forEach(a => {
+          let v = pref[a.num] != null ? pref[a.num] : 1;
           v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
-          if (v > bv) { bv = v; best = e.num; }
+          if (v > bv) { bv = v; best = a.num; }
         });
-        return { type: 'choose_char', num: best != null ? best : 2 };
+        return { type: 'choose_char', num: best != null ? best : opts[0].num };
       }
       case 'magician_choice': {
         let mostCards = -1, mi = -1;
@@ -491,18 +512,15 @@
       }
       case 'warlord_destroy': {
         const leader = leaderIdx(state);
+        // 目标清单以引擎发布的为准：住持保护这类判定要用到手牌里的角色牌，电脑不该自己查。
+        const allowed = new Set(choicesOf(state, p.id, 'choose_district').map(a => a.uid));
         let best = null, bv = -1, bestTarget = null;
         state.players.forEach((tp, i) => {
-          if (tp.city.length >= state.config.endDistricts) return;
-          if (i !== idx && Engine.isAbbotProtected(state, i)) return;   // 住持保护，选了也白选
-          if (i !== idx && tp.chars.some(x => x === 'bishop') &&
-              state.effects.assassinated !== 5 && state.effects.bewitched !== 5) return;
           tp.city.forEach(card => {
-            if (card.purple && card.purple.effect === 'immune') return;
+            if (!allowed.has(card.uid)) return;
             let cost = card.cost - 1 + (card.beautified ? 1 : 0);
             if (tp.city.some(d => d.uid !== card.uid && d.purple && d.purple.effect === 'wallCost')) cost += 1;
             cost = Math.max(0, cost);
-            if (cost > p.gold) return;
             let v = card.cost * 1.2 - cost * 0.4;
             if (i === leader) v += 2.0;
             if (i === idx) v -= 6;                       // 一般不拆自己的
@@ -513,16 +531,13 @@
         return { type: 'choose_district', target: bestTarget, uid: best.uid };
       }
       case 'marshal_seize': {
+        const allowed = new Set(choicesOf(state, p.id, 'choose_district').map(a => a.uid));
         let best = null, bt = null, bv = -1;
         state.players.forEach((tp, i) => {
           if (i === idx) return;
-          if (tp.city.length >= state.config.endDistricts) return;
-          if (Engine.isAbbotProtected(state, i)) return;                // 住持保护，选了也白选
           tp.city.forEach(card => {
-            if (card.cost > 3) return;
-            if (card.purple && card.purple.effect === 'immune') return;
+            if (!allowed.has(card.uid)) return;
             if (p.city.filter(d => d.name === card.name).length >= maxSame(p, card.name)) return;
-            if (card.cost > p.gold) return;
             const v = card.cost * 1.5 - card.cost * 0.3 + (i === leaderIdx(state) ? 1.5 : 0);
             if (v > bv) { bv = v; best = card; bt = tp.id; }
           });
@@ -543,15 +558,14 @@
       }
       case 'diplomat_theirs': {
         const mine = p.city.find(x => x.uid === pd.mineUid);
+        const allowed = new Set(choicesOf(state, p.id, 'choose_district').map(a => a.uid));
         let best = null, bt = null, bv = -1;
         state.players.forEach((tp, i) => {
           if (i === idx) return;
-          if (Engine.isAbbotProtected(state, i)) return;                // 住持保护，选了也白选
           tp.city.forEach(card => {
-            if (card.purple && card.purple.effect === 'immune') return;
+            if (!allowed.has(card.uid)) return;
             if (p.city.filter(d => d.name === card.name).length >= maxSame(p, card.name)) return;
             const diff = Math.max(0, card.cost - mine.cost);
-            if (diff > p.gold) return;
             const v = card.cost - mine.cost - diff * 0.5 + (i === leaderIdx(state) ? 1.0 : 0);
             if (v > bv) { bv = v; best = card; bt = tp.id; }
           });

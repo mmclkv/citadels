@@ -36,7 +36,9 @@ test('住持按卡图领取宗教建筑金币，不再发动旧资源组合能�
 
 test('住持未被刺杀或施咒时免疫全部8号角色建筑能力，失去角色效果后不免疫', () => {
   const state = stateWith('warlord');
-  state.players[1].chars = ['abbot'];
+  // 保护看的是「本轮已打出住持」（played 对所有观看者公开），不是「手里握住」——
+  // 后者会把谁拿住了持直接从 8 号角色的候选目标列表里读出来，见 test/abbot-privacy.test.js。
+  state.players[1].played = ['abbot'];
   state.players[1].city = [{ uid: 'abbot-city', name: '教堂', color: 'blue', cost: 2 }];
   state.players[0].gold = 10;
   state.turn.pending = { kind: 'warlord_destroy' };

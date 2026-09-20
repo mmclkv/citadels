@@ -136,5 +136,66 @@ console.log('\n[场景4] 回归：公开信息仍然正常公开（建造必须�
   check('建造的牌名照常公开在战报', /建造了『集市』/.test(tail), tail);
 }
 
+console.log('\n[场景5] 事件提示按下发对象裁剪：别人的牌面不在网络上裸奔');
+{
+  const st = mkState();
+  st.notices.push(
+    { seq: 900, kind: 'noble_draw', playerIdx: 0, playerName: '玩家1', amount: 3,
+      cardNames: ['教堂', '酒馆', '行宫'] },
+    { seq: 901, kind: 'spy_result', byIdx: 1, targetIdx: 0, targetName: '玩家1', color: 'blue',
+      matching: 2, gold: 1, cards: ['行宫', '教堂'] });
+  const of = pid => Engine.sanitize(st, pid).notices.filter(n => n.seq >= 900);
+  const drawer = of('p0'), spy = of('p1'), foe = of('p2'), spectator = of('nobody');
+  check('抽牌人自己仍看得到抽到什么', (drawer[0].cardNames || []).length === 3);
+  check('间谍自己仍看得到调查结果', (spy[1].cards || []).length === 2 && spy[1].matching === 2);
+  check('旁观与对手拿不到贵族抽到的牌名', !foe[0].cardNames && !spectator[0].cardNames,
+    JSON.stringify([foe[0], spectator[0]]));
+  check('对手拿不到被调查者的手牌构成', !foe[1].cards && !foe[1].matching &&
+    !spectator[1].cards, JSON.stringify([foe[1], spectator[1]]));
+  check('裁剪只删私人字段，动画需要的数量与座位仍在',
+    foe[0].amount === 3 && foe[0].playerIdx === 0 && foe[1].byIdx === 1 && foe[1].gold === 1);
+}
+
+console.log('\n[场景6] 跑完整局：任何一家收到的提示里都没有别人的隐藏牌面');
+{
+  const AI = require('../src/ai.js');
+  const { currentActor } = require('../training/train.js');
+  const keys = ['signed', 'cardNames', 'matching', 'isReal'];
+  let scanned = 0, leaked = null;
+  for (let seed = 1; seed <= 6 && !leaked; seed++) {
+    const seats = [];
+    for (let i = 0; i < 5; i++) seats.push({ id: 'q' + i, name: 'Q' + i, isBot: true, botType: 'npc' });
+    const st = Engine.createGame({ roomId: 'privacy-' + seed, seats, endDistricts: 6,
+      charSetMode: 'dark', seed });
+    Engine.startGame(st);
+    let guard = 0;
+    while (st.phase !== 'gameover' && guard++ < 4000) {
+      const actor = currentActor(st);
+      if (!actor) break;
+      const action = AI.decide(st, actor.id);
+      if (!action || !Engine.applyAction(st, actor.id, action).ok) break;
+      for (let i = 0; i < 5; i++) {
+        const view = Engine.sanitize(st, 'q' + i);
+        const seqs = new Set((st.notices || []).map(n => n.seq));
+        (view.notices || []).forEach(n => {
+          if (!seqs.has(n.seq)) return;               // 已裁剪的样本不算
+          scanned++;
+          const real = st.notices.find(x => x.seq === n.seq);
+          keys.forEach(key => {
+            if (n[key] !== undefined && real && real[key] !== undefined && n[key] !== real[key]) {
+              leaked = { seed: seed, viewer: i, kind: n.kind, key: key };
+            }
+            if (n[key] !== undefined && real && real[key] === undefined) {
+              leaked = { seed: seed, viewer: i, kind: n.kind, key: key, note: '凭空多出的字段' };
+            }
+          });
+        });
+      }
+    }
+  }
+  check(scanned + ' 份收件箱视图未私自夹带隐藏牌面', !leaked, JSON.stringify(leaked));
+}
+
 console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败\n');
 process.exit(fail ? 1 : 0);
+

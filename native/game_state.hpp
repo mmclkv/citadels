@@ -215,10 +215,14 @@ struct NativeGameState {
     return -1;
   }
 
+  // 只看公开信息：本轮已经打出过住持的人才受保护。
+  // 用 role_ids（本轮选到、可能还没叫到的角色）会和 JS 引擎的 played 判定分叉，
+  // 确定化猜出来的世界里「8 号回合还握着没打的住持」并不少见，两边一旦不一致，
+  // worker 的动作列表就对不上调用方下发的列表而退化成均匀先验（fallback）。
   bool protected_from_rank8(int target) const {
     if (target < 0 || target >= static_cast<int>(players.size())) return false;
     const auto& p = players[target];
-    return (std::find(p.role_ids.begin(), p.role_ids.end(), "abbot") != p.role_ids.end() || p.role_id == "abbot") &&
+    return std::find(p.played.begin(), p.played.end(), "abbot") != p.played.end() &&
       assassinated != 5 && bewitched != 5;
   }
 
@@ -701,7 +705,7 @@ struct NativeGameState {
   bool begin_next_round() {
     if (players.size() < 2 || char_deck.empty()) return false;
     ++round;
-    for (auto& player : players) { player.role_ids.clear(); player.role_id.clear(); }
+    for (auto& player : players) { player.role_ids.clear(); player.role_id.clear(); player.played.clear(); }
     pending_kind.clear(); pending_queue.clear(); pending_cards.clear(); pending_selected.clear();
     pending_target = -1; pending_amount = 0; pending_uid.clear();
     pending_nums.clear(); pending_first = -1; pending_signed = -1;
@@ -882,6 +886,8 @@ struct NativeGameState {
                    0, 0, false};
     if (!citadels::native::end_turn(turn)) return false;
     active()->gold = turn.gold;
+    // 与 JS 引擎一致：行动结束才把该角色登记为「已打出」，住持保护等公开判定读这个列表。
+    if (!active()->role_id.empty()) active()->played.push_back(active()->role_id);
     ++turns_completed;
     if (!call_queue.empty()) {
       ++call_index;

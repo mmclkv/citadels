@@ -43,7 +43,7 @@ function samplePositions(count) {
 function main() {
   const samples = samplePositions(80);
   assert(samples.length >= 40, '应采到足够的真实局面样本');
-  let sawDraft = false, sawAction = false, randomized = 0;
+  let sawDraft = false, sawAction = false, randomized = 0, queueChanged = 0, queueSamples = 0;
 
   samples.forEach(sample => {
     const before = JSON.stringify(sample.state);
@@ -69,11 +69,29 @@ function main() {
       i !== meIdx && JSON.stringify(p.hand) !== JSON.stringify(guess.players[i].hand));
     if (hiddenChanged) randomized++;
 
+    // 叫号队列尾部写着「每个还没叫到的号握在谁手上」，这是整轮最大的隐藏信息块：
+    // 它必须跟着打乱后的角色手牌重建，并且和猜测局面自身自洽。
+    if (sample.state.phase === 'action') {
+      const queue = sample.state.callQueue;
+      const cut = Math.min(sample.state.callIdx || 0, queue.length - 1);
+      assert.deepEqual(guess.callQueue.slice(0, cut + 1), queue.slice(0, cut + 1),
+        '已经叫过的号（含正在行动的这条）是公开事实，不得改动');
+      guess.callQueue.slice(cut + 1).forEach(entry => {
+        const holder = guess.players[entry.playerIdx];
+        assert(holder.chars.indexOf(entry.charId) >= 0 && !(holder.played || []).includes(entry.charId),
+          '队列尾部必须与猜测局面里的角色手牌自洽');
+      });
+      if (JSON.stringify(guess.callQueue) !== JSON.stringify(queue)) queueChanged++;
+      queueSamples++;
+    }
+
     if (sample.state.phase === 'draft') sawDraft = true;
     if (sample.state.phase === 'action') sawAction = true;
   });
 
   assert(sawDraft && sawAction, '样本要同时覆盖选角与行动阶段');
+  assert(queueSamples > 10 && queueChanged > queueSamples * 0.8,
+    '确定化必须真的重排叫号归属（' + queueChanged + '/' + queueSamples + '）');
   assert(randomized > samples.length * 0.8,
     '确定化必须真的换掉对手手牌（' + randomized + '/' + samples.length + '）');
 
@@ -90,6 +108,32 @@ function main() {
     guesses.add(warrant.signed);
   }
   assert(guesses.size > 1, '对非行政官本人而言，哪张是真令应当被重新随机指定');
+
+  // 真逮捕令一旦被没收就公开了（claimed），此时不能再猜，否则猜测局面与公开事实矛盾
+  const usedWarrant = makeState(78, 5);
+  usedWarrant.effects = usedWarrant.effects || {};
+  usedWarrant.effects.magistrate = { nums: [3, 5, 8], signed: 5, playerIdx: 4, claimed: true };
+  for (let i = 0; i < 10; i++) {
+    assert.equal(determinize(usedWarrant, 'p0').effects.magistrate.signed, 5,
+      '已公开的逮捕令真目标不得被改写');
+  }
+
+  // 勒索标记同理：公开的是编号集合，真的那个只有勒索者本人知道
+  const withThreat = makeState(79, 5);
+  withThreat.effects = withThreat.effects || {};
+  withThreat.effects.blackmailer = { nums: [2, 6], signed: 2, playerIdx: 4, done: [6], revealed: [{ num: 6, isReal: false }] };
+  const threatGuesses = new Set();
+  for (let i = 0; i < 30; i++) {
+    const threat = determinize(withThreat, 'p0').effects.blackmailer;
+    assert.deepEqual(threat.nums.slice(), [2, 6], '威胁标记的公开编号集合不变');
+    assert.equal(threat.signed, 2, '已经翻开证明是假的编号，真标记只可能剩下那个');
+    threatGuesses.add(threat.signed);
+  }
+  assert.equal(threatGuesses.size, 1, '真标记的候选被公开事实唯一确定时不得再随机');
+  withThreat.effects.blackmailer.done = []; withThreat.effects.blackmailer.revealed = [];
+  const openGuesses = new Set();
+  for (let i = 0; i < 30; i++) openGuesses.add(determinize(withThreat, 'p0').effects.blackmailer.signed);
+  assert(openGuesses.size > 1, '两个编号都没处理时，真标记应当被重新随机指定');
 
   // 已经被点名的牌（法师看过的牌、逮捕令要没收的牌）必须钉在原处：那是行动者的
   // 合法知识，猜没了它，引擎在猜测局面上会拒绝自己刚刚允许的动作。

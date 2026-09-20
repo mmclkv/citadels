@@ -85,6 +85,7 @@ int main() {
     NativeGameState abbot_guard;
     abbot_guard.active_player = 0; abbot_guard.players = {player("w", "warlord", 8), player("a", "abbot", 2)};
     abbot_guard.players[0].role_ids = {"warlord"}; abbot_guard.players[1].role_ids = {"abbot"};
+    abbot_guard.players[1].played = {"abbot"};   // 保护看的是「已打出」（公开信息），不是手里握着
     abbot_guard.players[1].city = {{{"guarded", "blue", 2, "Chapel"}, "Chapel"}};
     require(!abbot_guard.warlord_destroy("a", "guarded"), "active abbot rank-8 protection");
     abbot_guard.assassinated = 5;
