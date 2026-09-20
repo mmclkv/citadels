@@ -2875,9 +2875,32 @@
     // 碰撞收缩下限，避免刚放大就被压回手机尺寸。
     const viewportH = (window.innerHeight || 720);
     const spacious = (wrap.clientWidth || window.innerWidth || 0) >= 900 && viewportH >= 560;
+    const pwa = window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
     const currentHeight = parseFloat(wrap.style.height) || wrap.clientHeight || 0;
-    const targetHeight = Math.max(currentHeight, Math.min(spacious ? 640 : 620, Math.max(420, Math.round(viewportH * (spacious ? .76 : .62)))));
+    // 高 DPI 横屏设备虽然物理屏幕很宽，但 CSS 逻辑高度往往仍落在手机档。
+    // 如果继续使用 viewportH * .62，左右两侧上下玩家会被挤到同一条水平带内，
+    // 碰撞分离只能把它们推到边界，最后看起来像互相覆盖。多人 PWA 环形区
+    // 至少保留 600 CSS px 的垂直空间，根布局会再统一缩放到屏幕可见范围。
+    const minRingHeight = pwa && nodes.length >= 4 ? (spacious ? 520 : 600) : 420;
+    const maxRingHeight = pwa && nodes.length >= 4 ? (spacious ? 680 : 760) : (spacious ? 640 : 620);
+    const targetHeight = Math.max(currentHeight, Math.min(maxRingHeight, Math.max(minRingHeight, Math.round(viewportH * (spacious ? .76 : .62)))));
     wrap.style.height = targetHeight + 'px';
+
+    // 设备像素比高的横屏 PWA 可能只有约 768px 的 CSS 逻辑宽度，不能走
+    // “spacious” 分支；此前这里会退回 112–150px 的手机下限，经过整页适配
+    // 后玩家框就只剩一条竖线。PWA 多人环形布局统一保留可读宽度，空间不足
+    // 时由环形位移和内部卡牌缩放解决，而不是继续压缩外框。
+    const minPanelWidth = pwa
+      ? (spacious ? Math.max(240, Math.min(280, Math.round((wrap.clientWidth || window.innerWidth || 900) * .22))) : 250)
+      : (spacious ? 220 : 112);
+    nodes.forEach(node => {
+      const current = parseFloat(getComputedStyle(node).width) || 0;
+      if (current + 1 < minPanelWidth) {
+        node.style.setProperty('--mobile-opp-width', minPanelWidth + 'px');
+        node.dataset.compact = '4';
+      }
+    });
 
     const addPush = (node, dx, dy) => {
       const x = (parseFloat(node.dataset.pushX || '0') || 0) + dx;
@@ -2918,9 +2941,6 @@
           // CSS 像素宽度，160px 在 iPad/手机上最终只剩几十像素。先保留
           // 可读的面板最小宽度，空间不足时交给下面的环形位移和内部卡牌
           // 缩放逻辑处理；只有超过这个下限才继续收缩外框。
-          const minPanelWidth = spacious
-            ? Math.max(220, Math.min(280, Math.round((wrap.clientWidth || window.innerWidth || 900) * .22)))
-            : Math.max(112, Math.min(150, Math.round((wrap.clientWidth || window.innerWidth || 360) * .28)));
           if (Math.min(aw, bw) > minPanelWidth) {
             const floor = minPanelWidth;
             const next = Math.max(floor, Math.floor(Math.min(aw, bw) * .94));
