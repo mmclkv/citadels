@@ -128,22 +128,17 @@ test('粒子与路径不合时放弃该条模拟：不卡死、π 仍然合法',
     '每条模拟都归属于某条统计路径');
 });
 
-test('注入 infosetKeyFn 后严格的哈希校验能拦下不一致的重放', async () => {
+test('注入 infosetKeyFn 后不同信息集会拆成独立子节点，而不是污染共享统计', async () => {
   const state = newGame();
   const pool = particlePool(state, 3);
   let counter = 0;
-  // 每次调用都返回新 key：任何一次跨模拟的重放都会被判为「不属于同一信息集」
+  // 每次调用都返回新 key：每次后继都应进入自己的信息集子节点，而不是沿用旧节点。
   const result = await mcts.search(baseOptions(state, buildModel(53), {
     rootStates: pool,
     infosetKeyFn: () => 'infoset-' + (++counter)
   }));
-  assert.ok(result.simInfoSetMismatch > 0, '严格校验确实拦下了重放，mismatch=' +
-    result.simInfoSetMismatch);
-  // 这个键函数每次都返回新值，等于宣告「任何粒子都不属于已有信息集」，于是跨模拟的
-  // 重放几乎全被拦下：访问数会明显少于模拟数，但仍大于 0（第一条模拟能正常建树）。
-  assert.ok(result.visits > 0, '第一条模拟仍能建树，visits=' + result.visits);
-  assert.ok(result.visits < SIMULATE,
-    '被拦下的模拟没有把访问数灌进不属于它的节点，visits=' + result.visits);
+  assert.equal(result.simInfoSetMismatch, 0, '不同信息集应拆分节点，不应再误记为重放冲突');
+  assert.equal(result.visits, SIMULATE, '拆分后的各信息集子节点仍应完整累计访问次数');
 });
 
 test('聚合合法性的前提：同一信息集下不同粒子送进网络的特征向量完全相同', () => {

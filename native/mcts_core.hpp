@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -37,6 +38,8 @@ struct GameAdapter {
     result[0] = terminal_value(state, player);
     return result;
   }
+  // 当前行动玩家可观察信息的稳定标识。默认空字符串保持旧的按路径共享行为。
+  virtual std::string information_set_key(const State&, int) const { return {}; }
 };
 
 struct Evaluation {
@@ -153,19 +156,24 @@ class Mcts {
           backed_up = true;
           break;
         }
-        if (!node->children[index]) {
+        const int player = game_.next_player(state);
+        const std::string key = game_.information_set_key(state, player);
+        Node* child = find_child(*node, index, key);
+        if (!child) {
           if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
             backup(path, node->value_vector);
             backed_up = true;
             break;
           }
-          const int player = game_.next_player(state);
-          node->children[index] = std::make_unique<Node>();
+          auto fresh = std::make_unique<Node>();
+          child = fresh.get();
+          node->child_variants[index].push_back(std::move(fresh));
           ++node_count_;
-          node->children[index]->player = player;
-          node->children[index]->actions = game_.legal_actions(state, player);
+          child->player = player;
+          child->information_set_key = key;
+          child->actions = game_.legal_actions(state, player);
         }
-        node = node->children[index].get();
+        node = child;
         path.push_back(node);
       }
       if (!backed_up) backup(path, node->value_vector);
@@ -173,10 +181,10 @@ class Mcts {
 
     Result result;
     result.policy.resize(root.actions.size(), 0.0f);
-    for (size_t i = 0; i < root.children.size(); ++i) {
-      if (root.children[i]) {
-        result.policy[i] = static_cast<float>(root.children[i]->visits);
-        result.visits += root.children[i]->visits;
+    for (size_t i = 0; i < root.child_variants.size(); ++i) {
+      for (const auto& child : root.child_variants[i]) {
+        result.policy[i] += static_cast<float>(child->visits);
+        result.visits += child->visits;
       }
     }
     if (result.visits == 0) {
@@ -197,7 +205,8 @@ class Mcts {
     int player = 0;
     std::vector<Action> actions;
     std::vector<float> priors;
-    std::vector<std::unique_ptr<Node>> children;
+    std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
+    std::string information_set_key;
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
     float value = 0.0f;
@@ -215,7 +224,7 @@ class Mcts {
     node.value_vector = evaluation.has_value_vector ? evaluation.value_vector : std::array<float, kValueSlots>{};
     if (!evaluation.has_value_vector) node.value_vector[0] = evaluation.value;
     node.value = node.value_vector[0];
-    node.children.resize(node.actions.size());
+    node.child_variants.resize(node.actions.size());
     node.expanded = true;
     ++expansions_;
   }
@@ -225,10 +234,14 @@ class Mcts {
     float best_score = -std::numeric_limits<float>::infinity();
     const float parent = static_cast<float>(std::max(1, node.visits));
     for (size_t i = 0; i < node.actions.size(); ++i) {
-      const Node* child = node.children[i].get();
-      const float visits = child ? static_cast<float>(child->visits) : 0.0f;
-      const size_t slot = child && player_count_ ? relative_slot(child->player, node.player) : 0;
-      const float q = child && child->visits ? child->total[slot] / child->visits : 0.0f;
+      const auto& variants = node.child_variants[i];
+      float visits = 0.0f, total = 0.0f;
+      for (const auto& child : variants) {
+        visits += static_cast<float>(child->visits);
+        const size_t slot = player_count_ ? relative_slot(child->player, node.player) : 0;
+        total += child->visits ? child->total[slot] : 0.0f;
+      }
+      const float q = visits > 0.0f ? total / visits : 0.0f;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       const float u = config_.c_puct * p * std::sqrt(parent) / (1.0f + visits);
       const float score = q + u + (visits == 0 ? 1e-5f * random_unit() : 0.0f);
@@ -260,6 +273,13 @@ class Mcts {
   }
 
   float random_unit() { return std::generate_canonical<float, 24>(rng_); }
+
+  Node* find_child(Node& node, size_t action, const std::string& key) {
+    if (action >= node.child_variants.size()) return nullptr;
+    for (const auto& child : node.child_variants[action])
+      if (child->information_set_key == key) return child.get();
+    return nullptr;
+  }
 
   // 按权重抽一个粒子；权重缺失 / 全 0 / 长度对不上时退化为均匀采样
   size_t pick_particle() {
@@ -359,17 +379,23 @@ class BatchedMcts {
             terminal.push_back(true); terminal_values.push_back(node->value_vector);
             paths.push_back(std::move(path)); collected = true; break;
           }
-          if (!node->children[index]) {
+          const int player = game_.next_player(state);
+          const std::string key = game_.information_set_key(state, player);
+          Node* child = find_child(*node, index, key);
+          if (!child) {
             if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
               terminal.push_back(true); terminal_values.push_back(node->value_vector);
               paths.push_back(std::move(path)); collected = true; break;
             }
-            node->children[index] = std::make_unique<Node>();
+            auto fresh = std::make_unique<Node>();
+            child = fresh.get();
+            node->child_variants[index].push_back(std::move(fresh));
             ++node_count_;
-            node->children[index]->player = game_.next_player(state);
-            node->children[index]->actions = game_.legal_actions(state, node->children[index]->player);
+            child->player = player;
+            child->information_set_key = key;
+            child->actions = game_.legal_actions(state, player);
           }
-          node = node->children[index].get();
+          node = child;
           path.push_back(node);
         }
         if (!collected) {
@@ -404,7 +430,8 @@ class BatchedMcts {
  private:
   struct Node {
     int player = 0; std::vector<Action> actions; std::vector<float> priors;
-    std::vector<std::unique_ptr<Node>> children;
+    std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
+    std::string information_set_key;
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
     float value = 0;
@@ -420,16 +447,20 @@ class BatchedMcts {
       node.priors.assign(node.actions.size(), 1.0f / node.actions.size());
     node.value_vector = evaluation.has_value_vector ? evaluation.value_vector : std::array<float, kValueSlots>{};
     if (!evaluation.has_value_vector) node.value_vector[0] = evaluation.value;
-    node.value = node.value_vector[0]; node.children.resize(node.actions.size()); node.expanded = true;
+    node.value = node.value_vector[0]; node.child_variants.resize(node.actions.size()); node.expanded = true;
   }
   size_t select(const Node& node) const {
     size_t best = 0; float score_best = -std::numeric_limits<float>::infinity();
     const float parent = static_cast<float>(std::max(1, node.visits));
     for (size_t i = 0; i < node.actions.size(); ++i) {
-      const Node* child = node.children[i].get();
-      const float visits = child ? static_cast<float>(child->visits) : 0.0f;
-      const size_t slot = child && player_count_ ? relative_slot(child->player, node.player) : 0;
-      const float q = child && child->visits ? child->total[slot] / child->visits : 0.0f;
+      const auto& variants = node.child_variants[i];
+      float visits = 0.0f, total = 0.0f;
+      for (const auto& child : variants) {
+        visits += static_cast<float>(child->visits);
+        const size_t slot = player_count_ ? relative_slot(child->player, node.player) : 0;
+        total += child->visits ? child->total[slot] : 0.0f;
+      }
+      const float q = visits > 0.0f ? total / visits : 0.0f;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       const float score = q + config_.c_puct * p * std::sqrt(parent) / (1.0f + visits);
       if (score > score_best) { score_best = score; best = i; }
@@ -455,15 +486,23 @@ class BatchedMcts {
   }
   Result result(const Node& root) const {
     Result output; output.policy.resize(root.actions.size(), 0.0f);
-    for (size_t i = 0; i < root.children.size(); ++i) if (root.children[i]) {
-      output.policy[i] = static_cast<float>(root.children[i]->visits); output.visits += root.children[i]->visits;
-    }
+    for (size_t i = 0; i < root.child_variants.size(); ++i)
+      for (const auto& child : root.child_variants[i]) {
+        output.policy[i] += static_cast<float>(child->visits);
+        output.visits += child->visits;
+      }
     if (output.visits) for (float& value : output.policy) value /= output.visits;
     else output.policy = root.priors;
     if (root.visits) for (size_t i = 0; i < kValueSlots; ++i) output.value_vector[i] = root.total[i] / root.visits;
     else output.value_vector = root.value_vector;
     output.value = output.value_vector[0];
     return output;
+  }
+  Node* find_child(Node& node, size_t action, const std::string& key) {
+    if (action >= node.child_variants.size()) return nullptr;
+    for (const auto& child : node.child_variants[action])
+      if (child->information_set_key == key) return child.get();
+    return nullptr;
   }
   // 按权重抽一个粒子；权重缺失 / 全 0 / 长度对不上时退化为均匀采样
   size_t pick_particle() {

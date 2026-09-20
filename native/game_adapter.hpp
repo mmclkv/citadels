@@ -2,12 +2,15 @@
 
 #include <algorithm>
 #include <array>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "game_state.hpp"
 #include "magician_machine.hpp"
 #include "mcts_core.hpp"
+#include "state_features.hpp"
 
 namespace citadels::native {
 
@@ -261,6 +264,9 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
       for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player) {
+        // 法师只列有手牌的玩家：选中空手玩家下一步无牌可选，会和 JS 引擎卡住的分支不一致。
+        if (state.pending_kind == "wizard_target" && state.players[i].hand.empty() &&
+            state.players[i].hand_count <= 0) continue;
         NativeSearchAction action; action.type = state.pending_kind == "spy_target" ? ActionType::SpyTarget : ActionType::WizardTarget;
         action.target = state.players[i].id; actions.push_back(std::move(action));
       }
@@ -282,7 +288,12 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (state.pending_kind == "wizard_choice") {
       if (player != state.active_player) return {};
-      return {{ActionType::WizardTake}, {ActionType::WizardBuild}};
+      std::vector<NativeSearchAction> actions{{ActionType::WizardTake}};
+      // 立即建造要付得起那张牌：JS 侧的合法动作列表按「真能落子」筛选，
+      // 这里多给一个走不通的分支就会让根节点动作对不上而退化成均匀先验。
+      if (state.pending_cards.size() == 1 && state.active() &&
+          state.active()->gold >= state.pending_cards.front().cost) actions.push_back({ActionType::WizardBuild});
+      return actions;
     }
     if (state.pending_kind == "abbot_declare") {
       if (player != state.active_player) return {};
@@ -877,6 +888,24 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   std::array<float, kValueSlots> terminal_value_vector(
       const NativeGameState& state, int player) const override {
     return native_terminal_reward_vector(state, player);
+  }
+
+  std::string information_set_key(const NativeGameState& state, int player) const override {
+    // 编码复用与 GPU 网络相同的观察视角，再附上当前玩家可执行动作的实体引用。
+    // 这样自己的手牌变化会改变 key，而对手隐藏手牌只要不影响合法观察就不会进入 key。
+    std::ostringstream out;
+    out << std::setprecision(9);
+    for (float value : encode_features(state, player)) out << value << ',';
+    const auto actions = legal_actions(state, player);
+    for (const auto& action : actions) {
+      out << '|'
+          << static_cast<int>(action.type) << ':' << action.uid << ':' << action.name << ':'
+          << action.effect << ':' << action.target << ':' << action.secondary_uid << ':'
+          << action.mode << ':' << action.color << ':' << action.num << ':' << action.gold << ':'
+          << action.cards << ':' << (action.use ? 1 : 0) << ':';
+      for (const auto& uid : action.selected_uids) out << uid << ';';
+    }
+    return out.str();
   }
 };
 

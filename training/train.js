@@ -14,6 +14,7 @@ const { cloneTrimmed } = require('./search-state.js');
 const { applyRecorded } = require('./undo.js');
 const { determinize } = require('./determinize.js');
 const { beliefWeights } = require('./belief.js');
+const { informationSetKey } = require('./information-set.js');
 const mcts = require('./mcts.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -570,6 +571,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         dirichletAlpha: config.mctsDirichletAlpha,
         dirichletEpsilon: config.mctsDirichletEpsilon != null ? config.mctsDirichletEpsilon : 0.03,
         maxDepth: config.mctsMaxDepth,
+        infosetKeyFn: (working, playerId) => informationSetKey(working, playerId, Engine.sanitize),
         rng,
         evaluator: jsFallbackEvaluator
         });
@@ -1197,6 +1199,7 @@ module.exports = {
   STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION, ROLE_IDS, PHASE_CODES, TURN_PHASE_CODES, PENDING_CODES, ACTION_TYPES,
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
   alignedDeterminization, alignedParticlePool, particleBeliefWeights,
+  informationSetKey,
   resolveNetworkPlayerCount, heuristicLevelFor, nativeMctsSupportsGame,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR,

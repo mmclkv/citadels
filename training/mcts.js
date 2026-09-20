@@ -134,7 +134,9 @@ function makeNode(playerId, legalActions) {
     value: 0,                 // 兼容字段：valueVector[0]
     valueVector: new Float32Array(VALUE_SLOTS),
     expanded: false,
-    children: new Map(),      // actionIndex (整型) -> Node
+    // actionIndex -> Map(informationSetKey -> Node)。没有 key 时使用空字符串，
+    // 保持旧调用方的单节点行为；启用信息集后同一动作可拥有多个安全分支。
+    children: new Map(),
     incomingAction: null,     // 走到本节点的动作（根节点为 null）；MCTS 靠重放它还原状态
     parent: null,             // 父节点（根节点为 null）
   };
@@ -221,17 +223,23 @@ class Search {
     let bestAction = -1;
     let bestScore = -Infinity;
     for (let i = 0; i < node.legalActions.length; i++) {
-      const child = node.children.get(i);
+      const variants = node.children.get(i);
+      const children = variants instanceof Map ? Array.from(variants.values()) : (variants ? [variants] : []);
+      const visits = children.reduce((sum, child) => sum + child.N, 0);
       let score;
-      if (!child || child.N === 0) {
+      if (!children.length || visits === 0) {
         // 未访问：返回 PUCT 中的探索项，让首次访问也能被选
         const p = node.P ? node.P[i] : 0;
         score = this.cPuct * p * Math.sqrt(Math.max(parentVisit, 1) / (1 + 0)) * (1 + this.rng() * 1e-3);
       } else {
-        const slot = this.vectorMode ? this.relativeSlot(child.playerId, node.playerId) : 0;
-        const q = this.vectorMode ? child.WVector[slot] / child.N : child.W / child.N;
+        let q = 0;
+        for (const child of children) {
+          const slot = this.vectorMode ? this.relativeSlot(child.playerId, node.playerId) : 0;
+          q += this.vectorMode ? child.WVector[slot] : child.W;
+        }
+        q /= visits;
         const p = node.P ? node.P[i] : 0;
-        const u = this.cPuct * p * Math.sqrt(parentVisit) / (1 + child.N);
+        const u = this.cPuct * p * Math.sqrt(parentVisit) / (1 + visits);
         score = q + u;
       }
       if (score > bestScore) { bestScore = score; bestAction = i; }
@@ -424,7 +432,16 @@ class Search {
         return;
       }
       const actionIdx = this.selectUCB(current, current.N);
-      let child = current.children.get(actionIdx);
+      const variants = current.children.get(actionIdx);
+      const probe = this.cloneState(working);
+      let nextPlayer = null;
+      try {
+        const applied = this.Engine.applyAction(probe, current.playerId, current.legalActions[actionIdx]);
+        if (applied && applied.ok) nextPlayer = this.nextActor(probe);
+      } catch (_) { /* applyRecorded below remains the authoritative path */ }
+      const nextKey = nextPlayer && this.infosetKeyFn
+        ? this.infosetKeyFn(probe, nextPlayer.id) : '';
+      let child = variants instanceof Map ? variants.get(nextKey) : variants;
       if (!child) {
         // 在 working 上试走该动作（applyRecorded 自动记录并可精确撤销），
         // 拿到后继合法动作后立刻撤销，把 working 还原回 current 的状态。
@@ -438,12 +455,15 @@ class Search {
         const nextPlayerId = actor ? actor.id : current.playerId;
         const legalActions = this.legalFn(working, nextPlayerId);
         child = makeNode(nextPlayerId, legalActions);
+        child.infosetKey = actor && this.infosetKeyFn ? this.infosetKeyFn(working, nextPlayerId) : '';
         child.incomingAction = current.legalActions[actionIdx];
         child.parent = current;
         child.bornSim = simIndex;
         // 记录所属信息集：后续模拟重放到这个节点时会拿它做一致性校验
         if (this.infosetKeyFn) child.infosetKey = this.infosetKeyFn(working, nextPlayerId);
-        current.children.set(actionIdx, child);
+        let bucket = current.children.get(actionIdx);
+        if (!(bucket instanceof Map)) { bucket = new Map(); current.children.set(actionIdx, bucket); }
+        bucket.set(child.infosetKey || '', child);
         undo();
       }
       path.push(child);
@@ -508,9 +528,11 @@ class Search {
     if (this.evaluator.flush) await this.evaluator.flush();
     const pi = new Float32Array(rootLegal.length);
     let total = 0;
-    for (const [a, child] of root.children) {
-      pi[a] = child.N;
-      total += child.N;
+    for (const [a, bucket] of root.children) {
+      const children = bucket instanceof Map ? Array.from(bucket.values()) : [bucket];
+      const visits = children.reduce((sum, child) => sum + child.N, 0);
+      pi[a] = visits;
+      total += visits;
     }
     if (total > 0) {
       for (let i = 0; i < pi.length; i++) pi[i] /= total;
