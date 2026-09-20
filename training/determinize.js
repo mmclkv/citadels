@@ -131,8 +131,12 @@ function charPiles(state, me) {
   const d = state.draft;
   if (d) {
     if (!Array.isArray(d.faceDown)) d.faceDown = [];
-    piles.push(arrayPile(d.faceDown));
     const step = d.steps && d.steps[d.stepIdx];
+    // 7~8 人局最后一步会把暗置牌加入当前玩家的可选列表。对当前玩家来说，
+    // 这些牌面和顺序已经是合法可见信息；若此时把 faceDown 重排，
+    // draft_pick/draft_discard 的动作下标就会和真实局面错位。
+    const faceDownVisible = step && step.player === me && step.fromFaceDown && d.sub === 'pick';
+    if (!faceDownVisible) piles.push(arrayPile(d.faceDown));
     if (step && step.player !== me && Array.isArray(d.pool)) piles.push(arrayPile(d.pool));
   }
   return piles;

@@ -95,6 +95,29 @@ function main() {
   assert(randomized > samples.length * 0.8,
     '确定化必须真的换掉对手手牌（' + randomized + '/' + samples.length + '）');
 
+  // 7~8 人局最后一名玩家会从「传下来的牌 + 暗置牌」中选择角色。
+  // 暗置牌此时对当前玩家已经可见，确定化不得改变其动作顺序。
+  for (const playerCount of [7, 8]) {
+    const draftState = makeState(200 + playerCount, playerCount);
+    let sawFaceDownPick = false;
+    let guard = 0;
+    while (draftState.phase === 'draft' && guard++ < 100) {
+      const actor = currentActor(draftState);
+      if (!actor) break;
+      const step = draftState.draft.steps[draftState.draft.stepIdx];
+      const legal = enumerateLegalActions(draftState, actor.id);
+      if (step && step.fromFaceDown && draftState.draft.sub === 'pick') {
+        sawFaceDownPick = true;
+        const guess = determinize(draftState, actor.id);
+        assert.deepEqual(enumerateLegalActions(guess, actor.id), legal,
+          playerCount + ' 人局从暗置角色牌选角时动作列表必须保持一致');
+      }
+      const action = AI.decide(draftState, actor.id) || legal[0];
+      if (!action || !Engine.applyAction(draftState, actor.id, action).ok) break;
+    }
+    assert(sawFaceDownPick, playerCount + ' 人局应覆盖从暗置角色牌选角路径');
+  }
+
   // 逮捕令：三个编号是公开的，哪张是真的保密 —— 猜测只能在公开集合里选
   const withWarrant = makeState(77, 5);
   withWarrant.effects = withWarrant.effects || {};
