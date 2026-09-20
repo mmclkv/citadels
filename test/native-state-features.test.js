@@ -136,7 +136,7 @@ test('JS 编码为全部 6 个新角色及其专属状态/动作分配独立槽�
   const typeNames = ['abbot_resource', 'blackmailer_bribe', 'blackmailer_refuse', 'blackmailer_signed',
     'blackmailer_char', 'magistrate_signed', 'magistrate_char', 'spy_color', 'spy_target', 'tax_collect', 'wizard_build', 'wizard_card',
     'wizard_take', 'wizard_target'];
-  assert.equal(train.STATE_ENCODING_VERSION, 6);
+  assert.equal(train.STATE_ENCODING_VERSION, 7);
   assert.equal(train.ACTION_ENCODING_VERSION, 6);
   for (const role of newRoles) {
     assert.ok(train.ROLE_IDS.includes(role), `${role} role feature`);
@@ -163,7 +163,7 @@ test('六个新增暗版角色已由 C++ MCTS 规则模拟支持；独立 C++ �
 
 test('动作编码升级后拒绝 v5 旧 checkpoint，防止错配策略槽位', () => {
   const model = new PolicyValueNetwork({ profile: 'fast' });
-  assert.equal(model.encodingVersion, 6);
+  assert.equal(model.encodingVersion, 7);
   const oldCheckpoint = model.export();
   oldCheckpoint.encodingVersion = 5;
   assert.throws(() => model.import(oldCheckpoint), /不兼容的 checkpoint/);

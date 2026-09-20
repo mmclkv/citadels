@@ -8,7 +8,7 @@ const { BatchEvaluator } = require('./evaluator.js');
 const { NativeSearchClient } = require('./native-search.js');
 
 const model = new PolicyValueNetwork({ profile: workerData.config.profile,
-  stateSize: 672, actionSize: 256, encodingVersion: 6,
+  stateSize: 672, actionSize: 256, encodingVersion: 7,
   seed: workerData.config.seed ^ (workerData.workerId * 2654435761) });
 let modelVersion = -1;
 let stopping = false;

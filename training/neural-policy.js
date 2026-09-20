@@ -110,7 +110,7 @@ function concat(a, b) {
 }
 
 class PolicyValueNetwork {
-  constructor({ profile = 'balanced', stateSize = 672, actionSize = 256, seed = 2026, encodingVersion = 6 } = {}) {
+  constructor({ profile = 'balanced', stateSize = 672, actionSize = 256, seed = 2026, encodingVersion = 7 } = {}) {
     this.profileName = PROFILES[profile] ? profile : 'balanced';
     this.profile = PROFILES[this.profileName];
     this.stateSize = stateSize;

@@ -163,7 +163,11 @@
         endDistricts: config.endDistricts || 8,
         charSetMode: config.charSetMode || 'base',
         startingHand: 4,
-        startingGold: 2
+        startingGold: 2,
+        // 训练和复盘可以显式轮换开局皇冠；未提供时保持历史行为（座位 0）。
+        initialCrownSeat: Number.isInteger(Number(config.initialCrownSeat)) &&
+          Number(config.initialCrownSeat) >= 0 && Number(config.initialCrownSeat) < playerCount
+          ? Number(config.initialCrownSeat) : 0
       },
       players: [],
       deck: [],
@@ -222,8 +226,11 @@
       p.gold = state.config.startingGold;
       p.city = [];
     });
-    state.players[0].hasCrown = true;
-    log(state, '游戏开始！每位玩家获得 4 张建筑牌与 2 枚金币。皇冠由 ' + state.players[0].name + ' 持有。', 'sys');
+    state.players.forEach(p => { p.hasCrown = false; });
+    state.players[state.config.initialCrownSeat || 0].hasCrown = true;
+    const crownHolder = state.players.find(p => p.hasCrown);
+    log(state, '游戏开始！每位玩家获得 4 张建筑牌与 2 枚金币。皇冠由 ' +
+      (crownHolder ? crownHolder.name : '未知玩家') + ' 持有。', 'sys');
     log(state, '本局使用角色：' + state.charDeck.map(id => CHAR_MAP[id].num + '.' + CHAR_MAP[id].name).join('、'), 'sys');
     startRound(state);
     return { ok: true };

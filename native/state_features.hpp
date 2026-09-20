@@ -9,7 +9,7 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 6;
+constexpr int kStateEncodingVersion = 7;
 constexpr int kStateFeatureSize = 672;
 constexpr int kActionEncodingVersion = 6;
 constexpr std::array<const char*, 27> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
@@ -169,7 +169,9 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     features[base + 15] = static_cast<float>(visible_chars) / 3.0f;
     features[base + 16] = p.connected ? 1.0f : 0.0f;
     features[base + 17] = p.is_bot ? 1.0f : 0.0f;
-    features[base + 18] = static_cast<float>(p.seat) / 8.0f;
+    // 与 JS 编码保持一致：绝对座位号会让固定座位训练产生位置捷径，
+    // 这里保留槽位但不再写入绝对 seat。
+    features[base + 18] = 0.0f;
     features[base + 19] = absolute == active ? static_cast<float>(state.pending_cards.size()) / 8.0f : 0.0f;
     if (revealed >= 1 && revealed <= 9) features[base + 19 + static_cast<size_t>(revealed)] = 1.0f;
     for (size_t role = 0; role < kRoleIds.size(); ++role)

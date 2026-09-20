@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
 const STATE_SIZE = 672;
 const ACTION_SIZE = 256;
-const STATE_ENCODING_VERSION = 6;
+const STATE_ENCODING_VERSION = 7;
 const ACTION_ENCODING_VERSION = 6;
 const ROLE_IDS = ['assassin', 'witch', 'thief', 'magician', 'prophet', 'king', 'emperor', 'noble',
   'bishop', 'monk', 'merchant', 'alchemist', 'businessman', 'architect', 'navigator', 'scholar',
@@ -145,7 +145,10 @@ function encodeState(view, playerId) {
     vector[base + 15] = (p.chars || []).length / 3;
     vector[base + 16] = p.connected === false ? 0 : 1;
     vector[base + 17] = p.isBot ? 1 : 0;
-    vector[base + 18] = (Number(p.seat) || 0) / 8;
+    // 不再编码绝对 seat。玩家槽位已经按观察者相对位置排列，保留绝对座位号会让
+    // 固定座位训练的网络记住“座位 2 是目标”，破坏换座位后的泛化能力；该槽位保留
+    // 为 0 以维持 JS/C++ 的 672 维协议布局。
+    vector[base + 18] = 0;
     vector[base + 19] = ((context.meIndex + r) % players.length) === active && turn.pending && Number(turn.pending.count)
       ? Number(turn.pending.count) / 8 : 0;
     const revealed = Number(p.revealedCharNum);
@@ -412,6 +415,22 @@ function heuristicLevelFor(config, seatIndex, gameIndex) {
   return levels[(Math.abs((config.seed || 0) + gameIndex * 17 + seatIndex * 31) % levels.length)];
 }
 
+// 训练时轮换策略网络与皇冠的物理座位，避免网络永远在 seat 0、皇冠也永远在 seat 0。
+// 使用 gameIndex 派生的独立随机源，保证并行 worker 调度顺序不会改变座位分布。
+function trainingPlacement(config, gameIndex, playerCount, networkPlayerCount) {
+  const seed = ((Number(config.seed) || 0) ^ Math.imul(gameIndex, 0x9E3779B9) ^ 0x51ED270B) >>> 0;
+  const rnd = mulberry32(seed);
+  const order = Array.from({ length: playerCount }, (_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+  }
+  return {
+    networkSeats: new Set(order.slice(0, Math.max(1, Math.min(playerCount, networkPlayerCount)))),
+    initialCrownSeat: order[Math.floor(rnd() * playerCount)]
+  };
+}
+
 // 单局回合数上限的默认值；正常自对弈局平均十几到二十几回合结束，留足余量。
 const DEFAULT_MAX_ROUNDS = 100;
 
@@ -423,8 +442,9 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   const charSets = config.charSet === 'random' ? ['base', 'dark', 'mixed'] : [config.charSet];
   const charSet = charSets[Math.floor(rng() * charSets.length)];
   const networkPlayerCount = resolveNetworkPlayerCount(config, gameIndex, playerCount);
+  const placement = trainingPlacement(config, gameIndex, playerCount, networkPlayerCount);
   const seats = Array.from({ length: playerCount }, (_, i) => {
-    const neural = i < networkPlayerCount;
+    const neural = placement.networkSeats.has(i);
     return { id: (neural ? 'nn-' : 'heuristic-') + gameIndex + '-' + i,
       name: neural ? '神经网络 ' + (i + 1) : '启发式 ' + (i + 1), isBot: true,
       botType: neural ? 'neural' : 'heuristic',
@@ -432,7 +452,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   });
   const state = Engine.createGame({
     roomId: 'training-' + gameIndex, endDistricts: config.endDistricts,
-    charSetMode: charSet, seed: config.seed + gameIndex * 7919, seats
+    charSetMode: charSet, seed: config.seed + gameIndex * 7919, seats,
+    initialCrownSeat: placement.initialCrownSeat
   });
   Engine.startGame(state);
   const useNativeMcts = !!nativeSearch && (config.mctsEngine === 'cpp' || config.backend === 'native') &&
@@ -658,7 +679,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   const winning = state.winner == null ? [] : [state.winner];
   // avg_reward 把同桌所有人的名次分取平均，按构造≈0，看不出课程早期那一名网络
   // 玩家的强弱；这里单独统计网络座位自己的名次分、得分和是否（并列）第一。
-  const networkIds = new Set(seats.slice(0, networkPlayerCount).map(seat => seat.id));
+  const networkIds = new Set(seats.filter(seat => seat.botType === 'neural').map(seat => seat.id));
   const mean = values => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
   const networkRows = state.scores.filter(row =>
     networkIds.has(state.players[row.playerIdx] && state.players[row.playerIdx].id));
@@ -1216,7 +1237,7 @@ module.exports = {
   enumerateLegalActions, currentActor, gameRewards, relativeRewardVector, normalizeValueVector,
   alignedDeterminization, alignedParticlePool, particleBeliefWeights,
   informationSetKey,
-  resolveNetworkPlayerCount, heuristicLevelFor, nativeMctsSupportsGame,
+  resolveNetworkPlayerCount, heuristicLevelFor, trainingPlacement, nativeMctsSupportsGame,
   sampleHistory, redrawCandidates,
   cloneTrimmed, STATE_SIZE, ACTION_SIZE, VALUE_SLOTS, DATA_DIR,
   MAX_BATCH_GAMES, MAX_MCTS_PARTICLES, BELIEF_DECAY, adjustedConfigFields
