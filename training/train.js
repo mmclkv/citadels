@@ -911,6 +911,9 @@ async function train(rawConfig, hooks = {}) {
   // 训练批次按“完成的对局数”计数，而不是按 worker 池是否存在计数。
   // worker 一次返回多少局属于并行调度细节，不应覆盖控制台里的 batchGames 配置。
   let gamesSinceUpdate = 0;
+  // completedGames 只代表成功完成、可以进入训练的数据局数；它不能再兼任
+  // worker 的任务序号，否则超长/异常局被跳过后会重复使用同一个 gameIndex。
+  let nextGameIndex = completedGames + 1;
   let loggedDarkNativeFallback = false;
   if (torch && !stopping) {
     const nativeGpuSearch = config.mctsEngine === 'cpp' && config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu';
@@ -975,8 +978,11 @@ async function train(rawConfig, hooks = {}) {
   while (completedGames < config.targetGames && !shouldStop()) {
     let results;
     if (pool) {
-      const count = Math.min(config.batchGames, config.targetGames - completedGames);
-      const indices = Array.from({ length: count }, (_, i) => completedGames + i + 1);
+      // 一次只补齐当前训练批还缺的“成功对局数”。worker 返回 null 的超长/异常局
+      // 不会计入 results，因此下一轮会继续补齐，而不会把批次边界推迟到 100+ 局。
+      const needed = Math.max(1, config.batchGames - gamesSinceUpdate);
+      const count = Math.min(needed, config.targetGames - completedGames);
+      const indices = Array.from({ length: count }, () => nextGameIndex++);
       try {
         results = await pool.run(indices, torch.modelPath, completedGames);
       } catch (error) {
@@ -990,11 +996,12 @@ async function train(rawConfig, hooks = {}) {
       }
       batchFailures = 0;
     } else {
-      const result = await runSelfPlayGame(model, config, completedGames + 1, rng, shouldStop);
-      if (result && result.dropped) log('游戏 #' + (completedGames + 1) + ' ' + result.reason +
+      const gameIndex = nextGameIndex++;
+      const result = await runSelfPlayGame(model, config, gameIndex, rng, shouldStop);
+      if (result && result.dropped) log('游戏 #' + gameIndex + ' ' + result.reason +
         '，已丢弃该局（未计入数据）· ' + result.steps + ' 步 · ' +
         ((result.durationMs || 0) / 1000).toFixed(1) + 's');
-      results = (!result || result.stopped || result.dropped) ? [] : [{ gameIndex: completedGames + 1, ...result }];
+      results = (!result || result.stopped || result.dropped) ? [] : [{ gameIndex, ...result }];
     }
     if (!results.length) {
       // 收到停止信号就真的停下；否则说明这一批/这一局跑不通（无合法行动、超步数、超回合上限），
