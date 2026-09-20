@@ -890,22 +890,40 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     return native_terminal_reward_vector(state, player);
   }
 
-  std::string information_set_key(const NativeGameState& state, int player) const override {
-    // 编码复用与 GPU 网络相同的观察视角，再附上当前玩家可执行动作的实体引用。
-    // 这样自己的手牌变化会改变 key，而对手隐藏手牌只要不影响合法观察就不会进入 key。
-    std::ostringstream out;
-    out << std::setprecision(9);
-    for (float value : encode_features(state, player)) out << value << ',';
+  InformationSetKey information_set_hash(const NativeGameState& state, int player) const override {
+    // 与旧字符串 key 使用相同的可观察状态和动作字段，但直接写入双哈希，
+    // 避免 ostringstream、浮点格式化、大字符串分配和字符串线性查找。
+    InformationSetKeyBuilder builder;
+    builder.i32(player);
+    const auto features = encode_features(state, player);
+    builder.u64(features.size());
+    for (float value : features) builder.floating(value);
     const auto actions = legal_actions(state, player);
+    builder.u64(actions.size());
     for (const auto& action : actions) {
-      out << '|'
-          << static_cast<int>(action.type) << ':' << action.uid << ':' << action.name << ':'
-          << action.effect << ':' << action.target << ':' << action.secondary_uid << ':'
-          << action.mode << ':' << action.color << ':' << action.num << ':' << action.gold << ':'
-          << action.cards << ':' << (action.use ? 1 : 0) << ':';
-      for (const auto& uid : action.selected_uids) out << uid << ';';
+      builder.i32(static_cast<int>(action.type));
+      builder.string(action.uid);
+      builder.string(action.name);
+      builder.string(action.effect);
+      builder.string(action.target);
+      builder.string(action.secondary_uid);
+      builder.string(action.mode);
+      builder.string(action.color);
+      builder.i32(action.num);
+      builder.i32(action.gold);
+      builder.i32(action.cards);
+      builder.boolean(action.use);
+      builder.boolean(action.has_num);
+      builder.u64(action.selected_uids.size());
+      for (const auto& uid : action.selected_uids) builder.string(uid);
     }
-    return out.str();
+    return builder.finish();
+  }
+
+  // 仅供旧调试调用方读取；搜索核心使用上面的紧凑 hash。
+  std::string information_set_key(const NativeGameState& state, int player) const override {
+    const auto key = information_set_hash(state, player);
+    return std::to_string(key.lo) + ':' + std::to_string(key.hi);
   }
 };
 

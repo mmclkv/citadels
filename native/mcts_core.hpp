@@ -5,16 +5,65 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace citadels::native {
 
 constexpr size_t kValueSlots = 8;
+
+// Compact information-set identity. The old implementation formatted a large
+// observable state/action description into a string at every tree level.
+struct InformationSetKey {
+  uint64_t lo = 0;
+  uint64_t hi = 0;
+  bool operator==(const InformationSetKey& other) const {
+    return lo == other.lo && hi == other.hi;
+  }
+};
+
+struct InformationSetKeyHasher {
+  size_t operator()(const InformationSetKey& key) const {
+    return static_cast<size_t>(key.lo ^ (key.hi + 0x9e3779b97f4a7c15ULL +
+                                         (key.lo << 6) + (key.lo >> 2)));
+  }
+};
+
+class InformationSetKeyBuilder {
+ public:
+  void bytes(const void* data, size_t size) {
+    const auto* input = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < size; ++i) {
+      lo_ ^= input[i]; lo_ *= 1099511628211ULL;
+      hi_ ^= static_cast<uint64_t>(input[i]) + 0x9d;
+      hi_ *= 14029467366897019727ULL;
+      hi_ ^= hi_ >> 29;
+    }
+  }
+  void u64(uint64_t value) { bytes(&value, sizeof(value)); }
+  void i32(int value) { const auto v = static_cast<int64_t>(value); bytes(&v, sizeof(v)); }
+  void boolean(bool value) { const uint8_t v = value ? 1 : 0; bytes(&v, sizeof(v)); }
+  void floating(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    u64(bits);
+  }
+  void string(const std::string& value) {
+    u64(value.size());
+    bytes(value.data(), value.size());
+  }
+  InformationSetKey finish() const { return {lo_, hi_}; }
+
+ private:
+  uint64_t lo_ = 1469598103934665603ULL;
+  uint64_t hi_ = 1099511628211ULL;
+};
 
 template <typename State>
 auto state_player_count(const State& state, int) -> decltype(state.players.size(), size_t()) {
@@ -38,8 +87,15 @@ struct GameAdapter {
     result[0] = terminal_value(state, player);
     return result;
   }
-  // 当前行动玩家可观察信息的稳定标识。默认空字符串保持旧的按路径共享行为。
+  // 兼容旧适配器的字符串接口；新的搜索核心优先使用紧凑 hash。
   virtual std::string information_set_key(const State&, int) const { return {}; }
+  virtual InformationSetKey information_set_hash(const State& state, int player) const {
+    const std::string key = information_set_key(state, player);
+    if (key.empty()) return {};
+    InformationSetKeyBuilder builder;
+    builder.string(key);
+    return builder.finish();
+  }
 };
 
 struct Evaluation {
@@ -157,7 +213,7 @@ class Mcts {
           break;
         }
         const int player = game_.next_player(state);
-        const std::string key = game_.information_set_key(state, player);
+        const InformationSetKey key = game_.information_set_hash(state, player);
         Node* child = find_child(*node, index, key);
         if (!child) {
           if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
@@ -172,6 +228,7 @@ class Mcts {
           child->player = player;
           child->information_set_key = key;
           child->actions = game_.legal_actions(state, player);
+          node->child_by_key[index].emplace(key, child);
         }
         node = child;
         path.push_back(node);
@@ -206,7 +263,8 @@ class Mcts {
     std::vector<Action> actions;
     std::vector<float> priors;
     std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
-    std::string information_set_key;
+    std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
+    InformationSetKey information_set_key;
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
     float value = 0.0f;
@@ -225,6 +283,7 @@ class Mcts {
     if (!evaluation.has_value_vector) node.value_vector[0] = evaluation.value;
     node.value = node.value_vector[0];
     node.child_variants.resize(node.actions.size());
+    node.child_by_key.resize(node.actions.size());
     node.expanded = true;
     ++expansions_;
   }
@@ -274,11 +333,11 @@ class Mcts {
 
   float random_unit() { return std::generate_canonical<float, 24>(rng_); }
 
-  Node* find_child(Node& node, size_t action, const std::string& key) {
+  Node* find_child(Node& node, size_t action, const InformationSetKey& key) {
     if (action >= node.child_variants.size()) return nullptr;
-    for (const auto& child : node.child_variants[action])
-      if (child->information_set_key == key) return child.get();
-    return nullptr;
+    const auto& index = node.child_by_key[action];
+    const auto it = index.find(key);
+    return it == index.end() ? nullptr : it->second;
   }
 
   // 按权重抽一个粒子；权重缺失 / 全 0 / 长度对不上时退化为均匀采样
@@ -380,7 +439,7 @@ class BatchedMcts {
             paths.push_back(std::move(path)); collected = true; break;
           }
           const int player = game_.next_player(state);
-          const std::string key = game_.information_set_key(state, player);
+          const InformationSetKey key = game_.information_set_hash(state, player);
           Node* child = find_child(*node, index, key);
           if (!child) {
             if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
@@ -394,6 +453,7 @@ class BatchedMcts {
             child->player = player;
             child->information_set_key = key;
             child->actions = game_.legal_actions(state, player);
+            node->child_by_key[index].emplace(key, child);
           }
           node = child;
           path.push_back(node);
@@ -431,7 +491,8 @@ class BatchedMcts {
   struct Node {
     int player = 0; std::vector<Action> actions; std::vector<float> priors;
     std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
-    std::string information_set_key;
+    std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
+    InformationSetKey information_set_key;
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
     float value = 0;
@@ -447,7 +508,10 @@ class BatchedMcts {
       node.priors.assign(node.actions.size(), 1.0f / node.actions.size());
     node.value_vector = evaluation.has_value_vector ? evaluation.value_vector : std::array<float, kValueSlots>{};
     if (!evaluation.has_value_vector) node.value_vector[0] = evaluation.value;
-    node.value = node.value_vector[0]; node.child_variants.resize(node.actions.size()); node.expanded = true;
+    node.value = node.value_vector[0];
+    node.child_variants.resize(node.actions.size());
+    node.child_by_key.resize(node.actions.size());
+    node.expanded = true;
   }
   size_t select(const Node& node) const {
     size_t best = 0; float score_best = -std::numeric_limits<float>::infinity();
@@ -498,11 +562,11 @@ class BatchedMcts {
     output.value = output.value_vector[0];
     return output;
   }
-  Node* find_child(Node& node, size_t action, const std::string& key) {
+  Node* find_child(Node& node, size_t action, const InformationSetKey& key) {
     if (action >= node.child_variants.size()) return nullptr;
-    for (const auto& child : node.child_variants[action])
-      if (child->information_set_key == key) return child.get();
-    return nullptr;
+    const auto& index = node.child_by_key[action];
+    const auto it = index.find(key);
+    return it == index.end() ? nullptr : it->second;
   }
   // 按权重抽一个粒子；权重缺失 / 全 0 / 长度对不上时退化为均匀采样
   size_t pick_particle() {
