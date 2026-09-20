@@ -36,8 +36,9 @@ const Train = require('../training/train.js');
   const capped = Train.sanitizeConfig({ targetGames: 1, minPlayers: 2, maxPlayers: 2,
     charSet: 'base', profile: 'fast', batchGames: 1, seed: 42, endDistricts: 7, maxRounds: 1 });
   const cappedResult = await Train.runSelfPlayGame(model, capped, 1, () => 0.42, () => false);
-  assert.ok(cappedResult && cappedResult.dropped, '超过回合上限的局被丢弃，不产出训练数据');
-  assert.match(cappedResult.reason, /回合数/, '丢弃原因写明超回合上限');
+  assert.ok(cappedResult && cappedResult.truncated, '超过回合上限的局按当前排名提前结算');
+  assert.ok(!cappedResult.dropped && cappedResult.transitions.length > 0,
+    '超长局保留已收集的训练轨迹，不再整局丢弃');
   assert.ok(cappedResult.rounds > 1 && cappedResult.rounds <= 2, '到上限立即中断，不等这一局跑完');
   // 课程首段只有一人用策略网络：网络指标必须是那名玩家自己的名次分/得分，
   // 不能是同桌均值（那种数按构造≈0，衡量不出进步）。

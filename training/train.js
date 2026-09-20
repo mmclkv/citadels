@@ -479,6 +479,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     return true;
   };
   const startedAt = Date.now();
+  let truncated = false;
   while (state.phase !== 'gameover' && steps < config.maxSteps && state.round <= maxRounds) {
     if (shouldStop()) break;
     const actor = currentActor(state);
@@ -636,11 +637,16 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   }
   if (state.phase !== 'gameover') {
     if (shouldStop()) return { stopped: true, transitions: [] };
-    if (state.round > maxRounds)
-      return { dropped: true, reason: '回合数 ' + state.round + ' 超过上限 ' + maxRounds,
-        rounds: state.round, steps, durationMs: Date.now() - startedAt };
-    console.warn('[train] 跳过第 ' + gameIndex + ' 局：超过最大步数 ' + config.maxSteps);
-    return null;
+    if (state.round > maxRounds) {
+      // 超长局不再整局丢弃：用当前局面可计算出的临时分数做排名终点，
+      // 让已收集的搜索轨迹仍能贡献训练信号。这里不设置 winner，避免把
+      // “达到回合上限”误报成正常的率先建成胜利。
+      state.scores = Engine.computeScores(state);
+      truncated = true;
+    } else {
+      console.warn('[train] 跳过第 ' + gameIndex + ' 局：超过最大步数 ' + config.maxSteps);
+      return null;
+    }
   }
   const rewards = gameRewards(state);
   transitions.forEach(tr => {
@@ -658,7 +664,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     networkIds.has(state.players[row.playerIdx] && state.players[row.playerIdx].id));
   const rewardOf = row => rewards.get(state.players[row.playerIdx].id) || 0;
   return {
-    transitions, steps, rounds: state.round, durationMs: Date.now() - startedAt,
+    transitions, steps, rounds: state.round, durationMs: Date.now() - startedAt, truncated,
     avgInferenceMs: inferenceMs / Math.max(1, steps), fallbackCount, playerCount, charSet,
     networkPlayerCount,
     networkReward: mean(networkRows.map(rewardOf)),
@@ -906,7 +912,7 @@ async function train(rawConfig, hooks = {}) {
   const winSeatsByPlayers = {};   // { 玩家数: { games, wins: number[] } }，全程累计
   // 战力曲线同理按人数分开取窗口：某种人数最近 50 局的均值。
   const recentByPlayers = {};     // { 玩家数: stat[] }，每种人数各留 50 局
-  let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0;
+  let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0, totalTruncatedGames = 0;
   let rollout = [];
   // 训练批次按“完成的对局数”计数，而不是按 worker 池是否存在计数。
   // worker 一次返回多少局属于并行调度细节，不应覆盖控制台里的 batchGames 配置。
@@ -1022,6 +1028,7 @@ async function train(rawConfig, hooks = {}) {
       completedGames++;
       gamesSinceUpdate++;
       rollout.push(...result.transitions);
+      if (result.truncated) totalTruncatedGames++;
       totalSteps += result.steps;
       totalInferenceMs += result.avgInferenceMs * result.steps;
       totalFallbacks += result.fallbackCount;
@@ -1043,7 +1050,7 @@ async function train(rawConfig, hooks = {}) {
         scores: result.scores, rewards: result.rewards,
         networkPlayers: result.networkPlayerCount,
         networkReward: result.networkReward, networkScore: result.networkScore,
-        networkWin: result.networkWin
+        networkWin: result.networkWin, truncated: !!result.truncated
       };
       recentGames.push(gameStat);
       if (recentGames.length > 50) recentGames.shift();
@@ -1118,6 +1125,7 @@ async function train(rawConfig, hooks = {}) {
       gamesPerMinute: (completedGames - initialCompletedGames) / Math.max(1e-6, elapsedMs / 60000),
       avgGameMs: recentDuration, avgInferenceMs: totalInferenceMs / Math.max(1, totalSteps),
       avgScore: recentScore, avgReward: recentReward, fallbacks: totalFallbacks,
+      truncatedGames: totalTruncatedGames,
       networkReward: networkMean('networkReward'), networkScore: networkMean('networkScore'),
       networkWinRate: networkMean('networkWin'), networkPlayers: Math.round(networkMean('networkPlayers')),
       avgRounds: recentGames.reduce((sum, g) => sum + g.rounds, 0) / recentGames.length,
@@ -1140,6 +1148,7 @@ async function train(rawConfig, hooks = {}) {
         ' · 网络玩家 名次分=' + point.networkReward.toFixed(2) +
         ' 得分=' + point.networkScore.toFixed(1) + ' 第一率=' + Math.round(point.networkWinRate * 100) + '%' +
         ' · rounds=' + point.avgRounds.toFixed(1) +
+        (totalTruncatedGames ? ' · 超长提前结算=' + totalTruncatedGames : '') +
         etaStr);
     }
     if (checkpointDue) {
