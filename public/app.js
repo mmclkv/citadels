@@ -2914,8 +2914,15 @@
 
           const aw = parseFloat(getComputedStyle(nodes[i]).width) || 0;
           const bw = parseFloat(getComputedStyle(nodes[j]).width) || 0;
-          if (Math.min(aw, bw) > (spacious ? 160 : 84)) {
-            const floor = spacious ? 160 : 84;
+          // 不要把玩家框压成窄竖条：PWA 的整页 fit 缩放会再次缩小这里的
+          // CSS 像素宽度，160px 在 iPad/手机上最终只剩几十像素。先保留
+          // 可读的面板最小宽度，空间不足时交给下面的环形位移和内部卡牌
+          // 缩放逻辑处理；只有超过这个下限才继续收缩外框。
+          const minPanelWidth = spacious
+            ? Math.max(220, Math.min(280, Math.round((wrap.clientWidth || window.innerWidth || 900) * .22)))
+            : Math.max(112, Math.min(150, Math.round((wrap.clientWidth || window.innerWidth || 360) * .28)));
+          if (Math.min(aw, bw) > minPanelWidth) {
+            const floor = minPanelWidth;
             const next = Math.max(floor, Math.floor(Math.min(aw, bw) * .94));
             nodes[i].style.setProperty('--mobile-opp-width', next + 'px');
             nodes[j].style.setProperty('--mobile-opp-width', next + 'px');
