@@ -10,6 +10,8 @@ let logInitialized = false;
 let logPlaceholder = false;
 let logErrorEl = null;
 let logErrorText = '';
+let resumeCheckpointCompatible = null;
+const CURRENT_STATE_ENCODING_VERSION = 7;
 
 function num(value, digits = 2) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
 function integer(value) { return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('zh-CN') : '0'; }
@@ -202,13 +204,17 @@ async function uploadCheckpointFile(file) {
       body: file
     });
     $('resume-checkpoint-name').value = data.name;
+    resumeCheckpointCompatible = data.encodingCompatible === true;
     out.textContent = '已加载 ' + data.name + '（该文件已训练 ' + integer(data.game) + ' 局）；' +
       (data.renamed ? '原文件名不符合存档命名，已改名为上述名称。' : '') +
+      (resumeCheckpointCompatible ? '状态编码 v' + data.encodingVersion + ' 兼容。' :
+        '警告：状态编码 v' + (data.encodingVersion || '未知') + ' 与当前 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，不能续训。') +
       '可点左侧按钮把它的超参数读回面板。';
   } catch (error) {
     // 上传失败就退回从头训练，别留下一个指向不存在存档的配置
     $('resume-checkpoint').value = '';
     $('resume-checkpoint-name').value = '';
+    resumeCheckpointCompatible = null;
     out.textContent = '加载失败：' + error.message;
   }
   syncResumeUI();
@@ -360,6 +366,8 @@ function renderRuntime(status) {
     ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch（C++）' : (c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—')],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
+    ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
+    ['状态编码', 'v' + CURRENT_STATE_ENCODING_VERSION + '（JS / C++ 对齐）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['启发式难度', c.heuristicDifficulty || '—'],
     ['样本来源', c.trainNetworkOnly === false ? '全部玩家' : '仅策略网络玩家'],
@@ -665,6 +673,10 @@ async function refresh() {
 }
 
 $('start-training').onclick = async () => {
+  if (resumeCheckpointName() && resumeCheckpointCompatible === false) {
+    $('control-message').textContent = '当前权重的状态编码与 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，请从头训练或选择新权重';
+    return;
+  }
   $('control-message').textContent = '正在启动…';
   try { render(await api('./api/training/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formConfig()) })); }
   catch (error) { $('control-message').textContent = error.message; }
@@ -683,9 +695,11 @@ $('load-checkpoint-config').onclick = async () => {
   out.textContent = '正在读取 ' + name + ' …';
   try {
     const data = await api('./api/training/checkpoint?name=' + encodeURIComponent(name));
+    resumeCheckpointCompatible = data.encodingCompatible === true;
     const result = applyCheckpointConfig(data.config || {});
     if (latest) render(latest);
-    out.textContent = '已从 ' + data.name + '（已训 ' + integer(data.game) + ' 局）读入 ' + result.applied + ' 项参数' +
+    out.textContent = (resumeCheckpointCompatible ? '已从 ' : '警告：已从 ') + data.name + '（已训 ' + integer(data.game) + ' 局）读入 ' + result.applied + ' 项参数；' +
+      (resumeCheckpointCompatible ? '状态编码兼容。' : '状态编码 v' + (data.encodingVersion || '未知') + ' 与当前 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，不能续训。') +
       (result.skipped.length ? '；' + result.skipped.length + ' 项该存档未记录或面板无此选项，保持当前值' : '');
   } catch (error) {
     out.textContent = error.message;
@@ -698,13 +712,14 @@ $('resume-checkpoint').addEventListener('change', () => {
     if (!$('resume-checkpoint-name').value) requestCheckpointFile();
   } else {
     $('resume-checkpoint-name').value = '';
+    resumeCheckpointCompatible = null;
   }
   syncResumeUI();
 });
 $('resume-checkpoint-file').onchange = () => {
   const file = $('resume-checkpoint-file').files && $('resume-checkpoint-file').files[0];
   if (file) uploadCheckpointFile(file);
-  else { $('resume-checkpoint').value = ''; $('resume-checkpoint-name').value = ''; syncResumeUI(); }
+  else { $('resume-checkpoint').value = ''; $('resume-checkpoint-name').value = ''; resumeCheckpointCompatible = null; syncResumeUI(); }
 };
 $('profile').onchange = () => { if (latest) render(latest); };
 $('rules-engine').onchange = updateMctsEvaluatorUI;

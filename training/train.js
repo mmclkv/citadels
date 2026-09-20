@@ -840,7 +840,9 @@ function configTag(config) {
 function saveCheckpoint(model, config, game, history) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const name = 'checkpoint-' + String(game).padStart(6, '0') + '-' + configTag(config) + '.json.gz';
-  const payload = JSON.stringify({ createdAt: new Date().toISOString(), game, config, model: model.export(), history: sampleHistory(history) });
+  const payload = JSON.stringify({ createdAt: new Date().toISOString(), game, config,
+    encoding: { state: STATE_ENCODING_VERSION, action: ACTION_ENCODING_VERSION },
+    model: model.export(), history: sampleHistory(history) });
   atomicWrite(path.join(DATA_DIR, name), zlib.gzipSync(payload, { level: 6 }));
   return name;
 }
@@ -890,6 +892,7 @@ async function train(rawConfig, hooks = {}) {
         '，每 ' + config.curriculumStepGames + ' 局增加 1 人');
   log('自对弈阵容：' + composition + ' · 启发式难度=' + config.heuristicDifficulty +
     ' · 训练样本=' + (config.trainNetworkOnly ? '仅策略网络玩家' : '全部玩家'));
+  log('训练公平性：策略网络座位与开局皇冠每局自动轮换 · 状态编码 v' + STATE_ENCODING_VERSION);
   log('指标说明：avg_reward 是同桌所有人名次奖励的均值，零和所以长期≈0，与网络强弱无关；' +
     '看进步请用「策略网络战力」曲线的 networkReward / 第一率');
   if (config.mctsSimulations > 0) {
