@@ -14,9 +14,12 @@ node server.js 9000       # 指定端口
 启动后浏览器打开：
 
 - 本机：`http://localhost:8787`
-- 局域网：`http://<你的内网IP>:8787`（启动时会在终端打印，同一 WiFi 下的朋友可直接用它联机）
+- 局域网：`http://<你的内网IP>:8787`（启动时会在终端打印，同一 WiFi 下的朋友可直接用它联机；
+  浏览器只在 HTTPS 下开放麦克风，所以房间语音需要另外配 HTTPS，见「联机语音」）
 
 零依赖：只用到 Node 内置模块（HTTP、WebSocket 手写实现），无需 `npm install`。
+唯一一个第三方浏览器包（LiveKit 客户端，约 580KB）已经放在 `public/vendor/` 里，
+而且只在第一次点「语音」时才加载，单机玩家不会为它多花流量。
 
 ## 本地策略神经网络训练
 
@@ -89,6 +92,81 @@ iPhone 底部安全区、横屏小高度设备也都处理了。
 
 - 空缺座位可一键设为电脑；房主可随时调整人数 / 结束条件 / 角色组。
 - 玩家中途断线会自动由电脑托管，不会卡住牌局。
+
+### 联机语音（实时通话）
+
+房间里的真人座位可以开麦说话，电脑座位不参与。音频是浏览器之间的 WebRTC 流，
+经 **LiveKit**（自建或 LiveKit Cloud）转发，不经过游戏服务器：游戏服务器只负责
+给本房间的真人签发一枚短期访问令牌。
+
+**需要 HTTPS。** 浏览器只在安全上下文里提供麦克风（`navigator.mediaDevices`），
+所以 `http://192.168.x.x:8787` 这种局域网地址上语音是关着的 —— 页面检测到之后
+会直接提示「请用 HTTPS 打开」，不会让用户对着英文报错发愣。`http://127.0.0.1:8787`
+和 `http://localhost:8787` 属于安全上下文，本机自测可以直接用。
+
+服务器没配 LiveKit 时，界面里不会出现任何语音入口（连「语音」开关都不显示）。配置只放在
+**运行游戏服务器的机器上**，改完重启服务器：
+
+| 环境变量 | 用途 |
+|---|---|
+| `LIVEKIT_URL` | LiveKit 服务地址，`wss://xxx.livekit.cloud` 或自建 `wss://voice.example.com` |
+| `LIVEKIT_API_KEY` | LiveKit 的 API Key |
+| `LIVEKIT_API_SECRET` | LiveKit 的 API Secret，**只留在服务器端**，不下发给浏览器 |
+| `LIVEKIT_TOKEN_TTL` | 令牌有效期秒数，默认 21600（6 小时），允许 60–86400 |
+
+配置好之后，创建房间的表单和房间内的配置行都会多出一个「语音」开关（默认开）。
+房主在大厅里可以随时关掉（开局后大厅收起，要改得等下一局）；关掉后服务器会立刻拒绝
+为这个房间签发新令牌，已经连上的人还能把当前这句说完。
+
+**准备一台 LiveKit 服务器**，两条路：
+
+- **LiveKit Cloud**：建一个项目，把项目里的 `wss://` 地址和一对 Key/Secret 填进上面三个变量。
+- **自建**：从 [LiveKit Releases](https://github.com/livekit/livekit/releases) 下载
+  `livekit-server` 二进制，写一份带 `keys:` 的配置文件后启动。快速自测可以直接用
+  dev 模式（固定 `devkey`/`secret`，仅适合本机验证）：
+  ```bash
+  livekit-server --dev --bind 127.0.0.1     # 对应 LIVEKIT_URL=ws://127.0.0.1:7880
+  ```
+  对外提供服务时务必换成正式 Key/Secret，并让 LiveKit 走 TLS —— 页面在 HTTPS 下
+  只能连 `wss://`，混合内容会被浏览器拦掉。
+
+**自建 LiveKit 放在 nginx 后面**时，除了 WebSocket 升级，还要把 LiveKit 的
+`/rtc`（信令）和 `/twirp`（服务端 API）都转发过去，缺一个就连不上：
+
+```nginx
+location /rtc {
+    proxy_pass http://127.0.0.1:7880;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400s;
+}
+location /twirp {
+    proxy_pass http://127.0.0.1:7880;
+    proxy_set_header Host $host;
+}
+```
+
+**用法**：进入对局后点顶栏的「语音」（PC 上是右下角 ☰ 菜单里的语音按钮）加入，
+也可以再点一次退到静音。连上之后侧栏会自动切到语音页签，里面有每个人的音量滑杆、
+静音和「退出语音」。谁在说话，玩家面板和语音列表上会同时亮起，用的是 LiveKit
+服务端的语音活动检测，不依赖客户端猜。麦克风权限被拒时不会把人踢出语音，只退回
+「麦克风不可用，当前只能听到别人说话」的收听状态；浏览器拦截自动播放时，面板里会出现
+「点击开启声音」的按钮。
+
+**权限边界**：令牌接口 `/api/voice/token` 必须带上该座位的 `resumeToken` 才签发，
+未入座、电脑座位、房主关掉房间语音的情况一律拒绝；令牌只能进本房间（房间名是
+`citadels-<房号>`），并且按 IP 限流（每分钟 30 次）。`/api/voice/status` 只报告
+「是否已配置」和缺哪一项，不返回服务器地址和密钥。
+
+验证（不需要真实麦克风：用系统 Edge + 合成音源，并起一个本地 LiveKit dev 服务器）：
+
+```bash
+node --test test/voice.test.js        # 令牌签发、鉴权、限流、前后端接线
+node test/voice-e2e.js                # 真实浏览器 + 真实 LiveKit 服务器的端到端
+# 需要 playwright-core 与 livekit-server；BROWSER_CHANNEL=msedge 可指定浏览器
+```
 
 ### AI Agent 电脑（大模型决策）
 
@@ -194,6 +272,8 @@ node test/agent-browser.js
 ```
 citadels/
 ├── server.js          # HTTP + WebSocket 服务、房间管理、电脑托管驱动
+├── lib/
+│   └── voice.js       # LiveKit 访问令牌签发（HS256 JWT，只用内置 crypto）
 ├── src/
 │   ├── cards.js       # 建筑牌与角色牌数据（Node / 浏览器共用）
 │   ├── engine.js      # 规则引擎状态机（Node / 浏览器共用）
@@ -202,6 +282,7 @@ citadels/
 │   ├── index.html     # 主菜单 / 设置 / 大厅 / 对局 / 结算
 │   ├── style.css      # 羊皮纸中世纪风格（浅色）
 │   ├── app.js         # 客户端逻辑，本地与联机共用同一套 UI
+│   ├── vendor/        # 第三方 UMD 包（LiveKit 客户端，首次用语音时才加载）
 │   ├── themes/        # 主题管理器、资源 manifest 与 neon CSS
 │   └── assets/themes/neon/cards/
 │       ├── roles/{thumb,full}/      # 21 张角色卡的两级 WebP
@@ -209,6 +290,8 @@ citadels/
 └── test/
     ├── simulate.js    # 引擎冒烟：2–8 人 × 3 角色组全量对局
     ├── net.js         # 联机链路：建房 / 加入 / 开局 / 完整对局
+    ├── voice.test.js  # 联机语音：令牌签发 / 鉴权 / 限流 / 前后端接线
+    ├── voice-e2e.js   # 联机语音：真实浏览器 + 真实 LiveKit 服务器
     ├── dom-smoke.js   # 客户端 UI：极简 DOM 桩驱动整局渲染
     └── theme-assets.js # neon 主题卡图 manifest 与文件完整性
 ```
@@ -220,6 +303,7 @@ node test/simulate.js          # 22 组配置 × 3 局，检查不卡死、计�
 node test/dom-smoke.js 5 mixed 8   # 客户端渲染整局（参数：人数 角色组 结束栋数）
 node test/theme-assets.js      # 检查 21 角色 / 30 建筑的 full/thumb 资源
 node test/net.js 8787          # 需先启动服务器
+node --test test/voice.test.js # 联机语音令牌与接线（不需要 LiveKit 服务器）
 ```
 
 ## 已知取舍

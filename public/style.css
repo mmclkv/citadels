@@ -1603,3 +1603,43 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
   .side-panel.show.collapsed{
     left:auto;right:0;top:var(--topbar-h,52px);bottom:0;width:42px;flex:none}
 }
+
+/* ------------------------------ 联机语音（LiveKit） ------------------------------ */
+/* 远端音轨的挂载点：必须留在文档流里。display:none 在部分浏览器会让音频停播，
+   所以用 1px 的屏外定位藏起来。 */
+#voice-audio{position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden}
+
+/* 顶栏麦克风按钮三态：未加入 / 通话中（绿） / 静音（红）。 */
+#btn-voice{white-space:nowrap}
+#btn-voice.is-live{border-color:var(--c-green);color:var(--c-green-d);background:#eef8f1}
+#btn-voice.is-muted{border-color:var(--c-red);color:var(--c-red-d);background:#fdeeec}
+#btn-voice.is-busy{opacity:.72;cursor:progress}
+
+.voice-pane{flex:1 1 auto;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;
+  font-size:12.5px}
+.voice-status{font-weight:700;color:#7a5c22}
+.voice-error{color:var(--c-red-d);background:#fdeeec;border:1px solid #f0c8c2;border-radius:8px;padding:8px 10px}
+.voice-hint{color:var(--ink2);background:#f7efe0;border-radius:8px;padding:8px 10px}
+.voice-list{display:flex;flex-direction:column;gap:6px}
+.voice-row{display:flex;align-items:center;gap:8px;padding:6px 8px;
+  border:1px solid var(--line);border-radius:9px;background:#fffdf8}
+.voice-row.is-local{background:#f7f1e6}
+.voice-dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--line2)}
+.voice-row.is-speaking .voice-dot{background:var(--c-green);box-shadow:0 0 0 4px rgba(72,168,111,.22)}
+.voice-row.is-muted .voice-dot{background:var(--c-red)}
+.voice-row.is-muted .voice-name{color:var(--dim)}
+.voice-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.voice-volume{flex:0 0 78px;width:78px;accent-color:var(--gold)}
+.voice-foot{display:flex;gap:8px;margin-top:2px}
+
+/* 说话中的玩家面板加一圈呼吸光。用 outline + box-shadow 而不是改边框宽度，
+   避免影响环形座位的碰撞计算与整页缩放。 */
+.opp.voice-speaking,#me-area.voice-speaking{
+  outline:2px solid var(--c-green);outline-offset:2px;
+  animation:voiceSpeakingPulse 1.15s ease-in-out infinite}
+@keyframes voiceSpeakingPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(72,168,111,.34)}
+  50%{box-shadow:0 0 0 7px rgba(72,168,111,0)}}
+@media (prefers-reduced-motion:reduce){
+  .opp.voice-speaking,#me-area.voice-speaking{animation:none;box-shadow:0 0 0 4px rgba(72,168,111,.22)}
+}

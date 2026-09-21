@@ -16,6 +16,7 @@ const AgentModule = require('./src/agent.js');
 const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
 const TrainingManagerModule = require('./lib/training-manager.js');
 const LocalNeuralBotModule = require('./lib/local-neural-bot.js');
+const VoiceModule = require('./lib/voice.js');
 const { MCTS_MAX_SIMULATIONS, MCTS_MAX_DEPTH_CAP } = LocalNeuralBotModule;
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
@@ -24,6 +25,8 @@ const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
 const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT });
 const localNeuralBot = LocalNeuralBotModule.createLocalNeuralBot({ root: ROOT });
+// 联机语音：只负责给同房间的真人座位签发 LiveKit 访问令牌，音频流不经过本进程。
+const voiceService = VoiceModule.createVoiceService();
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 20000;
@@ -177,7 +180,10 @@ function createRoom(hostName, config) {
       // 房主在开局设置里选的节奏（= 普通动作的间隔毫秒），服务器上的机器人按它减速
       botPace: Number(config.botPace) || 430,
       mctsSimulations: clampMctsSimulations(config.mctsSimulations),
-      mctsMaxDepth: clampMctsDepth(config.mctsMaxDepth)
+      mctsMaxDepth: clampMctsDepth(config.mctsMaxDepth),
+      // 房主可关闭本房间语音；服务器没配 LiveKit 时这项没有意义，但保留开关值，
+      // 这样同一个房间配置在换服务器后行为一致。
+      voice: config.voice !== false
     },
     state: null,
     createdAt: Date.now(),
@@ -281,6 +287,10 @@ function viewFor(r, playerId) {
   base.roomName = r.name;
   base.hostId = r.seats[0] && r.seats[0].id;
   base.agentStatus = r.agentStatus || null;
+  // 客户端据此决定是否显示语音入口：服务器没配 LiveKit，或房主关了本房语音，
+  // 都不该出现一个点了没反应的麦克风按钮。
+  base.voiceReady = voiceService.configured;
+  base.voiceEnabled = r.config.voice !== false;
   base.players.forEach(p => {
     const seat = r.seats.find(s => s.id === p.id);
     const client = Array.from(clients.values()).find(c => c.id === p.id && c.roomId === r.id);
@@ -537,6 +547,7 @@ function handle(ws, info, msg) {
         if (msg.config.botPace) r.config.botPace = Number(msg.config.botPace) || r.config.botPace;
         if (msg.config.mctsSimulations != null) r.config.mctsSimulations = clampMctsSimulations(msg.config.mctsSimulations);
         if (msg.config.mctsMaxDepth != null) r.config.mctsMaxDepth = clampMctsDepth(msg.config.mctsMaxDepth);
+        if (msg.config.voice != null) r.config.voice = msg.config.voice !== false;
         if (msg.config.playerCount) {
           const t = Math.max(2, Math.min(8, msg.config.playerCount));
           r.config.playerCount = t;
@@ -677,13 +688,17 @@ function lobbyView(r) {
     seats: r.seats.map((s, i) => ({ index: i, id: s.id, name: s.name, isBot: !!s.isBot,
       botType: s.botType || 'npc', taken: !!s.taken,
       connected: !!s.isBot || !s.disconnected && !s.left, disconnected: !!s.disconnected, left: !!s.left })),
-    config: r.config
+    config: r.config,
+    voiceReady: voiceService.configured
   };
 }
 
 /* ------------------------------ HTTP 服务 ------------------------------ */
-function sendJson(res, status, value) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+function sendJson(res, status, value, extraHeaders) {
+  res.writeHead(status, Object.assign({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  }, extraHeaders || {}));
   res.end(JSON.stringify(value));
 }
 
@@ -730,6 +745,35 @@ function isLoopback(req) {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
+/* 语音状态只对外报告「有没有配好」和一句人话，不返回 API Key/Secret；
+ * 服务器地址在签发令牌时才随响应下发，未通过身份校验的请求拿不到。 */
+function voiceStatus() {
+  const s = voiceService.status();
+  return { configured: s.configured, message: s.message };
+}
+
+const VOICE_TOKEN_WINDOW_MS = 60000;
+const VOICE_TOKEN_MAX_PER_WINDOW = 30;
+const voiceTokenHits = new Map();   // remoteAddress -> { count, resetAt }
+
+/* 令牌签发接口不需要登录态，靠 resumeToken 鉴权；加一层按 IP 的限速，
+ * 避免有人拿它当签名预言机反复试探。 */
+function voiceTokenThrottle(req) {
+  const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
+  const now = Date.now();
+  if (voiceTokenHits.size > 200) {
+    voiceTokenHits.forEach((rec, key) => { if (now > rec.resetAt) voiceTokenHits.delete(key); });
+  }
+  const rec = voiceTokenHits.get(ip);
+  if (!rec || now > rec.resetAt) {
+    voiceTokenHits.set(ip, { count: 1, resetAt: now + VOICE_TOKEN_WINDOW_MS });
+    return null;
+  }
+  rec.count += 1;
+  if (rec.count > VOICE_TOKEN_MAX_PER_WINDOW) return '请求过于频繁，请稍后再试';
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   if (localCodexGateway && await localCodexGateway.handle(req, res)) return;
   const pathname = req.url.split('?')[0];
@@ -774,6 +818,41 @@ const server = http.createServer(async (req, res) => {
   if (req.url === '/api/neural/status') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
     return res.end(JSON.stringify(localNeuralBot.status()));
+  }
+  if (pathname === '/api/voice/status' && req.method === 'GET') {
+    return sendJson(res, 200, voiceStatus(), { 'Access-Control-Allow-Origin': '*' });
+  }
+  if (pathname === '/api/voice/token') {
+    // GitHub Pages 上的前端与游戏服务器不同源，POST + JSON 会先发预检请求。
+    const cors = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '600'
+    };
+    if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
+    if (req.method !== 'POST') return sendJson(res, 405, { error: '请使用 POST' }, cors);
+    if (!voiceService.configured) return sendJson(res, 503, { error: voiceService.status().message }, cors);
+    const throttled = voiceTokenThrottle(req);
+    if (throttled) return sendJson(res, 429, { error: throttled }, cors);
+    let body;
+    try { body = await readJsonBody(req); }
+    catch (error) { return sendJson(res, 400, { error: error.message }, cors); }
+    // resumeToken 就是「我确实坐在这个座位上」的凭证：24 字节随机数，只发给本人
+    // 的浏览器。这里沿用与断线重连完全相同的鉴权口径，不新增账号体系。
+    const resumed = resumeRoom(body && body.resumeToken, String((body && body.roomId) || '').toUpperCase());
+    if (!resumed) return sendJson(res, 403, { error: '无法验证房间身份，请刷新页面后重试' }, cors);
+    if (resumed.seat.isBot) return sendJson(res, 403, { error: '电脑座位不能加入语音' }, cors);
+    if (resumed.room.config.voice === false) return sendJson(res, 403, { error: '房主已关闭本房间的语音' }, cors);
+    try {
+      return sendJson(res, 200, voiceService.tokenFor({
+        roomId: resumed.room.id,
+        identity: resumed.seat.id,
+        name: resumed.seat.name
+      }), cors);
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message }, cors);
+    }
   }
   if (req.url === '/api/rooms') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -866,5 +945,8 @@ server.listen(PORT, () => {
   if (useLocalCodex) console.log('  AI Agent：  本机 ' + localCodex.version + '（无需另配 API）');
   else console.log('  AI Agent：  ' + agentStatus().message);
   console.log('  本地神经网络：' + localNeuralBot.status().message);
+  console.log('  联机语音：  ' + (voiceService.configured
+    ? voiceService.status().message + '（' + voiceService.url + '）'
+    : '未启用（设置 LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET 后重启）'));
   console.log('');
 });

@@ -698,6 +698,30 @@ html[data-theme="neon"] ::-webkit-scrollbar-thumb:hover { background:rgba(67,228
   html[data-theme="neon"] .pick-grid .card.neon-card .card-art { object-fit:cover; }
   html[data-theme="neon"] .char-zoom { width:min(330px,84vw); }
 }
+
+/* ------------------------------ 联机语音（LiveKit） ------------------------------ */
+html[data-theme="neon"] #btn-voice.is-live {
+  border-color:var(--c-green); color:var(--c-green-d); background:rgba(75,218,154,.14);
+}
+html[data-theme="neon"] #btn-voice.is-muted {
+  border-color:var(--c-red); color:var(--c-red-d); background:rgba(255,94,103,.14);
+}
+html[data-theme="neon"] .voice-status { color:var(--ui-cyan); }
+html[data-theme="neon"] .voice-error {
+  color:var(--c-red-d); background:rgba(255,94,103,.12); border-color:rgba(255,94,103,.4);
+}
+html[data-theme="neon"] .voice-hint { color:var(--ink2); background:rgba(67,228,255,.08); }
+html[data-theme="neon"] .voice-row { background:var(--ui-panel); border-color:var(--line); }
+html[data-theme="neon"] .voice-row.is-local { background:rgba(67,228,255,.08); }
+html[data-theme="neon"] .voice-dot { background:var(--line2); }
+html[data-theme="neon"] .voice-row.is-speaking .voice-dot {
+  background:var(--c-green); box-shadow:0 0 0 4px rgba(75,218,154,.24);
+}
+html[data-theme="neon"] .voice-name { color:#eaf7ff; }
+html[data-theme="neon"] .voice-row.is-muted .voice-name { color:var(--dim); }
+html[data-theme="neon"] .opp.voice-speaking,
+html[data-theme="neon"] #me-area.voice-speaking { outline-color:var(--c-green); }
+
 @media (prefers-reduced-motion:reduce) {
   html[data-theme="neon"] *, html[data-theme="neon"] *::before, html[data-theme="neon"] *::after {
     animation-duration:.001ms!important;

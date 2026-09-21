@@ -26,6 +26,7 @@
     sel: null,             // 选择模式
     logOpen: true,
     chatOpen: false,
+    voiceOpen: false,
     activeSideTab: 'log',
     sidePanelCollapsed: false,
     lastCfg: null,
@@ -36,6 +37,7 @@
     _reveal: {},           // 每位玩家上一帧的角色卡状态，用于检测「盖牌→翻面」触发动画
     myIdx: null,
     leavingNetGame: false,
+    lobbyState: null,      // 大厅阶段下发的视图（App.state 只放对局状态）
     chatBubbles: new Map()
   };
 
@@ -280,6 +282,9 @@
       closeChatComposer();
       clearPlayerChatBubbles();
     }
+    // 语音面板挂在侧栏上，不是每次 render 都会走到；切屏时同步一次，
+    // 免得上一个界面留下的麦克风按钮状态串到下一个界面。
+    voiceSync();
   }
 
   /* ======================= 关键事件提示（居中弹层） =======================
@@ -878,6 +883,414 @@
     },
     action(a) { this.send({ t: 'action', action: a }); }
   };
+
+  /* ============================== 房间语音（LiveKit） ==============================
+   * 音频由 LiveKit 在浏览器之间转发，这里只负责：取令牌 → 连房间 → 上/下麦 →
+   * 把远端音轨挂进 DOM → 把「谁在说话」映射到玩家面板。
+   *
+   * SDK 压缩后近 600KB，所以只在第一次点「语音」时才动态加载：单机玩家和不开
+   * 语音的联机玩家都不必为它买单。这里从头到尾不接触 LiveKit 的 API Secret ——
+   * 令牌由游戏服务器签发，见 lib/voice.js。
+   * ============================================================================ */
+  const VOICE_VOLUME_KEY = 'citadels.voice.volumes';
+  const VOICE_SDK_PATH = 'vendor/livekit-client.umd.min.js';
+  let voiceSdkPromise = null;
+
+  function loadVoiceSdk() {
+    if (window.LivekitClient) return Promise.resolve(window.LivekitClient);
+    if (voiceSdkPromise) return voiceSdkPromise;
+    voiceSdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = new URL(VOICE_SDK_PATH, document.baseURI).href;
+      script.async = true;
+      script.onload = () => {
+        if (window.LivekitClient) resolve(window.LivekitClient);
+        else { voiceSdkPromise = null; reject(new Error('语音组件加载异常')); }
+      };
+      script.onerror = () => { voiceSdkPromise = null; reject(new Error('无法加载语音组件，请检查网络')); };
+      document.head.appendChild(script);
+    });
+    return voiceSdkPromise;
+  }
+
+  const Voice = {
+    room: null,
+    joined: false,
+    joining: false,
+    muted: false,
+    micDenied: false,      // 麦克风被拒后仍可收听，只是自己说不了
+    audioBlocked: false,   // 浏览器拦截了自动播放，等一次点击解锁
+    error: '',
+    hint: '',              // 重连等待等临时提示
+    ready: false,          // 服务器是否配好了 LiveKit
+    checked: false,
+    statusMessage: '',
+    speakers: new Set(),   // 正在说话的 playerId
+    panelSig: '',
+    volumes: (function () {
+      try { return JSON.parse(window.localStorage.getItem(VOICE_VOLUME_KEY) || '{}') || {}; }
+      catch (e) { return {}; }
+    })(),
+
+    /* 服务器配好了、房主也没关，才值得显示语音入口。
+     * 大厅阶段 App.state 还没有对局状态（render 会跳过 lobby），所以另存一份
+     * lobbyState，两边取当前有效的那份。 */
+    available() {
+      if (App.mode !== 'net') return false;
+      const st = (App.state && App.state.phase !== 'lobby') ? App.state : App.lobbyState;
+      if (!st) return false;
+      if (st.voiceReady === false || st.voiceEnabled === false) return false;
+      if (st.config && st.config.voice === false) return false;
+      return true;
+    },
+
+    async check() {
+      if (this.checked) return this.ready;
+      this.checked = true;
+      try {
+        const res = await fetch(gameServerBase() + '/api/voice/status', { cache: 'no-store' });
+        const data = await res.json();
+        this.ready = !!data.configured;
+        this.statusMessage = data.message || '';
+      } catch (e) {
+        this.ready = false;
+        this.statusMessage = '无法连接游戏服务器，暂时用不了语音';
+      }
+      voiceSync();
+      return this.ready;
+    },
+
+    async join() {
+      if (this.joined || this.joining) return;
+      const session = loadNetSession();
+      if (!session || !session.token) { toast('请先进入联机房间再加入语音'); return; }
+      // 非安全上下文里 navigator.mediaDevices 直接不存在。先在本地拦下来，
+      // 否则用户只会看到 SDK 抛出的英文错误，看不出是页面没走 HTTPS。
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast('浏览器不允许在非 HTTPS 页面使用麦克风，请用 HTTPS 打开');
+        return;
+      }
+      this.joining = true;
+      this.error = '';
+      this.hint = '';
+      voiceSync();
+      try {
+        const sdk = await loadVoiceSdk();
+        const res = await fetch(gameServerBase() + '/api/voice/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId: session.roomId, resumeToken: session.token })
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok) throw new Error(data.error || '服务器拒绝了语音请求');
+        const room = new sdk.Room({
+          // 语音只用到麦克风：关掉为视频设计的自适应/动态码率，避免多余的协商。
+          adaptiveStream: false,
+          dynacast: false,
+          disconnectOnPageLeave: true,
+          audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+        this.room = room;
+        this.bindRoom(room);
+        await room.connect(data.url, data.token);
+        this.joined = true;
+        this.audioBlocked = !room.canPlaybackAudio;
+        // 连上就把语音面板顶出来：开麦要等权限弹窗，不能让用户对着没反应的界面等。
+        // 面板里能看到名单和「正在开麦」，权限结果出来后再刷新一次。
+        App.voiceOpen = true;
+        App.activeSideTab = 'voice';
+        App.sidePanelCollapsed = false;
+        updateSidePanel();
+        // 先接上再开麦：麦克风被拒时连接仍然保留，还能听别人说话。
+        await this.setMic(true);
+      } catch (error) {
+        this.error = (error && error.message) || '加入语音失败';
+        this.teardown();
+      } finally {
+        this.joining = false;
+        voiceSync();
+        updateSidePanel();
+      }
+    },
+
+    /* setMicrophoneEnabled 会在权限被拒时抛错。这里不把它当致命错误：
+     * 保持连接、退回「只能收听」状态，比直接踢出语音有用得多。 */
+    async setMic(on) {
+      const room = this.room;
+      if (!room) return;
+      try {
+        await room.localParticipant.setMicrophoneEnabled(on);
+        this.muted = !on;
+        this.micDenied = false;
+      } catch (error) {
+        this.muted = true;
+        this.micDenied = true;
+        toast('麦克风不可用：' + ((error && error.message) || '权限被拒绝') + '（仍可收听）');
+      }
+    },
+
+    async toggleMute() {
+      if (!this.joined) { this.join(); return; }
+      await this.setMic(this.muted);
+      voiceSync();
+    },
+
+    leave() {
+      if (!this.joined && !this.room) return;
+      this.teardown();
+      this.hint = '';
+      voiceSync();
+      updateSidePanel();
+    },
+
+    teardown() {
+      const room = this.room;
+      this.room = null;
+      this.joined = false;
+      this.speakers = new Set();
+      this.audioBlocked = false;
+      if (room) { try { room.disconnect(); } catch (e) { /* 已经断开 */ } }
+      const box = $('#voice-audio');
+      if (box) box.innerHTML = '';
+      voiceSync();
+    },
+
+    async unblockAudio() {
+      const room = this.room;
+      if (!room) return;
+      try { await room.startAudio(); } catch (e) { /* 仍然被拦，下次点击再试 */ }
+      this.audioBlocked = !room.canPlaybackAudio;
+      voiceSync();
+    },
+
+    volumeOf(identity) {
+      const v = this.volumes[identity];
+      return typeof v === 'number' ? v : 1;
+    },
+
+    setVolume(identity, value) {
+      const v = Math.max(0, Math.min(1, Number(value)));
+      this.volumes[identity] = v;
+      try { window.localStorage.setItem(VOICE_VOLUME_KEY, JSON.stringify(this.volumes)); }
+      catch (e) { /* 隐私模式或存储被禁用 */ }
+      this.applyVolume(identity);
+    },
+
+    applyVolume(identity) {
+      const room = this.room;
+      if (!room) return;
+      const p = room.remoteParticipants.get(identity);
+      if (p) { try { p.setVolume(this.volumeOf(identity)); } catch (e) { /* 还没发布音轨 */ } }
+    },
+
+    bindRoom(room) {
+      const sdk = window.LivekitClient;
+      const E = sdk.RoomEvent;
+      room.on(E.TrackSubscribed, (track, publication, participant) => {
+        if (track.kind !== sdk.Track.Kind.Audio) return;
+        const node = track.attach();
+        node.autoplay = true;
+        node.setAttribute('playsinline', '');
+        const box = $('#voice-audio');
+        if (box) box.appendChild(node);
+        this.applyVolume(participant.identity);
+        voiceSync();
+      });
+      room.on(E.TrackUnsubscribed, track => {
+        try { track.detach().forEach(node => node.remove()); } catch (e) { /* 已移除 */ }
+      });
+      room.on(E.ParticipantConnected, () => voiceSync());
+      room.on(E.ParticipantDisconnected, participant => {
+        this.speakers.delete(participant.identity);
+        voiceSync();
+      });
+      // 服务端算好的说话人列表，比自己算音量阈值准，也不会给每个远端流加 AudioContext。
+      room.on(E.ActiveSpeakersChanged, speakers => {
+        this.speakers = new Set(speakers.map(p => p.identity));
+        syncVoiceIndicators();
+      });
+      room.on(E.TrackMuted, () => voiceSync());
+      room.on(E.TrackUnmuted, () => voiceSync());
+      room.on(E.LocalTrackPublished, () => voiceSync());
+      room.on(E.ParticipantNameChanged, () => voiceSync());
+      room.on(E.AudioPlaybackStatusChanged, () => {
+        this.audioBlocked = !room.canPlaybackAudio;
+        voiceSync();
+      });
+      room.on(E.ConnectionStateChanged, () => voiceSync());
+      room.on(E.Reconnecting, () => { this.hint = '语音正在重连…'; voiceSync(); });
+      room.on(E.Reconnected, () => { this.hint = ''; voiceSync(); });
+      room.on(E.Disconnected, () => {
+        const wasJoined = this.joined;
+        this.room = null;
+        this.joined = false;
+        this.speakers = new Set();
+        const box = $('#voice-audio');
+        if (box) box.innerHTML = '';
+        if (wasJoined) this.hint = '语音连接已断开';
+        voiceSync();
+      });
+      room.on(E.MediaDevicesError, () => {
+        this.micDenied = true;
+        this.muted = true;
+        voiceSync();
+      });
+    },
+
+    /* 远端参与者 → 面板行数据。麦克风「关」有两种表现：整条音轨没发布
+     * （isMicrophoneEnabled 为假），或发布了但被静音。两种都要算静音。 */
+    roster() {
+      const room = this.room;
+      const rows = [];
+      if (!room) return rows;
+      const collect = (p, isLocal) => {
+        let hasAudio = false;
+        let muted = false;
+        p.audioTrackPublications.forEach(pub => {
+          hasAudio = true;
+          if (pub.isMuted || (pub.track && pub.track.isMuted)) muted = true;
+        });
+        rows.push({
+          identity: p.identity,
+          name: p.name || '玩家',
+          isLocal: isLocal,
+          speaking: this.speakers.has(p.identity),
+          muted: !p.isMicrophoneEnabled || !hasAudio || muted
+        });
+      };
+      collect(room.localParticipant, true);
+      room.remoteParticipants.forEach(p => collect(p, false));
+      return rows;
+    }
+  };
+
+  /* 语音面板是可交互的（音量滑杆、静音按钮），所以只在「结构」变化时重建；
+   * 说话状态这种高频变化单独用 class 切换，免得拖滑杆时被重建打断。 */
+  function voicePanelSignature() {
+    if (!Voice.joined) return 'off|' + Voice.joining + '|' + Voice.error + '|' + Voice.ready + '|' + Voice.hint;
+    return 'on|' + Voice.muted + '|' + Voice.micDenied + '|' + Voice.audioBlocked + '|' + Voice.hint + '|' +
+      Voice.roster().map(r => r.identity + ':' + r.name + ':' + (r.muted ? 1 : 0) + ':' + (r.isLocal ? 1 : 0)).join(',');
+  }
+
+  function voiceRenderPanel() {
+    const box = $('#voice-pane');
+    if (!box) return;
+    const sig = voicePanelSignature();
+    if (sig === Voice.panelSig) return;
+    Voice.panelSig = sig;
+    box.innerHTML = '';
+    box.appendChild(el('div', 'voice-status', Voice.joined
+      ? (Voice.muted ? '已加入 · 静音中' : '已加入 · 正在通话')
+      : (Voice.joining ? '正在连接语音…' : (Voice.ready ? '未加入语音' : (Voice.statusMessage || '服务器未启用语音')))));
+    if (Voice.error) box.appendChild(el('div', 'voice-error', Voice.error));
+    if (Voice.hint) box.appendChild(el('div', 'voice-hint', Voice.hint));
+    if (Voice.micDenied) {
+      box.appendChild(el('div', 'voice-hint', '麦克风不可用，当前只能听到别人说话。'));
+    }
+    if (Voice.audioBlocked && Voice.joined) {
+      const unblock = el('button', 'btn tiny primary', '点击开启声音');
+      unblock.type = 'button';
+      unblock.onclick = () => Voice.unblockAudio();
+      box.appendChild(unblock);
+    }
+    if (!Voice.joined) {
+      if (Voice.ready && Voice.available()) {
+        const joinBtn = el('button', 'btn primary block', Voice.joining ? '连接中…' : '加入语音');
+        joinBtn.type = 'button';
+        joinBtn.disabled = Voice.joining;
+        joinBtn.onclick = () => Voice.join();
+        box.appendChild(joinBtn);
+        box.appendChild(el('p', 'dim small', '真人座位之间实时通话；电脑座位不参与语音。'));
+      }
+      return;
+    }
+    const list = el('div', 'voice-list');
+    Voice.roster().forEach(row => {
+      const item = el('div', 'voice-row' + (row.isLocal ? ' is-local' : ''));
+      item.dataset.id = row.identity;
+      item.classList.toggle('is-speaking', row.speaking);
+      item.classList.toggle('is-muted', row.muted);
+      const dot = el('i', 'voice-dot');
+      dot.setAttribute('aria-hidden', 'true');
+      const name = el('span', 'voice-name', escapeHtml(row.name) + (row.isLocal ? '（我）' : ''));
+      item.appendChild(dot);
+      item.appendChild(name);
+      // 自己的音量由对方控制，滑杆只对远端有意义。
+      if (!row.isLocal) {
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'voice-volume';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '5';
+        slider.value = String(Math.round(Voice.volumeOf(row.identity) * 100));
+        slider.title = '调整 ' + row.name + ' 的音量';
+        slider.setAttribute('aria-label', row.name + ' 的音量');
+        slider.oninput = () => Voice.setVolume(row.identity, Number(slider.value) / 100);
+        item.appendChild(slider);
+      }
+      list.appendChild(item);
+    });
+    box.appendChild(list);
+    const foot = el('div', 'voice-foot');
+    const muteBtn = el('button', 'btn tiny', Voice.muted ? '开麦' : '静音');
+    muteBtn.type = 'button';
+    muteBtn.onclick = () => Voice.toggleMute();
+    const leaveBtn = el('button', 'btn tiny ghost', '退出语音');
+    leaveBtn.type = 'button';
+    leaveBtn.onclick = () => Voice.leave();
+    foot.appendChild(muteBtn);
+    foot.appendChild(leaveBtn);
+    box.appendChild(foot);
+  }
+
+  /* 说话高亮同时打在玩家面板和语音面板行上。identity 就是座位 id，
+   * 所以直接按 p.id 匹配，不需要另建映射表。 */
+  function syncVoiceIndicators() {
+    const st = App.state;
+    const players = (st && st.players) || [];
+    $$('#opponents .opp').forEach(node => {
+      const seat = Number(node.dataset.seat);
+      const p = players.find(x => x.seat === seat);
+      node.classList.toggle('voice-speaking', !!(p && Voice.speakers.has(p.id)));
+    });
+    const meArea = $('#me-area');
+    if (meArea) {
+      const me = players.find(p => p.id === App.myId);
+      meArea.classList.toggle('voice-speaking', !!(me && Voice.speakers.has(me.id)));
+    }
+    $$('#voice-pane .voice-row').forEach(node => {
+      node.classList.toggle('is-speaking', Voice.speakers.has(node.dataset.id));
+    });
+  }
+
+  function voiceSync() {
+    // 服务器有没有配 LiveKit 是异步问出来的；还没问过就先问一次（check 完成后
+    // 会再回调这里）。没配的服务器上不该出现任何语音开关。
+    if (App.mode === 'net' && !Voice.checked) Voice.check();
+    $$('.voice-capable').forEach(node => { node.hidden = !Voice.ready; });
+    const btn = $('#btn-voice');
+    if (btn) {
+      const show = Voice.available();
+      btn.hidden = !show;
+      btn.classList.toggle('is-live', Voice.joined && !Voice.muted);
+      btn.classList.toggle('is-muted', Voice.joined && Voice.muted);
+      btn.classList.toggle('is-busy', Voice.joining);
+      btn.setAttribute('aria-pressed', String(!!Voice.joined));
+      btn.textContent = Voice.joining ? '语音 · 连接中'
+        : !Voice.joined ? '语音'
+          : Voice.muted ? '语音 · 静音' : '语音 · 开麦';
+      btn.title = Voice.joined
+        ? (Voice.muted ? '已静音，点击开麦' : '正在通话，点击静音')
+        : (Voice.ready ? '加入房间语音' : (Voice.statusMessage || '加入房间语音'));
+      // 房间没了 / 房主关了语音 / 回到主菜单：不能让麦克风还开着。
+      if (btn.hidden && Voice.joined) Voice.leave();
+    }
+    const tab = $('#tab-voice');
+    if (tab) tab.hidden = !Voice.available();
+    voiceRenderPanel();
+    syncVoiceIndicators();
+  }
 
   function send(action) {
     if (App.buildingAnimPaused) return;
@@ -2314,6 +2727,7 @@
     syncSpeedBtn();
     syncThemeBtn();
     syncChatControl();
+    voiceSync();
     updateSidePanel();
 
     // 本轮生效的负面效果常驻显示，别让玩家忘了自己被刺杀/被盯上
@@ -3385,8 +3799,10 @@
     const sp = $('#side-panel');
     if (!sp) return;
     const gameScreen = $('#screen-game');
-    const both = App.logOpen && App.chatOpen;
-    const any = App.logOpen || App.chatOpen;
+    // 三个面板共用一条侧栏：各自的开/关由自己的按钮决定，同时开着时用 activeSideTab
+    // 选一个显示。语音面板还要求当前房间真的能用语音，否则不占位置。
+    const open = { log: !!App.logOpen, chat: !!App.chatOpen, voice: !!App.voiceOpen && Voice.available() };
+    const any = open.log || open.chat || open.voice;
     const collapsed = any && !!App.sidePanelCollapsed;
     sp.classList.toggle('show', any);
     sp.classList.toggle('collapsed', collapsed);
@@ -3409,15 +3825,20 @@
     }
     const tabs = $('#side-tabs');
     if (tabs) tabs.hidden = false;
-    const active = both ? App.activeSideTab : (App.logOpen ? 'log' : 'chat');
-    const showLog = App.logOpen && (!both || active === 'log');
-    const showChat = App.chatOpen && (!both || active === 'chat');
+    const keys = ['log', 'chat', 'voice'].filter(k => open[k]);
+    const active = keys.indexOf(App.activeSideTab) >= 0 ? App.activeSideTab : (keys[0] || 'log');
+    const showLog = open.log && active === 'log';
+    const showChat = open.chat && active === 'chat';
+    const showVoice = open.voice && active === 'voice';
     const paneLog = $('#pane-log'); if (paneLog) paneLog.hidden = !showLog;
     const paneChat = $('#pane-chat'); if (paneChat) paneChat.hidden = !showChat;
+    const paneVoice = $('#pane-voice'); if (paneVoice) paneVoice.hidden = !showVoice;
     const tabLog = $('#tab-log'); if (tabLog) tabLog.classList.toggle('is-active', active === 'log');
     const tabChat = $('#tab-chat'); if (tabChat) tabChat.classList.toggle('is-active', active === 'chat');
+    const tabVoice = $('#tab-voice'); if (tabVoice) tabVoice.classList.toggle('is-active', active === 'voice');
     if (showLog && App.state) renderLog(App.state);
     if (showChat) renderChatLog();
+    if (showVoice) voiceRenderPanel();
   }
 
   /* ============================== 选角阶段 ============================== */
@@ -3870,6 +4291,7 @@
   }
 
   function renderLobbyRoom(st) {
+    App.lobbyState = st;
     $('#lobby-pre').hidden = true;
     $('#lobby-room').hidden = false;
     $('#r-code').textContent = st.roomId;
@@ -3878,7 +4300,9 @@
       $('#r-players').value = String(st.config.playerCount || 4);
       $('#r-end').value = String(st.config.endDistricts || 8);
       $('#r-chars').value = st.config.charSetMode || 'base';
+      $('#r-voice').value = st.config.voice === false ? 'off' : 'on';
     }
+    voiceSync();
     const grid = $('#seat-grid');
     grid.innerHTML = '';
     const seats = st.seats || [];
@@ -3945,6 +4369,8 @@
         App.state = null;
         App.myId = null;
       }
+      // 离开对局界面就别占着语音房间了：对方面板上不该留着一个已经走了的人。
+      if (target === 'home') Voice.leave();
       showScreen('screen-' + target);
     });
 
@@ -4064,7 +4490,8 @@
             botLevel: 'normal',
             botType: $('#net-bot-type').value,
             // 房主的节奏偏好决定服务器上机器人的行动间隔
-            botPace: pace().act
+            botPace: pace().act,
+            voice: $('#net-voice').value === 'on'
           }, readMctsConfig('#net-mcts-sims', '#net-mcts-depth'))
         });
       });
@@ -4080,6 +4507,8 @@
     };
     $('#btn-refresh').onclick = () => Net.send({ t: 'listRooms' });
     $('#btn-leave').onclick = () => {
+      Voice.leave();
+      App.lobbyState = null;
       Net.send({ t: 'leaveRoom' });
       clearNetSession();
       $('#lobby-pre').hidden = false; $('#lobby-room').hidden = true;
@@ -4088,13 +4517,14 @@
     };
     $('#btn-net-start').onclick = () => Net.send({ t: 'startGame' });
     $('#btn-net-shuffle').onclick = () => Net.send({ t: 'shuffleSeats' });
-    ['r-players', 'r-end', 'r-chars'].forEach(id => {
+    ['r-players', 'r-end', 'r-chars', 'r-voice'].forEach(id => {
       $('#' + id).onchange = () => {
         Net.send({
           t: 'config', config: {
             playerCount: Number($('#r-players').value),
             endDistricts: Number($('#r-end').value),
-            charSetMode: $('#r-chars').value
+            charSetMode: $('#r-chars').value,
+            voice: $('#r-voice').value === 'on'
           }
         });
       };
@@ -4103,6 +4533,7 @@
     // 对局内
     $('#btn-back-home').onclick = () => {
       if (App.state && App.state.phase !== 'gameover' && !confirm('确定离开当前对局吗？')) return;
+      Voice.leave();
       showScreen('screen-home');
     };
     $('#btn-chars').onclick = openCharacters;
@@ -4147,6 +4578,14 @@
     };
     $('#btn-chat').onclick = openChatComposer;
     $('#chat-close').onclick = closeChatComposer;
+    // 语音按钮一键两用：没加入时加入，已加入时开麦/静音（退出语音在语音面板里）。
+    $('#btn-voice').onclick = () => Voice.toggleMute();
+    $('#tab-voice').onclick = () => {
+      App.voiceOpen = true;
+      App.activeSideTab = 'voice';
+      App.sidePanelCollapsed = false;
+      updateSidePanel();
+    };
     $('#chat-composer').onsubmit = e => {
       e.preventDefault();
       const input = $('#chat-input');
@@ -4198,6 +4637,7 @@
   // 供自动化测试驱动使用
   App.__local = Local;
   App.__net = Net;
+  App.__voice = Voice;
   window.__CitadelsApp = App;
   // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
   if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {

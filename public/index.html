@@ -178,6 +178,10 @@
           <label class="field"><span>角色组</span>
             <select id="net-chars"><option value="base" selected>基本版</option><option value="dark">黑暗城市扩充</option><option value="mixed">加强版混合</option></select>
           </label>
+          <label class="field voice-capable" hidden><span>房间语音</span>
+            <select id="net-voice"><option value="on" selected>开启</option><option value="off">关闭</option></select>
+          </label>
+          <p class="dim small voice-capable" hidden>语音由 LiveKit 转发音频，真人座位之间可实时通话；电脑座位不参与语音。</p>
           <button class="btn primary block" id="btn-create">创建房间</button>
         </div>
         <div class="lobby-box">
@@ -202,6 +206,8 @@
             <select id="r-end"><option value="8" selected>8 栋</option><option value="7">7 栋</option></select></label>
           <label class="field inline"><span>角色</span>
             <select id="r-chars"><option value="base" selected>基本版</option><option value="dark">黑暗扩充</option><option value="mixed">混合</option></select></label>
+          <label class="field inline voice-capable" hidden><span>语音</span>
+            <select id="r-voice"><option value="on" selected>开</option><option value="off">关</option></select></label>
         </div>
       </div>
       <div class="seat-grid" id="seat-grid"></div>
@@ -239,6 +245,8 @@
       <button class="btn tiny" id="btn-log-toggle">战报</button>
       <button class="btn tiny" id="btn-chat-log-toggle" type="button" title="聊天记录侧栏">聊天记录</button>
       <button class="btn tiny" id="btn-chat" type="button" hidden>发言</button>
+      <button class="btn tiny" id="btn-voice" type="button" hidden
+        aria-pressed="false" title="加入房间语音">语音</button>
     </div>
   </header>
 
@@ -293,6 +301,7 @@
         <div class="side-tabs" id="side-tabs">
           <button class="side-tab is-active" type="button" data-tab="log" id="tab-log">战报</button>
           <button class="side-tab" type="button" data-tab="chat" id="tab-chat">聊天记录</button>
+          <button class="side-tab" type="button" data-tab="voice" id="tab-voice" hidden>语音</button>
         </div>
         <button class="side-panel-toggle" id="btn-side-panel-toggle" type="button"
           aria-expanded="true" aria-controls="side-panel-body" title="收起右侧边栏">
@@ -305,6 +314,9 @@
         </div>
         <div class="side-pane" id="pane-chat" hidden>
           <div class="chat-log" id="chat-log"></div>
+        </div>
+        <div class="side-pane" id="pane-voice" hidden>
+          <div class="voice-pane" id="voice-pane"></div>
         </div>
       </div>
     </aside>
@@ -408,11 +420,15 @@
   </div>
 </div>
 
+<!-- 远端语音音轨挂载点。必须留在 DOM 里（不能用 display:none），
+     浏览器只在元素处于文档中时才保证音频持续播放。 -->
+<div id="voice-audio" aria-hidden="true"></div>
+
 <script src="./themes/neon/manifest.js?v=11"></script>
 <script src="./themes/theme-manager.js?v=2"></script>
 <script src="./src/cards.js?v=4"></script>
 <script src="./src/engine.js?v=16"></script>
 <script src="./src/ai.js?v=2"></script>
-<script src="./app.js?v=86"></script>
+<script src="./app.js?v=87"></script>
 </body>
 </html>
