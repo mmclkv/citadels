@@ -70,6 +70,20 @@ async function openMenu(page) {
   await until(() => page.isVisible('#btn-voice'), '展开菜单后出现语音按钮');
 }
 
+/* 安全上下文（https / localhost）里 app 会注册 service worker，worker 接管页面时
+ * 有可能触发一次自动重载；重载会把刚点下去的操作吞掉，所以先等它稳定下来再交互。 */
+async function waitForStablePage(page, label) {
+  await page.waitForLoadState('load').catch(() => {});
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const controlled = await page.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller)).catch(() => false);
+    if (controlled) break;
+    await wait(200);
+  }
+  await wait(1200);
+  await until(() => page.isVisible('#btn-online'), label || '首页可交互', 20000);
+}
+
 async function main() {
   const server = E2E_BASE
     ? { base: E2E_BASE, close: async () => {}, output: () => '' }
@@ -96,6 +110,8 @@ async function main() {
   try {
     await pageA.goto(server.base, { waitUntil: 'domcontentloaded' });
     await pageB.goto(server.base, { waitUntil: 'domcontentloaded' });
+    await waitForStablePage(pageA, '甲页面可交互');
+    await waitForStablePage(pageB, '乙页面可交互');
 
     // ---- 甲：创建 2 人房间，语音开启 ----
     await pageA.click('#btn-online');
