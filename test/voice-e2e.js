@@ -6,6 +6,8 @@
  *
  * 用法：node test/voice-e2e.js
  * 环境变量：LIVEKIT_WS / LIVEKIT_KEY / LIVEKIT_SECRET / BROWSER_CHANNEL
+ *          E2E_BASE=https://23.144.4.81  直接打已部署的服务器（不再本机起服务）
+ *          E2E_IGNORE_CERT=1             自签证书，忽略证书校验
  */
 'use strict';
 
@@ -18,6 +20,8 @@ const LIVEKIT_WS = process.env.LIVEKIT_WS || 'ws://127.0.0.1:7880';
 const LIVEKIT_KEY = process.env.LIVEKIT_KEY || 'devkey';
 const LIVEKIT_SECRET = process.env.LIVEKIT_SECRET || 'secret';
 const CHANNEL = process.env.BROWSER_CHANNEL || 'msedge';
+const E2E_BASE = (process.env.E2E_BASE || '').replace(/\/+$/, '');
+const IGNORE_CERT = process.env.E2E_IGNORE_CERT === '1';
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
@@ -67,18 +71,23 @@ async function openMenu(page) {
 }
 
 async function main() {
-  const server = await startGameServer();
+  const server = E2E_BASE
+    ? { base: E2E_BASE, close: async () => {}, output: () => '' }
+    : await startGameServer();
   const browser = await chromium.launch({
     channel: CHANNEL,
     args: [
       '--use-fake-device-for-media-stream',   // 合成麦克风输入，不需要真实设备
       '--use-fake-ui-for-media-stream',       // 自动同意权限弹窗
-      '--autoplay-policy=no-user-gesture-required'
+      '--autoplay-policy=no-user-gesture-required',
+      // 页面里的 wss:// 是浏览器自己发起的，context 的 ignoreHTTPSErrors 管不到，
+      // 自签证书场景要靠这个开关。
+      ...(IGNORE_CERT ? ['--ignore-certificate-errors'] : [])
     ]
   });
 
-  const ctxA = await browser.newContext({ permissions: ['microphone'] });
-  const ctxB = await browser.newContext({ permissions: ['microphone'] });
+  const ctxA = await browser.newContext({ permissions: ['microphone'], ignoreHTTPSErrors: IGNORE_CERT });
+  const ctxB = await browser.newContext({ permissions: ['microphone'], ignoreHTTPSErrors: IGNORE_CERT });
   const pageA = await ctxA.newPage();
   const pageB = await ctxB.newPage();
   pageA.on('pageerror', e => console.log('  [A pageerror]', e.message));
