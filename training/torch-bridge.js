@@ -107,7 +107,9 @@ class TorchBridge {
       const response = await this.request({ cmd: 'train', rolloutPath, rolloutFormat: 'ctrl-binary',
         rolloutBytes: rollout.bytes, modelPath: this.modelPath,
         epochs: this.config.ppoEpochs, miniBatch: this.config.miniBatch,
-        policyLossMode: this.config.policyLossMode || 'auto' });
+        policyLossMode: this.config.policyLossMode || 'auto',
+        mctsCeRequired: this.config.policyLossMode === 'mcts_ce' ||
+          (this.config.policyLossMode === 'auto' && Number(this.config.mctsSimulations) > 0) });
       this.readModel();
       return response.metrics;
     } finally {

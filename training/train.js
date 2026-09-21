@@ -460,6 +460,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     nativeMctsSupportsGame(state);
   const transitions = [];
   let steps = 0, inferenceMs = 0, fallbackCount = 0;
+  let policyTargetSamples = 0, policyTargetMissingSamples = 0;
   // 搜索失败（最常见的是 CUDA OOM：6GB 显卡还要和桌面合成器共享显存）不该掀翻
   // 整轮训练 —— 一次失败就丢掉上万局样本太亏（2026-09-19 实测：跑到 6326 局被
   // 一次 OOM 打断，且因为没有存档路径，1h46m 全部作废）。偶发失败降级成均匀
@@ -642,6 +643,10 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         transition.mctsValue = mctsValue;
         transition.mctsValueVector = normalizeValueVector(mctsValueVector, mctsValue);
       }
+      if (actor.botType === 'neural') {
+        if (piVector && piVector.length) policyTargetSamples++;
+        else policyTargetMissingSamples++;
+      }
       transitions.push(transition);
     }
     let result = Engine.applyAction(state, actor.id, legal[decision.chosen]);
@@ -686,7 +691,8 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
   const rewardOf = row => rewards.get(state.players[row.playerIdx].id) || 0;
   return {
     transitions, steps, rounds: state.round, durationMs: Date.now() - startedAt, truncated,
-    avgInferenceMs: inferenceMs / Math.max(1, steps), fallbackCount, playerCount, charSet,
+    avgInferenceMs: inferenceMs / Math.max(1, steps), fallbackCount,
+    policyTargetSamples, policyTargetMissingSamples, playerCount, charSet,
     networkPlayerCount,
     networkReward: mean(networkRows.map(rewardOf)),
     networkScore: mean(networkRows.map(row => row.total)),
@@ -937,10 +943,12 @@ async function train(rawConfig, hooks = {}) {
   // 战力曲线同理按人数分开取窗口：某种人数最近 50 局的均值。
   const recentByPlayers = {};     // { 玩家数: stat[] }，每种人数各留 50 局
   let totalSteps = 0, totalInferenceMs = 0, totalFallbacks = 0, totalTruncatedGames = 0;
+  let totalPolicyTargetSamples = 0, totalPolicyTargetMissingSamples = 0;
   let rollout = [];
   // 训练批次按“完成的对局数”计数，而不是按 worker 池是否存在计数。
   // worker 一次返回多少局属于并行调度细节，不应覆盖控制台里的 batchGames 配置。
   let gamesSinceUpdate = 0;
+  let batchPolicyTargetSamples = 0, batchPolicyTargetMissingSamples = 0;
   // completedGames 只代表成功完成、可以进入训练的数据局数；它不能再兼任
   // worker 的任务序号，否则超长/异常局被跳过后会重复使用同一个 gameIndex。
   let nextGameIndex = completedGames + 1;
@@ -1056,6 +1064,10 @@ async function train(rawConfig, hooks = {}) {
       totalSteps += result.steps;
       totalInferenceMs += result.avgInferenceMs * result.steps;
       totalFallbacks += result.fallbackCount;
+      totalPolicyTargetSamples += result.policyTargetSamples || 0;
+      totalPolicyTargetMissingSamples += result.policyTargetMissingSamples || 0;
+      batchPolicyTargetSamples += result.policyTargetSamples || 0;
+      batchPolicyTargetMissingSamples += result.policyTargetMissingSamples || 0;
       const seatCount = Number(result.playerCount) || 0;
       if (seatCount >= 2) {
         if (!winSeatsByPlayers[seatCount]) {
@@ -1097,8 +1109,19 @@ async function train(rawConfig, hooks = {}) {
       { policyLoss: 0, valueLoss: 0, totalLoss: 0, entropy: 0, clipFraction: 0, approxKl: 0, gradientNorm: 0 };
     let justTrained = false;
     if (gamesSinceUpdate >= config.batchGames && rollout.length) {
+      const mctsCeRequired = config.policyLossMode === 'mcts_ce' ||
+        (config.policyLossMode === 'auto' && config.mctsSimulations > 0);
+      const batchPolicyTargetTotal = batchPolicyTargetSamples + batchPolicyTargetMissingSamples;
+      const batchPolicyCoverage = batchPolicyTargetTotal > 0
+        ? batchPolicyTargetSamples / batchPolicyTargetTotal : 1;
+      if (mctsCeRequired && (!batchPolicyTargetTotal || batchPolicyCoverage < 0.5)) {
+        throw new Error('MCTS 策略目标覆盖率过低：' + Math.round(batchPolicyCoverage * 100) +
+          '%（有效=' + batchPolicyTargetSamples + '，缺失=' + batchPolicyTargetMissingSamples +
+          '）。搜索通道可能已因 CUDA OOM 崩溃，已停止训练以避免污染策略网络。');
+      }
       losses = torch ? await torch.train(rollout) :
-        model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs, policyLossMode: config.policyLossMode });
+        model.trainPPO(rollout, { learningRate: config.learningRate, epochs: config.ppoEpochs,
+          policyLossMode: config.policyLossMode, mctsCeRequired });
       justTrained = true;
       // 打印最近一次策略更新的指标摘要（每批一次），方便在事件日志里看趋势
       log('策略更新（' + (config.policyLossMode === 'auto' && config.mctsSimulations > 0 ? 'MCTS 交叉熵' : config.policyLossMode.toUpperCase()) + '）：策略损失 ' + losses.policyLoss.toExponential(2) +
@@ -1106,9 +1129,12 @@ async function train(rawConfig, hooks = {}) {
         ' · 熵 ' + Number(losses.entropy).toFixed(3) +
         ' · KL ' + Number(losses.approxKl || 0).toFixed(4) +
         ' · 梯度 ' + Number(losses.gradientNorm || 0).toFixed(3) +
-        (losses.gpuMemoryMB ? ' · 显存 ' + losses.gpuMemoryMB + ' MB' : ''));
+        (losses.gpuMemoryMB ? ' · 显存 ' + losses.gpuMemoryMB + ' MB' : '') +
+        (losses.policySamples != null ? ' · 有效策略样本 ' + losses.policySamples : ''));
       rollout = [];
       gamesSinceUpdate = 0;
+      batchPolicyTargetSamples = 0;
+      batchPolicyTargetMissingSamples = 0;
     } else if (gamesSinceUpdate >= config.batchGames) {
       // 本批没有可训练样本时也要消费掉批次数，避免下一批被错误合并。
       gamesSinceUpdate = 0;
@@ -1149,6 +1175,10 @@ async function train(rawConfig, hooks = {}) {
       gamesPerMinute: (completedGames - initialCompletedGames) / Math.max(1e-6, elapsedMs / 60000),
       avgGameMs: recentDuration, avgInferenceMs: totalInferenceMs / Math.max(1, totalSteps),
       avgScore: recentScore, avgReward: recentReward, fallbacks: totalFallbacks,
+      policyTargetSamples: totalPolicyTargetSamples,
+      policyTargetMissingSamples: totalPolicyTargetMissingSamples,
+      policyTargetCoverage: (totalPolicyTargetSamples + totalPolicyTargetMissingSamples) > 0
+        ? totalPolicyTargetSamples / (totalPolicyTargetSamples + totalPolicyTargetMissingSamples) : 1,
       truncatedGames: totalTruncatedGames,
       networkReward: networkMean('networkReward'), networkScore: networkMean('networkScore'),
       networkWinRate: networkMean('networkWin'), networkPlayers: Math.round(networkMean('networkPlayers')),
@@ -1189,7 +1219,10 @@ async function train(rawConfig, hooks = {}) {
 
   if (rollout.length && !shouldStop()) {
     if (torch) await torch.train(rollout);
-    else model.trainPPO(rollout, { learningRate: config.learningRate, epochs: 1, policyLossMode: config.policyLossMode });
+    else model.trainPPO(rollout, { learningRate: config.learningRate, epochs: 1,
+      policyLossMode: config.policyLossMode,
+      mctsCeRequired: config.policyLossMode === 'mcts_ce' ||
+        (config.policyLossMode === 'auto' && config.mctsSimulations > 0) });
   }
   const finalCheckpoint = completedGames > 0 ? saveCheckpoint(model, config, completedGames, history) : '';
   if (torch && finalCheckpoint) await torch.checkpoint(finalCheckpoint);

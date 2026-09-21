@@ -64,6 +64,14 @@ const Train = require('../training/train.js');
   const ceLoss = ceModel.trainPPO(ceTransitions, { epochs: 1, learningRate: 0.0003, policyLossMode: 'auto' });
   assert.ok(Object.values(ceLoss).every(Number.isFinite), 'MCTS 访问分布交叉熵指标均为有限数值');
   assert.strictEqual(ceLoss.clipFraction, 0, 'MCTS 交叉熵模式不使用 PPO 裁剪');
+  const { pi: _missingPi, ...missingPolicyTarget } = ceTransitions[0];
+  const invalidCeLoss = ceModel.trainPPO([missingPolicyTarget], {
+    epochs: 1, learningRate: 0.0003, policyLossMode: 'auto', mctsCeRequired: true
+  });
+  assert.strictEqual(invalidCeLoss.policySamples, 0,
+    'MCTS 搜索失败样本不得伪造一热策略目标');
+  assert.strictEqual(invalidCeLoss.policyLoss, 0,
+    '没有有效 MCTS 目标时策略损失应为 0，而不是对退化目标计算交叉熵');
 
   const history = Array.from({ length: 1000 }, (_, i) => ({ game: (i + 1) * 4 }));
   const sampled = Train.sampleHistory(history, 100);

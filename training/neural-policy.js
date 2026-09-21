@@ -195,6 +195,7 @@ class PolicyValueNetwork {
     const epochs = Math.max(1, Math.min(6, Number(options.epochs) || 2));
     const clip = Number(options.clip) || 0.2;
     const policyLossMode = ['auto', 'ppo', 'mcts_ce'].includes(options.policyLossMode) ? options.policyLossMode : 'auto';
+    const mctsCeRequired = options.mctsCeRequired === true;
     const valueCoef = Number(options.valueCoef) || 0.5;
     const entropyCoef = Number(options.entropyCoef) || 0.01;
     const rawAdvantages = transitions.map(t => {
@@ -206,7 +207,7 @@ class PolicyValueNetwork {
     const variance = rawAdvantages.reduce((a, b) => a + (b - mean) ** 2, 0) / rawAdvantages.length;
     const std = Math.sqrt(variance + 1e-8);
     const advantages = rawAdvantages.map(v => (v - mean) / std);
-    let totals = { policyLoss: 0, valueLoss: 0, entropy: 0, clips: 0, samples: 0 };
+    let totals = { policyLoss: 0, valueLoss: 0, entropy: 0, clips: 0, samples: 0, policySamples: 0 };
 
     for (let epoch = 0; epoch < epochs; epoch++) {
       this.layers.forEach(l => l.zeroGrad());
@@ -217,14 +218,20 @@ class PolicyValueNetwork {
         // π 目标既可能是 number[] 也可能是 Float32Array：自对弈侧为了省内存和省
         // postMessage 的克隆开销，发的就是 TypedArray，按「有没有长度」判断即可。
         const hasPi = !!(tr.pi && tr.pi.length);
-        const useMctsCe = policyLossMode === 'mcts_ce' || (policyLossMode === 'auto' && hasPi);
+        const useMctsCe = policyLossMode === 'mcts_ce' ||
+          (policyLossMode === 'auto' && (mctsCeRequired || hasPi));
+        // MCTS 交叉熵只能使用真实搜索返回的访问分布。搜索失败时故意不写 pi，
+        // 这类样本仍可用于价值头，但不能再伪造一热策略目标。
+        let policyTargetValid = !useMctsCe;
         const target = new Float32Array(out.probs.length);
         if (useMctsCe && hasPi) {
           let total = 0;
           for (let i = 0; i < target.length; i++) { target[i] = Math.max(0, Number(tr.pi[i]) || 0); total += target[i]; }
-          if (total > 0) for (let i = 0; i < target.length; i++) target[i] /= total;
-          else target[selected] = 1;
-        } else if (useMctsCe) target[selected] = 1;
+          if (total > 1e-8) {
+            for (let i = 0; i < target.length; i++) target[i] /= total;
+            policyTargetValid = true;
+          }
+        }
         const prob = Math.max(1e-8, out.probs[selected]);
         const oldProb = Math.max(1e-8, tr.oldProb);
         const ratio = prob / oldProb;
@@ -233,22 +240,29 @@ class PolicyValueNetwork {
         const unclippedObjective = ratio * advantage;
         const clippedObjective = clippedRatio * advantage;
         const isClipped = !useMctsCe && ((advantage >= 0 && ratio > 1 + clip) || (advantage < 0 && ratio < 1 - clip));
-        if (useMctsCe) {
+        if (useMctsCe && policyTargetValid) {
           for (let i = 0; i < out.probs.length; i++) if (target[i] > 0) totals.policyLoss -= target[i] * Math.log(Math.max(1e-8, out.probs[i]));
-        } else {
+          totals.policySamples++;
+        } else if (!useMctsCe) {
           totals.policyLoss += -Math.min(unclippedObjective, clippedObjective);
         }
         totals.clips += isClipped ? 1 : 0;
-        const ent = entropy(out.probs);
+        const ent = policyTargetValid ? entropy(out.probs) : 0;
         totals.entropy += ent;
         const gradLogits = new Float32Array(out.probs.length);
         const policyScale = isClipped ? 0 : advantage * ratio;
         let entropyCommon = 0;
-        for (let i = 0; i < out.probs.length; i++) entropyCommon += out.probs[i] * (Math.log(Math.max(1e-8, out.probs[i])) + 1);
+        if (policyTargetValid) {
+          for (let i = 0; i < out.probs.length; i++) entropyCommon += out.probs[i] * (Math.log(Math.max(1e-8, out.probs[i])) + 1);
+        }
         for (let i = 0; i < out.probs.length; i++) {
           const p = out.probs[i];
-          const policyGrad = useMctsCe ? (p - target[i]) : policyScale * (p - (i === selected ? 1 : 0));
-          const entropyGrad = -entropyCoef * p * (entropyCommon - (Math.log(Math.max(1e-8, p)) + 1));
+          const policyGrad = useMctsCe
+            ? (policyTargetValid ? p - target[i] : 0)
+            : policyScale * (p - (i === selected ? 1 : 0));
+          const entropyGrad = policyTargetValid
+            ? -entropyCoef * p * (entropyCommon - (Math.log(Math.max(1e-8, p)) + 1))
+            : 0;
           gradLogits[i] = policyGrad + entropyGrad;
         }
 
@@ -297,7 +311,8 @@ class PolicyValueNetwork {
     return {
       policyLoss, valueLoss, entropy: totals.entropy / denom,
       totalLoss: policyLoss + valueCoef * valueLoss - entropyCoef * totals.entropy / denom,
-      clipFraction: totals.clips / denom
+      clipFraction: totals.clips / denom,
+      policySamples: totals.policySamples
     };
   }
 
