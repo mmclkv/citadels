@@ -4654,8 +4654,12 @@
         });
       });
     }).catch(() => {});
+    // 首次安装 worker 时页面并没有旧版本要替换，此时重载只会把用户刚做的操作吞掉
+    // （HTTPS 首访尤其明显），所以首次接管不重载，只有真正的版本更新才刷新。
     let pwaRefreshing = false;
+    let pwaHadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!pwaHadController) { pwaHadController = true; return; }
       if (pwaRefreshing) return;
       pwaRefreshing = true;
       window.location.reload();
