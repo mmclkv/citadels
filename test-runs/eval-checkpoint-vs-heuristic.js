@@ -5,7 +5,7 @@ const path = require('path');
 const zlib = require('zlib');
 const Engine = require('../src/engine.js');
 const AI = require('../src/ai.js');
-const { PolicyValueNetwork } = require('../training/neural-policy.js');
+const { PolicyValueNetwork, mulberry32 } = require('../training/neural-policy.js');
 const {
   enumerateLegalActions, currentActor, alignedParticlePool, particleBeliefWeights,
   BELIEF_DECAY, trainingPlacement, heuristicLevelFor
@@ -26,17 +26,7 @@ const MIN_PLAYERS = Number(process.env.MIN_PLAYERS || 6);
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS || MIN_PLAYERS);
 const NETWORK_PLAYERS = Number(process.env.NETWORK_PLAYERS || 1);
 const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 100);
-
-function seededRng(seed) {
-  let value = seed >>> 0;
-  return () => {
-    value = (value + 0x6D2B79F5) >>> 0;
-    let t = value;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+const START_GAME_INDEX = Number(process.env.START_GAME_INDEX || 200001);
 
 async function main() {
   const started = Date.now();
@@ -66,15 +56,16 @@ async function main() {
     client.setModelPath(flatPath);
 
     for (let game = 1; game <= GAMES; game++) {
-      // 每局从基本、黑暗、混合三种角色组中伪随机选择；使用固定种子
-      // 让评测可复现，同时避免按固定周期暴露角色组分布。
-      const charSetSeed = Math.imul(SEED + game * 7919, 1664525) + 1013904223;
-      const charSet = ['base', 'dark', 'mixed'][(charSetSeed >>> 0) % 3];
-      const playerCount = MIN_PLAYERS + Math.floor(seededRng(SEED ^ Math.imul(game, 0x27D4EB2D))() *
+      const gameIndex = START_GAME_INDEX + game - 1;
+      // 训练 worker 为每局创建一条随机流；人数、角色组、粒子、落子和对手
+      // 共用它。保持相同消费顺序，评测训练范围外的未见对局。
+      const rng = mulberry32(SEED ^ (gameIndex * 2246822519));
+      const playerCount = MIN_PLAYERS + Math.floor(rng() *
         (MAX_PLAYERS - MIN_PLAYERS + 1));
+      const charSet = ['base', 'dark', 'mixed'][Math.floor(rng() * 3)];
       // 训练会轮换策略网络的物理座位和开局皇冠；评测也必须保持这一点，
       // 否则固定 seat 0 会把座位/先手偏差误算成模型强弱。
-      const placement = trainingPlacement({ seed: SEED }, game, playerCount, NETWORK_PLAYERS);
+      const placement = trainingPlacement({ seed: SEED }, gameIndex, playerCount, NETWORK_PLAYERS);
       const networkSeats = [...placement.networkSeats];
       const networkSeat = networkSeats[0];
       const seats = Array.from({ length: playerCount }, (_, i) => {
@@ -86,12 +77,12 @@ async function main() {
           botType: neural ? 'neural' : 'heuristic',
           botLevel: neural ? undefined : (HEURISTIC_LEVEL || heuristicLevelFor({
             seed: SEED, heuristicDifficulty: 'random'
-          }, i, game))
+          }, i, gameIndex))
         };
       });
       const state = Engine.createGame({
-        roomId: 'eval-' + game, endDistricts: 8, charSetMode: charSet,
-        seed: SEED + game * 7919, seats,
+        roomId: 'eval-' + gameIndex, endDistricts: 8, charSetMode: charSet,
+        seed: SEED + gameIndex * 7919, seats,
         initialCrownSeat: placement.initialCrownSeat
       });
       Engine.startGame(state);
@@ -106,13 +97,11 @@ async function main() {
           const searchStarted = Date.now();
           // 与训练一致：4 个粒子共用一棵信息集搜索树，并按公开信息对粒子加权。
           // 不能把真实 state 直接交给 MCTS，否则会偷看对手手牌和牌库顺序。
-          const rng = seededRng(SEED ^ Math.imul(game, 0x9E3779B9) ^
-            Math.imul(steps + 1, 0x85EBCA6B));
           const pool = alignedParticlePool(state, actor.id, legal, rng, PARTICLES);
           if (!pool.length) throw new Error('确定化无法复现合法动作列表，game=' + game + ' step=' + steps);
           const weights = particleBeliefWeights(pool, actor.id, BELIEF_DECAY);
           const result = await client.search(pool.map(entry => entry.state), actor.id,
-            pool[0].legal, game, weights);
+            pool[0].legal, 0, weights);
           searchMs += Date.now() - searchStarted;
           const phase = state.phase === 'draft' ? 'draft' : state.reaction ? 'reaction' :
             state.roundConfirm ? 'roundConfirm' : state.turn && state.turn.pending ?
@@ -137,7 +126,9 @@ async function main() {
           }
           action = pool[0].legal[chosen];
         } else {
-          action = AI.decide(state, actor.id) || legal[0];
+          const heuristicAction = AI.decide(state, actor.id, rng);
+          const heuristicKey = heuristicAction && JSON.stringify(heuristicAction);
+          action = legal.find(candidate => JSON.stringify(candidate) === heuristicKey) || legal[0];
         }
         const applied = Engine.applyAction(state, actor.id, action);
         if (!applied.ok) {
@@ -171,7 +162,7 @@ async function main() {
       });
       const gameMs = Date.now() - gameStarted;
       totalSteps += steps; totalGameMs += gameMs; totalSearchMs += searchMs;
-      console.log(JSON.stringify({ game, playerCount, networkSeats, charSet, networkSeat,
+      console.log(JSON.stringify({ game, gameIndex, playerCount, networkSeats, charSet, networkSeat,
         truncated: state.phase !== 'gameover',
         crownSeat: placement.initialCrownSeat,
         rank, win: rank === 1, steps, gameMs,
@@ -179,6 +170,7 @@ async function main() {
     }
     console.log(JSON.stringify({
       type: 'final', checkpoint: CHECKPOINT, minPlayers: MIN_PLAYERS, maxPlayers: MAX_PLAYERS,
+      startGameIndex: START_GAME_INDEX,
       maxRounds: MAX_ROUNDS, truncatedGames,
       networkPlayers: NETWORK_PLAYERS, simulations: SIMULATIONS, maxDepth: MAX_DEPTH,
       mctsBatchSize: MCTS_BATCH_SIZE, cPuct: MCTS_C_PUCT, particles: PARTICLES,
