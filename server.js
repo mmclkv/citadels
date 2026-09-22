@@ -84,8 +84,18 @@ const AgentBackend = {
   decide: (...args) => CitAgent.decide(...args)
 };
 
+function normalizeBotSelection(type, fallbackLevel) {
+  const value = String(type || 'npc');
+  const match = /^npc-(easy|normal|hard)$/.exec(value);
+  if (match) return { botType: 'npc', botLevel: match[1] };
+  return {
+    botType: value === 'agent' || value === 'neural' ? value : 'npc',
+    botLevel: ['easy', 'normal', 'hard'].includes(fallbackLevel) ? fallbackLevel : 'normal'
+  };
+}
+
 function normalizeBotType(value) {
-  return value === 'agent' || value === 'neural' ? value : 'npc';
+  return normalizeBotSelection(value).botType;
 }
 
 function botTypeError(type) {
@@ -172,13 +182,14 @@ function publicRoom(r) {
 
 function createRoom(hostName, config) {
   const id = roomCode();
+  const botSelection = normalizeBotSelection(config.botType, config.botLevel);
   const seats = [];
   const total = Math.max(2, Math.min(8, config.playerCount || 4));
   const bots = Math.max(0, Math.min(total - 1, config.bots || 0));
   seats.push({ id: genId('p'), name: hostName, resumeToken: genResumeToken(), isBot: false, taken: true,
     disconnected: false, left: false });
   for (let i = 0; i < bots; i++) {
-    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botType: normalizeBotType(config.botType), botLevel: config.botLevel || 'normal', taken: true });
+    seats.push({ id: genId('b'), name: '电脑 ' + (i + 1), isBot: true, botType: botSelection.botType, botLevel: botSelection.botLevel, taken: true });
   }
   for (let i = seats.length; i < total; i++) seats.push({ id: null, name: '', isBot: false, taken: false,
     disconnected: false, left: false });
@@ -189,8 +200,8 @@ function createRoom(hostName, config) {
       playerCount: total,
       endDistricts: config.endDistricts || 8,
       charSetMode: config.charSetMode || 'base',
-      botLevel: config.botLevel || 'normal',
-      botType: normalizeBotType(config.botType),
+      botLevel: botSelection.botLevel,
+      botType: botSelection.botType,
       // 房主在开局设置里选的节奏（= 普通动作的间隔毫秒），服务器上的机器人按它减速
       botPace: Number(config.botPace) || 430,
       // 房间策略网络默认与当前严格评测保持一致；显式传 0 仍可关闭 MCTS。
@@ -520,7 +531,8 @@ function handle(ws, info, msg) {
       break;
 
     case 'createRoom': {
-      const backendError = botTypeError(msg.config && msg.config.botType);
+      const requested = normalizeBotSelection(msg.config && msg.config.botType, msg.config && msg.config.botLevel);
+      const backendError = botTypeError(requested.botType);
       if (backendError) {
         wsSend(ws, JSON.stringify({ t: 'error', error: backendError })); break;
       }
@@ -580,7 +592,11 @@ function handle(ws, info, msg) {
       if (msg.config) {
         if (msg.config.endDistricts) r.config.endDistricts = msg.config.endDistricts;
         if (msg.config.charSetMode) r.config.charSetMode = msg.config.charSetMode;
-        if (msg.config.botLevel) r.config.botLevel = msg.config.botLevel;
+        if (msg.config.botType) {
+          const selection = normalizeBotSelection(msg.config.botType, msg.config.botLevel || r.config.botLevel);
+          r.config.botType = selection.botType;
+          r.config.botLevel = selection.botLevel;
+        } else if (msg.config.botLevel) r.config.botLevel = msg.config.botLevel;
         if (msg.config.botPace) r.config.botPace = Number(msg.config.botPace) || r.config.botPace;
         if (msg.config.mctsSimulations != null) r.config.mctsSimulations = clampMctsSimulations(msg.config.mctsSimulations);
         if (msg.config.mctsMaxDepth != null) r.config.mctsMaxDepth = clampMctsDepth(msg.config.mctsMaxDepth);
@@ -620,12 +636,13 @@ function handle(ws, info, msg) {
       if (i === 0) break;
       const s = r.seats[i];
       if (msg.kind === 'bot') {
-        const botType = msg.botType ? normalizeBotType(msg.botType) : r.config.botType;
+        const selection = normalizeBotSelection(msg.botType || r.config.botType, r.config.botLevel);
+        const botType = selection.botType;
         const backendError = botTypeError(botType);
         if (backendError) {
           wsSend(ws, JSON.stringify({ t: 'error', error: backendError })); break;
         }
-        r.seats[i] = { id: s.isBot ? s.id : genId('b'), name: '电脑 ' + i, isBot: true, botType, botLevel: r.config.botLevel || 'normal', taken: true,
+        r.seats[i] = { id: s.isBot ? s.id : genId('b'), name: '电脑 ' + i, isBot: true, botType, botLevel: selection.botLevel, taken: true,
           disconnected: false, left: false };
       } else if (msg.kind === 'open') {
         r.seats[i] = { id: null, name: '', isBot: false, taken: false };

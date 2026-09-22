@@ -77,8 +77,8 @@
           <option value="8">8 人</option>
         </select>
       </label>
-      <label class="field">
-        <span>电脑难度</span>
+      <label class="field" hidden>
+        <span>电脑难度（兼容旧配置）</span>
         <select id="cfg-level">
           <option value="easy">简单</option>
           <option value="normal" selected>普通</option>
@@ -88,7 +88,9 @@
       <label class="field">
         <span>电脑类型</span>
         <select id="cfg-bot-type">
-          <option value="npc" selected>普通电脑（启发式）</option>
+          <option value="npc-easy">启发式电脑 · 简单</option>
+          <option value="npc-normal" selected>启发式电脑 · 普通</option>
+          <option value="npc-hard">启发式电脑 · 困难</option>
           <option value="neural">策略神经网络（仓库自带权重）</option>
           <option value="agent">AI Agent 电脑（大模型决策，需要联网）</option>
         </select>
@@ -169,7 +171,7 @@
               <option value="2">2 个电脑</option><option value="3">3 个电脑</option><option value="4">4 个电脑</option></select>
           </label>
           <label class="field"><span>电脑类型</span>
-            <select id="net-bot-type"><option value="npc" selected>普通电脑（启发式）</option><option value="neural">策略神经网络（仓库自带权重）</option><option value="agent">AI Agent 电脑（大模型决策）</option></select>
+            <select id="net-bot-type"><option value="npc-easy">启发式电脑 · 简单</option><option value="npc-normal" selected>启发式电脑 · 普通</option><option value="npc-hard">启发式电脑 · 困难</option><option value="neural">策略神经网络（仓库自带权重）</option><option value="agent">AI Agent 电脑（大模型决策）</option></select>
           </label>
           <label class="field neural-only" hidden><span>MCTS 模拟次数（0 = 关闭）</span>
             <input id="net-mcts-sims" type="number" min="0" max="2000" step="50" value="500" inputmode="numeric"></label>

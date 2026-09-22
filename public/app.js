@@ -342,6 +342,15 @@
       Array.from(root.querySelectorAll('.neural-only')).forEach(node => { node.hidden = !show; });
     });
   }
+  const HEURISTIC_BOT_LEVELS = { 'npc-easy': 'easy', 'npc-normal': 'normal', 'npc-hard': 'hard' };
+  function normalizeBotSelection(type, fallbackLevel) {
+    const level = HEURISTIC_BOT_LEVELS[type];
+    if (level) return { botType: 'npc', botLevel: level };
+    return {
+      botType: type === 'agent' || type === 'neural' ? type : 'npc',
+      botLevel: ['easy', 'normal', 'hard'].includes(fallbackLevel) ? fallbackLevel : 'normal'
+    };
+  }
   async function startServerBotSingle(cfg) {
     const available = cfg.botType === 'agent' ? await checkAgentServer() : await checkNeuralServer();
     if (!available) return;
@@ -4416,7 +4425,8 @@
     const amHost = seats.length && seats[0].id === App.myId;
     seats.forEach((s, i) => {
       const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
-      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : s.botType === 'neural' ? '策略神经网络' : '普通电脑') : (s.taken ? '真人玩家' : '可加入');
+      const heuristicLabel = s.botLevel === 'easy' ? '启发式电脑 · 简单' : s.botLevel === 'hard' ? '启发式电脑 · 困难' : '启发式电脑 · 普通';
+      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : s.botType === 'neural' ? '策略神经网络' : heuristicLabel) : (s.taken ? '真人玩家' : '可加入');
       d.innerHTML = '<div class="seat-no">座位 ' + (i + 1) + (i === 0 ? ' · 房主' : '') + '</div>' +
         '<div class="seat-name">' + (s.taken ? escapeHtml(s.name) : '空缺') + '</div>' +
         '<div class="seat-tag">' + (s.disconnected ? '已断连' : s.left ? '已离开' :
@@ -4429,8 +4439,8 @@
         if (s.isBot) {
           const type = el('select');
           type.setAttribute('aria-label', s.name + '的电脑类型');
-          type.innerHTML = '<option value="npc">普通电脑</option><option value="neural">策略神经网络（仓库权重）</option><option value="agent">AI Agent（模型）</option>';
-          type.value = s.botType || 'npc';
+          type.innerHTML = '<option value="npc-easy">启发式电脑 · 简单</option><option value="npc-normal">启发式电脑 · 普通</option><option value="npc-hard">启发式电脑 · 困难</option><option value="neural">策略神经网络（仓库权重）</option><option value="agent">AI Agent（模型）</option>';
+          type.value = s.botType === 'npc' ? 'npc-' + (s.botLevel || 'normal') : (s.botType || 'npc-normal');
           type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
           ops.appendChild(type);
         }
@@ -4570,10 +4580,11 @@
     syncNeuralOnlyFields();
 
     $('#btn-start-single').onclick = () => {
+      const botSelection = normalizeBotSelection($('#cfg-bot-type').value, $('#cfg-level').value);
       const cfg = {
         players: Number($('#cfg-players').value),
-        level: $('#cfg-level').value,
-        botType: $('#cfg-bot-type').value,
+        level: botSelection.botLevel,
+        botType: botSelection.botType,
         end: Number($('#cfg-end').value),
         chars: $('#cfg-chars').value,
         name: ($('#cfg-name').value || '我').trim()
@@ -4589,8 +4600,9 @@
 
     // 联机
     $('#btn-create').onclick = async () => {
-      if ($('#net-bot-type').value === 'agent' && !await checkAgentServer()) return;
-      if ($('#net-bot-type').value === 'neural' && !await checkNeuralServer()) return;
+      const botSelection = normalizeBotSelection($('#net-bot-type').value, 'normal');
+      if (botSelection.botType === 'agent' && !await checkAgentServer()) return;
+      if (botSelection.botType === 'neural' && !await checkNeuralServer()) return;
       Net.name = ($('#net-name').value || '玩家').trim();
       Net.connect(() => {
         Net.send({
@@ -4599,8 +4611,8 @@
             bots: Number($('#net-bots').value),
             endDistricts: Number($('#net-end').value),
             charSetMode: $('#net-chars').value,
-            botLevel: 'normal',
-            botType: $('#net-bot-type').value,
+            botLevel: botSelection.botLevel,
+            botType: botSelection.botType,
             // 房主的节奏偏好决定服务器上机器人的行动间隔
             botPace: pace().act,
             voice: $('#net-voice').value === 'on'
