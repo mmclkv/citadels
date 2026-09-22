@@ -210,7 +210,19 @@
     if (entry.phase) body += ' · ' + entry.phase + ' · 第' + (entry.round || 0) + '轮';
     if (entry.legalCount != null) body += ' · 合法行动 ' + entry.legalCount + ' 个';
     if (entry.action) body += '\n行动：' + debugActionText(entry.action);
-    if (entry.inference) body += '\n推理：' + debugActionText(entry.inference);
+    if (entry.inference) {
+      const inference = Object.assign({}, entry.inference);
+      const policy = Array.isArray(inference.policy) ? inference.policy : null;
+      delete inference.policy;
+      body += '\n推理：' + debugActionText(inference);
+      if (policy) {
+        const label = inference.method === 'native-mcts' ? 'MCTS访问概率分布' : '策略概率分布';
+        body += '\n' + label + '：\n' + policy.map((item, index) => {
+          const percent = (Number(item.probability || 0) * 100).toFixed(2) + '%';
+          return '  ' + (index + 1) + '. ' + percent + ' · ' + debugActionText(item.action);
+        }).join('\n');
+      }
+    }
     if (entry.mcts) body += '\nMCTS：' + debugActionText(entry.mcts);
     if (entry.checkpoint) body += '\n权重：' + entry.checkpoint;
     if (entry.strategy) body += '\n策略：' + entry.strategy;
