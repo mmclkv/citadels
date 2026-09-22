@@ -94,7 +94,7 @@ async function main() {
           let best = 0;
           for (let i = 1; i < result.policy.length; i++)
             if (result.policy[i] > result.policy[best]) best = i;
-          action = root.legal[best];
+          action = pool[0].legal[best];
         } else {
           action = AI.decide(state, actor.id) || legal[0];
         }
