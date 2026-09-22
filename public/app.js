@@ -2888,7 +2888,9 @@
     const t = s.turn;
     if (!t || !t.pending || t.playerId !== App.myId) { App.pickKey = null; return; }
     const k = t.pending.kind;
-    if (k !== 'draw_keep' && k !== 'scholar_pick' && k !== 'prophet_give') { App.pickKey = null; return; }
+    if (k !== 'draw_keep' && k !== 'scholar_pick' && k !== 'prophet_give' && k !== 'wizard_card') {
+      App.pickKey = null; return;
+    }
     const key = s.round + '|' + k + '|' +
       (t.pending.cards ? t.pending.cards.map(c => c.uid).join(',') : String(t.pending.targetIdx));
     if (App.pickKey === key) return;
@@ -4121,7 +4123,7 @@
     }
     // pending 卡牌选择弹窗（抽牌保留 / 学者 / 预言家归还）
     const tk = s.turn && s.turn.pending ? s.turn.pending.kind : null;
-    if (tk === 'draw_keep' || tk === 'scholar_pick' || tk === 'prophet_give') {
+    if (tk === 'draw_keep' || tk === 'scholar_pick' || tk === 'prophet_give' || tk === 'wizard_card') {
       const b = el('button', 'act main', '打开卡牌选择');
       onTap(b, openPickModal);
       actionsEl.appendChild(b);
@@ -4225,7 +4227,9 @@
     const cards = pd.cards || [];
     const kind = pd.kind;
     const title = kind === 'scholar_pick' ? '学者：从 7 张中选 1 张'
-      : kind === 'draw_keep' ? '选择要保留的建筑牌' : '选择一张卡牌';
+      : kind === 'draw_keep' ? '选择要保留的建筑牌'
+      : kind === 'wizard_card' ? '法师：从目标玩家手牌中选择 1 张'
+      : '选择一张卡牌';
     $('#modal-title').textContent = title;
     const body = $('#modal-body');
     body.innerHTML = '';
@@ -4243,6 +4247,7 @@
         bindCardAction(n, () => {
           closeModal();
           if (kind === 'scholar_pick') send({ type: 'scholar_pick', uid: c.uid });
+          else if (kind === 'wizard_card') send({ type: 'wizard_card', uid: c.uid });
           else send({ type: 'draw_keep', uid: c.uid });
         }, true);
         grid.appendChild(n);
