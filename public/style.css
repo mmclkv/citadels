@@ -122,6 +122,15 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 .seat .seat-tag{font-size:11px;color:var(--dim)}
 .seat .seat-ops{display:flex;gap:6px;margin-top:auto}
 
+/* 联机建房：电脑类型文字较长，给外层面板、座位卡和座位选择框留出稳定空间。 */
+#screen-lobby .wide-panel{width:min(1120px,96vw)}
+#screen-lobby #lobby-pre .lobby-cols{grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr)}
+#screen-lobby #lobby-pre #net-bot-type{min-width:280px}
+#screen-lobby #lobby-room .seat-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+#screen-lobby #lobby-room .seat{min-height:112px;padding:13px}
+#screen-lobby #lobby-room .seat select{min-width:180px;flex:1 1 180px}
+#screen-lobby #lobby-room .seat .seat-ops{flex-wrap:wrap}
+
 /* ============================== 对局 ============================== */
 .topbar{
   flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -986,6 +995,12 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   .score-detail{font-size:10.5px}
 
   /* -------- 大厅座位 -------- */
+  #screen-lobby .wide-panel{width:calc(100vw - 20px)}
+  #screen-lobby #lobby-pre .lobby-cols{grid-template-columns:1fr}
+  #screen-lobby #lobby-pre #net-bot-type{min-width:0}
+  #screen-lobby #lobby-room .seat-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  #screen-lobby #lobby-room .seat{min-height:100px;padding:10px}
+  #screen-lobby #lobby-room .seat select{min-width:150px;flex-basis:150px}
   .seat-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
   .room-head{gap:8px}
   .room-code b{font-size:20px}
