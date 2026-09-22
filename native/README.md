@@ -62,7 +62,7 @@ native mcts_worker 的 GPU evaluator 有三种模式：
 不足 8 人的槽位为无效 mask。mcts_worker 返回 `valueVector`，同时保留
 `value = valueVector[0]` 供旧客户端兼容；GPU batch 协议也返回 8 个 float 的向量。
 
-## JS/C++ 输入编码协议：状态 v6 / 动作 v6
+## JS/C++ 输入编码协议：状态 v8 / 动作 v6
 
 `training/train.js` 与 `native/state_features.hpp` 共用版本化的 672 维实体槽位状态编码：
 前 32 维是全局回合/阶段/待决动作字段，随后是从当前玩家视角开始的 8 个座位，

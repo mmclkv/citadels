@@ -9,7 +9,7 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 7;
+constexpr int kStateEncodingVersion = 8;
 constexpr int kStateFeatureSize = 672;
 constexpr int kActionEncodingVersion = 6;
 constexpr std::array<const char*, 27> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",

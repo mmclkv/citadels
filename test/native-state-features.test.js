@@ -28,7 +28,7 @@ function finishDraft(state) {
   }
 }
 
-test('JS/C++ 状态编码 v6 在 4/5/6 人、阶段、隐藏信息和 pending 上逐维一致', t => {
+test('JS/C++ 状态编码 v8 在 4/5/6 人、阶段、隐藏信息和 pending 上逐维一致', t => {
   const exe = process.env.CITADELS_NATIVE_STATE_ENCODING_PROBE;
   if (!exe) { t.skip('未设置 CITADELS_NATIVE_STATE_ENCODING_PROBE，跳过跨语言状态编码检查'); return; }
   for (const count of [4, 5, 6]) {
@@ -85,6 +85,13 @@ test('JS/C++ 状态编码 v6 在 4/5/6 人、阶段、隐藏信息和 pending �
     snapshot.turn.pending = { kind, targetIdx: 0 };
     cases.push([`pending-${kind}`, snapshot]);
   }
+  const bishopCard = state.players[1].hand[0];
+  const bishopPayer = JSON.parse(JSON.stringify(state));
+  bishopPayer.turn.pending = { kind: 'bishop_payer', uid: bishopCard.uid, amount: 1 };
+  cases.push(['pending-bishop_payer', bishopPayer]);
+  const bishopRepay = JSON.parse(JSON.stringify(state));
+  bishopRepay.turn.pending = { kind: 'bishop_repay', payerIdx: 0, uid: bishopCard.uid };
+  cases.push(['pending-bishop_repay', bishopRepay]);
   for (const [label, snapshot] of cases) {
     const perspective = 1;
     const view = Engine.sanitize(snapshot, snapshot.players[perspective].id);
