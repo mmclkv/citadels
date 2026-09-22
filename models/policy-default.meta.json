@@ -1,15 +1,15 @@
 {
   "format": "json.gz",
-  "game": 43328,
+  "game": 45376,
   "profile": "large",
-  "backend": "js",
-  "trainedAt": "2026-09-22T11:40:59.309Z",
-  "sha256": "2f8532863258069f2158cf8669d322927b733fd0317bb48bb7a79af30292f0a5",
+  "backend": "libtorch",
+  "trainedAt": "2026-09-22T00:00:00.000Z",
+  "sha256": "d94402a8f7777ed89c65ceb0501f70a4aaee9d37826399527a81559306d0dbb8",
   "stateSize": 672,
   "actionSize": 256,
   "encodingVersion": 7,
   "weightsRoundedTo": 6,
-  "bytes": 3151926,
-  "source": "training-data/checkpoint-043328-plarge-m500-egpu-crandom-s20260913.json.gz",
-  "note": "训练 checkpoint 精简部署：删除 history、config 只留 profile、权重四舍五入到 6 位小数；状态编码 v7"
+  "bytes": 8667205,
+  "source": "training-data/checkpoint-045376-plarge-m500-egpu-crandom-s20260913.json.gz",
+  "note": "使用最新 45376 局 checkpoint；权重编码版本 v7，兼容 LibTorch/C++ MCTS 房间推理"
 }
