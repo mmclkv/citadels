@@ -251,7 +251,7 @@
   function readMctsConfig(simsId, depthId, particlesId) {
     const clamp = (id, max) => Math.max(0, Math.min(max, Math.floor(Number($(id) && $(id).value) || 0)));
     const particles = Math.max(1, Math.min(8, Math.floor(Number($(particlesId) && $(particlesId).value) || 4)));
-    return { mctsSimulations: clamp(simsId, 2000), mctsMaxDepth: clamp(depthId, 200), mctsParticles: particles };
+    return { mctsSimulations: clamp(simsId, 2000), mctsMaxDepth: clamp(depthId, 700), mctsParticles: particles };
   }
   function syncNeuralOnlyFields() {
     [['#screen-setup', '#cfg-bot-type'], ['#lobby-pre', '#net-bot-type']].forEach(pair => {

@@ -95,11 +95,11 @@
       </label>
       <label class="field neural-only" hidden>
         <span>MCTS 模拟次数（0 = 关闭）</span>
-        <input id="cfg-mcts-sims" type="number" min="0" max="2000" step="50" value="0" inputmode="numeric">
+        <input id="cfg-mcts-sims" type="number" min="0" max="2000" step="50" value="500" inputmode="numeric">
       </label>
       <label class="field neural-only" hidden>
-        <span>MCTS 最大搜索深度（0 = 自动 60）</span>
-        <input id="cfg-mcts-depth" type="number" min="0" max="200" step="10" value="0" inputmode="numeric">
+        <span>MCTS 最大搜索深度（0 = 自动 700）</span>
+        <input id="cfg-mcts-depth" type="number" min="0" max="700" step="10" value="700" inputmode="numeric">
       </label>
       <label class="field neural-only" hidden>
         <span>MCTS 隐藏信息粒子数</span>
@@ -172,9 +172,9 @@
             <select id="net-bot-type"><option value="npc" selected>普通电脑（启发式）</option><option value="neural">策略神经网络（仓库自带权重）</option><option value="agent">AI Agent 电脑（大模型决策）</option></select>
           </label>
           <label class="field neural-only" hidden><span>MCTS 模拟次数（0 = 关闭）</span>
-            <input id="net-mcts-sims" type="number" min="0" max="2000" step="50" value="0" inputmode="numeric"></label>
-          <label class="field neural-only" hidden><span>MCTS 最大搜索深度（0 = 自动 60）</span>
-            <input id="net-mcts-depth" type="number" min="0" max="200" step="10" value="0" inputmode="numeric"></label>
+            <input id="net-mcts-sims" type="number" min="0" max="2000" step="50" value="500" inputmode="numeric"></label>
+          <label class="field neural-only" hidden><span>MCTS 最大搜索深度（0 = 自动 700）</span>
+            <input id="net-mcts-depth" type="number" min="0" max="700" step="10" value="700" inputmode="numeric"></label>
           <label class="field neural-only" hidden><span>MCTS 隐藏信息粒子数</span>
             <input id="net-mcts-particles" type="number" min="1" max="8" step="1" value="4" inputmode="numeric"></label>
           <p class="dim small neural-only" hidden>模拟次数只对策略神经网络电脑生效：0 = 按网络策略直接走子，填正数则在指定份数的隐藏信息猜测上做确定化 MCTS 搜索，更强但每步更慢。</p>

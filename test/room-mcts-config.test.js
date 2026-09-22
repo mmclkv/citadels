@@ -70,3 +70,15 @@ test('服务器截断并保存 MCTS 设置，大厅视图原样回显', async t 
   c.send({ t: 'config', config: { mctsSimulations: 0 } });
   await until(() => c.state.config.mctsSimulations === 0, '关闭搜索');
 });
+
+test('新房间的神经网络 MCTS 默认值与严格评测对齐', async t => {
+  const f = await fixture(false); t.after(f.close);
+  const c = await connect(f.base, '房主'); t.after(c.close);
+  c.send({ t: 'createRoom', name: '房主', config: {
+    playerCount: 3, bots: 1, botType: 'neural', charSetMode: 'base'
+  } });
+  await until(() => c.state && c.state.phase === 'lobby', 'lobby view');
+  assert.equal(c.state.config.mctsSimulations, 500);
+  assert.equal(c.state.config.mctsMaxDepth, 700);
+  assert.equal(c.state.config.mctsParticles, 4);
+});

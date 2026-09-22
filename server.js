@@ -17,7 +17,9 @@ const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
 const TrainingManagerModule = require('./lib/training-manager.js');
 const LocalNeuralBotModule = require('./lib/local-neural-bot.js');
 const VoiceModule = require('./lib/voice.js');
-const { MCTS_MAX_SIMULATIONS, MCTS_MAX_DEPTH_CAP } = LocalNeuralBotModule;
+const {
+  MCTS_MAX_SIMULATIONS, MCTS_DEFAULT_SIMULATIONS, MCTS_DEFAULT_MAX_DEPTH, MCTS_MAX_DEPTH_CAP
+} = LocalNeuralBotModule;
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -182,8 +184,11 @@ function createRoom(hostName, config) {
       botType: normalizeBotType(config.botType),
       // 房主在开局设置里选的节奏（= 普通动作的间隔毫秒），服务器上的机器人按它减速
       botPace: Number(config.botPace) || 430,
-      mctsSimulations: clampMctsSimulations(config.mctsSimulations),
-      mctsMaxDepth: clampMctsDepth(config.mctsMaxDepth),
+      // 房间策略网络默认与当前严格评测保持一致；显式传 0 仍可关闭 MCTS。
+      mctsSimulations: config.mctsSimulations == null
+        ? MCTS_DEFAULT_SIMULATIONS : clampMctsSimulations(config.mctsSimulations),
+      mctsMaxDepth: config.mctsMaxDepth == null
+        ? MCTS_DEFAULT_MAX_DEPTH : clampMctsDepth(config.mctsMaxDepth),
       mctsParticles: clampMctsParticles(config.mctsParticles),
       // 房主可关闭本房间语音；服务器没配 LiveKit 时这项没有意义，但保留开关值，
       // 这样同一个房间配置在换服务器后行为一致。
