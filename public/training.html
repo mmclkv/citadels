@@ -22,7 +22,7 @@
         <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
         <label><span>规则引擎</span><select id="rules-engine"><option value="js" selected>JS</option><option value="cpp" disabled>C++（尚未支持完整规则）</option></select><small>当前只有 JS 规则引擎支持完整对局；C++ 规则选项暂不可用</small></label>
-        <label><span>MCTS 引擎</span><select id="mcts-engine"><option value="js" selected>JS</option><option value="cpp">C++</option></select><small>负责搜索和生成访问分布</small></label>
+        <label><span>MCTS 引擎</span><select id="mcts-engine"><option value="cpp" selected>C++</option></select><small>固定使用 C++ MCTS；未找到 worker 时训练直接报错</small></label>
         <label><span>神经网络框架</span><select id="neural-network-framework"><option value="pytorch" selected>PyTorch</option><option value="libtorch">LibTorch（C++）</option></select><small id="neural-framework-hint">用于神经网络推理</small></label>
         <label><span>计算设备</span><select id="device"><option value="cuda" selected>GPU</option><option value="cpu">CPU</option></select></label>
         <label><span>结束建筑数</span><select id="end-districts"><option value="7">7 栋</option><option value="8" selected>8 栋</option></select></label>
@@ -73,7 +73,7 @@
           <label><span>根节点 Dirichlet 混合 α</span><input id="mcts-dirichlet" type="number" min="0" max="1" step="0.05" value="0.3"><small id="mcts-dirichlet-hint">0 = 关闭噪声</small></label>
           <label><span>Dirichlet 浓度 ε</span><input id="mcts-diri-eps" type="number" min="0.001" max="1" step="0.01" value="0.03"></label>
           <label><span>MCTS 最大搜索深度</span><input id="mcts-max-depth" type="number" min="20" max="1000" step="20" value="200"></label>
-          <label><span>GPU 批量大小</span><input id="mcts-batch-size" type="number" min="1" max="256" step="1" value="32"><small>GPU 评估时使用；JS 评估时保留此配置以便切换后端</small></label>
+          <label><span>GPU 批量大小</span><input id="mcts-batch-size" type="number" min="1" max="256" step="1" value="32"><small>供 C++ MCTS 的神经网络批量评估使用</small></label>
           <label><span>最长等待</span><input id="mcts-max-wait" type="number" min="0" max="50" step="1" value="1"><small>毫秒；超过也立即发送（0 = 严格攒满才发）</small></label>
           <label><span>状态缓存</span><input id="mcts-cache-size" type="number" min="0" max="1048576" step="1024" value="65536"><small>前向结果 LRU 缓存条数（0 = 关闭，重算更准但更慢）</small></label>
           <label><span>隐藏信息粒子数</span><input id="mcts-particles" type="number" min="1" max="16" step="1" value="4"><small>对未知手牌的猜测份数。整池共用一棵搜索树、每条模拟抽一份（1 = 猜一次钉死整棵树）</small></label>

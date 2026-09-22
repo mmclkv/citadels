@@ -93,7 +93,7 @@ worker 拿到的是一份完整游戏状态，里面写了谁的手牌、牌库�
 `encodeSearchRequest` 把第一份放进 `state`、其余放进 `particles`，
 `mcts_worker` 收到后整池交给 `Mcts::search` / `BatchedMcts::search` 的
 `std::vector<State>` 重载 —— **每条模拟随机抽一份往下走，所有粒子共用同一棵树、同一批
-统计量**。JS 侧 `training/mcts.js` 的 `rootStates` 是同一套语义。
+统计量**。Node 侧通过 native-search 协议传入 `rootStates`。
 
 不要退回「每个世界各搜一次再平均根访问分布」（PIMC）：那会因为 strategy fusion
 选出在任一世界里都不最优的动作，而且模拟预算被切成 N 份，同一信息集的经验分散在
@@ -127,4 +127,4 @@ JS 仍是外层正式对局状态的权威引擎，并按 C++ 搜索返回的动
 整局训练后端尚未打通，因此控制台仍禁用该选项，服务端也会拒绝该配置。
 
 终局价值只由竞争排名决定：并列玩家共享同一名次，下一名跳过并列名次；绝对分数
-与分差不进入奖励。JS 训练目标、JS MCTS 终局值、C++ MCTS/worker 终局值使用同一规则。
+与分差不进入奖励。JS 训练目标与 C++ MCTS/worker 终局值使用同一规则。

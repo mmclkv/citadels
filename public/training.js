@@ -220,23 +220,16 @@ async function uploadCheckpointFile(file) {
   syncResumeUI();
 }
 
-// 不再单独提供「神经网络评估器」选项：其值由「神经网络框架」推导，
-// 推导规则与 training/train.js 的 sanitizeConfig 保持一致：
-//   PyTorch  → gpu（经 PyTorch 桥批量 forward）
-//   LibTorch + JS MCTS → js（worker 内本地 forward）
-//   C++ MCTS 恒为 gpu（走进程内原生搜索，不经 JS 评估器）
+// JS MCTS 已移除；C++ MCTS 的网络评估由所选 PyTorch/LibTorch 后端完成。
 function resolveMctsEvaluator() {
-  return ($('mcts-engine').value === 'cpp' || $('neural-network-framework').value === 'pytorch') ? 'gpu' : 'js';
+  return 'gpu';
 }
 
 function estimateMCTS() {
   const sims = +$('mcts-simulations').value || 0;
   const out = $('mcts-time-estimate');
   if (!sims) { out.textContent = '关闭'; return; }
-  const evaluator = resolveMctsEvaluator();
-  const perStepHint = evaluator === 'gpu'
-    ? 'GPU 批量 forward 实测取决于模拟数和批大小'
-    : '单步 ~' + (sims * 0.87 / 1000).toFixed(2) + ' 秒（JS CPU forward 估算）';
+  const perStepHint = 'GPU/CPU 原生批量 forward，耗时取决于模拟数、批大小和设备';
   let bullet;
   if (sims <= 50) bullet = '轻量 A 档';
   else if (sims <= 200) bullet = '适中 B 档';
@@ -246,15 +239,12 @@ function estimateMCTS() {
 }
 
 function updateMctsEvaluatorUI() {
-  const mctsEngine = $('mcts-engine').value;
   const framework = $('neural-network-framework').value;
-  const native = mctsEngine === 'cpp';
-  const evaluator = resolveMctsEvaluator();
-  // 评估器不再是独立选项，提示改挂在「神经网络框架」下面，说明它会推导出什么
-  $('neural-framework-hint').textContent = native
-    ? (framework === 'libtorch' ? '✓ C++ MCTS 与完整角色规则在搜索进程内运行，使用 LibTorch 评估' : '✓ C++ MCTS 与完整角色规则运行于搜索进程，通过 PyTorch 桥评估网络')
-    : (evaluator === 'gpu' ? '✓ JS MCTS 通过 IPC 把 batch 转发到 PyTorch 子进程' : 'JS 评估器在每个 worker 内部 forward');
-  document.querySelectorAll('.native-only').forEach(el => { el.style.display = native ? '' : 'none'; });
+  const native = true;
+  $('neural-framework-hint').textContent = framework === 'libtorch'
+    ? '✓ C++ MCTS 与完整角色规则运行于搜索进程，使用 LibTorch 评估'
+    : '✓ C++ MCTS 与完整角色规则运行于搜索进程，通过 PyTorch 后端评估网络';
+  document.querySelectorAll('.native-only').forEach(el => { el.style.display = ''; });
   // 切换框架会改变推导出的评估器，单步耗时估算要跟着刷新
   estimateMCTS();
 }
@@ -362,7 +352,7 @@ function renderRuntime(status) {
     ['GPU 峰值显存', status.point && status.point.gpuMemoryMB ? num(status.point.gpuMemoryMB, 0) + ' MB' : '—'],
     ['玩家范围', c.minPlayers ? c.minPlayers + '–' + c.maxPlayers + ' 人' : '—'],
     ['规则引擎', c.rulesEngine === 'cpp' ? 'C++' : (c.rulesEngine === 'js' ? 'JS' : '—')],
-    ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++' : (c.mctsEngine === 'js' ? 'JS' : '—')],
+    ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++' : '—'],
     ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch（C++）' : (c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—')],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],

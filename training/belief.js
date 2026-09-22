@@ -24,7 +24,7 @@
  *
  * 用法：
  *   const weights = beliefWeights(particles, playerId, { decay: 0.15 });
- *   mcts.search({ rootStates: particles, particleWeights: weights, ... });
+ *   native mcts_worker 的搜索请求会携带 particles 与 particleWeights。
  */
 
 // 每违反一张「他买得起却没建」的牌，权重乘一次这个数。

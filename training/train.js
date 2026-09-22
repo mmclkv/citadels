@@ -15,7 +15,6 @@ const { applyRecorded } = require('./undo.js');
 const { determinize } = require('./determinize.js');
 const { beliefWeights } = require('./belief.js');
 const { informationSetKey } = require('./information-set.js');
-const mcts = require('./mcts.js');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'training-data');
@@ -456,8 +455,10 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     initialCrownSeat: placement.initialCrownSeat
   });
   Engine.startGame(state);
-  const useNativeMcts = !!nativeSearch && (config.mctsEngine === 'cpp' || config.backend === 'native') &&
-    nativeMctsSupportsGame(state);
+  if (config.mctsSimulations > 0 && (!nativeSearch || !nativeMctsSupportsGame(state))) {
+    throw new Error('MCTS 已启用但 C++ native worker 不可用；JS MCTS 已移除');
+  }
+  const useNativeMcts = config.mctsSimulations > 0 && !!nativeSearch && nativeMctsSupportsGame(state);
   const transitions = [];
   let steps = 0, inferenceMs = 0, fallbackCount = 0;
   let policyTargetSamples = 0, policyTargetMissingSamples = 0;
@@ -523,7 +524,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     const encoded = encodeState(view, actor.id);
     const actionVectors = legal.map(action => encodeAction(action, encoded.context));
     // 搜索只能看人类玩家看得到的信息：把根局面的隐藏部分换成若干份随机猜测（确定化）。
-    // 直接把真 state 交给 MCTS（无论 JS 还是 native）等于让电脑看着对手的手牌和牌库
+    // 直接把真 state 交给 MCTS 等于让电脑看着对手的手牌和牌库
     // 顺序做决策，学到的不是策略而是偷看。详见 ./determinize.js。
     // 粒子是「池」不是「几棵树」：整池交给一次搜索，每条模拟抽一份，共用一棵树。
     const willSearch = actor.botType !== 'heuristic' && (useNativeMcts || config.mctsSimulations > 0);
@@ -570,52 +571,6 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
         for (let i = 0; i < piVector.length; i++) { r -= piVector[i]; if (r <= 0) { chosen = i; break; } }
         decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue,
           entropy: 0, mctsVisits: nativeResult.visits || 0, mctsExpansions: nativeResult.expansions || 0 };
-      }
-    } else if (config.mctsSimulations > 0 && searchRoot && !channelBroken) {
-      const jsFallbackEvaluator = config.mctsEngine === 'cpp' && config.neuralNetworkFramework === 'libtorch'
-        ? null : evaluator;
-      let mctsResult = null;
-      try {
-        mctsResult = await mcts.search({
-        // 整池进同一棵树；池里只有一份时与旧的单 rootState 完全等价
-        rootStates: searchPool.map(entry => entry.state),
-        // 信念权重：与公开事实矛盾的世界少被抽到（null = 均匀采样）
-        particleWeights: searchWeights || undefined,
-        rootPlayerId: actor.id,
-        model,
-        Engine,
-        sanitize: Engine.sanitize,
-        legalFn: enumerateLegalActions,
-        rewardFn: gameRewards,
-        encodeState,
-        encodeAction,
-        simulate: config.mctsSimulations,
-        cPuct: config.mctsC_puct,
-        dirichletAlpha: config.mctsDirichletAlpha,
-        dirichletEpsilon: config.mctsDirichletEpsilon != null ? config.mctsDirichletEpsilon : 0.03,
-        maxDepth: config.mctsMaxDepth,
-        infosetKeyFn: (working, playerId) => informationSetKey(working, playerId, Engine.sanitize),
-        rng,
-        evaluator: jsFallbackEvaluator
-        });
-      } catch (error) {
-        if (!handleSearchFailure(error)) return null;
-      }
-      if (mctsResult) {
-        searchFailures = 0;
-        if (searchChannel) searchChannel.searchFailureStreak = 0;
-        piVector = mctsResult.pi;
-        mctsValueVector = normalizeValueVector(mctsResult.valueVector, mctsResult.value);
-        mctsValue = mctsValueVector[0];
-        // 按访问分布比例抽样；既然分布已含 Dirichlet 噪声，这里不再额外加 temperature
-        let r = rng();
-        let chosen = Math.max(0, piVector.length - 1);
-        for (let i = 0; i < piVector.length; i++) {
-          r -= piVector[i];
-          if (r <= 0) { chosen = i; break; }
-        }
-        decision = { chosen, probability: piVector[chosen], valueVector: mctsValueVector, value: mctsValue, entropy: 0,
-          mctsVisits: mctsResult.visits, mctsExpansions: mctsResult.expansions };
       }
     } else {
       decision = model.choose(encoded.vector, actionVectors, temperature);
@@ -698,7 +653,7 @@ async function runSelfPlayGame(model, config, gameIndex, rng, shouldStop, evalua
     networkScore: mean(networkRows.map(row => row.total)),
     // 名次第一的奖励恒为 +1（并列第一同样拿 +1），据此判断是否夺冠
     networkWin: networkRows.some(row => rewardOf(row) >= 1) ? 1 : 0,
-    mctsEngineUsed: config.mctsSimulations > 0 ? (useNativeMcts ? 'cpp' : 'js') : 'none',
+    mctsEngineUsed: config.mctsSimulations > 0 ? (useNativeMcts ? 'cpp' : 'unavailable') : 'none',
     rewards: Array.from(rewards.values()), scores: state.scores.map(s => s.total), winners: winning
   };
 }
@@ -750,8 +705,8 @@ function sanitizeConfig(input = {}) {
   const mctsSimulations = Math.max(0, Math.min(10000, Number(input.mctsSimulations) || 0));
   const hasSplitEngines = input.rulesEngine != null || input.mctsEngine != null || input.neuralNetworkFramework != null;
   const rulesEngine = ['js', 'cpp'].includes(input.rulesEngine) ? input.rulesEngine : 'js';
-  const mctsEngine = ['js', 'cpp'].includes(input.mctsEngine)
-    ? input.mctsEngine : (input.backend === 'native' ? 'cpp' : 'js');
+  // JS MCTS 已移除；配置统一使用 C++ MCTS，缺少 native worker 时直接报错。
+  const mctsEngine = 'cpp';
   const neuralNetworkFramework = ['pytorch', 'libtorch'].includes(input.neuralNetworkFramework)
     ? input.neuralNetworkFramework : (input.nativeInferenceBackend === 'libtorch' ? 'libtorch' : 'pytorch');
   const effectiveBackend = hasSplitEngines
@@ -788,9 +743,8 @@ function sanitizeConfig(input = {}) {
     mctsDirichletAlpha: Math.max(0, Math.min(1, Number(input.mctsDirichletAlpha) || 0.3)),
     mctsDirichletEpsilon: Math.max(0.001, Math.min(1, Number(input.mctsDirichletEpsilon) || 0.03)),
     mctsMaxDepth: Math.max(10, Math.min(2000, Number(input.mctsMaxDepth) || 200)),
-    mctsEvaluator: hasSplitEngines
-      ? (mctsEngine === 'cpp' || neuralNetworkFramework === 'pytorch' ? 'gpu' : 'js')
-      : (['js', 'gpu'].includes(input.mctsEvaluator) ? input.mctsEvaluator : 'js'),
+    // 兼容旧配置中的 js 标记，但实际统一交给 native worker；device 仍单独决定 GPU/CPU。
+    mctsEvaluator: input.mctsEvaluator === 'gpu' ? 'gpu' : 'native',
     mctsBatchSize: Math.max(1, Math.min(256, Number(input.mctsBatchSize) || 32)),
     // 0 是合法值，表示"不限制等待"（等满批或显式 flush 才发）；仅 undefined/NaN 取默认 1
     mctsMaxWaitMs: Math.max(0, Math.min(50, Number.isFinite(Number(input.mctsMaxWaitMs)) ? Number(input.mctsMaxWaitMs) : 1)),
@@ -831,13 +785,13 @@ function sampleHistory(history, limit = 400) {
 // checkpoint 后缀。训练者一眼就能从文件名区分出不同配置的产物：
 //   p<profile>    fast / balanced / large，决定网络层宽与深度
 //   m<mctsSims>   每步 MCTS 模拟数（0 = 未启用），决定训练目标分布的平滑度
-//   e<evaluator>  js / gpu，js 是 worker 内本地网络；gpu 是 PyTorch 批量 forward
+//   e<evaluator>  native / gpu，均表示由 C++ MCTS worker 负责搜索
 //   c<charSet>    random / base / dark / mixed，决定训练分布
 //   s<seed>       随机种子，决定初始权重与采样路径
 function configTag(config) {
   const profile = PROFILES[config.profile] ? config.profile : 'balanced';
   const mcts = Math.max(0, Math.min(10000, Math.round(Number(config.mctsSimulations) || 0)));
-  const evaluator = (config.mctsEvaluator === 'gpu') ? 'gpu' : 'js';
+  const evaluator = config.mctsEvaluator === 'gpu' ? 'gpu' : 'native';
   const charSet = ['base', 'dark', 'mixed', 'random'].includes(config.charSet) ? config.charSet : 'random';
   const seed = Math.floor(Number(config.seed) || 0);
   return ['p' + profile, 'm' + mcts, 'e' + evaluator, 'c' + charSet, 's' + seed].join('-');
@@ -909,9 +863,9 @@ async function train(rawConfig, hooks = {}) {
       ' · 粒子=' + config.mctsParticles + '（同一棵树，每条模拟抽一份）' +
       (config.mctsBelief ? ' · 信念加权（按公开事实压低矛盾世界）' : ' · 信念关闭（均匀采样）') +
       ' · 评估器=' + config.mctsEvaluator + '（' +
-      (config.mctsEvaluator === 'gpu'
-        ? 'GPU 批量 forward 走 PyTorch 桥，批 ' + config.mctsBatchSize + ' · 等待 ' + config.mctsMaxWaitMs + 'ms'
-        : 'worker 内 JS 网络同步 forward') + '）');
+      (config.neuralNetworkFramework === 'libtorch'
+        ? 'C++ worker 内 LibTorch forward，批 ' + config.mctsBatchSize
+        : 'C++ worker 通过 PyTorch 后端 forward，批 ' + config.mctsBatchSize) + '）');
   } else {
     log('MCTS 未启用，自对弈按网络 softmax 采样');
   }
@@ -952,9 +906,8 @@ async function train(rawConfig, hooks = {}) {
   // completedGames 只代表成功完成、可以进入训练的数据局数；它不能再兼任
   // worker 的任务序号，否则超长/异常局被跳过后会重复使用同一个 gameIndex。
   let nextGameIndex = completedGames + 1;
-  let loggedDarkNativeFallback = false;
   if (torch && !stopping) {
-    const nativeGpuSearch = config.mctsEngine === 'cpp' && config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu';
+    const nativeGpuSearch = config.mctsEngine === 'cpp' && config.mctsSimulations > 0;
     // LibTorch 直连的 C++ worker 不会收到 sharedMemoryName（native-search.js 显式跳过下发），
     // 起了 daemon 也没人消费，白白多一份 Python+PyTorch 进程和一份 CUDA context。
     // 8GB 内存的机器上这份死重量就是 bad allocation 崩溃现场的一部分。
@@ -979,19 +932,14 @@ async function train(rawConfig, hooks = {}) {
     }
     const poolOpts = { root: ROOT, config,
       size: Math.min(config.workers, config.batchGames), onLog: text => log(text) };
-    if (config.mctsSimulations > 0 && config.mctsEvaluator === 'gpu') {
-      // 若某局未创建原生 worker，JS MCTS 仍通过主进程 PyTorch 桥批量评估。
+    if (nativeGpuSearch) {
       poolOpts.batchForward = (stateVectors, actionVectorsList) =>
         torch.batchForward({ stateVectors, actionVectorsList });
-      if (!nativeGpuSearch) {
-        log('MCTS 评估：worker → torch.batchForward（PyTorch）');
-      } else if (useSharedMemoryDaemon) {
+      if (useSharedMemoryDaemon) {
         log('MCTS 评估：C++ 规则/MCTS worker 走共享内存 GPU daemon（含新增暗版角色）');
       } else {
         log('MCTS 评估：C++ 规则/MCTS worker 走 LibTorch 直连（含新增暗版角色）');
       }
-    } else if (config.mctsSimulations > 0) {
-      log('MCTS 评估：worker 内本地 JS 网络 forward（mctsEvaluator=js）');
     }
     pool = new SelfPlayPool(poolOpts);
   }
@@ -1053,10 +1001,6 @@ async function train(rawConfig, hooks = {}) {
     }
     emptyBatches = 0;
     for (const result of results) {
-      if (!loggedDarkNativeFallback && config.mctsEngine === 'cpp' && result.mctsEngineUsed === 'js') {
-        log('本局未启用原生 MCTS worker，已使用 JS MCTS 回退');
-        loggedDarkNativeFallback = true;
-      }
       completedGames++;
       gamesSinceUpdate++;
       rollout.push(...result.transitions);

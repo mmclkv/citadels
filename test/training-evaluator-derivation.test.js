@@ -1,12 +1,5 @@
 'use strict';
-// 回归：「神经网络评估器」不再是独立选项，改由「神经网络框架」推导。
-//
-// 背景：这个下拉框的值在服务端 sanitizeConfig 里本来就会被覆盖（只要 UI 提供了
-// rulesEngine / mctsEngine / neuralNetworkFramework 三者之一，hasSplitEngines 即为真），
-// 也就是说用户在界面上选什么都无效——纯属噪音。现在直接从框架推导，规则与服务端一致：
-//   js  + pytorch  → gpu
-//   js  + libtorch → js
-//   cpp + 任意     → gpu（C++ MCTS 走进程内原生搜索，必须 gpu）
+// 回归：JS MCTS 已删除，训练页和服务端只允许 C++ MCTS。
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -32,25 +25,21 @@ test('评估器由神经网络框架 + MCTS 引擎推导，规则与服务端一
   const js = read('public/training.js');
   const fn = js.match(/function resolveMctsEvaluator\(\)\s*\{[\s\S]*?\n\}/);
   assert.ok(fn, '必须定义 resolveMctsEvaluator()');
-  assert.match(fn[0], /\$\('mcts-engine'\)\.value === 'cpp'/, 'C++ MCTS 必须判为 gpu');
-  assert.match(fn[0], /\$\('neural-network-framework'\)\.value === 'pytorch'/, 'PyTorch 必须判为 gpu');
-  assert.match(fn[0], /\? 'gpu' : 'js'/, '非上述情况为 js');
+  assert.match(fn[0], /return 'gpu'/, 'C++ MCTS 统一走原生网络评估');
   // 推导函数必须真的被用于提交配置，而不是另写一份
   assert.match(js, /mctsEvaluator:\s*resolveMctsEvaluator\(\)/, 'formConfig 必须使用推导值');
 });
 
 test('推导规则与 train.js 的 sanitizeConfig 保持同构', () => {
   const train = read('training/train.js');
-  assert.match(train,
-    /mctsEvaluator:\s*hasSplitEngines[\s\S]{0,120}mctsEngine === 'cpp' \|\| neuralNetworkFramework === 'pytorch' \? 'gpu' : 'js'/,
-    '服务端推导规则应与前端一致');
+  assert.match(train, /const mctsEngine = 'cpp'/, '服务端必须固定使用 C++ MCTS');
 });
 
 test('原提示信息迁移到「神经网络框架」下方并仍会随选择刷新', () => {
   const html = read('public/training.html');
   assert.match(html, /id="neural-framework-hint"/, '提示位应挂在神经网络框架上');
   const js = read('public/training.js');
-  assert.match(js, /\$\('neural-framework-hint'\)\.textContent = native/, '提示文案仍需按 MCTS 引擎分支');
+  assert.match(js, /\$\('neural-framework-hint'\)\.textContent = framework/, '提示文案仍需按网络框架刷新');
   assert.match(js, /LibTorch 评估/, 'C++ + LibTorch 的提示文案要保留');
 });
 
