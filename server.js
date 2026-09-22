@@ -84,7 +84,7 @@ function serverLog(level, ...args) {
   }).join(' ');
   serverLogBuffer.push({ at: Date.now(), level, text });
   if (serverLogBuffer.length > 300) serverLogBuffer.splice(0, serverLogBuffer.length - 300);
-  if (capturingStartupLogs && /mcts_worker|编译|C\+\+/.test(text)) {
+  if (capturingStartupLogs && /mcts_worker|编译|C\+\+|LibTorch|安装器/.test(text)) {
     startupLogBuffer.push({ at: Date.now(), level, text });
     if (startupLogBuffer.length > 120) startupLogBuffer.splice(0, startupLogBuffer.length - 120);
   }
