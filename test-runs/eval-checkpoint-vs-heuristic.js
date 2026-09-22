@@ -25,6 +25,7 @@ const SEED = Number(process.env.SEED || 20260913);
 const MIN_PLAYERS = Number(process.env.MIN_PLAYERS || 6);
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS || MIN_PLAYERS);
 const NETWORK_PLAYERS = Number(process.env.NETWORK_PLAYERS || 1);
+const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 100);
 
 function seededRng(seed) {
   let value = seed >>> 0;
@@ -49,7 +50,7 @@ async function main() {
   fs.writeFileSync(flatPath, Buffer.from(flat.buffer, flat.byteOffset, flat.byteLength));
 
   let client;
-  let wins = 0, top3 = 0, totalSteps = 0, totalGameMs = 0, totalSearchMs = 0;
+  let wins = 0, top3 = 0, truncatedGames = 0, totalSteps = 0, totalGameMs = 0, totalSearchMs = 0;
   const playerWins = Array(MAX_PLAYERS).fill(0);
   const playerRanks = Array.from({ length: MAX_PLAYERS }, () => Array(MAX_PLAYERS).fill(0));
   try {
@@ -92,7 +93,7 @@ async function main() {
       });
       Engine.startGame(state);
       let steps = 0, searchMs = 0, gameStarted = Date.now();
-      while (state.phase !== 'gameover' && steps < 100000) {
+      while (state.phase !== 'gameover' && steps < 100000 && state.round <= MAX_ROUNDS) {
         const actor = currentActor(state);
         if (!actor) throw new Error('没有当前行动者，phase=' + state.phase);
         const legal = enumerateLegalActions(state, actor.id);
@@ -110,10 +111,14 @@ async function main() {
           const result = await client.search(pool.map(entry => entry.state), actor.id,
             pool[0].legal, game, weights);
           searchMs += Date.now() - searchStarted;
-          let best = 0;
-          for (let i = 1; i < result.policy.length; i++)
-            if (result.policy[i] > result.policy[best]) best = i;
-          action = pool[0].legal[best];
+          // 训练自对弈按 MCTS 访问分布采样，而不是始终取 argmax；保持同一行为策略。
+          let r = rng();
+          let chosen = Math.max(0, result.policy.length - 1);
+          for (let i = 0; i < result.policy.length; i++) {
+            r -= result.policy[i];
+            if (r <= 0) { chosen = i; break; }
+          }
+          action = pool[0].legal[chosen];
         } else {
           action = AI.decide(state, actor.id) || legal[0];
         }
@@ -124,7 +129,14 @@ async function main() {
         }
         steps++;
       }
-      if (state.phase !== 'gameover') throw new Error('单局超过最大步数');
+      if (state.phase !== 'gameover') {
+        if (state.round > MAX_ROUNDS) {
+          state.scores = Engine.computeScores(state);
+          truncatedGames++;
+        } else {
+          throw new Error('单局超过最大步数');
+        }
+      }
       const scores = state.scores || [];
       const networkIndices = state.players
         .map((player, index) => player.id.startsWith('nn-') ? index : -1)
@@ -142,12 +154,14 @@ async function main() {
       const gameMs = Date.now() - gameStarted;
       totalSteps += steps; totalGameMs += gameMs; totalSearchMs += searchMs;
       console.log(JSON.stringify({ game, playerCount, networkSeats, charSet, networkSeat,
+        truncated: state.phase !== 'gameover',
         crownSeat: placement.initialCrownSeat,
         rank, win: rank === 1, steps, gameMs,
         nnSearchMs: searchMs, wins, winRate: (wins / game).toFixed(3) }));
     }
     console.log(JSON.stringify({
       type: 'final', checkpoint: CHECKPOINT, minPlayers: MIN_PLAYERS, maxPlayers: MAX_PLAYERS,
+      maxRounds: MAX_ROUNDS, truncatedGames,
       networkPlayers: NETWORK_PLAYERS, simulations: SIMULATIONS, maxDepth: MAX_DEPTH,
       mctsBatchSize: MCTS_BATCH_SIZE, cPuct: MCTS_C_PUCT, particles: PARTICLES,
       beliefDecay: BELIEF_DECAY, inferenceBackend: 'libtorch', games: GAMES,
