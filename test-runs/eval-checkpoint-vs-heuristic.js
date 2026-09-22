@@ -14,6 +14,7 @@ const ROOT = path.join(__dirname, '..');
 const CHECKPOINT = process.env.CHECKPOINT || 'training-data/checkpoint-004000-plarge-m300-egpu-crandom-s20260913.json.gz';
 const GAMES = Number(process.env.GAMES || 100);
 const SIMULATIONS = Number(process.env.SIMULATIONS || 500);
+const HEURISTIC_LEVEL = process.env.HEURISTIC_LEVEL || '';
 
 async function main() {
   const checkpointPath = path.join(ROOT, CHECKPOINT);
@@ -53,7 +54,7 @@ async function main() {
       const seats = [{ id: 'nn', name: '策略网络', isBot: true, botType: 'neural', botLevel: 'hard' }];
       for (let i = 1; i < 6; i++) seats.push({
         id: 'h' + i, name: '启发式' + i, isBot: true, botType: 'heuristic',
-        botLevel: ['easy', 'normal', 'hard'][(game + i) % 3]
+        botLevel: HEURISTIC_LEVEL || ['easy', 'normal', 'hard'][(game + i) % 3]
       });
       const state = Engine.createGame({
         roomId: 'eval-' + game, endDistricts: 8, charSetMode: charSet,
