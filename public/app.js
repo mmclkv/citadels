@@ -328,10 +328,18 @@
   }
   // 「策略神经网络」电脑专属的 MCTS 配置：0 = 关闭搜索（按网络策略直接走子）。
   // 上限与服务器的 clamp 一致，客户端只是提前拦住明显越界的输入。
+  const DEFAULT_MCTS_CONFIG = { simulations: 500, maxDepth: 700, particles: 4 };
   function readMctsConfig(simsId, depthId, particlesId) {
-    const clamp = (id, max) => Math.max(0, Math.min(max, Math.floor(Number($(id) && $(id).value) || 0)));
-    const particles = Math.max(1, Math.min(8, Math.floor(Number($(particlesId) && $(particlesId).value) || 4)));
-    return { mctsSimulations: clamp(simsId, 2000), mctsMaxDepth: clamp(depthId, 700), mctsParticles: particles };
+    const valueOrDefault = (id, fallback) => {
+      const node = $(id);
+      const raw = node ? String(node.value).trim() : '';
+      return raw === '' ? fallback : Number(raw);
+    };
+    const clamp = (id, max, fallback) => Math.max(0, Math.min(max,
+      Math.floor(Number.isFinite(valueOrDefault(id, fallback)) ? valueOrDefault(id, fallback) : fallback)));
+    const particles = Math.max(1, Math.min(8, Math.floor(valueOrDefault(particlesId, DEFAULT_MCTS_CONFIG.particles) || DEFAULT_MCTS_CONFIG.particles)));
+    return { mctsSimulations: clamp(simsId, 2000, DEFAULT_MCTS_CONFIG.simulations),
+      mctsMaxDepth: clamp(depthId, 700, DEFAULT_MCTS_CONFIG.maxDepth), mctsParticles: particles };
   }
   function syncNeuralOnlyFields() {
     [['#screen-setup', '#cfg-bot-type'], ['#lobby-pre', '#net-bot-type']].forEach(pair => {
@@ -340,6 +348,14 @@
       if (!root || !select) return;
       const show = select.value === 'neural';
       Array.from(root.querySelectorAll('.neural-only')).forEach(node => { node.hidden = !show; });
+      if (show) {
+        const defaults = [
+          ['#cfg-mcts-sims', DEFAULT_MCTS_CONFIG.simulations], ['#cfg-mcts-depth', DEFAULT_MCTS_CONFIG.maxDepth],
+          ['#cfg-mcts-particles', DEFAULT_MCTS_CONFIG.particles], ['#net-mcts-sims', DEFAULT_MCTS_CONFIG.simulations],
+          ['#net-mcts-depth', DEFAULT_MCTS_CONFIG.maxDepth], ['#net-mcts-particles', DEFAULT_MCTS_CONFIG.particles]
+        ];
+        defaults.forEach(([id, value]) => { const input = $(id); if (input && String(input.value).trim() === '') input.value = String(value); });
+      }
     });
   }
   const HEURISTIC_BOT_LEVELS = { 'npc-easy': 'easy', 'npc-normal': 'normal', 'npc-hard': 'hard' };
