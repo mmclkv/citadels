@@ -4284,7 +4284,95 @@
     body.appendChild(grid);
     $('#modal').hidden = false;
   }
-  function closeModal() { $('#modal').hidden = true; }
+  let serverConsoleTimer = null;
+  function closeModal() {
+    $('#modal').hidden = true;
+    if (serverConsoleTimer) {
+      clearInterval(serverConsoleTimer);
+      serverConsoleTimer = null;
+    }
+  }
+
+  /* ============================== 服务器控制台 ============================== */
+  function renderServerConsoleCard(summary, label, value) {
+    const card = el('div', 'server-console-card');
+    const title = document.createElement('b');
+    title.textContent = label;
+    const text = document.createElement('span');
+    text.textContent = value == null ? '' : String(value);
+    card.appendChild(title);
+    card.appendChild(text);
+    summary.appendChild(card);
+  }
+  async function refreshServerConsole() {
+    const body = $('#modal-body');
+    if (!body) return;
+    try {
+      const response = await fetch(gameServerBase() + '/api/server/status', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '服务器拒绝了请求');
+      const summary = el('div', 'server-console-summary');
+      const memory = data.memory && Number.isFinite(data.memory.rss)
+        ? Math.round(data.memory.rss / 1024 / 1024) + ' MB RSS' : '未知';
+      const training = data.training && data.training.running
+        ? '运行中 · ' + (data.training.game || '自对弈') : '未运行';
+      const neural = data.neural && data.neural.message ? data.neural.message : '未配置';
+      const worker = data.nativeWorker ? '运行中' : '未运行';
+      const rooms = Number.isFinite(data.rooms) ? data.rooms : 0;
+      const clients = Number.isFinite(data.clients) ? data.clients : 0;
+      const uptime = Number.isFinite(data.uptimeSeconds) ? data.uptimeSeconds : 0;
+      const started = data.startedAt ? new Date(data.startedAt).toLocaleString() : '未知';
+      renderServerConsoleCard(summary, '进程', 'PID ' + data.pid + ' · ' + (data.platform || '未知平台'));
+      renderServerConsoleCard(summary, '监听状态', data.listening ? '监听中 · :' + data.port : '未监听');
+      renderServerConsoleCard(summary, '运行时间', uptime + ' 秒 · 启动于 ' + started);
+      renderServerConsoleCard(summary, '在线规模', rooms + ' 个房间 · ' + clients + ' 个连接');
+      renderServerConsoleCard(summary, '原生 MCTS', worker);
+      renderServerConsoleCard(summary, '内存', memory);
+      renderServerConsoleCard(summary, '训练服务', training);
+      renderServerConsoleCard(summary, '本地神经网络', neural);
+
+      const actions = el('div', 'server-console-actions');
+      const refresh = el('button', 'btn tiny ghost', '立即刷新');
+      refresh.type = 'button';
+      refresh.onclick = refreshServerConsole;
+      const updated = el('span', 'dim small', '更新于 ' + new Date().toLocaleTimeString());
+      actions.appendChild(refresh);
+      actions.appendChild(updated);
+
+      const log = el('div', 'server-console-log');
+      const entries = Array.isArray(data.logs) ? data.logs : [];
+      if (!entries.length) {
+        log.textContent = '暂无服务器日志。';
+      } else {
+        entries.forEach(item => {
+          const line = el('div', 'server-console-entry' + (item.level === 'error' ? ' error' : ''));
+          const time = item.at ? new Date(item.at).toLocaleTimeString() : '--:--:--';
+          line.textContent = '[' + time + '] ' + (item.text == null ? '' : String(item.text));
+          log.appendChild(line);
+        });
+        log.scrollTop = log.scrollHeight;
+      }
+      body.innerHTML = '';
+      body.appendChild(summary);
+      body.appendChild(actions);
+      body.appendChild(log);
+    } catch (error) {
+      body.innerHTML = '';
+      const message = document.createElement('p');
+      message.className = 'dim';
+      message.textContent = '无法读取服务器状态：' + (error && error.message ? error.message : error);
+      body.appendChild(message);
+      body.appendChild(el('p', 'small dim', '请确认游戏服务器已启动，并且当前页面连接的是本机服务器。'));
+    }
+  }
+  function openServerConsole() {
+    $('#modal-title').textContent = '服务器控制台';
+    $('#modal-body').innerHTML = '<p class="dim">正在读取服务器状态…</p>';
+    $('#modal').hidden = false;
+    refreshServerConsole();
+    if (serverConsoleTimer) clearInterval(serverConsoleTimer);
+    serverConsoleTimer = setInterval(refreshServerConsole, 3000);
+  }
 
   /* ============================== 结算 ============================== */
   function showOver(s) {
@@ -4542,6 +4630,8 @@
       Net.connect(() => { Net.send({ t: 'listRooms' }); });
     };
     $('#btn-rules').onclick = openRules;
+    const serverConsoleBtn = $('#btn-server-console');
+    if (serverConsoleBtn) serverConsoleBtn.onclick = openServerConsole;
     $('#modal-close').onclick = closeModal;
     $('#modal').onclick = e => { if (e.target === $('#modal')) closeModal(); };
 

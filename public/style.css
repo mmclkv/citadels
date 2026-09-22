@@ -66,6 +66,16 @@ a{color:var(--gold-d, #a97c15)}
 .home-foot{margin-top:26px;font-size:12px;color:var(--dim)}
 .home-foot a{color:#a97c15;text-decoration:none}
 .home-foot a:hover{text-decoration:underline}
+.home-console-btn{margin-top:18px}
+
+/* ------------------------------ 服务器控制台 ------------------------------ */
+.server-console-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-bottom:12px}
+.server-console-card{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.035);font-size:12px;color:var(--ink2)}
+.server-console-card b{display:block;margin-bottom:3px;color:var(--gold);font-size:11px}
+.server-console-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.server-console-log{margin:0;max-height:52vh;overflow:auto;padding:11px 12px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:#050a12;color:#d8f7ff;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace}
+.server-console-entry{padding:2px 0;border-bottom:1px dotted rgba(255,255,255,.08)}
+.server-console-entry.error{color:#ffaaa8}
 
 /* ------------------------------ 面板 ------------------------------ */
 .panel{background:var(--paper);border:1px solid var(--line);border-radius:16px;

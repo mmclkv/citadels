@@ -26,11 +26,22 @@ const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
+const serverStartedAt = Date.now();
+const serverLogBuffer = [];
+function serverLog(level, ...args) {
+  const text = args.map(value => {
+    if (typeof value === 'string') return value;
+    try { return JSON.stringify(value); } catch (_) { return String(value); }
+  }).join(' ');
+  serverLogBuffer.push({ at: Date.now(), level, text });
+  if (serverLogBuffer.length > 300) serverLogBuffer.splice(0, serverLogBuffer.length - 300);
+  (level === 'error' ? console.error : console.log)(...args);
+}
 const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT });
 const nativeWorkerManager = new NativeWorkerManager({
   root: ROOT,
   backend: 'libtorch',
-  log: text => console.log('[native] ' + text)
+  log: text => serverLog('info', '[native] ' + text)
 });
 const localNeuralBot = LocalNeuralBotModule.createLocalNeuralBot({
   root: ROOT,
@@ -847,6 +858,27 @@ function voiceTokenThrottle(req) {
 const server = http.createServer(async (req, res) => {
   if (localCodexGateway && await localCodexGateway.handle(req, res)) return;
   const pathname = req.url.split('?')[0];
+  if (pathname === '/api/server/status' && req.method === 'GET') {
+    if (!isLoopback(req)) return sendJson(res, 403, { error: '服务器控制台仅允许本机访问' });
+    const training = trainingManager.status();
+    return sendJson(res, 200, {
+      startedAt: serverStartedAt,
+      uptimeSeconds: Math.floor(process.uptime()),
+      pid: process.pid,
+      platform: process.platform,
+      port: PORT,
+      listening: !!server.listening,
+      rooms: Object.keys(rooms).length,
+      clients: clients.size,
+      nativeWorker: !!(nativeWorkerManager.child && nativeWorkerManager.child.exitCode == null),
+      memory: process.memoryUsage(),
+      training: { running: !!training.running, game: training.game, totalGames: training.totalGames, progress: training.progress },
+      agent: { configured: !!agentStatus().configured, provider: agentStatus().provider, message: agentStatus().message },
+      neural: { configured: !!localNeuralBot.status().configured, message: localNeuralBot.status().message },
+      voice: voiceStatus(),
+      logs: serverLogBuffer.slice(-200)
+    });
+  }
   if (pathname === '/api/training/status' && req.method === 'GET') {
     const payload = trainingManager.status();
     payload.profiles = {
@@ -953,7 +985,7 @@ server.on('upgrade', (req, socket) => {
       let msg;
       try { msg = JSON.parse(str); } catch (e) { return; }
       info.lastSeenAt = Date.now();
-      try { handle(socket, info, msg); } catch (e) { console.error('handle error', e); }
+      try { handle(socket, info, msg); } catch (e) { serverLog('error', 'handle error', e && e.stack || e); }
     });
     if (r.close) {
       onClose(socket, info);
@@ -1004,34 +1036,34 @@ async function startServer() {
     // 服务启动阶段就准备并拉起 LibTorch worker；房间策略玩家复用这一进程。
     await nativeWorkerManager.start();
   } catch (error) {
-    console.error('[native] mcts_worker 准备失败：' + error.message);
-    console.error('[native] 策略网络房间将保持不可用，修复编译环境后重启 server.js');
+    serverLog('error', '[native] mcts_worker 准备失败：' + error.message);
+    serverLog('error', '[native] 策略网络房间将保持不可用，修复编译环境后重启 server.js');
   }
   server.listen(PORT, () => {
   if (process.send) process.send({ type: 'listening', port: server.address().port });
-  console.log('');
-  console.log('  富饶之城 / 荣耀之城 (Citadels) 联机服务器已启动');
-  console.log('  ─────────────────────────────────────────────');
-  console.log('  本机访问：  http://localhost:' + PORT);
+  serverLog('info', '');
+  serverLog('info', '  富饶之城 / 荣耀之城 (Citadels) 联机服务器已启动');
+  serverLog('info', '  ─────────────────────────────────────────────');
+  serverLog('info', '  本机访问：  http://localhost:' + PORT);
   const nets = [];
   const os = require('os');
   const ifaces = os.networkInterfaces();
   Object.keys(ifaces).forEach(k => ifaces[k].forEach(i => {
     if (i.family === 'IPv4' && !i.internal) nets.push(i.address);
   }));
-  nets.forEach(a => console.log('  局域网访问：http://' + a + ':' + PORT));
-  if (useLocalCodex) console.log('  AI Agent：  本机 ' + localCodex.version + '（无需另配 API）');
-  else console.log('  AI Agent：  ' + agentStatus().message);
-  console.log('  本地神经网络：' + localNeuralBot.status().message);
-  console.log('  联机语音：  ' + (voiceService.configured
+  nets.forEach(a => serverLog('info', '  局域网访问：http://' + a + ':' + PORT));
+  if (useLocalCodex) serverLog('info', '  AI Agent：  本机 ' + localCodex.version + '（无需另配 API）');
+  else serverLog('info', '  AI Agent：  ' + agentStatus().message);
+  serverLog('info', '  本地神经网络：' + localNeuralBot.status().message);
+  serverLog('info', '  联机语音：  ' + (voiceService.configured
     ? voiceService.status().message + '（' + voiceService.url + '）'
     : '未启用（设置 LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET 后重启）'));
-  console.log('');
+  serverLog('info', '');
   });
 }
 
 function shutdownServer(signal) {
-  console.log('\n收到 ' + signal + '，正在关闭服务…');
+  serverLog('info', '\n收到 ' + signal + '，正在关闭服务…');
   localNeuralBot.close();
   nativeWorkerManager.close();
   trainingManager.stop();
