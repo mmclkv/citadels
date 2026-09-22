@@ -27,6 +27,7 @@ const MAX_PLAYERS = Number(process.env.MAX_PLAYERS || MIN_PLAYERS);
 const NETWORK_PLAYERS = Number(process.env.NETWORK_PLAYERS || 1);
 const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 100);
 const START_GAME_INDEX = Number(process.env.START_GAME_INDEX || 200001);
+const NATIVE_WORKER = process.env.NATIVE_WORKER || path.join(ROOT, 'native', 'mcts_worker_libtorch.exe');
 
 async function main() {
   const started = Date.now();
@@ -48,7 +49,7 @@ async function main() {
   const playerRanks = Array.from({ length: MAX_PLAYERS }, () => Array(MAX_PLAYERS).fill(0));
   try {
     client = new NativeSearchClient({
-      root: ROOT, executable: path.join(ROOT, 'native', 'mcts_worker_libtorch.exe'),
+      root: ROOT, executable: NATIVE_WORKER,
       simulations: SIMULATIONS, maxDepth: MAX_DEPTH, batchSize: MCTS_BATCH_SIZE,
       cPuct: MCTS_C_PUCT, seed: SEED, gpuEvaluator: true, profile,
       device: process.env.EVAL_DEVICE || 'cuda', inferenceBackend: 'libtorch'
