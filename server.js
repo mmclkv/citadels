@@ -94,7 +94,7 @@ const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT
 const nativeWorkerManager = new NativeWorkerManager({
   root: ROOT,
   backend: 'libtorch',
-  log: text => serverLog('info', '[native] ' + text)
+  log: text => serverLog('info', text)
 });
 const localNeuralBot = LocalNeuralBotModule.createLocalNeuralBot({
   root: ROOT,
