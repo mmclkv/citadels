@@ -45,6 +45,10 @@
     // 越接近结束，越偏好高分建筑
     const left = Math.max(0, state.config.endDistricts - player.city.length);
     if (left <= 2) v += card.cost * 0.35;
+    // 能直接完成城区门槛时，终局价值远高于普通建筑价值；否则 AI
+    // 常会为了更高的单卡评分把胜局拖过一回合。
+    if (left === 1) v += 7.0;
+    if (left === 0) v -= 8.0;
     return v;
   }
   function bestBuildCard(state, player) {
@@ -159,6 +163,36 @@
       if (p && p.city.length >= state.config.endDistricts - 2 && (a.num === 7 || a.num === 8)) score += 0.18;
       return { num: a.num, score };
     });
+    const maxScore = Math.max(...scored.map(x => x.score));
+    const weights = scored.map(x => Math.exp((x.score - maxScore) / temperature));
+    const total = weights.reduce((sum, x) => sum + x, 0);
+    let pick = (typeof rnd === 'function' ? rnd() : Math.random()) * total;
+    for (let i = 0; i < scored.length; i++) {
+      pick -= weights[i];
+      if (pick <= 0) return scored[i].num;
+    }
+    return scored[scored.length - 1].num;
+  }
+
+  function thiefTarget(state, playerId, level, rnd) {
+    const opts = choicesOf(state, playerId, 'choose_char');
+    if (!opts.length) return null;
+    const idx = state.players.findIndex(p => p.id === playerId);
+    const base = { 2: 1.4, 3: 1.1, 4: 1.8, 5: 1.2, 6: 2.0, 7: 1.7, 8: 1.3, 9: 1.0 };
+    const scored = opts.map(a => {
+      const c = charByNum(state, a.num);
+      let score = base[a.num] != null ? base[a.num] : 1.0;
+      let bestGold = 0;
+      state.players.forEach((o, i) => {
+        if (i === idx || o.gold < 2) return;
+        const income = c && c.income ? colorCount(o, c.income) : 0;
+        const flexible = o.city.filter(d => d.purple && d.purple.effect === 'anyColorIncome').length;
+        bestGold = Math.max(bestGold, o.gold * 0.35 + (income + flexible) * 0.6);
+      });
+      score += bestGold;
+      return { num: a.num, score };
+    });
+    const temperature = level === 2 ? 0.65 : level === 1 ? 1.0 : 1.45;
     const maxScore = Math.max(...scored.map(x => x.score));
     const weights = scored.map(x => Math.exp((x.score - maxScore) / temperature));
     const total = weights.reduce((sum, x) => sum + x, 0);
@@ -305,11 +339,13 @@
     const target = state.config.endDistricts;
     // 手牌里能盖得起的最高价值
     let goldScore = 0;
+    let bestCost = Infinity;
     p.hand.forEach(card => {
       if (p.city.filter(d => d.name === card.name).length >= maxSame(p, card.name)) return;
       if (card.cost <= p.gold + 2 + (c.goldBonus || 0)) {
         goldScore = Math.max(goldScore, buildValue(state, p, card));
       }
+      if (card.cost <= p.gold + 1 + (c.goldBonus || 0)) bestCost = Math.min(bestCost, card.cost);
     });
     const handPoor = p.hand.length <= 1;
     const goldHungry = p.gold < 3;
@@ -317,6 +353,9 @@
       // 本回合不能建造，倾向于攒钱
       return (p.gold < 6) ? { type: 'take_gold' } : { type: 'take_cards' };
     }
+    // 最后一栋建筑优先保证金币，不要因为手牌少而错过直接结束游戏的机会。
+    if (p.city.length >= target - 1 && bestCost < Infinity) return { type: 'take_gold' };
+    if (handPoor && p.gold < 2) return { type: 'take_cards' };
     if (handPoor) return { type: 'take_cards' };
     if (goldScore >= 3.2 && !goldHungry) return { type: 'take_gold' };
     if (p.city.length >= target - 2 && goldScore > 0) return { type: 'take_gold' };
@@ -468,43 +507,12 @@
         return target == null ? { type: 'ability_skip' } : { type: 'choose_char', num: target };
       }
       case 'thief': {
-        const opts = choicesOf(state, p.id, 'choose_char');
-        if (!opts.length) return { type: 'ability_skip' };
-        let best = null, bv = -1;
-        opts.forEach(a => {
-          const cc = charByNum(state, a.num);
-          let v = 0.6;
-          // 收入型角色往往是富人的选择
-          if (cc && cc.income) {
-            let mx = 0;
-            state.players.forEach((o, i) => {
-              if (i === idx) return;
-              if (o.gold < 2) return;
-              const n = colorCount(o, cc.income) + o.city.filter(d => d.purple && d.purple.effect === 'anyColorIncome').length;
-              mx = Math.max(mx, n * 0.5 + o.gold * 0.35);
-            });
-            v += mx;
-          } else {
-            let mx = 0;
-            state.players.forEach((o, i) => { if (i !== idx) mx = Math.max(mx, o.gold); });
-            v += mx * 0.25;
-          }
-          v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
-          if (v > bv) { bv = v; best = a.num; }
-        });
-        return { type: 'choose_char', num: best != null ? best : opts[0].num };
+        const target = thiefTarget(state, p.id, level, rand);
+        return target == null ? { type: 'ability_skip' } : { type: 'choose_char', num: target };
       }
       case 'witch_target': {
-        const pref = { 7: 3.0, 6: 2.6, 5: 2.4, 4: 2.0, 8: 2.2, 3: 1.6, 2: 1.4, 9: 1.0 };
-        const opts = choicesOf(state, p.id, 'choose_char');
-        if (!opts.length) return { type: 'ability_skip' };
-        let best = null, bv = -1;
-        opts.forEach(a => {
-          let v = pref[a.num] != null ? pref[a.num] : 1;
-          v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
-          if (v > bv) { bv = v; best = a.num; }
-        });
-        return { type: 'choose_char', num: best != null ? best : opts[0].num };
+        const target = assassinTarget(state, p.id, level, rand);
+        return target == null ? { type: 'ability_skip' } : { type: 'choose_char', num: target };
       }
       case 'magician_choice': {
         let mostCards = -1, mi = -1;
@@ -679,5 +687,5 @@
   }
 
   return { decide: decide, draftDecision: draftDecision, charValue: charValue, bestBuildCard: bestBuildCard,
-    assassinTarget: assassinTarget };
+    assassinTarget: assassinTarget, thiefTarget: thiefTarget };
 });
