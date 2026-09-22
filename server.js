@@ -74,6 +74,8 @@ function loadAdminCredentials() {
 const adminCredentials = loadAdminCredentials();
 const consoleOrigins = String(process.env.CITADELS_CONSOLE_ORIGINS || 'https://mmclkv.github.io')
   .split(',').map(value => value.trim()).filter(Boolean);
+const startupLogBuffer = [];
+let capturingStartupLogs = true;
 const serverLogBuffer = [];
 function serverLog(level, ...args) {
   const text = args.map(value => {
@@ -82,6 +84,10 @@ function serverLog(level, ...args) {
   }).join(' ');
   serverLogBuffer.push({ at: Date.now(), level, text });
   if (serverLogBuffer.length > 300) serverLogBuffer.splice(0, serverLogBuffer.length - 300);
+  if (capturingStartupLogs && /mcts_worker|编译|C\+\+/.test(text)) {
+    startupLogBuffer.push({ at: Date.now(), level, text });
+    if (startupLogBuffer.length > 120) startupLogBuffer.splice(0, startupLogBuffer.length - 120);
+  }
   (level === 'error' ? console.error : console.log)(...args);
 }
 const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT });
@@ -977,6 +983,16 @@ const server = http.createServer(async (req, res) => {
       voice: voiceStatus(),
       logs: serverLogBuffer.slice(-200)
     }, cors);
+  }
+  if (pathname === '/api/server/startup' && req.method === 'GET') {
+    return sendJson(res, 200, {
+      logs: startupLogBuffer.slice(-100),
+      worker: {
+        path: nativeWorkerManager.executable,
+        exists: fs.existsSync(nativeWorkerManager.executable),
+        running: !!(nativeWorkerManager.child && nativeWorkerManager.child.exitCode == null)
+      }
+    });
   }
   if (pathname === '/api/training/status' && req.method === 'GET') {
     const payload = trainingManager.status();

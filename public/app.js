@@ -4439,6 +4439,41 @@
     serverConsoleTimer = setInterval(refreshServerConsole, 3000);
   }
 
+  async function openServerStartupInfo() {
+    if (serverConsoleTimer) {
+      clearInterval(serverConsoleTimer);
+      serverConsoleTimer = null;
+    }
+    $('#modal-title').textContent = '启动信息';
+    const body = $('#modal-body');
+    body.innerHTML = '<p class="dim">正在读取 mcts_worker 启动日志…</p>';
+    $('#modal').hidden = false;
+    try {
+      const response = await fetch(gameServerBase() + '/api/server/startup', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '服务器拒绝了请求');
+      const state = data.worker || {};
+      const summary = document.createElement('p');
+      summary.className = 'small';
+      summary.textContent = 'worker：' + (state.running ? '运行中' : state.exists ? '已编译但未运行' : '未找到编译产物');
+      const log = el('div', 'server-console-log');
+      const entries = Array.isArray(data.logs) ? data.logs : [];
+      if (!entries.length) log.textContent = '暂无启动阶段日志。';
+      entries.forEach(item => {
+        const line = el('div', 'server-console-entry' + (item.level === 'error' ? ' error' : ''));
+        line.textContent = '[' + (item.at ? new Date(item.at).toLocaleTimeString() : '--:--:--') + '] ' +
+          (item.text == null ? '' : String(item.text));
+        log.appendChild(line);
+      });
+      body.innerHTML = '';
+      body.appendChild(summary);
+      body.appendChild(log);
+    } catch (error) {
+      body.innerHTML = '';
+      body.appendChild(el('p', 'dim', '无法读取启动信息：' + (error && error.message ? error.message : error)));
+    }
+  }
+
   /* ============================== 结算 ============================== */
   function showOver(s) {
     // 避免之前打开的计分详情浮层挡住结算页按钮，导致首击只关闭浮层。
@@ -4697,6 +4732,8 @@
     $('#btn-rules').onclick = openRules;
     const serverConsoleBtn = $('#btn-server-console');
     if (serverConsoleBtn) serverConsoleBtn.onclick = openServerConsole;
+    const serverStartupBtn = $('#btn-server-startup');
+    if (serverStartupBtn) serverStartupBtn.onclick = openServerStartupInfo;
     $('#modal-close').onclick = closeModal;
     $('#modal').onclick = e => { if (e.target === $('#modal')) closeModal(); };
 
