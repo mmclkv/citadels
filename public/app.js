@@ -652,6 +652,18 @@
         flyCoinToTaxPot(n.playerIdx, n.amount || 1);
         return;
 
+      case 'beautified':
+        beautifyBuildingAnim(n.playerIdx, n.uids || []);
+        if (isMe) {
+          queueEvent({
+            tone: 'good', icon: '✦', title: '建筑已美化', hold: 4200,
+            text: '你美化了 <b>' + (n.amount || 0) + ' 栋建筑</b>，每栋建筑额外计分 +1。'
+          });
+        } else {
+          toast('✦ ' + escapeHtml(n.playerName || '玩家') + ' 美化了 ' + (n.amount || 0) + ' 栋建筑');
+        }
+        return;
+
       case 'blackmailer_reveal':
         // 真威胁标记翻开：被勒索者的全部金币飞向勒索者（刀）；假标记不产生金币流动。
         if (n.revealed && n.isReal && n.amount > 0) flyCoins(n.fromIdx, n.toIdx, n.amount);
@@ -2510,6 +2522,36 @@
       const pot = $('#tax-pot .tax-pot-mark') || $('#tax-pot');
       const to = playerGoldAnchor(seat);
       if (pot && to) coinFlight(rectOf(pot), { left: to.x, top: to.y, width: 0, height: 0 }, amount);
+    });
+  }
+
+  // 艺术家美化建筑：金币从玩家的金币标识飞向被美化的建筑，建筑随后短暂金色闪耀。
+  function beautifyBuildingAnim(seat, uids) {
+    if (seat == null || !Array.isArray(uids) || !uids.length ||
+        typeof document === 'undefined' || !document.body) return;
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    nextFrame(() => {
+      const from = playerGoldAnchor(seat);
+      if (!from) return;
+      uids.forEach((uid, index) => {
+        const targetCard = Array.prototype.find.call(document.querySelectorAll('.card[data-uid]'), node =>
+          node.dataset && node.dataset.uid === String(uid));
+        const target = rectOf(targetCard);
+        if (!target) return;
+        coinFlight({ left: from.x, top: from.y, width: 0, height: 0 }, target, 1);
+        targetCard.classList.add('beautified-flash');
+        setTimeout(() => {
+          if (targetCard && targetCard.classList) targetCard.classList.remove('beautified-flash');
+        }, 1200 + index * 90);
+      });
+      const badge = document.createElement('div');
+      badge.className = 'beautify-badge';
+      badge.textContent = '✦ 美化 +' + uids.length;
+      badge.style.left = (from.x - 34) + 'px';
+      badge.style.top = (from.y - 30) + 'px';
+      document.body.appendChild(badge);
+      setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1350);
     });
   }
 

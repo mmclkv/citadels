@@ -1794,11 +1794,23 @@
         const uids = action.uids || [];
         if (uids.length > 2) return err('最多 2 栋');
         if (p.gold < uids.length) return err('金币不足');
+        const beautifiedCards = [];
         uids.forEach(u => {
           const card = p.city.find(x => x.uid === u);
-          if (card) { card.beautified = 1; p.gold -= 1; }
+          if (card) {
+            card.beautified = 1;
+            p.gold -= 1;
+            beautifiedCards.push({ uid: card.uid, name: card.name });
+          }
         });
         t.abilityUsed = true; t.pending = null;
+        if (beautifiedCards.length) {
+          notify(state, 'beautified', {
+            playerIdx: idx, playerId: p.id, playerName: p.name,
+            uids: beautifiedCards.map(card => card.uid),
+            cards: beautifiedCards, amount: beautifiedCards.length
+          });
+        }
         log(state, '【艺术家】' + p.name + ' 美化了 ' + uids.length + ' 栋建筑（各 +1 分）。', 'good');
         return ok();
       }
