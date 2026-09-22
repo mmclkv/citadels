@@ -743,7 +743,7 @@ function lobbyView(r) {
     roomId: r.id, roomName: r.name, phase: 'lobby',
     you: null,
     seats: r.seats.map((s, i) => ({ index: i, id: s.id, name: s.name, isBot: !!s.isBot,
-      botType: s.botType || 'npc', taken: !!s.taken,
+      botType: s.botType || 'npc', botLevel: s.botLevel || 'normal', taken: !!s.taken,
       connected: !!s.isBot || !s.disconnected && !s.left, disconnected: !!s.disconnected, left: !!s.left })),
     config: r.config,
     voiceReady: voiceService.configured
