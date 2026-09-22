@@ -342,6 +342,17 @@
   <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
     <span aria-hidden="true">☰</span><span>菜单</span>
   </button>
+  <aside class="bot-debug-console" id="bot-debug-console" hidden aria-label="电脑决策调试控制台">
+    <div class="bot-debug-head">
+      <h3>电脑决策调试</h3>
+      <div class="bot-debug-head-actions">
+        <button class="btn tiny ghost" id="bot-debug-clear" type="button">清空</button>
+        <button class="btn tiny ghost" id="bot-debug-close" type="button" aria-label="关闭调试控制台">×</button>
+      </div>
+    </div>
+    <div class="bot-debug-log" id="bot-debug-log" role="log" aria-live="polite"></div>
+    <div class="bot-debug-foot">Ctrl+Shift+I 打开/关闭 · 仅保留最近 300 条</div>
+  </aside>
 </section>
 
 <!-- ============================ 结算 ============================ -->

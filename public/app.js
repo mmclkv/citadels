@@ -38,7 +38,9 @@
     myIdx: null,
     leavingNetGame: false,
     lobbyState: null,      // 大厅阶段下发的视图（App.state 只放对局状态）
-    chatBubbles: new Map()
+    chatBubbles: new Map(),
+    botDebugOpen: false,
+    botDebugEntries: []
   };
 
   const NET_SESSION_KEY = 'citadels.net.session';
@@ -190,6 +192,70 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
   }
+
+  function debugActionText(action) {
+    if (!action) return '—';
+    const copy = Object.assign({}, action);
+    return JSON.stringify(copy);
+  }
+  function botDebugText(entry) {
+    const time = new Date(Number(entry.at) || Date.now()).toLocaleTimeString();
+    const name = entry.playerName || entry.playerId || '电脑';
+    const bot = entry.botType === 'neural' ? '策略网络' : entry.botType === 'agent' ? 'AI Agent' : '启发式';
+    let title = entry.kind === 'decision_start' ? '开始决策' :
+      entry.kind === 'decision_detail' ? '决策完成' :
+      entry.kind === 'action_apply' ? '执行行动' :
+      entry.kind === 'fallback_action' ? '回退行动' : '决策异常';
+    let body = name + ' · ' + bot;
+    if (entry.phase) body += ' · ' + entry.phase + ' · 第' + (entry.round || 0) + '轮';
+    if (entry.legalCount != null) body += ' · 合法行动 ' + entry.legalCount + ' 个';
+    if (entry.action) body += '\n行动：' + debugActionText(entry.action);
+    if (entry.inference) body += '\n推理：' + debugActionText(entry.inference);
+    if (entry.mcts) body += '\nMCTS：' + debugActionText(entry.mcts);
+    if (entry.checkpoint) body += '\n权重：' + entry.checkpoint;
+    if (entry.strategy) body += '\n策略：' + entry.strategy;
+    if (entry.error) body += '\n错误：' + entry.error + (entry.fallback ? '；' + entry.fallback : '');
+    return { time, title, body, neural: entry.botType === 'neural', error: entry.kind === 'decision_error' };
+  }
+  function renderBotDebug() {
+    const box = $('#bot-debug-log');
+    if (!box) return;
+    box.textContent = '';
+    if (!App.botDebugEntries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'bot-debug-entry';
+      empty.textContent = '等待电脑玩家做出决策…';
+      box.appendChild(empty);
+      return;
+    }
+    App.botDebugEntries.forEach(entry => {
+      const view = botDebugText(entry);
+      const row = document.createElement('div');
+      row.className = 'bot-debug-entry' + (view.neural ? ' neural' : '') + (view.error ? ' error' : '');
+      const time = document.createElement('span'); time.className = 'debug-time'; time.textContent = '[' + view.time + '] ';
+      const title = document.createElement('span'); title.className = 'debug-title'; title.textContent = view.title;
+      const body = document.createElement('div'); body.className = 'debug-body'; body.textContent = view.body;
+      row.append(time, title, body); box.appendChild(row);
+    });
+    box.scrollTop = box.scrollHeight;
+  }
+  function appendBotDebug(entry) {
+    if (!entry) return;
+    App.botDebugEntries.push(entry);
+    if (App.botDebugEntries.length > 300) App.botDebugEntries.splice(0, App.botDebugEntries.length - 300);
+    if (App.botDebugOpen) renderBotDebug();
+  }
+  function setBotDebugOpen(open) {
+    const consoleEl = $('#bot-debug-console');
+    if (!consoleEl) return;
+    App.botDebugOpen = !!open;
+    consoleEl.hidden = !App.botDebugOpen;
+    if (App.botDebugOpen) {
+      renderBotDebug();
+      if (App.mode === 'net') Net.send({ t: 'botDebugSubscribe' });
+    }
+  }
+  function toggleBotDebug() { setBotDebugOpen(!App.botDebugOpen); }
   function handleRoomNotice(n) {
     if (!n) return;
     const name = n.playerName || '玩家';
@@ -690,6 +756,8 @@
     state: null, myId: null, timer: null, pendingMs: null,
     start(cfg) {
       if (cfg.botType === 'agent' || cfg.botType === 'neural') return startServerBotSingle(cfg);
+      App.botDebugEntries = [];
+      if (App.botDebugOpen) renderBotDebug();
       const seats = [{ id: 'me', name: cfg.name, isBot: false }];
       for (let i = 1; i < cfg.players; i++) {
         seats.push({ id: 'bot' + i, name: '电脑 ' + i, isBot: true, botType: cfg.botType, botLevel: cfg.level });
@@ -746,13 +814,23 @@
       const actor = localActor(st);
       if (actor && actor.isBot) {
         let action = null;
+        const available = Engine.getAvailableActions(st, actor.id) || {};
+        appendBotDebug({ kind: 'decision_start', at: Date.now(), playerId: actor.id,
+          playerName: actor.name, botType: actor.botType || 'npc', botLevel: actor.botLevel || 'normal',
+          phase: st.phase, round: st.round, legalCount: (available.actions || []).length,
+          state: { gold: actor.gold, hand: actor.hand && actor.hand.length, city: actor.city && actor.city.length } });
         try { action = AI.decide(st, actor.id); } catch (e) { console.error(e); }
+        appendBotDebug({ kind: 'decision_detail', at: Date.now(), playerId: actor.id,
+          playerName: actor.name, botType: 'npc', botLevel: actor.botLevel || 'normal',
+          action: action ? { type: action.type, ...action } : null, strategy: '启发式评分与规则优先级' });
         // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
         if (!action) {
           const opts = Engine.getAvailableActions(st, actor.id);
           if (opts && opts.actions && opts.actions.length) action = opts.actions[0];
         }
         if (action) {
+          appendBotDebug({ kind: 'action_apply', at: Date.now(), playerId: actor.id,
+            playerName: actor.name, botType: actor.botType || 'npc', action: { type: action.type, ...action } });
           let res = Engine.applyAction(st, actor.id, action);
           if (!res.ok) {
             console.warn('电脑行动失败：' + res.error);
@@ -843,6 +921,8 @@
           this.myId = m.youId; this.roomId = m.roomId;
           if (m.resumeToken) saveNetSession(m.resumeToken, m.roomId, this.name);
           App.myId = m.youId;
+          App.botDebugEntries = [];
+          if (App.botDebugOpen) renderBotDebug();
           // 大厅里加入 → 从 0 开始（后续事件全部提示）；中途加入 → 对齐进度，不回放历史
           App.noticeSeen = (m.state.notices && m.state.notices.length)
             ? m.state.notices[m.state.notices.length - 1].seq : 0;
@@ -879,6 +959,11 @@
           }
           break;
         }
+        case 'botDebug': appendBotDebug(m.entry); break;
+        case 'botDebugHistory':
+          App.botDebugEntries = Array.isArray(m.entries) ? m.entries.slice(-300) : [];
+          if (App.botDebugOpen) renderBotDebug();
+          break;
         case 'roomNotice': handleRoomNotice(m.notice); break;
       }
     },
@@ -4429,6 +4514,11 @@
     if (mobileMenuToggle && gameScreen) {
       mobileMenuToggle.onclick = () => setMenuOpen(!gameScreen.classList.contains('mobile-menu-open'));
     }
+    $('#bot-debug-close').onclick = () => setBotDebugOpen(false);
+    $('#bot-debug-clear').onclick = () => {
+      App.botDebugEntries = [];
+      renderBotDebug();
+    };
     // 选中菜单里的任一项后自动收起（「电脑节奏」要连点切换，保持展开）。
     const topbarEl = $('#topbar');
     if (topbarEl && gameScreen) {
@@ -4611,6 +4701,13 @@
       const target = e.target;
       const interactive = target && target.closest &&
         target.closest('button, input, textarea, select, a, [contenteditable="true"]');
+      if (e.ctrlKey && e.shiftKey && String(e.key).toLowerCase() === 'i' &&
+          gameScreen && gameScreen.classList.contains('active')) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleBotDebug();
+        return;
+      }
       if (e.key === 'Enter' && !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
           !interactive && gameScreen && gameScreen.classList.contains('active') &&
           composer && composer.hidden && App.mode === 'net' && App.state &&

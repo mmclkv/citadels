@@ -206,6 +206,7 @@ function createRoom(hostName, config) {
     state: null,
     createdAt: Date.now(),
     botJob: null,
+    botDebug: [],
     closed: false
   };
   rooms[id] = room;
@@ -285,6 +286,7 @@ function startRoom(r) {
     }))
   });
   r.state = state;
+  r.botDebug = [];
   CitEngine.startGame(state);
   return { ok: true };
 }
@@ -340,6 +342,16 @@ function sendPersonalExcept(r, excludedId) {
 function sendRoomNotice(r, notice, excludedId) {
   const msg = JSON.stringify({ t: 'roomNotice', notice });
   r.seats.forEach(s => { if (s.id && s.id !== excludedId) sendTo(s.id, msg); });
+}
+
+function sendBotDebug(r, entry) {
+  if (!r || !entry) return;
+  const previous = r.botDebug.length ? r.botDebug[r.botDebug.length - 1].seq : 0;
+  const record = Object.assign({ seq: previous + 1, at: Date.now() }, entry);
+  r.botDebug.push(record);
+  if (r.botDebug.length > 300) r.botDebug.splice(0, r.botDebug.length - 300);
+  const msg = JSON.stringify({ t: 'botDebug', entry: record });
+  r.seats.forEach(s => { if (s.id) sendTo(s.id, msg); });
 }
 
 function hasRemainingHuman(r) {
@@ -402,7 +414,7 @@ function currentActor(state) {
 
 const botDriver = require('./lib/bot-driver.js').createBotDriver({
   Engine: CitEngine, AI: CitAI, agent: AgentBackend, neural: localNeuralBot, currentActor,
-  send: sendPersonal, delay: botDelayFor
+  send: sendPersonal, delay: botDelayFor, debug: sendBotDebug
 });
 function botTick(r) { botDriver.tick(r); }
 
@@ -495,6 +507,13 @@ function handle(ws, info, msg) {
     case 'heartbeat':
       wsSend(ws, JSON.stringify({ t: 'heartbeat', ts: msg.ts || Date.now() }));
       break;
+
+    case 'botDebugSubscribe': {
+      const r = rooms[info.roomId];
+      if (!r || !r.state || !r.seats.some(s => s.id === info.id)) break;
+      wsSend(ws, JSON.stringify({ t: 'botDebugHistory', entries: r.botDebug || [] }));
+      break;
+    }
 
     case 'listRooms':
       wsSend(ws, JSON.stringify({ t: 'rooms', rooms: Object.values(rooms).map(publicRoom) }));
