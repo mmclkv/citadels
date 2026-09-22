@@ -201,6 +201,7 @@
         isBot: !!s.isBot,
         botLevel: s.botLevel || 'normal',
         botType: s.botType || 'npc',
+        mcts: s.mcts || null,
         seat: i,
         gold: 0,
         hand: [],

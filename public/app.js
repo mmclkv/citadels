@@ -342,7 +342,7 @@
       mctsMaxDepth: clamp(depthId, 700, DEFAULT_MCTS_CONFIG.maxDepth), mctsParticles: particles };
   }
   function syncNeuralOnlyFields() {
-    [['#screen-setup', '#cfg-bot-type'], ['#lobby-pre', '#net-bot-type']].forEach(pair => {
+    [['#screen-setup', '#cfg-bot-type']].forEach(pair => {
       const root = $(pair[0]);
       const select = $(pair[1]);
       if (!root || !select) return;
@@ -351,8 +351,7 @@
       if (show) {
         const defaults = [
           ['#cfg-mcts-sims', DEFAULT_MCTS_CONFIG.simulations], ['#cfg-mcts-depth', DEFAULT_MCTS_CONFIG.maxDepth],
-          ['#cfg-mcts-particles', DEFAULT_MCTS_CONFIG.particles], ['#net-mcts-sims', DEFAULT_MCTS_CONFIG.simulations],
-          ['#net-mcts-depth', DEFAULT_MCTS_CONFIG.maxDepth], ['#net-mcts-particles', DEFAULT_MCTS_CONFIG.particles]
+          ['#cfg-mcts-particles', DEFAULT_MCTS_CONFIG.particles]
         ];
         defaults.forEach(([id, value]) => { const input = $(id); if (input && String(input.value).trim() === '') input.value = String(value); });
       }
@@ -4459,6 +4458,34 @@
           type.value = s.botType === 'npc' ? 'npc-' + (s.botLevel || 'normal') : (s.botType || 'npc-normal');
           type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
           ops.appendChild(type);
+          if (s.botType === 'neural') {
+            const mcts = s.mcts || {};
+            const box = el('div', 'seat-mcts');
+            box.innerHTML = '<span class="seat-mcts-title">MCTS 参数</span>';
+            const fields = [
+              ['模拟次数', 'simulations', 500, 0, 2000, 50],
+              ['最大深度', 'maxDepth', 700, 0, 700, 10],
+              ['粒子数', 'particles', 4, 1, 8, 1]
+            ];
+            fields.forEach(([label, key, fallback, min, max, step]) => {
+              const field = el('label', 'seat-mcts-field');
+              field.innerHTML = '<span>' + label + '</span>';
+              const input = document.createElement('input');
+              input.type = 'number'; input.min = String(min); input.max = String(max); input.step = String(step);
+              const roomValue = st.config && st.config['mcts' + key[0].toUpperCase() + key.slice(1)];
+              input.value = String(mcts[key] == null ? (roomValue == null ? fallback : roomValue) : mcts[key]);
+              input.onchange = () => {
+                const current = s.mcts || {};
+                Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value, mcts: {
+                  simulations: key === 'simulations' ? input.value : current.simulations == null ? 500 : current.simulations,
+                  maxDepth: key === 'maxDepth' ? input.value : current.maxDepth == null ? 700 : current.maxDepth,
+                  particles: key === 'particles' ? input.value : current.particles == null ? 4 : current.particles
+                }});
+              };
+              field.appendChild(input); box.appendChild(field);
+            });
+            ops.appendChild(box);
+          }
         }
         d.appendChild(ops);
       }
@@ -4589,7 +4616,7 @@
     syncSpeedBtn();
 
     // MCTS 两项只在电脑类型选「策略神经网络」时才露出来
-    ['#cfg-bot-type', '#net-bot-type'].forEach(id => {
+    ['#cfg-bot-type'].forEach(id => {
       const node = $(id);
       if (node) node.onchange = syncNeuralOnlyFields;
     });
@@ -4616,23 +4643,17 @@
 
     // 联机
     $('#btn-create').onclick = async () => {
-      const botSelection = normalizeBotSelection($('#net-bot-type').value, 'normal');
-      if (botSelection.botType === 'agent' && !await checkAgentServer()) return;
-      if (botSelection.botType === 'neural' && !await checkNeuralServer()) return;
       Net.name = ($('#net-name').value || '玩家').trim();
       Net.connect(() => {
         Net.send({
           t: 'createRoom', name: Net.name, config: Object.assign({
             playerCount: Number($('#net-players').value),
-            bots: Number($('#net-bots').value),
             endDistricts: Number($('#net-end').value),
             charSetMode: $('#net-chars').value,
-            botLevel: botSelection.botLevel,
-            botType: botSelection.botType,
             // 房主的节奏偏好决定服务器上机器人的行动间隔
             botPace: pace().act,
             voice: $('#net-voice').value === 'on'
-          }, readMctsConfig('#net-mcts-sims', '#net-mcts-depth', '#net-mcts-particles'))
+          })
         });
       });
       App.mode = 'net';

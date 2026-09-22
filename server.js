@@ -114,6 +114,17 @@ function clampMctsDepth(value) {
 function clampMctsParticles(value) {
   return Math.max(1, Math.min(8, Math.floor(Number(value) || 4)));
 }
+function normalizeSeatMcts(value, fallback) {
+  const source = value || fallback || {};
+  const simulations = value && value.simulations != null ? value.simulations : source.mctsSimulations;
+  const maxDepth = value && value.maxDepth != null ? value.maxDepth : source.mctsMaxDepth;
+  const particles = value && value.particles != null ? value.particles : source.mctsParticles;
+  return {
+    simulations: clampMctsSimulations(simulations == null ? MCTS_DEFAULT_SIMULATIONS : simulations),
+    maxDepth: clampMctsDepth(maxDepth == null ? MCTS_DEFAULT_MAX_DEPTH : maxDepth),
+    particles: clampMctsParticles(particles)
+  };
+}
 
 /* ------------------------------ 静态资源 ------------------------------ */
 const MIME = {
@@ -285,7 +296,8 @@ function startRoom(r) {
   const filled = seats.slice();
   let bi = 1;
   while (filled.length < Math.max(2, r.config.playerCount)) {
-    filled.push({ id: genId('b'), name: '电脑 ' + (bi++), taken: true, isBot: true, botType: r.config.botType || 'npc', botLevel: r.config.botLevel || 'normal' });
+    filled.push({ id: genId('b'), name: '电脑 ' + (bi++), taken: true, isBot: true, botType: r.config.botType || 'npc', botLevel: r.config.botLevel || 'normal',
+      mcts: normalizeSeatMcts(null, r.config) });
   }
   r.seats = filled;
   const state = CitEngine.createGame({
@@ -293,7 +305,7 @@ function startRoom(r) {
     endDistricts: r.config.endDistricts,
     charSetMode: r.config.charSetMode,
     seats: r.seats.filter(s => s.taken).map(s => ({
-      id: s.id, name: s.name, isBot: !!s.isBot, botType: s.botType || 'npc', botLevel: s.botLevel
+      id: s.id, name: s.name, isBot: !!s.isBot, botType: s.botType || 'npc', botLevel: s.botLevel, mcts: s.mcts
     }))
   });
   r.state = state;
@@ -645,6 +657,7 @@ function handle(ws, info, msg) {
           wsSend(ws, JSON.stringify({ t: 'error', error: backendError })); break;
         }
         r.seats[i] = { id: s.isBot ? s.id : genId('b'), name: '电脑 ' + i, isBot: true, botType, botLevel: selection.botLevel, taken: true,
+          mcts: normalizeSeatMcts(msg.mcts, s.mcts || r.config),
           disconnected: false, left: false };
       } else if (msg.kind === 'open') {
         r.seats[i] = { id: null, name: '', isBot: false, taken: false };
@@ -743,7 +756,7 @@ function lobbyView(r) {
     roomId: r.id, roomName: r.name, phase: 'lobby',
     you: null,
     seats: r.seats.map((s, i) => ({ index: i, id: s.id, name: s.name, isBot: !!s.isBot,
-      botType: s.botType || 'npc', botLevel: s.botLevel || 'normal', taken: !!s.taken,
+      botType: s.botType || 'npc', botLevel: s.botLevel || 'normal', mcts: s.mcts, taken: !!s.taken,
       connected: !!s.isBot || !s.disconnected && !s.left, disconnected: !!s.disconnected, left: !!s.left })),
     config: r.config,
     voiceReady: voiceService.configured

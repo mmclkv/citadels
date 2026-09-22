@@ -130,6 +130,10 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 #screen-lobby #lobby-room .seat{min-height:112px;padding:13px}
 #screen-lobby #lobby-room .seat select{min-width:180px;flex:1 1 180px}
 #screen-lobby #lobby-room .seat .seat-ops{flex-wrap:wrap}
+#screen-lobby #lobby-room .seat-mcts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;width:100%;margin-top:3px}
+#screen-lobby #lobby-room .seat-mcts-title{grid-column:1/-1;font-size:11px;color:var(--dim)}
+#screen-lobby #lobby-room .seat-mcts-field{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--dim)}
+#screen-lobby #lobby-room .seat-mcts-field input{min-width:0;padding:4px 5px;font-size:11px}
 
 /* ============================== 对局 ============================== */
 .topbar{
@@ -1001,6 +1005,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-lobby #lobby-room .seat-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
   #screen-lobby #lobby-room .seat{min-height:100px;padding:10px}
   #screen-lobby #lobby-room .seat select{min-width:150px;flex-basis:150px}
+  #screen-lobby #lobby-room .seat-mcts{grid-template-columns:repeat(3,minmax(58px,1fr))}
   .seat-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
   .room-head{gap:8px}
   .room-code b{font-size:20px}

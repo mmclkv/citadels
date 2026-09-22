@@ -166,20 +166,7 @@
               <option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option>
             </select>
           </label>
-          <label class="field"><span>电脑补位</span>
-            <select id="net-bots"><option value="0">不补位</option><option value="1" selected>1 个电脑</option>
-              <option value="2">2 个电脑</option><option value="3">3 个电脑</option><option value="4">4 个电脑</option></select>
-          </label>
-          <label class="field"><span>电脑类型</span>
-            <select id="net-bot-type"><option value="npc-easy">启发式电脑 · 简单</option><option value="npc-normal" selected>启发式电脑 · 普通</option><option value="npc-hard">启发式电脑 · 困难</option><option value="neural">策略神经网络（仓库自带权重）</option><option value="agent">AI Agent 电脑（大模型决策）</option></select>
-          </label>
-          <label class="field neural-only" hidden><span>MCTS 模拟次数（0 = 关闭）</span>
-            <input id="net-mcts-sims" type="number" min="0" max="2000" step="50" value="500" inputmode="numeric"></label>
-          <label class="field neural-only" hidden><span>MCTS 最大搜索深度（0 = 自动 700）</span>
-            <input id="net-mcts-depth" type="number" min="0" max="700" step="10" value="700" inputmode="numeric"></label>
-          <label class="field neural-only" hidden><span>MCTS 隐藏信息粒子数</span>
-            <input id="net-mcts-particles" type="number" min="1" max="8" step="1" value="4" inputmode="numeric"></label>
-          <p class="dim small neural-only" hidden>模拟次数只对策略神经网络电脑生效：0 = 按网络策略直接走子，填正数则在指定份数的隐藏信息猜测上做确定化 MCTS 搜索，更强但每步更慢。</p>
+          <p class="dim small">电脑座位和策略网络参数在创建房间后，分别设置在对应的座位卡片内。</p>
           <label class="field"><span>结束条件</span>
             <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
           </label>
@@ -219,7 +206,7 @@
         </div>
       </div>
       <div class="seat-grid" id="seat-grid"></div>
-      <p class="dim small">把房间号告诉朋友即可加入；空缺座位可用电脑补位。房主点击「开始游戏」开局。</p>
+      <p class="dim small">把房间号告诉朋友即可加入；房主可以在每个座位卡片内设置电脑类型和策略网络参数。</p>
       <div class="btn-row">
         <button class="btn ghost" id="btn-leave">离开房间</button>
         <button class="btn ghost" id="btn-net-shuffle">打乱座位</button>
