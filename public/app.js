@@ -196,7 +196,8 @@
   function debugActionText(action) {
     if (!action) return '—';
     const copy = Object.assign({}, action);
-    return JSON.stringify(copy);
+    try { return JSON.stringify(copy, null, 2); }
+    catch (_) { return String(copy); }
   }
   function botDebugText(entry) {
     const time = new Date(Number(entry.at) || Date.now()).toLocaleTimeString();
@@ -219,7 +220,8 @@
         const label = inference.method === 'native-mcts' ? 'MCTS访问概率分布' : '策略概率分布';
         body += '\n' + label + '：\n' + policy.map((item, index) => {
           const percent = (Number(item.probability || 0) * 100).toFixed(2) + '%';
-          return '  ' + (index + 1) + '. ' + percent + ' · ' + debugActionText(item.action);
+          const actionText = debugActionText(item.action).replace(/\n/g, '\n     ');
+          return '  ' + (index + 1) + '. ' + percent + ' · ' + actionText;
         }).join('\n');
       }
     }
