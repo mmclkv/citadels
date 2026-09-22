@@ -8,7 +8,7 @@ const AI = require('../src/ai.js');
 const { PolicyValueNetwork } = require('../training/neural-policy.js');
 const {
   enumerateLegalActions, currentActor, alignedParticlePool, particleBeliefWeights,
-  BELIEF_DECAY
+  BELIEF_DECAY, trainingPlacement, heuristicLevelFor
 } = require('../training/train.js');
 const { NativeSearchClient } = require('../training/native-search.js');
 
@@ -63,14 +63,26 @@ async function main() {
       // 让评测可复现，同时避免按固定周期暴露角色组分布。
       const charSetSeed = Math.imul(SEED + game * 7919, 1664525) + 1013904223;
       const charSet = ['base', 'dark', 'mixed'][(charSetSeed >>> 0) % 3];
-      const seats = [{ id: 'nn', name: '策略网络', isBot: true, botType: 'neural', botLevel: 'hard' }];
-      for (let i = 1; i < 6; i++) seats.push({
-        id: 'h' + i, name: '启发式' + i, isBot: true, botType: 'heuristic',
-        botLevel: HEURISTIC_LEVEL || ['easy', 'normal', 'hard'][(game + i) % 3]
+      // 训练会轮换策略网络的物理座位和开局皇冠；评测也必须保持这一点，
+      // 否则固定 seat 0 会把座位/先手偏差误算成模型强弱。
+      const placement = trainingPlacement({ seed: SEED }, game, 6, 1);
+      const networkSeat = [...placement.networkSeats][0];
+      const seats = Array.from({ length: 6 }, (_, i) => {
+        const neural = i === networkSeat;
+        return {
+          id: neural ? 'nn' : 'h' + i,
+          name: neural ? '策略网络' : '启发式' + i,
+          isBot: true,
+          botType: neural ? 'neural' : 'heuristic',
+          botLevel: neural ? undefined : (HEURISTIC_LEVEL || heuristicLevelFor({
+            seed: SEED, heuristicDifficulty: 'random'
+          }, i, game))
+        };
       });
       const state = Engine.createGame({
         roomId: 'eval-' + game, endDistricts: 8, charSetMode: charSet,
-        seed: SEED + game * 7919, seats
+        seed: SEED + game * 7919, seats,
+        initialCrownSeat: placement.initialCrownSeat
       });
       Engine.startGame(state);
       let steps = 0, searchMs = 0, gameStarted = Date.now();
@@ -80,7 +92,7 @@ async function main() {
         const legal = enumerateLegalActions(state, actor.id);
         if (!legal.length) throw new Error('没有合法行动，player=' + actor.id);
         let action;
-        if (actor.id === 'nn') {
+      if (actor.id === 'nn') {
           const searchStarted = Date.now();
           // 与训练一致：4 个粒子共用一棵信息集搜索树，并按公开信息对粒子加权。
           // 不能把真实 state 直接交给 MCTS，否则会偷看对手手牌和牌库顺序。
@@ -108,7 +120,8 @@ async function main() {
       }
       if (state.phase !== 'gameover') throw new Error('单局超过最大步数');
       const scores = state.scores || [];
-      const mine = scores.find(row => row.playerIdx === 0);
+      const networkIndex = state.players.findIndex(player => player.id === 'nn');
+      const mine = scores.find(row => row.playerIdx === networkIndex);
       const rank = 1 + scores.filter(row => row.total > mine.total).length;
       if (rank === 1) wins++;
       if (rank <= 3) top3++;
@@ -119,7 +132,8 @@ async function main() {
       });
       const gameMs = Date.now() - gameStarted;
       totalSteps += steps; totalGameMs += gameMs; totalSearchMs += searchMs;
-      console.log(JSON.stringify({ game, charSet, rank, win: rank === 1, steps, gameMs,
+      console.log(JSON.stringify({ game, charSet, networkSeat, crownSeat: placement.initialCrownSeat,
+        rank, win: rank === 1, steps, gameMs,
         nnSearchMs: searchMs, wins, winRate: (wins / game).toFixed(3) }));
     }
     console.log(JSON.stringify({
