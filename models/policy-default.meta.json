@@ -1,15 +1,15 @@
 {
   "format": "json.gz",
-  "game": 29582,
+  "game": 43328,
   "profile": "large",
   "backend": "js",
-  "trainedAt": "2026-09-18T14:41:23.064Z",
-  "sha256": "e9488ae8c5a467fc51ce6b1f4bc7f2f80a886d6ac38835c8f7f5869562d0b549",
+  "trainedAt": "2026-09-22T11:40:59.309Z",
+  "sha256": "2f8532863258069f2158cf8669d322927b733fd0317bb48bb7a79af30292f0a5",
   "stateSize": 672,
   "actionSize": 256,
-  "encodingVersion": 6,
+  "encodingVersion": 7,
   "weightsRoundedTo": 6,
-  "bytes": 3063295,
-  "source": "training-data/checkpoint-029582-plarge-m500-egpu-crandom-s20260913.json.gz",
-  "note": "训练 checkpoint 精简部署：删除 history、config 只留 profile、权重四舍五入到 6 位小数（40 个真实局面 argmax 全一致，最大 logit 偏差 4.3e-4）"
+  "bytes": 3151926,
+  "source": "training-data/checkpoint-043328-plarge-m500-egpu-crandom-s20260913.json.gz",
+  "note": "训练 checkpoint 精简部署：删除 history、config 只留 profile、权重四舍五入到 6 位小数；状态编码 v7"
 }
