@@ -16,6 +16,7 @@ const AgentModule = require('./src/agent.js');
 const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
 const TrainingManagerModule = require('./lib/training-manager.js');
 const LocalNeuralBotModule = require('./lib/local-neural-bot.js');
+const { NativeWorkerManager } = require('./lib/native-worker-manager.js');
 const VoiceModule = require('./lib/voice.js');
 const {
   MCTS_MAX_SIMULATIONS, MCTS_DEFAULT_SIMULATIONS, MCTS_DEFAULT_MAX_DEPTH, MCTS_MAX_DEPTH_CAP
@@ -26,7 +27,15 @@ const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
 const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT });
-const localNeuralBot = LocalNeuralBotModule.createLocalNeuralBot({ root: ROOT });
+const nativeWorkerManager = new NativeWorkerManager({
+  root: ROOT,
+  backend: 'libtorch',
+  log: text => console.log('[native] ' + text)
+});
+const localNeuralBot = LocalNeuralBotModule.createLocalNeuralBot({
+  root: ROOT,
+  nativeWorkerManager
+});
 // 联机语音：只负责给同房间的真人座位签发 LiveKit 访问令牌，音频流不经过本进程。
 const voiceService = VoiceModule.createVoiceService();
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
@@ -939,7 +948,15 @@ setInterval(() => {
   });
 }, HEARTBEAT_INTERVAL_MS);
 
-server.listen(PORT, () => {
+async function startServer() {
+  try {
+    // 服务启动阶段就准备并拉起 LibTorch worker；房间策略玩家复用这一进程。
+    await nativeWorkerManager.start();
+  } catch (error) {
+    console.error('[native] mcts_worker 准备失败：' + error.message);
+    console.error('[native] 策略网络房间将保持不可用，修复编译环境后重启 server.js');
+  }
+  server.listen(PORT, () => {
   if (process.send) process.send({ type: 'listening', port: server.address().port });
   console.log('');
   console.log('  富饶之城 / 荣耀之城 (Citadels) 联机服务器已启动');
@@ -959,4 +976,18 @@ server.listen(PORT, () => {
     ? voiceService.status().message + '（' + voiceService.url + '）'
     : '未启用（设置 LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET 后重启）'));
   console.log('');
-});
+  });
+}
+
+function shutdownServer(signal) {
+  console.log('\n收到 ' + signal + '，正在关闭服务…');
+  localNeuralBot.close();
+  nativeWorkerManager.close();
+  trainingManager.stop();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.once('SIGINT', () => shutdownServer('SIGINT'));
+process.once('SIGTERM', () => shutdownServer('SIGTERM'));
+startServer();

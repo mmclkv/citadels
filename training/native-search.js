@@ -3,6 +3,7 @@
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { buildSearchRequest, decodeSearchResponse } = require('../native/protocol.js');
+const { findTorchRoot } = require('../lib/native-worker-manager.js');
 
 // 显存不足（CUDA OOM）时的重启上限与冷却时间。6GB 显卡还要和桌面合成器共享
 // 显存，偶发 OOM 不该中断训练；但真的持续 OOM 时也不能无限重启把机器拖垮。
@@ -14,7 +15,7 @@ const OOM_RESTART_COOLDOWN_MS = 30000;
 const DEFAULT_SEARCH_TIMEOUT_MS = 120000;
 
 class NativeSearchClient {
-  constructor({ root, executable, simulations = 50, maxDepth = 200, batchSize = 32, cPuct = 1, seed = 1,
+  constructor({ root, executable, childProvider = null, restartChild = null, simulations = 50, maxDepth = 200, batchSize = 32, cPuct = 1, seed = 1,
     gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda',
     inferenceBackend = 'python-binary', sharedMemoryName = '', sharedMemorySlots = 8,
     sharedMemorySlotBytes = 8 * 1024 * 1024, searchTimeoutMs = DEFAULT_SEARCH_TIMEOUT_MS }) {
@@ -22,8 +23,14 @@ class NativeSearchClient {
     if (!binary) throw new Error('backend:native 需要 CITADELS_NATIVE_SEARCH_WORKER 指向已编译的 mcts_worker');
     const environment = { ...process.env };
     if (inferenceBackend === 'libtorch') {
-      const torchLib = path.join(root, '.python', 'Lib', 'site-packages', 'torch', 'lib');
-      environment.PATH = torchLib + path.delimiter + (environment.PATH || '');
+      const torchRoot = findTorchRoot(root);
+      const torchLib = torchRoot ? path.join(torchRoot, 'lib') : '';
+      if (torchLib) {
+        environment.PATH = torchLib + path.delimiter + (environment.PATH || '');
+        if (process.platform !== 'win32') {
+          environment.LD_LIBRARY_PATH = torchLib + path.delimiter + (environment.LD_LIBRARY_PATH || '');
+        }
+      }
       // 6GB 级显卡上 batching 的高峰显存很容易碎片化到「总量够、连续块不够」而 OOM
       // （2026-09-17 训练日志：单次申请 2.80 GiB 失败）。expandable_segments 让
       // 分配器可以整体伸缩段，PyTorch 官方 OOM 提示也是这个建议。用户显式设了就不覆盖。
@@ -33,6 +40,8 @@ class NativeSearchClient {
     }
     this.root = root;
     this.binary = binary;
+    this.childProvider = childProvider;
+    this.restartChild = restartChild;
     this.environment = environment;
     this.simulations = simulations;
     this.maxDepth = maxDepth;
@@ -78,8 +87,10 @@ class NativeSearchClient {
     this.buffer = '';
     this.childExited = false;
     this.lastExitError = '';
-    this.child = spawn(this.binary, [], { cwd: this.root, env: this.environment,
-      stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = this.childProvider
+      ? this.childProvider()
+      : spawn(this.binary, [], { cwd: this.root, env: this.environment, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (!this.child) throw new Error('native mcts_worker 尚未启动');
     const child = this.child;
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => this.#onData(chunk));
@@ -122,12 +133,18 @@ class NativeSearchClient {
   restart() {
     const previous = this.child;
     this.#fail(new Error('native mcts_worker 因显存不足重启'));
+    if (this.childProvider) {
+      try { if (this.restartChild) this.restartChild(); } catch (_) { /* manager will report */ }
+      this.#startChild();
+      return;
+    }
     try { this.#killTree(previous); } catch (_) { /* 进程可能已退出 */ }
     this.#startChild();
   }
 
   #killTree(child) {
     if (!child || child.exitCode != null) return;
+    if (this.childProvider) return;
     if (process.platform === 'win32' && child.pid) {
       try {
         spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
@@ -261,6 +278,7 @@ class NativeSearchClient {
     if (this.closed) return;
     this.closed = true;
     this.#fail(new Error('native mcts_worker 已关闭'));
+    if (this.childProvider) return;
     // Windows 上 kill() 只杀这一个进程；万一 native worker 以后再拉子进程，
     // 留下的就是占着显存的孤儿（2026-09-17 日志：池关闭 30 秒后孤儿还在跑并 OOM）。
     // taskkill /T 连整棵树一起杀，失败再回退普通 kill。
