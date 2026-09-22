@@ -22,6 +22,9 @@ const MAX_DEPTH = Number(process.env.MAX_DEPTH || 700);
 const MCTS_BATCH_SIZE = Number(process.env.MCTS_BATCH_SIZE || 32);
 const MCTS_C_PUCT = Number(process.env.MCTS_C_PUCT || 1);
 const SEED = Number(process.env.SEED || 20260913);
+const MIN_PLAYERS = Number(process.env.MIN_PLAYERS || 6);
+const MAX_PLAYERS = Number(process.env.MAX_PLAYERS || MIN_PLAYERS);
+const NETWORK_PLAYERS = Number(process.env.NETWORK_PLAYERS || 1);
 
 function seededRng(seed) {
   let value = seed >>> 0;
@@ -47,8 +50,8 @@ async function main() {
 
   let client;
   let wins = 0, top3 = 0, totalSteps = 0, totalGameMs = 0, totalSearchMs = 0;
-  const playerWins = Array(6).fill(0);
-  const playerRanks = Array.from({ length: 6 }, () => Array(6).fill(0));
+  const playerWins = Array(MAX_PLAYERS).fill(0);
+  const playerRanks = Array.from({ length: MAX_PLAYERS }, () => Array(MAX_PLAYERS).fill(0));
   try {
     client = new NativeSearchClient({
       root: ROOT, executable: path.join(ROOT, 'native', 'mcts_worker_libtorch.exe'),
@@ -63,15 +66,18 @@ async function main() {
       // 让评测可复现，同时避免按固定周期暴露角色组分布。
       const charSetSeed = Math.imul(SEED + game * 7919, 1664525) + 1013904223;
       const charSet = ['base', 'dark', 'mixed'][(charSetSeed >>> 0) % 3];
+      const playerCount = MIN_PLAYERS + Math.floor(seededRng(SEED ^ Math.imul(game, 0x27D4EB2D))() *
+        (MAX_PLAYERS - MIN_PLAYERS + 1));
       // 训练会轮换策略网络的物理座位和开局皇冠；评测也必须保持这一点，
       // 否则固定 seat 0 会把座位/先手偏差误算成模型强弱。
-      const placement = trainingPlacement({ seed: SEED }, game, 6, 1);
-      const networkSeat = [...placement.networkSeats][0];
-      const seats = Array.from({ length: 6 }, (_, i) => {
-        const neural = i === networkSeat;
+      const placement = trainingPlacement({ seed: SEED }, game, playerCount, NETWORK_PLAYERS);
+      const networkSeats = [...placement.networkSeats];
+      const networkSeat = networkSeats[0];
+      const seats = Array.from({ length: playerCount }, (_, i) => {
+        const neural = placement.networkSeats.has(i);
         return {
-          id: neural ? 'nn' : 'h' + i,
-          name: neural ? '策略网络' : '启发式' + i,
+          id: neural ? 'nn-' + i : 'h' + i,
+          name: neural ? '策略网络' + i : '启发式' + i,
           isBot: true,
           botType: neural ? 'neural' : 'heuristic',
           botLevel: neural ? undefined : (HEURISTIC_LEVEL || heuristicLevelFor({
@@ -92,7 +98,7 @@ async function main() {
         const legal = enumerateLegalActions(state, actor.id);
         if (!legal.length) throw new Error('没有合法行动，player=' + actor.id);
         let action;
-      if (actor.id === 'nn') {
+        if (actor.id.startsWith('nn-')) {
           const searchStarted = Date.now();
           // 与训练一致：4 个粒子共用一棵信息集搜索树，并按公开信息对粒子加权。
           // 不能把真实 state 直接交给 MCTS，否则会偷看对手手牌和牌库顺序。
@@ -120,8 +126,11 @@ async function main() {
       }
       if (state.phase !== 'gameover') throw new Error('单局超过最大步数');
       const scores = state.scores || [];
-      const networkIndex = state.players.findIndex(player => player.id === 'nn');
-      const mine = scores.find(row => row.playerIdx === networkIndex);
+      const networkIndices = state.players
+        .map((player, index) => player.id.startsWith('nn-') ? index : -1)
+        .filter(index => index >= 0);
+      const networkRows = scores.filter(row => networkIndices.includes(row.playerIdx));
+      const mine = networkRows[0];
       const rank = 1 + scores.filter(row => row.total > mine.total).length;
       if (rank === 1) wins++;
       if (rank <= 3) top3++;
@@ -132,12 +141,14 @@ async function main() {
       });
       const gameMs = Date.now() - gameStarted;
       totalSteps += steps; totalGameMs += gameMs; totalSearchMs += searchMs;
-      console.log(JSON.stringify({ game, charSet, networkSeat, crownSeat: placement.initialCrownSeat,
+      console.log(JSON.stringify({ game, playerCount, networkSeats, charSet, networkSeat,
+        crownSeat: placement.initialCrownSeat,
         rank, win: rank === 1, steps, gameMs,
         nnSearchMs: searchMs, wins, winRate: (wins / game).toFixed(3) }));
     }
     console.log(JSON.stringify({
-      type: 'final', checkpoint: CHECKPOINT, simulations: SIMULATIONS, maxDepth: MAX_DEPTH,
+      type: 'final', checkpoint: CHECKPOINT, minPlayers: MIN_PLAYERS, maxPlayers: MAX_PLAYERS,
+      networkPlayers: NETWORK_PLAYERS, simulations: SIMULATIONS, maxDepth: MAX_DEPTH,
       mctsBatchSize: MCTS_BATCH_SIZE, cPuct: MCTS_C_PUCT, particles: PARTICLES,
       beliefDecay: BELIEF_DECAY, inferenceBackend: 'libtorch', games: GAMES,
       wins, winRate: wins / GAMES, top3, top3Rate: top3 / GAMES,
