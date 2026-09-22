@@ -27,5 +27,6 @@ int main() {
   Mcts<NativeGameState, NativeSearchAction>::Config config; config.simulations = 12; config.max_depth = 16;
   BatchedMcts<NativeGameState, NativeSearchAction> search(game, evaluator, config);
   const auto result = search.search(state, 0, 4);
-  std::cout << result.visits << ',' << evaluator.batch_calls << ',' << result.policy.size();
+  std::cout << result.visits << ',' << evaluator.batch_calls << ',' << result.policy.size()
+            << ',' << result.expansions;
 }

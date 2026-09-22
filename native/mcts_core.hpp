@@ -402,6 +402,7 @@ class BatchedMcts {
     const State& seed_state = root_states.front();
     player_count_ = state_player_count(seed_state, 0);
     node_count_ = 1;
+    expansions_ = 0;
     Node root;
     root.player = root_player;
     root.actions = game_.legal_actions(seed_state, root_player);
@@ -503,6 +504,7 @@ class BatchedMcts {
     expand(node, state, evaluation);
   }
   void expand(Node& node, const State&, const Evaluation& evaluation) {
+    if (!node.expanded) ++expansions_;
     node.priors = evaluation.priors;
     if (node.priors.size() != node.actions.size())
       node.priors.assign(node.actions.size(), 1.0f / node.actions.size());
@@ -560,6 +562,7 @@ class BatchedMcts {
     if (root.visits) for (size_t i = 0; i < kValueSlots; ++i) output.value_vector[i] = root.total[i] / root.visits;
     else output.value_vector = root.value_vector;
     output.value = output.value_vector[0];
+    output.expansions = expansions_;
     return output;
   }
   Node* find_child(Node& node, size_t action, const InformationSetKey& key) {
@@ -591,6 +594,7 @@ class BatchedMcts {
   float weight_total_ = 0.0f;
   size_t player_count_ = 0;
   size_t node_count_ = 0;
+  int expansions_ = 0;
 };
 
 }  // namespace citadels::native
