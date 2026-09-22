@@ -141,6 +141,34 @@
     const res = Engine.getAvailableActions(state, playerId) || {};
     return (res.actions || []).filter(a => a.type === type && !a.disabled);
   }
+  // 刺客不知道每个角色号码实际在谁手里，不能把某个号码永久当成唯一答案。
+  // 用角色威胁评分做 softmax 抽样：困难电脑更偏向高威胁角色，普通/简单电脑
+  // 保留足够探索，避免每局都机械地刺杀航海家。
+  function assassinTarget(state, playerId, level, rnd) {
+    const opts = choicesOf(state, playerId, 'choose_char');
+    if (!opts.length) return null;
+    const idx = state.players.findIndex(p => p.id === playerId);
+    const p = idx >= 0 ? state.players[idx] : null;
+    const base = {
+      2: 2.35, 3: 2.25, 4: 2.55, 5: 2.20,
+      6: 2.50, 7: 2.70, 8: 2.55, 9: 2.15
+    };
+    const temperature = level === 2 ? 0.72 : level === 1 ? 1.05 : 1.55;
+    const scored = opts.map(a => {
+      let score = base[a.num] != null ? base[a.num] : 2.15;
+      if (p && p.city.length >= state.config.endDistricts - 2 && (a.num === 7 || a.num === 8)) score += 0.18;
+      return { num: a.num, score };
+    });
+    const maxScore = Math.max(...scored.map(x => x.score));
+    const weights = scored.map(x => Math.exp((x.score - maxScore) / temperature));
+    const total = weights.reduce((sum, x) => sum + x, 0);
+    let pick = (typeof rnd === 'function' ? rnd() : Math.random()) * total;
+    for (let i = 0; i < scored.length; i++) {
+      pick -= weights[i];
+      if (pick <= 0) return scored[i].num;
+    }
+    return scored[scored.length - 1].num;
+  }
   function charByNum(state, num) {
     const id = (state.charDeck || []).find(cid => {
       const c = Engine.charOf(cid);
@@ -436,19 +464,8 @@
       case 'tax_collect':
         return { type: 'tax_collect' };
       case 'assassin': {
-        const pref = { 7: 3.2, 4: 2.6, 6: 2.2, 5: 2.0, 8: 2.4, 3: 1.8, 2: 1.6, 9: 0.8 };
-        const opts = choicesOf(state, p.id, 'choose_char');
-        if (!opts.length) return { type: 'ability_skip' };
-        let best = null, bv = -1;
-        // 「几号在谁手上」是隐藏的，所以只能按角色本身的价值挑，不能挑 leader 那张。
-        opts.forEach(a => {
-          let v = pref[a.num] != null ? pref[a.num] : 1;
-          if (a.num === 8 && p.city.length >= 5) v += 1.0;
-          if (a.num === 2 && p.gold >= 5) v += 1.2;
-          v += (rand() - 0.5) * (level === 0 ? 2 : 0.5);
-          if (v > bv) { bv = v; best = a.num; }
-        });
-        return { type: 'choose_char', num: best != null ? best : opts[0].num };
+        const target = assassinTarget(state, p.id, level, rand);
+        return target == null ? { type: 'ability_skip' } : { type: 'choose_char', num: target };
       }
       case 'thief': {
         const opts = choicesOf(state, p.id, 'choose_char');
@@ -661,5 +678,6 @@
     return { type: 'ability_skip' };
   }
 
-  return { decide: decide, draftDecision: draftDecision, charValue: charValue, bestBuildCard: bestBuildCard };
+  return { decide: decide, draftDecision: draftDecision, charValue: charValue, bestBuildCard: bestBuildCard,
+    assassinTarget: assassinTarget };
 });
