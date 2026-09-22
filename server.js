@@ -568,7 +568,9 @@ function handle(ws, info, msg) {
           s.taken = false; s.name = ''; s.id = null; s.disconnected = false; s.left = false;
           sendRoomNotice(r, { kind: 'player_left', playerName: leavingName }, info.id);
           sendPersonalExcept(r, info.id);
-          if (r.seats.every(x => !x.taken)) closeRoomIfEmpty(r);
+          // 大厅里也要按“是否还有真人”判断，而不是只看是否还有空座位。
+          // 否则最后一名真人离开、但房间里仍有电脑补位时，房间会永久残留。
+          closeRoomIfEmpty(r);
         } else if (s && r.state) {
           s.left = true;
           s.disconnected = false;
