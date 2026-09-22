@@ -220,6 +220,7 @@ int main() {
             direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
               string_field(request, "profile", "balanced"), model_path,
               string_field(request, "device", "cuda"));
+            context += " · 设备=" + direct_neural->device_name();
           } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
             direct_neural->reload_model(model_path);
           }

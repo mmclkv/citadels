@@ -24,9 +24,9 @@
 namespace citadels::native {
 
 #ifdef _WIN32
-inline void ensure_libtorch_cuda_loaded() {
+inline bool libtorch_cuda_runtime_loaded() {
   static HMODULE cuda_module = LoadLibraryW(L"torch_cuda.dll");
-  if (!cuda_module) throw std::runtime_error("无法加载 LibTorch torch_cuda.dll");
+  return cuda_module != nullptr;
 }
 #endif
 
@@ -73,17 +73,34 @@ class LibTorchNeuralBatchedEvaluator final
     const auto dims = profile_dimensions(profile_);
   model_ = LibTorchPolicyValueNet(672, 256, dims[0], dims[1], dims[2], dims[3], dims[4]);
     if (device_name_ == "cuda") {
+      bool cuda_available = false;
+      // CUDA 是可选加速路径：没有 GPU、驱动或 CUDA 版 LibTorch 时，
+      // 仍然让同一个 C++ MCTS worker 使用 CPU 完成推理，而不是让房间直接失效。
+      try {
 #ifdef _WIN32
-      ensure_libtorch_cuda_loaded();
+        cuda_available = libtorch_cuda_runtime_loaded();
+#else
+        cuda_available = true;
 #endif
-      if (!torch::cuda::is_available()) throw std::runtime_error("LibTorch CUDA 不可用");
-      device_ = torch::Device(torch::kCUDA);
+        cuda_available = cuda_available && torch::cuda::is_available();
+      } catch (const std::exception&) {
+        cuda_available = false;
+      }
+      if (cuda_available) {
+        device_ = torch::Device(torch::kCUDA);
+      } else {
+        device_name_ = "cpu";
+        device_ = torch::Device(torch::kCPU);
+      }
     } else {
+      device_name_ = "cpu";
       device_ = torch::Device(torch::kCPU);
     }
     model_->to(device_);
     reload_model(model_path);
   }
+
+  const std::string& device_name() const { return device_name_; }
 
   Evaluation evaluate(const NativeGameState& state, int player,
                       const std::vector<NativeSearchAction>& actions) override {
