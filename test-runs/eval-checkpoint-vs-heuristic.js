@@ -51,6 +51,9 @@ async function main() {
 
   let client;
   let wins = 0, top3 = 0, truncatedGames = 0, totalSteps = 0, totalGameMs = 0, totalSearchMs = 0;
+  const searchStats = { decisions: 0, fallback: 0, zeroVisits: 0, visits: 0,
+    expansions: 0, particlesUsed: 0, partialParticles: 0, beliefApplied: 0,
+    actionFailures: 0, byPhase: {} };
   const playerWins = Array(MAX_PLAYERS).fill(0);
   const playerRanks = Array.from({ length: MAX_PLAYERS }, () => Array(MAX_PLAYERS).fill(0));
   try {
@@ -111,6 +114,20 @@ async function main() {
           const result = await client.search(pool.map(entry => entry.state), actor.id,
             pool[0].legal, game, weights);
           searchMs += Date.now() - searchStarted;
+          const phase = state.phase === 'draft' ? 'draft' : state.reaction ? 'reaction' :
+            state.roundConfirm ? 'roundConfirm' : state.turn && state.turn.pending ?
+              'pending' : 'action';
+          const phaseStats = searchStats.byPhase[phase] ||
+            (searchStats.byPhase[phase] = { decisions: 0, fallback: 0, zeroVisits: 0 });
+          searchStats.decisions++;
+          phaseStats.decisions++;
+          if (result.fallback) { searchStats.fallback++; phaseStats.fallback++; }
+          if (!(result.visits > 0)) { searchStats.zeroVisits++; phaseStats.zeroVisits++; }
+          searchStats.visits += Number(result.visits) || 0;
+          searchStats.expansions += Number(result.expansions) || 0;
+          searchStats.particlesUsed += Number(result.particlesUsed) || 0;
+          if (Number(result.particlesUsed) < PARTICLES) searchStats.partialParticles++;
+          if (result.belief) searchStats.beliefApplied++;
           // 训练自对弈按 MCTS 访问分布采样，而不是始终取 argmax；保持同一行为策略。
           let r = rng();
           let chosen = Math.max(0, result.policy.length - 1);
@@ -124,6 +141,7 @@ async function main() {
         }
         const applied = Engine.applyAction(state, actor.id, action);
         if (!applied.ok) {
+          if (actor.id.startsWith('nn-')) searchStats.actionFailures++;
           const fallback = legal.find(candidate => Engine.applyAction(state, actor.id, candidate).ok);
           if (!fallback) throw new Error('动作执行失败：' + JSON.stringify(applied));
         }
@@ -166,6 +184,12 @@ async function main() {
       mctsBatchSize: MCTS_BATCH_SIZE, cPuct: MCTS_C_PUCT, particles: PARTICLES,
       beliefDecay: BELIEF_DECAY, inferenceBackend: 'libtorch', games: GAMES,
       wins, winRate: wins / GAMES, top3, top3Rate: top3 / GAMES,
+      searchStats: { ...searchStats,
+        fallbackRate: searchStats.fallback / Math.max(1, searchStats.decisions),
+        zeroVisitsRate: searchStats.zeroVisits / Math.max(1, searchStats.decisions),
+        avgVisits: searchStats.visits / Math.max(1, searchStats.decisions),
+        avgExpansions: searchStats.expansions / Math.max(1, searchStats.decisions),
+        avgParticlesUsed: searchStats.particlesUsed / Math.max(1, searchStats.decisions) },
       totalSteps, avgSteps: totalSteps / GAMES, totalGameMs,
       avgGameMs: totalGameMs / GAMES, totalSearchMs,
       avgSearchMsPerGame: totalSearchMs / GAMES, avgSearchMsPerStep: totalSearchMs / totalSteps,
