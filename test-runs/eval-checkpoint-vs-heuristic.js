@@ -35,6 +35,7 @@ function seededRng(seed) {
 }
 
 async function main() {
+  const started = Date.now();
   const checkpointPath = path.join(ROOT, CHECKPOINT);
   const payload = JSON.parse(zlib.gunzipSync(fs.readFileSync(checkpointPath)));
   const profile = payload.config.profile || 'large';
