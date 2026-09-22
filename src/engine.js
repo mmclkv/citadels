@@ -937,7 +937,8 @@
       case 'wizard_choice':
         return { prompt: '【法师】将牌加入手牌或立即建造', actions: [
           { type: 'wizard_take', label: '加入手牌' },
-          { type: 'wizard_build', label: '立即建造（不占建造次数）' }
+          { type: 'wizard_build', label: '立即建造（不占建造次数）' },
+          { type: 'pending_back', to: 'wizard_card', label: '« 返回重新选择手牌' }
         ] };
       case 'bishop_repay':
         return { prompt: '【主教】选择 ' + pd.amount + ' 张手牌，偿还 ' + state.players[pd.payerIdx].name + ' 代付的 ' + pd.amount + ' 金',
@@ -1925,13 +1926,22 @@
           log(state, p.name + ' 退回到【魔术师】能力选择。', 'info');
           return ok();
         }
-        // 2) 外交官：theirs → 退回 mine（无副作用，还未真正交换）
+        // 2) 法师：已选定牌但尚未取得/建造，重新展示目标玩家当前手牌。
+        // 不复用旧的 cards 快照，避免目标手牌在状态修复后与选择列表不一致。
+        if (pd.kind === 'wizard_choice' && target === 'wizard_card') {
+          const targetPlayer = state.players[pd.targetIdx];
+          if (!targetPlayer || !targetPlayer.hand.length) return err('目标玩家已经没有手牌');
+          t.pending = { kind: 'wizard_card', targetIdx: pd.targetIdx, cards: targetPlayer.hand.slice() };
+          log(state, p.name + ' 退回到【法师】重新选择目标手牌。', 'info');
+          return ok();
+        }
+        // 3) 外交官：theirs → 退回 mine（无副作用，还未真正交换）
         if (pd.kind === 'diplomat_theirs' && target === 'diplomat_mine') {
           t.pending = { kind: 'diplomat_mine' };
           log(state, p.name + ' 退回到【外交官】选择要交出的建筑。', 'info');
           return ok();
         }
-        // 3) 皇帝：take → 退回 crown（必须把皇冠还给原持有者）
+        // 4) 皇帝：take → 退回 crown（必须把皇冠还给原持有者）
         if (pd.kind === 'emperor_take' && target === 'emperor_crown') {
           const prev = pd._fromCrownIdx;
           if (prev == null || prev < 0 || prev >= state.players.length) {

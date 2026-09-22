@@ -4164,6 +4164,8 @@
       case 'pending_back':
         // 多步能力中撤回上一步前，先丢弃前端的多选/手选缓存，避免回退后仍残留旧选择
         if (App.sel) { App.sel = null; }
+        if (App.state && App.state.turn && App.state.turn.pending &&
+            App.state.turn.pending.kind === 'wizard_choice') { App.pickKey = null; closeModal(); }
         send(a); return;
       default:
         send(a);
