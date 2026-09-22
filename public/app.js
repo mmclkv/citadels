@@ -45,6 +45,7 @@
 
   const NET_SESSION_KEY = 'citadels.net.session';
   let selectedGameServer = '';
+  let serverConsoleCredentials = null;
   try { selectedGameServer = localStorage.getItem('citadels.gameServer') || ''; } catch (_) { /* storage unavailable */ }
   function loadNetSession() {
     try {
@@ -4308,8 +4309,27 @@
     const body = $('#modal-body');
     if (!body) return;
     try {
-      const response = await fetch(gameServerBase() + '/api/server/status', { cache: 'no-store' });
+      const serverUrl = new URL(gameServerBase());
+      const localHost = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(serverUrl.hostname);
+      if (!localHost || serverUrl.origin !== window.location.origin) {
+        throw new Error('服务器控制台仅支持 localhost / 127.0.0.1 / ::1 的同源服务，已阻止向远程地址发送管理员凭据');
+      }
+      const headers = {};
+      // 仅同源本机服务时发送 Basic Auth，避免密码外传到用户填写的远程地址。
+      if (serverConsoleCredentials) {
+        headers.Authorization = 'Basic ' + btoa(
+          serverConsoleCredentials.username + ':' + serverConsoleCredentials.password);
+      }
+      const response = await fetch(serverUrl.href + '/api/server/status', { cache: 'no-store', headers });
       const data = await response.json();
+      if (response.status === 401 && !serverConsoleCredentials) {
+        const username = window.prompt('请输入服务器控制台管理员账号');
+        if (username == null) throw new Error('已取消管理员认证');
+        const password = window.prompt('请输入服务器控制台管理员密码');
+        if (password == null) throw new Error('已取消管理员认证');
+        serverConsoleCredentials = { username, password };
+        return refreshServerConsole();
+      }
       if (!response.ok) throw new Error(data.error || '服务器拒绝了请求');
       const summary = el('div', 'server-console-summary');
       const memory = data.memory && Number.isFinite(data.memory.rss)
@@ -4334,7 +4354,10 @@
       const actions = el('div', 'server-console-actions');
       const refresh = el('button', 'btn tiny ghost', '立即刷新');
       refresh.type = 'button';
-      refresh.onclick = refreshServerConsole;
+      refresh.onclick = () => {
+        serverConsoleCredentials = null;
+        refreshServerConsole();
+      };
       const updated = el('span', 'dim small', '更新于 ' + new Date().toLocaleTimeString());
       actions.appendChild(refresh);
       actions.appendChild(updated);

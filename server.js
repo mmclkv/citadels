@@ -8,6 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 
 const CitCards = require('./src/cards.js');
 const CitEngine = require('./src/engine.js');
@@ -27,6 +28,50 @@ const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
 const serverStartedAt = Date.now();
+const adminCredentialsDir = process.env.CITADELS_ADMIN_DIR || (
+  process.platform === 'win32'
+    ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Citadels')
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'citadels')
+);
+const adminCredentialsFile = process.env.CITADELS_ADMIN_FILE || path.join(adminCredentialsDir, 'server-admin.json');
+
+function loadAdminCredentials() {
+  const envUsername = String(process.env.CITADELS_ADMIN_USERNAME || '').trim();
+  const envPassword = String(process.env.CITADELS_ADMIN_PASSWORD || '');
+  if (envUsername && envPassword) return { username: envUsername, password: envPassword, source: 'environment' };
+  try {
+    const saved = JSON.parse(fs.readFileSync(adminCredentialsFile, 'utf8'));
+    if (saved && typeof saved.username === 'string' && saved.username &&
+        typeof saved.password === 'string' && saved.password) {
+      return { username: saved.username, password: saved.password, source: 'file' };
+    }
+  } catch (_) { /* 首次启动或旧配置不存在，下面自动生成 */ }
+  const generated = {
+    username: 'admin',
+    password: crypto.randomBytes(32).toString('base64url'),
+    createdAt: new Date().toISOString()
+  };
+  try {
+    fs.mkdirSync(path.dirname(adminCredentialsFile), { recursive: true });
+    fs.writeFileSync(adminCredentialsFile, JSON.stringify(generated, null, 2) + '\n', { flag: 'wx', encoding: 'utf8' });
+    try { fs.chmodSync(adminCredentialsFile, 0o600); } catch (_) { /* Windows 没有 Unix 权限位 */ }
+    console.warn('[security] 已生成服务器控制台管理员凭据，保存在 ' + adminCredentialsFile);
+    console.warn('[security] 管理员账号：' + generated.username + '（密码只写入本机配置文件，不写入运行日志）');
+    return { username: generated.username, password: generated.password, source: 'generated' };
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      try {
+        const saved = JSON.parse(fs.readFileSync(adminCredentialsFile, 'utf8'));
+        if (saved && saved.username && saved.password) {
+          return { username: String(saved.username), password: String(saved.password), source: 'file' };
+        }
+      } catch (_) { /* fall through */ }
+    }
+    throw new Error('无法创建服务器控制台管理员凭据：' + error.message);
+  }
+}
+
+const adminCredentials = loadAdminCredentials();
 const serverLogBuffer = [];
 function serverLog(level, ...args) {
   const text = args.map(value => {
@@ -826,6 +871,30 @@ function isLoopback(req) {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
+function safeCredentialEqual(actual, expected) {
+  const left = Buffer.from(String(actual || ''));
+  const right = Buffer.from(String(expected || ''));
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function isAdminAuthenticated(req) {
+  const header = String(req.headers.authorization || '');
+  if (!/^Basic\s+/i.test(header)) return false;
+  let decoded;
+  try { decoded = Buffer.from(header.replace(/^Basic\s+/i, ''), 'base64').toString('utf8'); }
+  catch (_) { return false; }
+  const separator = decoded.indexOf(':');
+  if (separator < 0) return false;
+  return safeCredentialEqual(decoded.slice(0, separator), adminCredentials.username) &&
+    safeCredentialEqual(decoded.slice(separator + 1), adminCredentials.password);
+}
+
+function rejectServerConsoleAuth(res, message) {
+  return sendJson(res, 401, { error: message || '需要管理员账号密码' }, {
+    'WWW-Authenticate': 'Basic realm="Citadels server console", charset="UTF-8"'
+  });
+}
+
 /* 语音状态只对外报告「有没有配好」和一句人话，不返回 API Key/Secret；
  * 服务器地址在签发令牌时才随响应下发，未通过身份校验的请求拿不到。 */
 function voiceStatus() {
@@ -860,6 +929,7 @@ const server = http.createServer(async (req, res) => {
   const pathname = req.url.split('?')[0];
   if (pathname === '/api/server/status' && req.method === 'GET') {
     if (!isLoopback(req)) return sendJson(res, 403, { error: '服务器控制台仅允许本机访问' });
+    if (!isAdminAuthenticated(req)) return rejectServerConsoleAuth(res);
     const training = trainingManager.status();
     return sendJson(res, 200, {
       startedAt: serverStartedAt,
