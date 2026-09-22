@@ -248,9 +248,10 @@
   }
   // 「策略神经网络」电脑专属的 MCTS 配置：0 = 关闭搜索（按网络策略直接走子）。
   // 上限与服务器的 clamp 一致，客户端只是提前拦住明显越界的输入。
-  function readMctsConfig(simsId, depthId) {
+  function readMctsConfig(simsId, depthId, particlesId) {
     const clamp = (id, max) => Math.max(0, Math.min(max, Math.floor(Number($(id) && $(id).value) || 0)));
-    return { mctsSimulations: clamp(simsId, 2000), mctsMaxDepth: clamp(depthId, 200) };
+    const particles = Math.max(1, Math.min(8, Math.floor(Number($(particlesId) && $(particlesId).value) || 4)));
+    return { mctsSimulations: clamp(simsId, 2000), mctsMaxDepth: clamp(depthId, 200), mctsParticles: particles };
   }
   function syncNeuralOnlyFields() {
     [['#screen-setup', '#cfg-bot-type'], ['#lobby-pre', '#net-bot-type']].forEach(pair => {
@@ -272,7 +273,7 @@
       Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
         playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
         endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act
-      }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth')) });
+      }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth', '#cfg-mcts-particles')) });
     });
   }
   function showScreen(id) {
@@ -4492,7 +4493,7 @@
             // 房主的节奏偏好决定服务器上机器人的行动间隔
             botPace: pace().act,
             voice: $('#net-voice').value === 'on'
-          }, readMctsConfig('#net-mcts-sims', '#net-mcts-depth'))
+          }, readMctsConfig('#net-mcts-sims', '#net-mcts-depth', '#net-mcts-particles'))
         });
       });
       App.mode = 'net';

@@ -85,7 +85,7 @@ let bot;
     assert.equal(normalizeMcts(undefined), null, '不传设置 = 关闭搜索');
     assert.equal(normalizeMcts({ simulations: 0 }), null, '模拟数 0 = 关闭搜索');
     assert.equal(normalizeMcts({ simulations: -5 }), null, '负数按关闭处理');
-    assert.deepEqual(normalizeMcts({ simulations: 10 }), { simulations: 10, maxDepth: 60 },
+    assert.deepEqual(normalizeMcts({ simulations: 10 }), { simulations: 10, maxDepth: 60, particles: 4 },
       '最大深度 0 表示用默认值');
     assert.equal(normalizeMcts({ simulations: 9e9 }).simulations, MCTS_MAX_SIMULATIONS, '模拟数有上限');
     assert.equal(normalizeMcts({ simulations: 10, maxDepth: 9e9 }).maxDepth, MCTS_MAX_DEPTH_CAP, '深度有上限');

@@ -101,7 +101,11 @@
         <span>MCTS 最大搜索深度（0 = 自动 60）</span>
         <input id="cfg-mcts-depth" type="number" min="0" max="200" step="10" value="0" inputmode="numeric">
       </label>
-      <p class="dim small neural-only mcts-hint" hidden>策略神经网络电脑默认只按网络策略走子。填大于 0 的模拟次数后，服务器会在 4 份隐藏信息猜测上做蒙特卡洛树搜索（确定化 MCTS），电脑更强一些、每步更慢一些。</p>
+      <label class="field neural-only" hidden>
+        <span>MCTS 隐藏信息粒子数</span>
+        <input id="cfg-mcts-particles" type="number" min="1" max="8" step="1" value="4" inputmode="numeric">
+      </label>
+      <p class="dim small neural-only mcts-hint" hidden>策略神经网络电脑默认只按网络策略走子。填大于 0 的模拟次数后，服务器会在指定份数的隐藏信息猜测上做蒙特卡洛树搜索，粒子越多越稳但每步越慢。</p>
       <label class="field">
         <span>电脑节奏</span>
         <select id="cfg-speed">
@@ -171,7 +175,9 @@
             <input id="net-mcts-sims" type="number" min="0" max="2000" step="50" value="0" inputmode="numeric"></label>
           <label class="field neural-only" hidden><span>MCTS 最大搜索深度（0 = 自动 60）</span>
             <input id="net-mcts-depth" type="number" min="0" max="200" step="10" value="0" inputmode="numeric"></label>
-          <p class="dim small neural-only" hidden>模拟次数只对策略神经网络电脑生效：0 = 按网络策略直接走子，填正数则在 4 份隐藏信息猜测上做确定化 MCTS 搜索，更强但每步更慢。</p>
+          <label class="field neural-only" hidden><span>MCTS 隐藏信息粒子数</span>
+            <input id="net-mcts-particles" type="number" min="1" max="8" step="1" value="4" inputmode="numeric"></label>
+          <p class="dim small neural-only" hidden>模拟次数只对策略神经网络电脑生效：0 = 按网络策略直接走子，填正数则在指定份数的隐藏信息猜测上做确定化 MCTS 搜索，更强但每步更慢。</p>
           <label class="field"><span>结束条件</span>
             <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
           </label>

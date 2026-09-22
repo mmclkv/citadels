@@ -41,8 +41,8 @@ test('驱动把房主的 MCTS 设置原样交给神经网络电脑', async () =>
   const { driver, room } = driverWith({ mctsSimulations: 240, mctsMaxDepth: 30 }, captured);
   await wait(30);
   room.closed = true; driver.cancel(room);
-  assert.deepEqual(captured.options.mcts, { simulations: 240, maxDepth: 30 });
-  assert.deepEqual(normalizeMcts(captured.options.mcts), { simulations: 240, maxDepth: 30 });
+  assert.deepEqual(captured.options.mcts, { simulations: 240, maxDepth: 30, particles: undefined });
+  assert.deepEqual(normalizeMcts(captured.options.mcts), { simulations: 240, maxDepth: 30, particles: 4 });
 });
 
 test('老房间没有 MCTS 字段时搜索保持关闭', async () => {
@@ -58,13 +58,15 @@ test('服务器截断并保存 MCTS 设置，大厅视图原样回显', async t 
   const f = await fixture(false); t.after(f.close);
   const c = await connect(f.base, '房主'); t.after(c.close);
   c.send({ t: 'createRoom', name: '房主', config: { playerCount: 3, bots: 1,
-    mctsSimulations: 999999, mctsMaxDepth: -7 } });
+    mctsSimulations: 999999, mctsMaxDepth: -7, mctsParticles: 999 } });
   await until(() => c.state && c.state.phase === 'lobby', 'lobby view');
   assert.equal(c.state.config.mctsSimulations, 2000, '越界的模拟数被截断');
   assert.equal(c.state.config.mctsMaxDepth, 0, '负数深度按 0（自动）保存');
-  c.send({ t: 'config', config: { mctsSimulations: 120, mctsMaxDepth: 40 } });
+  assert.equal(c.state.config.mctsParticles, 8, '粒子数被截断到上限');
+  c.send({ t: 'config', config: { mctsSimulations: 120, mctsMaxDepth: 40, mctsParticles: 6 } });
   await until(() => c.state.config.mctsSimulations === 120, 'config update applied');
   assert.equal(c.state.config.mctsMaxDepth, 40);
+  assert.equal(c.state.config.mctsParticles, 6);
   c.send({ t: 'config', config: { mctsSimulations: 0 } });
   await until(() => c.state.config.mctsSimulations === 0, '关闭搜索');
 });

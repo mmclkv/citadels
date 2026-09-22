@@ -90,6 +90,9 @@ function clampMctsSimulations(value) {
 function clampMctsDepth(value) {
   return Math.max(0, Math.min(MCTS_MAX_DEPTH_CAP, Math.floor(Number(value) || 0)));
 }
+function clampMctsParticles(value) {
+  return Math.max(1, Math.min(8, Math.floor(Number(value) || 4)));
+}
 
 /* ------------------------------ 静态资源 ------------------------------ */
 const MIME = {
@@ -181,6 +184,7 @@ function createRoom(hostName, config) {
       botPace: Number(config.botPace) || 430,
       mctsSimulations: clampMctsSimulations(config.mctsSimulations),
       mctsMaxDepth: clampMctsDepth(config.mctsMaxDepth),
+      mctsParticles: clampMctsParticles(config.mctsParticles),
       // 房主可关闭本房间语音；服务器没配 LiveKit 时这项没有意义，但保留开关值，
       // 这样同一个房间配置在换服务器后行为一致。
       voice: config.voice !== false
@@ -547,6 +551,7 @@ function handle(ws, info, msg) {
         if (msg.config.botPace) r.config.botPace = Number(msg.config.botPace) || r.config.botPace;
         if (msg.config.mctsSimulations != null) r.config.mctsSimulations = clampMctsSimulations(msg.config.mctsSimulations);
         if (msg.config.mctsMaxDepth != null) r.config.mctsMaxDepth = clampMctsDepth(msg.config.mctsMaxDepth);
+        if (msg.config.mctsParticles != null) r.config.mctsParticles = clampMctsParticles(msg.config.mctsParticles);
         if (msg.config.voice != null) r.config.voice = msg.config.voice !== false;
         if (msg.config.playerCount) {
           const t = Math.max(2, Math.min(8, msg.config.playerCount));
