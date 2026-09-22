@@ -72,6 +72,8 @@ function loadAdminCredentials() {
 }
 
 const adminCredentials = loadAdminCredentials();
+const consoleOrigins = String(process.env.CITADELS_CONSOLE_ORIGINS || 'https://mmclkv.github.io')
+  .split(',').map(value => value.trim()).filter(Boolean);
 const serverLogBuffer = [];
 function serverLog(level, ...args) {
   const text = args.map(value => {
@@ -889,10 +891,28 @@ function isAdminAuthenticated(req) {
     safeCredentialEqual(decoded.slice(separator + 1), adminCredentials.password);
 }
 
-function rejectServerConsoleAuth(res, message) {
-  return sendJson(res, 401, { error: message || '需要管理员账号密码' }, {
+function consoleCorsHeaders(req) {
+  const origin = String(req.headers.origin || '');
+  if (!origin || !consoleOrigins.includes(origin)) return {};
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Max-Age': '600',
+    'Vary': 'Origin'
+  };
+}
+
+function rejectServerConsoleAuth(res, message, extraHeaders) {
+  return sendJson(res, 401, { error: message || '需要管理员账号密码' }, Object.assign({
     'WWW-Authenticate': 'Basic realm="Citadels server console", charset="UTF-8"'
-  });
+  }, extraHeaders || {}));
+}
+
+function isSecureRequest(req) {
+  if (req.socket && req.socket.encrypted) return true;
+  return process.env.CITADELS_TRUST_PROXY_TLS === '1' &&
+    String(req.headers['x-forwarded-proto'] || '').toLowerCase() === 'https';
 }
 
 /* 语音状态只对外报告「有没有配好」和一句人话，不返回 API Key/Secret；
@@ -927,9 +947,18 @@ function voiceTokenThrottle(req) {
 const server = http.createServer(async (req, res) => {
   if (localCodexGateway && await localCodexGateway.handle(req, res)) return;
   const pathname = req.url.split('?')[0];
+  if (pathname === '/api/server/status' && req.method === 'OPTIONS') {
+    const cors = consoleCorsHeaders(req);
+    if (!cors['Access-Control-Allow-Origin']) return sendJson(res, 403, { error: '未允许的控制台来源' });
+    res.writeHead(204, cors);
+    return res.end();
+  }
   if (pathname === '/api/server/status' && req.method === 'GET') {
-    if (!isLoopback(req)) return sendJson(res, 403, { error: '服务器控制台仅允许本机访问' });
-    if (!isAdminAuthenticated(req)) return rejectServerConsoleAuth(res);
+    const cors = consoleCorsHeaders(req);
+    if (!isLoopback(req) && !isSecureRequest(req)) {
+      return sendJson(res, 400, { error: '公网访问服务器控制台必须使用 HTTPS' }, cors);
+    }
+    if (!isAdminAuthenticated(req)) return rejectServerConsoleAuth(res, '需要管理员账号密码', cors);
     const training = trainingManager.status();
     return sendJson(res, 200, {
       startedAt: serverStartedAt,
@@ -947,7 +976,7 @@ const server = http.createServer(async (req, res) => {
       neural: { configured: !!localNeuralBot.status().configured, message: localNeuralBot.status().message },
       voice: voiceStatus(),
       logs: serverLogBuffer.slice(-200)
-    });
+    }, cors);
   }
   if (pathname === '/api/training/status' && req.method === 'GET') {
     const payload = trainingManager.status();
