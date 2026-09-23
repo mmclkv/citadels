@@ -37,8 +37,13 @@
     });
     return best;
   }
-  function cloneState(state) {
-    return JSON.parse(JSON.stringify(state));
+  function cloneState(state, playerId) {
+    const actorIdx = state.players.findIndex(p => p.id === playerId);
+    // 信息集视图会把对手手牌替换成只能读取 length 的不透明对象。
+    // 这种视图不能安全复制成完整规则状态，直接关闭模拟，继续使用公开信息评分。
+    if (actorIdx >= 0 && state.players.some((p, i) => i !== actorIdx && !Array.isArray(p.hand))) return null;
+    try { return JSON.parse(JSON.stringify(state)); }
+    catch (_) { return null; }
   }
   function strategicPosition(state, playerId) {
     const idx = state.players.findIndex(p => p.id === playerId);
@@ -54,7 +59,7 @@
     state.players.forEach((other, i) => {
       if (i === idx) return;
       const gap = p.city.length - other.city.length;
-      if (other.city.length >= target - 1 && other.hand.some(card => canBuildCard(other, card, other.gold))) {
+      if (other.city.length >= target - 1 && other.hand.length > 0 && other.gold >= 1) {
         value -= 2.5;
       }
       if (gap >= 2) value += 0.4;
@@ -62,7 +67,8 @@
     return value;
   }
   function projectedActionPosition(state, playerId, action) {
-    const copy = cloneState(state);
+    const copy = cloneState(state, playerId);
+    if (!copy) return null;
     const result = Engine.applyAction(copy, playerId, action);
     if (!result || !result.ok) return null;
     return { state: copy, value: strategicPosition(copy, playerId) };
@@ -122,8 +128,7 @@
     if (left === 0) v -= 8.0;
     // 对手已经接近结束时，优先能让自己立即完成的建筑，减少被动等待一轮的风险。
     const opponentThreat = state.players.some(o => o !== player &&
-      o.city.length >= state.config.endDistricts - 1 &&
-      o.hand.some(card => canBuildCard(o, card, o.gold)));
+      o.city.length >= state.config.endDistricts - 1 && o.hand.length > 0 && o.gold >= 1);
     if (opponentThreat && left === 1) v += 3.0;
     return v;
   }
@@ -220,6 +225,69 @@
     const res = Engine.getAvailableActions(state, playerId) || {};
     return (res.actions || []).filter(a => a.type === type && !a.disabled);
   }
+  function roleForNum(state, num) {
+    const active = (state.charDeck || []).find(id => {
+      const c = Engine.charOf(id);
+      return c && c.num === num;
+    });
+    if (active) return Engine.charOf(active);
+    return Object.keys(CHAR_MAP).map(id => CHAR_MAP[id]).find(c => c.num === num) || null;
+  }
+  function rolePubliclyConfirmed(state, player, role) {
+    if (!role || !Array.isArray(state.log)) return false;
+    const name = String(player.name || '');
+    const roleName = String(role.name || '');
+    return state.log.some(entry => {
+      const text = String(entry && entry.text || '');
+      return text.includes('【' + roleName + '】' + name) ||
+        text.includes(name + '（' + roleName + '）');
+    });
+  }
+  // 只用公开的城区、金币、手牌数量和已经公开的战报估计角色归属，
+  // 不读取 player.chars、其他玩家的手牌内容或 callQueue。
+  function roleLikelihood(state, player, role) {
+    if (!role) return 1;
+    if (rolePubliclyConfirmed(state, player, role)) return 100;
+    let score = 1;
+    const colors = colorCount(player, role.income);
+    if (role.income) score += colors * 0.7;
+    if (role.id === 'architect') score += Math.max(0, player.hand.length - 2) * 0.35 + player.gold * 0.12;
+    if (role.id === 'merchant') score += colors * 0.25 + player.gold * 0.08;
+    if (role.id === 'warlord' || role.id === 'marshal') score += Math.max(0, leaderIdx(state) >= 0 &&
+      state.players[leaderIdx(state)].city.length - player.city.length) * 0.45;
+    if (role.id === 'thief') score += player.gold < 2 ? 0.25 : 0;
+    if (role.id === 'magician' || role.id === 'wizard' || role.id === 'spy') score += player.hand.length * 0.12;
+    if (role.id === 'king' || role.id === 'emperor') score += player.hasCrown ? 0.35 : 0;
+    if (player.city.length >= state.config.endDistricts - 2 && role.buildLimit > 1) score += 0.7;
+    return Math.max(0.05, score);
+  }
+  function roleBelief(state, num, excludedIdx) {
+    const role = roleForNum(state, num);
+    if (!role) return 0;
+    let total = 0;
+    state.players.forEach((player, i) => {
+      if (i !== excludedIdx) total += roleLikelihood(state, player, role);
+    });
+    return total;
+  }
+  function targetUtility(state, player, role) {
+    const target = state.config.endDistricts;
+    let value = player.hand.length * 0.9 + player.gold * 0.25 + player.city.length * 0.7;
+    if (player.city.length >= target - 1) value += 3.5;
+    if (player.city.length >= target - 2) value += 1.5;
+    if (role && role.income) value += colorCount(player, role.income) * 0.45;
+    return value;
+  }
+  function bestPublicTarget(state, playerId, role) {
+    const idx = state.players.findIndex(p => p.id === playerId);
+    let best = null;
+    state.players.forEach((player, i) => {
+      if (i === idx) return;
+      const score = targetUtility(state, player, role);
+      if (!best || score > best.score) best = { player, score };
+    });
+    return best && best.player;
+  }
   // 刺客不知道每个角色号码实际在谁手里，不能把某个号码永久当成唯一答案。
   // 用角色威胁评分做 softmax 抽样：困难电脑更偏向高威胁角色，普通/简单电脑
   // 保留足够探索，避免每局都机械地刺杀航海家。
@@ -234,7 +302,17 @@
     };
     const temperature = level === 2 ? 0.72 : level === 1 ? 1.05 : 1.55;
     const scored = opts.map(a => {
-      let score = base[a.num] != null ? base[a.num] : 2.15;
+      // 固定先验只作为平局时的弱信号；主要依据公开局面推断该号码
+      // 可能落在谁手里，以及这个角色对当前局面的威胁。
+      const role = roleForNum(state, a.num);
+      let score = (base[a.num] != null ? base[a.num] : 2.15) * 0.35;
+      score += roleBelief(state, a.num, idx) * (role && role.buildLimit > 1 ? 0.7 : 0.35);
+      if (role) {
+        state.players.forEach((opponent, i) => {
+          if (i !== idx) score += roleLikelihood(state, opponent, role) *
+            targetUtility(state, opponent, role) * 0.08;
+        });
+      }
       if (p && p.city.length >= state.config.endDistricts - 2 && (a.num === 7 || a.num === 8)) score += 0.18;
       return { num: a.num, score };
     });
@@ -255,16 +333,17 @@
     const idx = state.players.findIndex(p => p.id === playerId);
     const base = { 2: 1.4, 3: 1.1, 4: 1.8, 5: 1.2, 6: 2.0, 7: 1.7, 8: 1.3, 9: 1.0 };
     const scored = opts.map(a => {
-      const c = charByNum(state, a.num);
-      let score = base[a.num] != null ? base[a.num] : 1.0;
+      const c = roleForNum(state, a.num);
+      let score = (base[a.num] != null ? base[a.num] : 1.0) * 0.35;
       let bestGold = 0;
       state.players.forEach((o, i) => {
         if (i === idx || o.gold < 2) return;
         const income = c && c.income ? colorCount(o, c.income) : 0;
         const flexible = o.city.filter(d => d.purple && d.purple.effect === 'anyColorIncome').length;
-        bestGold = Math.max(bestGold, o.gold * 0.35 + (income + flexible) * 0.6);
+        bestGold = Math.max(bestGold, (o.gold * 0.35 + (income + flexible) * 0.6) *
+          (roleLikelihood(state, o, c) * 0.45));
       });
-      score += bestGold;
+      score += bestGold + roleBelief(state, a.num, idx) * 0.55;
       return { num: a.num, score };
     });
     const temperature = level === 2 ? 0.65 : level === 1 ? 1.0 : 1.45;
@@ -554,7 +633,7 @@
         // 金币多时花钱买确定性，金币少时干脆赌一把让勒索者去翻
         return { type: p.gold >= 4 ? 'blackmailer_bribe' : 'blackmailer_refuse' };
       case 'spy_target': {
-        const target = state.players.filter((_, i) => i !== idx).sort((a, b) => b.hand.length - a.hand.length)[0];
+        const target = bestPublicTarget(state, p.id, CHAR_MAP.spy);
         return { type: 'spy_target', target: target && target.id };
       }
       case 'spy_color': {
@@ -566,7 +645,7 @@
         return { type: 'spy_color', color };
       }
       case 'wizard_target': {
-        const target = state.players.filter((_, i) => i !== idx).sort((a, b) => b.hand.length - a.hand.length)[0];
+        const target = bestPublicTarget(state, p.id, CHAR_MAP.wizard);
         return { type: 'wizard_target', target: target && target.id };
       }
       case 'wizard_card': {
@@ -597,10 +676,8 @@
         return { type: 'magician_mode', mode: 'redraw' };
       }
       case 'magician_swap': {
-        let mi = -1, mc = -1;
-        state.players.forEach((o, i) => { if (i !== idx && o.hand.length > mc) { mc = o.hand.length; mi = i; } });
-        if (mi < 0) mi = (idx + 1) % state.players.length;
-        return { type: 'choose_player', target: state.players[mi].id };
+        const target = bestPublicTarget(state, p.id, CHAR_MAP.magician) || state.players[(idx + 1) % state.players.length];
+        return { type: 'choose_player', target: target.id };
       }
       case 'magician_redraw': {
         const drop = [];
