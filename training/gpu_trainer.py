@@ -11,6 +11,11 @@ import numpy as np
 import torch
 from torch import nn
 
+try:
+    from entity_transformer import EntityTransformerNet
+except ImportError:
+    EntityTransformerNet = None
+
 
 PROFILES = {
     "fast": (256, 128, 128, 64, 64),
@@ -238,6 +243,16 @@ class PolicyValueNet(nn.Module):
 ROLLOUT_MAGIC = b"CTRL"
 ROLLOUT_VERSION = 1
 ROLLOUT_HEADER = struct.Struct("<4s7I")
+
+
+def create_model(architecture, profile):
+    if architecture in (None, "", "flat", "policy-value"):
+        return PolicyValueNet(profile)
+    if architecture == "entity-v1":
+        if EntityTransformerNet is None:
+            raise RuntimeError("无法加载 entity_transformer.py")
+        return EntityTransformerNet(profile)
+    raise ValueError("不支持的网络架构：%s" % architecture)
 
 
 def load_rollout(filename):
@@ -471,7 +486,7 @@ def main():
                 if requested == "cuda" and not use_cuda:
                     raise RuntimeError("已要求 CUDA，但 PyTorch 无法访问 CUDA")
                 device = torch.device("cuda" if use_cuda else "cpu")
-                model = PolicyValueNet(command["profile"])
+                model = create_model(command.get("architecture", "flat"), command["profile"])
                 model.load_flat(command["modelPath"])
                 model.to(device)
                 model.eval()
