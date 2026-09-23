@@ -164,6 +164,16 @@ class EntityTransformerPolicy {
     for (let i = 0; i < VALUE_SLOTS; i++) values[i] = this.valueOut.forward(tokens[i + 1], false)[0];
     return { logits, probs: softmax(logits), valueVector: values, value: values[0], tokens };
   }
+  choose(state, actions) {
+    const out = this.forward(state, actions);
+    let random = Math.random(), chosen = Math.max(0, actions.length - 1);
+    for (let i = 0; i < out.probs.length; i++) {
+      random -= out.probs[i];
+      if (random <= 0) { chosen = i; break; }
+    }
+    return { chosen, probability: out.probs[chosen] || 0, valueVector: out.valueVector,
+      value: out.value, entropy: 0 };
+  }
   exportFlat() {
     const flat = new Float32Array(this.parameterCount); let offset = 0;
     for (const layer of this.layers) {
@@ -175,6 +185,37 @@ class EntityTransformerPolicy {
       } else { flat.set(layer.w, offset); offset += layer.w.length; flat.set(layer.b, offset); offset += layer.b.length; }
     }
     return flat;
+  }
+  importFlat(flat) {
+    if (!flat || flat.length !== this.parameterCount) {
+      throw new Error('entity-transformer-v1 参数数量不匹配');
+    }
+    let offset = 0;
+    const copyDense = layer => {
+      layer.w.set(flat.subarray(offset, offset + layer.w.length)); offset += layer.w.length;
+      layer.b.set(flat.subarray(offset, offset + layer.b.length)); offset += layer.b.length;
+    };
+    for (const layer of this.layers) {
+      if (layer instanceof TransformerBlock) {
+        for (const dense of [layer.q, layer.k, layer.v, layer.attnOut, layer.ff1, layer.ff2]) copyDense(dense);
+        for (const vector of [layer.norm1Gamma, layer.norm1Beta, layer.norm2Gamma, layer.norm2Beta]) {
+          vector.set(flat.subarray(offset, offset + vector.length)); offset += vector.length;
+        }
+      } else copyDense(layer);
+    }
+  }
+  export() {
+    return {
+      version: 1, architecture: ENTITY_ENCODING_VERSION, profile: this.profileName,
+      stateSize: this.stateSize, actionSize: this.actionSize,
+      parameterCount: this.parameterCount, flat: Array.from(this.exportFlat())
+    };
+  }
+  import(data) {
+    if (!data || data.version !== 1 || data.architecture !== ENTITY_ENCODING_VERSION ||
+        data.profile !== this.profileName || data.stateSize !== this.stateSize ||
+        data.actionSize !== this.actionSize) throw new Error('不兼容的 entity-transformer-v1 checkpoint');
+    this.importFlat(Float32Array.from(data.flat || []));
   }
   get parameterCount() { return this.layers.reduce((n, layer) => n + layer.parameterCount, 0); }
 }

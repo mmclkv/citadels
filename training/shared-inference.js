@@ -10,11 +10,12 @@ const { spawn } = require('node:child_process');
  * they never create a Python or GPU context themselves.
  */
 class SharedInferenceDaemon {
-  constructor({ root, modelPath, profile = 'balanced', device = 'cuda', slots = 8,
+  constructor({ root, modelPath, profile = 'balanced', architecture = 'flat', device = 'cuda', slots = 8,
     slotBytes = 8 * 1024 * 1024, onLog = () => {} }) {
     this.root = root;
     this.modelPath = modelPath;
     this.profile = profile;
+    this.architecture = architecture || 'flat';
     this.device = device;
     this.slots = slots;
     this.slotBytes = slotBytes;
@@ -36,6 +37,7 @@ class SharedInferenceDaemon {
     this.child = spawn(this.python, ['-u', this.script,
       '--name', this.name,
       '--profile', this.profile,
+      '--architecture', this.architecture,
       '--device', this.device,
       '--model', this.modelPath,
       '--slots', String(this.slots),

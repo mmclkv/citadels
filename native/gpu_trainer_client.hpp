@@ -281,7 +281,8 @@ class GpuTrainerClient {
 
   void start(const std::string& profile, const std::string& model_path,
              float learning_rate, const std::string& device,
-             const std::string& protocol = "json");
+             const std::string& protocol = "json",
+             const std::string& architecture = "flat");
   BatchEvaluationResult evaluate(const std::vector<std::vector<float>>& states,
                                  const std::vector<std::vector<std::vector<float>>>& actions,
                                  const std::string& profile);
@@ -319,7 +320,8 @@ inline std::wstring wide_path(const std::string& path) {
 
 inline void GpuTrainerClient::start(const std::string& profile, const std::string& model_path,
                                     float learning_rate, const std::string& device,
-                                    const std::string& protocol) {
+                                    const std::string& protocol,
+                                    const std::string& architecture) {
   if (running_) return;
   SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
   HANDLE child_out_read = nullptr, child_out_write = nullptr;
@@ -346,6 +348,7 @@ inline void GpuTrainerClient::start(const std::string& profile, const std::strin
   std::ostringstream init;
   binary_protocol_ = protocol == "binary";
   init << "{\"cmd\":\"init\",\"profile\":\"" << json_escape(profile)
+       << "\",\"architecture\":\"" << json_escape(architecture)
        << "\",\"learningRate\":" << learning_rate << ",\"device\":\""
        << json_escape(device) << "\",\"modelPath\":\"" << json_escape(model_path)
        << "\"" << (binary_protocol_ ? ",\"protocol\":\"binary\"" : "") << "}\n";
@@ -445,7 +448,7 @@ namespace citadels::native {
 inline std::vector<uint8_t> GpuTrainerClient::request_binary(const std::vector<uint8_t>&) {
   throw std::runtime_error("当前平台尚未实现 gpu_trainer binary 双向进程管道");
 }
-inline void GpuTrainerClient::start(const std::string&, const std::string&, float, const std::string&, const std::string&) {
+inline void GpuTrainerClient::start(const std::string&, const std::string&, float, const std::string&, const std::string&, const std::string&) {
   throw std::runtime_error("当前平台尚未实现 gpu_trainer 双向进程管道");
 }
 inline BatchEvaluationResult GpuTrainerClient::evaluate(const std::vector<std::vector<float>>&,

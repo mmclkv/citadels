@@ -36,7 +36,8 @@ function formConfig() {
   return {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
-    profile: $('profile').value, rulesEngine, mctsEngine, neuralNetworkFramework, device: $('device').value,
+    profile: $('profile').value, networkArchitecture: $('network-architecture').value,
+    rulesEngine, mctsEngine, neuralNetworkFramework, device: $('device').value,
     backend: mctsEngine === 'cpp' ? 'native' : 'gpu',
     nativeInferenceBackend: neuralNetworkFramework === 'libtorch' ? 'libtorch' : 'python-binary',
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
@@ -77,6 +78,7 @@ const CONFIG_FIELDS = [
   ['maxPlayers', 'max-players', 'select'],
   ['charSet', 'char-set', 'select'],
   ['profile', 'profile', 'select'],
+  ['networkArchitecture', 'network-architecture', 'select'],
   ['rulesEngine', 'rules-engine', 'select'],
   ['mctsEngine', 'mcts-engine', 'select'],
   ['neuralNetworkFramework', 'neural-network-framework', 'select'],

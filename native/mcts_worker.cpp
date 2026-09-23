@@ -240,7 +240,8 @@ int main() {
         } else if (!gpu) {
           gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));
           gpu->start(string_field(request, "profile", "balanced"), model_path, 0.0003f,
-                     string_field(request, "device", "cuda"), "binary");
+                     string_field(request, "device", "cuda"), "binary",
+                     string_field(request, "architecture", "flat"));
           batch = std::make_unique<BatchEvaluator>(make_gpu_batch_backend(gpu,
             string_field(request, "profile", "balanced")));
           neural = std::make_unique<NativeNeuralBatchedEvaluator>(*batch,

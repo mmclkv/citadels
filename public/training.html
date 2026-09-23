@@ -21,6 +21,7 @@
         <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option></select></label>
         <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
+        <label><span>网络架构</span><select id="network-architecture"><option value="flat" selected>传统全连接（兼容旧权重）</option><option value="entity-v1">Entity Transformer v1（新权重）</option></select><small>新架构不会读取或覆盖旧网络 checkpoint</small></label>
         <label><span>规则引擎</span><select id="rules-engine"><option value="js" selected>JS</option><option value="cpp" disabled>C++（尚未支持完整规则）</option></select><small>当前只有 JS 规则引擎支持完整对局；C++ 规则选项暂不可用</small></label>
         <label><span>MCTS 引擎</span><select id="mcts-engine"><option value="cpp" selected>C++</option></select><small>固定使用 C++ MCTS；未找到 worker 时训练直接报错</small></label>
         <label><span>神经网络框架</span><select id="neural-network-framework"><option value="pytorch" selected>PyTorch</option><option value="libtorch">LibTorch（C++）</option></select><small id="neural-framework-hint">用于神经网络推理</small></label>

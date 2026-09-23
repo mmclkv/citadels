@@ -7,6 +7,7 @@ const os = require('os');
 const Engine = require('../src/engine.js');
 const HeuristicAI = require('../src/ai.js');
 const { PolicyValueNetwork, PROFILES, VALUE_SLOTS, mulberry32 } = require('./neural-policy.js');
+const { EntityTransformerPolicy, ENTITY_PROFILES, ENTITY_ENCODING_VERSION } = require('./entity-transformer-policy.js');
 const { TorchBridge } = require('./torch-bridge.js');
 const { SharedInferenceDaemon } = require('./shared-inference.js');
 const { SelfPlayPool } = require('./selfplay-pool.js');
@@ -718,6 +719,8 @@ function sanitizeConfig(input = {}) {
     charSet: ['base', 'dark', 'mixed', 'random'].includes(input.charSet) ? input.charSet : 'random',
     endDistricts: [7, 8].includes(Number(input.endDistricts)) ? Number(input.endDistricts) : 8,
     profile: PROFILES[input.profile] ? input.profile : 'balanced',
+    networkArchitecture: ['flat', ENTITY_ENCODING_VERSION].includes(input.networkArchitecture)
+      ? input.networkArchitecture : 'flat',
     rulesEngine, mctsEngine, neuralNetworkFramework,
     backend: effectiveBackend,
     device: ['cuda', 'cpu'].includes(input.device)
@@ -767,6 +770,15 @@ function sanitizeConfig(input = {}) {
     curriculumStepGames: clampInteger(input.curriculumStepGames, 1, 1000000, 1000),
     trainNetworkOnly: input.trainNetworkOnly !== false
   };
+}
+
+function createPolicyNetwork(config) {
+  if (config.networkArchitecture === ENTITY_ENCODING_VERSION) {
+    return new EntityTransformerPolicy({ profile: config.profile, stateSize: STATE_SIZE,
+      actionSize: ACTION_SIZE, seed: config.seed });
+  }
+  return new PolicyValueNetwork({ profile: config.profile, stateSize: STATE_SIZE,
+    actionSize: ACTION_SIZE, seed: config.seed });
 }
 
 function atomicWrite(file, data) {
@@ -830,7 +842,7 @@ function immediate() { return new Promise(resolve => setImmediate(resolve)); }
 async function train(rawConfig, hooks = {}) {
   const config = sanitizeConfig(rawConfig);
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const model = new PolicyValueNetwork({ profile: config.profile, stateSize: STATE_SIZE, actionSize: ACTION_SIZE, seed: config.seed });
+  const model = createPolicyNetwork(config);
   const restored = loadCheckpoint(model, config.resumeCheckpoint);
   let completedGames = restored.game;
   const initialCompletedGames = completedGames;
@@ -915,6 +927,7 @@ async function train(rawConfig, hooks = {}) {
     if (useSharedMemoryDaemon) {
       sharedInference = new SharedInferenceDaemon({
         root: ROOT, modelPath: torch.modelPath, profile: config.profile,
+        architecture: config.networkArchitecture,
         device: config.device || 'cuda', onLog: log
       });
       try {

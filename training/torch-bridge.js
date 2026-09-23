@@ -79,7 +79,7 @@ class TorchBridge {
       ? path.join(this.dataDir, resumeCheckpoint.replace(/\.json\.gz$/, '.optimizer.pt')) : '';
     try {
       this.info = await this.request({
-        cmd: 'init', profile: this.config.profile, learningRate: this.config.learningRate,
+        cmd: 'init', profile: this.config.profile, architecture: this.config.networkArchitecture || 'flat', learningRate: this.config.learningRate,
         device: this.config.device || (this.config.backend === 'cpu' ? 'cpu' : 'cuda'), modelPath: this.modelPath, optimizerPath
       });
       this.onLog('训练器 init 完成：profile=' + this.config.profile + ' · lr=' + this.config.learningRate +

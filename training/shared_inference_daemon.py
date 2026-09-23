@@ -9,7 +9,7 @@ from multiprocessing import shared_memory
 # The bundled Python uses an isolated sys.path, so the script directory is not
 # automatically importable when launched by Node with an absolute script path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gpu_trainer import PolicyValueNet, binary_batch_eval
+from gpu_trainer import create_model, binary_batch_eval
 import torch
 
 # 实测（2026-09-18 诊断）：daemon 默认用满所有核做 intra-op 并行（6 核机器上
@@ -41,6 +41,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True)
     parser.add_argument("--profile", default="balanced")
+    parser.add_argument("--architecture", default="flat")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--model", required=True)
     parser.add_argument("--slots", type=int, default=8)
@@ -57,7 +58,7 @@ def main():
     if args.device == "cuda" and not use_cuda:
         raise RuntimeError("已要求 CUDA，但 PyTorch 无法访问 CUDA")
     device = torch.device("cuda" if use_cuda else "cpu")
-    model = PolicyValueNet(args.profile)
+    model = create_model(args.architecture, args.profile)
     model.load_flat(args.model)
     model.to(device)
     model.eval()

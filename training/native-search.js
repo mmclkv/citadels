@@ -16,7 +16,7 @@ const DEFAULT_SEARCH_TIMEOUT_MS = 120000;
 
 class NativeSearchClient {
   constructor({ root, executable, childProvider = null, restartChild = null, simulations = 50, maxDepth = 200, batchSize = 32, cPuct = 1, seed = 1,
-    gpuEvaluator = false, python = '', script = '', profile = 'balanced', device = 'cuda',
+    gpuEvaluator = false, python = '', script = '', profile = 'balanced', architecture = 'flat', device = 'cuda',
     inferenceBackend = 'python-binary', sharedMemoryName = '', sharedMemorySlots = 8,
     sharedMemorySlotBytes = 8 * 1024 * 1024, searchTimeoutMs = DEFAULT_SEARCH_TIMEOUT_MS }) {
     const binary = executable || process.env.CITADELS_NATIVE_SEARCH_WORKER;
@@ -52,6 +52,7 @@ class NativeSearchClient {
     this.python = python;
     this.script = script;
     this.profile = profile;
+    this.architecture = architecture || 'flat';
     this.device = device;
     this.inferenceBackend = inferenceBackend === 'libtorch' ? 'libtorch' : 'python-binary';
     this.sharedMemoryName = sharedMemoryName || '';
@@ -216,6 +217,7 @@ class NativeSearchClient {
       request.python = this.python;
       request.script = this.script;
       request.profile = this.profile;
+      request.architecture = this.architecture;
       request.device = this.device;
       request.inferenceBackend = this.inferenceBackend;
       request.modelPath = this.modelPath;

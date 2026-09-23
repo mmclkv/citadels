@@ -3,12 +3,15 @@
 const fs = require('fs');
 const { parentPort, workerData } = require('worker_threads');
 const { PolicyValueNetwork, mulberry32 } = require('./neural-policy.js');
+const { EntityTransformerPolicy, ENTITY_ENCODING_VERSION } = require('./entity-transformer-policy.js');
 const { runSelfPlayGame } = require('./train.js');
 const { NativeSearchClient } = require('./native-search.js');
 
-const model = new PolicyValueNetwork({ profile: workerData.config.profile,
-  stateSize: 672, actionSize: 256, encodingVersion: 7,
-  seed: workerData.config.seed ^ (workerData.workerId * 2654435761) });
+const model = workerData.config.networkArchitecture === ENTITY_ENCODING_VERSION
+  ? new EntityTransformerPolicy({ profile: workerData.config.profile, stateSize: 672, actionSize: 256,
+    seed: workerData.config.seed ^ (workerData.workerId * 2654435761) })
+  : new PolicyValueNetwork({ profile: workerData.config.profile, stateSize: 672, actionSize: 256,
+    encodingVersion: 7, seed: workerData.config.seed ^ (workerData.workerId * 2654435761) });
 let modelVersion = -1;
 let stopping = false;
 
@@ -34,6 +37,7 @@ function getNativeSearch() {
     python: require('node:path').join(__dirname, '..', '.python', 'python.exe'),
     script: require('node:path').join(__dirname, 'gpu_trainer.py'),
     profile: workerData.config.profile,
+    architecture: workerData.config.networkArchitecture || 'flat',
     device: workerData.config.device || (workerData.config.backend === 'cpu' ? 'cpu' : 'cuda'),
     inferenceBackend: workerData.config.nativeInferenceBackend || 'python-binary',
     sharedMemoryName: workerData.config.sharedMemoryName || '',
