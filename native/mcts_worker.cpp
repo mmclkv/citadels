@@ -167,7 +167,7 @@ int main() {
   std::unique_ptr<BatchEvaluator> shared_batch;
   std::unique_ptr<NativeNeuralBatchedEvaluator> shared_neural;
 #ifdef CITADELS_LIBTORCH
-  std::unique_ptr<LibTorchNeuralBatchedEvaluator> direct_neural;
+  std::unique_ptr<DirectNeuralEvaluator> direct_neural;
 #endif
   std::string gpu_model_path;
   int gpu_model_version = -1;
@@ -216,12 +216,17 @@ int main() {
         const int model_version = int_field(request, "modelVersion", 0);
         if (inference_backend == "libtorch") {
 #ifdef CITADELS_LIBTORCH
-          if (string_field(request, "architecture", "flat") != "flat")
-            throw std::runtime_error("当前 LibTorch 直连暂不支持 entity-transformer-v1；请使用 PyTorch 推理后端");
           if (!direct_neural) {
-            direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
-              string_field(request, "profile", "balanced"), model_path,
-              string_field(request, "device", "cuda"));
+            const auto architecture = string_field(request, "architecture", "flat");
+            if (architecture == "entity-v1") {
+              direct_neural = std::make_unique<LibTorchEntityTransformerEvaluator>(
+                string_field(request, "profile", "balanced"), model_path,
+                string_field(request, "device", "cuda"));
+            } else if (architecture == "flat") {
+              direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
+                string_field(request, "profile", "balanced"), model_path,
+                string_field(request, "device", "cuda"));
+            } else throw std::runtime_error("未知网络架构：" + architecture);
             context += " · 设备=" + direct_neural->device_name();
           } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
             direct_neural->reload_model(model_path);
