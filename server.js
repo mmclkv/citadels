@@ -1182,12 +1182,15 @@ async function startServer() {
     // 先监听端口，再异步准备 LibTorch worker。编译大体积 Torch 头文件时，
     // 即使耗时较长或触发 OOM，主页和“启动信息”也仍然可以访问并显示进度。
     serverLog('info', '[native] 已启用启动时自动编译/启动 mcts_worker');
-    nativeWorkerManager.start().catch(error => {
+    nativeWorkerManager.start({ build: true }).catch(error => {
       serverLog('error', '[native] mcts_worker 准备失败：' + error.message);
       serverLog('error', '[native] 策略网络房间将保持不可用，修复环境后重启 server.js');
     });
   } else {
-    serverLog('info', '[native] 默认跳过启动时自动编译；如需启用请设置 CITADELS_AUTO_BUILD_NATIVE_WORKER=1 或传入 --auto-build-native-worker');
+    serverLog('info', '[native] 默认跳过启动时自动编译，尝试复用已有 worker；如需启用自动编译请设置 CITADELS_AUTO_BUILD_NATIVE_WORKER=1 或传入 --auto-build-native-worker');
+    nativeWorkerManager.start({ build: false }).catch(error => {
+      serverLog('info', '[native] 未启动已有 worker：' + error.message);
+    });
   }
   frpManager.start().catch(error => {
     serverLog('error', '[frp] 启动失败：' + error.message);
