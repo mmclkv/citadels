@@ -4446,16 +4446,18 @@
     }
     $('#modal-title').textContent = '启动信息';
     const body = $('#modal-body');
-    body.innerHTML = '<p class="dim">正在读取 mcts_worker 启动日志…</p>';
+    body.innerHTML = '<p class="dim">正在读取 worker / FRP 启动日志…</p>';
     $('#modal').hidden = false;
     try {
       const response = await fetch(gameServerBase() + '/api/server/startup', { cache: 'no-store' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '服务器拒绝了请求');
       const state = data.worker || {};
+      const frp = data.frp || {};
       const summary = document.createElement('p');
       summary.className = 'small';
       summary.textContent = 'worker：' + (state.running ? '运行中' : state.exists ? '已编译但未运行' : '未找到编译产物');
+      if (frp.enabled) summary.textContent += '　FRP：' + (frp.running ? '运行中' : '未运行');
       const log = el('div', 'server-console-log');
       const entries = Array.isArray(data.logs) ? data.logs : [];
       if (!entries.length) log.textContent = '暂无启动阶段日志。';

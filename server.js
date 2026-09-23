@@ -18,6 +18,7 @@ const CodexGatewayModule = require('./lib/codex-agent-gateway.js');
 const TrainingManagerModule = require('./lib/training-manager.js');
 const LocalNeuralBotModule = require('./lib/local-neural-bot.js');
 const { NativeWorkerManager } = require('./lib/native-worker-manager.js');
+const { FrpManager } = require('./lib/frp-manager.js');
 const VoiceModule = require('./lib/voice.js');
 const {
   MCTS_MAX_SIMULATIONS, MCTS_DEFAULT_SIMULATIONS, MCTS_DEFAULT_MAX_DEPTH, MCTS_MAX_DEPTH_CAP
@@ -84,7 +85,7 @@ function serverLog(level, ...args) {
   }).join(' ');
   serverLogBuffer.push({ at: Date.now(), level, text });
   if (serverLogBuffer.length > 300) serverLogBuffer.splice(0, serverLogBuffer.length - 300);
-  if (capturingStartupLogs && /mcts_worker|编译|C\+\+|LibTorch|安装器/.test(text)) {
+  if (capturingStartupLogs && /mcts_worker|编译|C\+\+|LibTorch|安装器|frp|穿透/.test(text)) {
     startupLogBuffer.push({ at: Date.now(), level, text });
     if (startupLogBuffer.length > 120) startupLogBuffer.splice(0, startupLogBuffer.length - 120);
   }
@@ -94,6 +95,11 @@ const trainingManager = TrainingManagerModule.createTrainingManager({ root: ROOT
 const nativeWorkerManager = new NativeWorkerManager({
   root: ROOT,
   backend: 'libtorch',
+  log: text => serverLog('info', text)
+});
+const frpManager = new FrpManager({
+  root: ROOT,
+  port: PORT,
   log: text => serverLog('info', text)
 });
 const localNeuralBot = LocalNeuralBotModule.createLocalNeuralBot({
@@ -991,7 +997,8 @@ const server = http.createServer(async (req, res) => {
         path: nativeWorkerManager.executable,
         exists: fs.existsSync(nativeWorkerManager.executable),
         running: !!(nativeWorkerManager.child && nativeWorkerManager.child.exitCode == null)
-      }
+      },
+      frp: frpManager.status()
     });
   }
   if (pathname === '/api/training/status' && req.method === 'GET') {
@@ -1174,6 +1181,9 @@ async function startServer() {
     serverLog('error', '[native] mcts_worker 准备失败：' + error.message);
     serverLog('error', '[native] 策略网络房间将保持不可用，修复编译环境后重启 server.js');
   });
+  frpManager.start().catch(error => {
+    serverLog('error', '[frp] 启动失败：' + error.message);
+  });
   });
 }
 
@@ -1181,6 +1191,7 @@ function shutdownServer(signal) {
   serverLog('info', '\n收到 ' + signal + '，正在关闭服务…');
   localNeuralBot.close();
   nativeWorkerManager.close();
+  frpManager.close();
   trainingManager.stop();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();

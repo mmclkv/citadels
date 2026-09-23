@@ -57,6 +57,31 @@ POST /api/training/stop
 
 ## 用手机玩
 
+### 通过 FRP 暴露到公网
+
+服务器支持可选的 FRP 客户端穿透。公网机器需要单独运行 `frps`，本机安装对应版本的
+`frpc`；游戏服务器只负责把本机 `8787` 转发到已经配置好的 FRP 服务端。未设置
+`CITADELS_FRP_ENABLED=1` 时不会启动 FRP，也不会改变现有局域网玩法。
+
+HTTP 域名穿透示例（Windows PowerShell）：
+
+```powershell
+$env:CITADELS_FRP_ENABLED="1"
+$env:CITADELS_FRPC_PATH="C:\\tools\\frp\\frpc.exe"
+$env:CITADELS_FRP_SERVER_ADDR="公网服务器IP或域名"
+$env:CITADELS_FRP_SERVER_PORT="7000"
+$env:CITADELS_FRP_TOKEN="与frps一致的token"
+$env:CITADELS_FRP_TYPE="http"
+$env:CITADELS_FRP_DOMAIN="game.example.com"
+node server.js
+```
+
+Linux 使用同名环境变量即可。TCP 模式将 `CITADELS_FRP_TYPE` 设为 `tcp`，并额外设置
+`CITADELS_FRP_REMOTE_PORT`；如果已经有完整的 FRP 配置文件，也可以只设置
+`CITADELS_FRP_ENABLED=1` 和 `CITADELS_FRP_CONFIG=/path/to/frpc.toml`。FRP 的 token
+只从环境变量或外部配置读取，不会写入仓库；生成的临时配置在服务器退出时删除。
+启动日志和主页的「启动信息」会显示 frpc 的连接状态，但不会打印 token。
+
 手机和电脑连**同一个 WiFi** 时，手机浏览器直接打开 `http://<电脑内网IP>:8787` 即可
 （服务器启动时会在终端打印这个地址，也可以直接扫 `qr-code.png`）。
 
