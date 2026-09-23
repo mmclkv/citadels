@@ -25,6 +25,8 @@ const {
 } = LocalNeuralBotModule;
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
+const autoBuildNativeWorker = process.env.CITADELS_AUTO_BUILD_NATIVE_WORKER === '1' ||
+  process.argv.includes('--auto-build-native-worker');
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const SRC = path.join(ROOT, 'src');
@@ -998,7 +1000,8 @@ const server = http.createServer(async (req, res) => {
         exists: fs.existsSync(nativeWorkerManager.executable),
         running: !!(nativeWorkerManager.child && nativeWorkerManager.child.exitCode == null)
       },
-      frp: frpManager.status()
+      frp: frpManager.status(),
+      autoBuildNativeWorker
     });
   }
   if (pathname === '/api/training/status' && req.method === 'GET') {
@@ -1175,12 +1178,17 @@ async function startServer() {
     : '未启用（设置 LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET 后重启）'));
   serverLog('info', '');
 
-  // 先监听端口，再异步准备 LibTorch worker。编译大体积 Torch 头文件时，
-  // 即使耗时较长或触发 OOM，主页和“启动信息”也仍然可以访问并显示进度。
-  nativeWorkerManager.start().catch(error => {
-    serverLog('error', '[native] mcts_worker 准备失败：' + error.message);
-    serverLog('error', '[native] 策略网络房间将保持不可用，修复编译环境后重启 server.js');
-  });
+  if (autoBuildNativeWorker) {
+    // 先监听端口，再异步准备 LibTorch worker。编译大体积 Torch 头文件时，
+    // 即使耗时较长或触发 OOM，主页和“启动信息”也仍然可以访问并显示进度。
+    serverLog('info', '[native] 已启用启动时自动编译/启动 mcts_worker');
+    nativeWorkerManager.start().catch(error => {
+      serverLog('error', '[native] mcts_worker 准备失败：' + error.message);
+      serverLog('error', '[native] 策略网络房间将保持不可用，修复环境后重启 server.js');
+    });
+  } else {
+    serverLog('info', '[native] 默认跳过启动时自动编译；如需启用请设置 CITADELS_AUTO_BUILD_NATIVE_WORKER=1 或传入 --auto-build-native-worker');
+  }
   frpManager.start().catch(error => {
     serverLog('error', '[frp] 启动失败：' + error.message);
   });

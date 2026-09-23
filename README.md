@@ -9,7 +9,12 @@
 ```bash
 node server.js            # 默认端口 8787
 node server.js 9000       # 指定端口
+node server.js 8787 --auto-build-native-worker  # 启动时自动编译并启动 LibTorch worker
 ```
+
+启动时自动编译 native MCTS worker 默认关闭，避免服务器启动时因为 C++/LibTorch 编译耗时过长。
+需要时可以使用上面的命令行参数，或设置环境变量
+`CITADELS_AUTO_BUILD_NATIVE_WORKER=1` 后启动服务器。关闭该开关不会删除已有的编译产物。
 
 启动后浏览器打开：
 
