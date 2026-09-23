@@ -310,15 +310,30 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     input.seekg(0, std::ios::end); const auto bytes = input.tellg(); input.seekg(0, std::ios::beg);
     if (bytes <= 0 || bytes % static_cast<std::streamoff>(sizeof(float)) != 0) throw std::runtime_error("Entity Transformer 权重文件无效");
     std::vector<float> flat(static_cast<size_t>(bytes) / sizeof(float)); input.read(reinterpret_cast<char*>(flat.data()), bytes);
-    const auto expected = model_->parameters(); size_t total = 0;
-    for (const auto& parameter : expected) total += parameter.numel();
+    size_t total = 0;
+    auto count_linear = [&](const torch::nn::Linear& layer) { total += layer->weight.numel() + layer->bias.numel(); };
+    auto count_norm = [&](const torch::nn::LayerNorm& layer) { total += layer->weight.numel() + layer->bias.numel(); };
+    count_linear(model_->global_embed); count_linear(model_->player_embed); count_linear(model_->action_embed);
+    for (const auto& block : model_->blocks) {
+      count_linear(block->q); count_linear(block->k); count_linear(block->v); count_linear(block->attn_out);
+      count_linear(block->ff1); count_linear(block->ff2); count_norm(block->norm1); count_norm(block->norm2);
+    }
+    count_linear(model_->action1); count_linear(model_->action_out); count_linear(model_->value_out);
     if (flat.size() != total) throw std::runtime_error("Entity Transformer 参数数量不匹配");
     size_t offset = 0; torch::NoGradGuard guard;
-    for (auto& parameter : model_->parameters()) {
+    auto copy_parameter = [&](torch::Tensor parameter) {
       const size_t count = parameter.numel();
       auto tensor = torch::from_blob(flat.data() + offset, {static_cast<int64_t>(count)}, torch::TensorOptions().dtype(torch::kFloat32));
       parameter.copy_(tensor.view_as(parameter)); offset += count;
+    };
+    auto copy_linear = [&](const torch::nn::Linear& layer) { copy_parameter(layer->weight); copy_parameter(layer->bias); };
+    auto copy_norm = [&](const torch::nn::LayerNorm& layer) { copy_parameter(layer->weight); copy_parameter(layer->bias); };
+    copy_linear(model_->global_embed); copy_linear(model_->player_embed); copy_linear(model_->action_embed);
+    for (const auto& block : model_->blocks) {
+      copy_linear(block->q); copy_linear(block->k); copy_linear(block->v); copy_linear(block->attn_out);
+      copy_linear(block->ff1); copy_linear(block->ff2); copy_norm(block->norm1); copy_norm(block->norm2);
     }
+    copy_linear(model_->action1); copy_linear(model_->action_out); copy_linear(model_->value_out);
     model_->to(device_); model_->eval();
   }
  private:
