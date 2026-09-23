@@ -1147,13 +1147,6 @@ setInterval(() => {
 }, HEARTBEAT_INTERVAL_MS);
 
 async function startServer() {
-  try {
-    // 服务启动阶段就准备并拉起 LibTorch worker；房间策略玩家复用这一进程。
-    await nativeWorkerManager.start();
-  } catch (error) {
-    serverLog('error', '[native] mcts_worker 准备失败：' + error.message);
-    serverLog('error', '[native] 策略网络房间将保持不可用，修复编译环境后重启 server.js');
-  }
   server.listen(PORT, () => {
   if (process.send) process.send({ type: 'listening', port: server.address().port });
   serverLog('info', '');
@@ -1174,6 +1167,13 @@ async function startServer() {
     ? voiceService.status().message + '（' + voiceService.url + '）'
     : '未启用（设置 LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET 后重启）'));
   serverLog('info', '');
+
+  // 先监听端口，再异步准备 LibTorch worker。编译大体积 Torch 头文件时，
+  // 即使耗时较长或触发 OOM，主页和“启动信息”也仍然可以访问并显示进度。
+  nativeWorkerManager.start().catch(error => {
+    serverLog('error', '[native] mcts_worker 准备失败：' + error.message);
+    serverLog('error', '[native] 策略网络房间将保持不可用，修复编译环境后重启 server.js');
+  });
   });
 }
 
