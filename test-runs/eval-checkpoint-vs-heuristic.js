@@ -17,6 +17,7 @@ const CHECKPOINT = process.env.CHECKPOINT || 'training-data/checkpoint-004000-pl
 const GAMES = Number(process.env.GAMES || 100);
 const SIMULATIONS = Number(process.env.SIMULATIONS || 500);
 const HEURISTIC_LEVEL = process.env.HEURISTIC_LEVEL || '';
+const CHAR_SET = process.env.CHAR_SET || '';
 const PARTICLES = Number(process.env.PARTICLES || 4);
 const MAX_DEPTH = Number(process.env.MAX_DEPTH || 700);
 const MCTS_BATCH_SIZE = Number(process.env.MCTS_BATCH_SIZE || 32);
@@ -63,7 +64,7 @@ async function main() {
       const rng = mulberry32(SEED ^ (gameIndex * 2246822519));
       const playerCount = MIN_PLAYERS + Math.floor(rng() *
         (MAX_PLAYERS - MIN_PLAYERS + 1));
-      const charSet = ['base', 'dark', 'mixed'][Math.floor(rng() * 3)];
+      const charSet = CHAR_SET || ['base', 'dark', 'mixed'][Math.floor(rng() * 3)];
       // 训练会轮换策略网络的物理座位和开局皇冠；评测也必须保持这一点，
       // 否则固定 seat 0 会把座位/先手偏差误算成模型强弱。
       const placement = trainingPlacement({ seed: SEED }, gameIndex, playerCount, NETWORK_PLAYERS);
