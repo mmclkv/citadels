@@ -37,6 +37,60 @@
     });
     return best;
   }
+  function cloneState(state) {
+    return JSON.parse(JSON.stringify(state));
+  }
+  function strategicPosition(state, playerId) {
+    const idx = state.players.findIndex(p => p.id === playerId);
+    if (idx < 0) return -1e9;
+    const p = state.players[idx];
+    const target = state.config.endDistricts;
+    const colors = new Set(p.city.map(card => card.color)).size;
+    const handValue = p.hand.reduce((sum, card) => sum + Math.min(2.5, card.cost * 0.35), 0);
+    let value = p.city.reduce((sum, card) => sum + card.cost * 0.8, 0) +
+      p.city.length * 2.4 + colors * 1.4 + p.gold * 0.65 + handValue;
+    if (p.city.length >= target - 1) value += 6;
+    if (p.city.length >= target) value += 12;
+    state.players.forEach((other, i) => {
+      if (i === idx) return;
+      const gap = p.city.length - other.city.length;
+      if (other.city.length >= target - 1 && other.hand.some(card => canBuildCard(other, card, other.gold))) {
+        value -= 2.5;
+      }
+      if (gap >= 2) value += 0.4;
+    });
+    return value;
+  }
+  function projectedActionPosition(state, playerId, action) {
+    const copy = cloneState(state);
+    const result = Engine.applyAction(copy, playerId, action);
+    if (!result || !result.ok) return null;
+    return { state: copy, value: strategicPosition(copy, playerId) };
+  }
+  function buildActionScore(state, player, card) {
+    const base = buildValue(state, player, card);
+    const projected = projectedActionPosition(state, player.id, { type: 'build', uid: card.uid });
+    if (!projected) return base;
+    const before = strategicPosition(state, player.id);
+    const nextPlayer = projected.state.players.find(p => p.id === player.id);
+    const nextBuild = nextPlayer ? buildPlanScore(projected.state, nextPlayer, nextPlayer.gold) : 0;
+    // 一步看建造后的局面，再用下一张可建建筑估计第二步机会。
+    return base + (projected.value - before) * 0.55 + nextBuild * 0.18;
+  }
+  function resourceProjection(state, playerId, type) {
+    const projected = projectedActionPosition(state, playerId, { type });
+    if (!projected) return -1e9;
+    let best = projected.value;
+    // 抽牌会进入 draw_keep，多看一步每个候选保留结果，避免只按手牌数量估值。
+    if (type === 'take_cards' && projected.state.turn && projected.state.turn.pending &&
+        Array.isArray(projected.state.turn.pending.cards)) {
+      for (const card of projected.state.turn.pending.cards) {
+        const kept = projectedActionPosition(projected.state, playerId, { type: 'draw_keep', uid: card.uid });
+        if (kept) best = Math.max(best, kept.value);
+      }
+    }
+    return best;
+  }
   function buildValue(state, player, card) {
     const have = {};
     player.city.forEach(d => { have[d.color] = true; });
@@ -77,7 +131,7 @@
     let best = null, bestV = -1;
     player.hand.forEach(c => {
       if (!canBuildCard(player, c)) return;
-      const v = buildValue(state, player, c);
+      const v = buildActionScore(state, player, c);
       if (v > bestV) { bestV = v; best = c; }
     });
     return best;
@@ -360,7 +414,11 @@
     const target = state.config.endDistricts;
     const currentPlan = buildPlanScore(state, p, p.gold);
     const goldPlan = buildPlanScore(state, p, p.gold + 2 + (c.goldBonus || 0));
-    const goldScore = Math.max(0, goldPlan - currentPlan) + (p.gold < 2 ? 1.2 : 0);
+    const baseline = strategicPosition(state, p.id);
+    const goldProjection = resourceProjection(state, p.id, 'take_gold');
+    const cardProjection = resourceProjection(state, p.id, 'take_cards');
+    const goldScore = Math.max(0, goldPlan - currentPlan) +
+      Math.max(0, goldProjection - baseline) * 0.65 + (p.gold < 2 ? 1.2 : 0);
     const bestCost = p.hand.reduce((best, card) =>
       canBuildCard(p, card, p.gold + 1 + (c.goldBonus || 0)) ? Math.min(best, card.cost) : best, Infinity);
     const handPoor = p.hand.length <= 1;
@@ -374,7 +432,8 @@
     if (handPoor && p.gold < 2) return { type: 'take_cards' };
     // 抽牌的边际价值：手牌越少、当前没有可建建筑，越应该补充选择空间。
     const cardScore = (handPoor ? 2.6 : 0) + (p.hand.length <= 2 ? 1.0 : 0) +
-      (currentPlan <= 0 ? 1.8 : 0) - (p.gold >= 6 ? 0.5 : 0);
+      (currentPlan <= 0 ? 1.8 : 0) - (p.gold >= 6 ? 0.5 : 0) +
+      Math.max(0, cardProjection - baseline) * 0.65;
     if (p.city.length >= target - 2 && goldScore > 0) return { type: 'take_gold' };
     if (goldScore > cardScore || (goldHungry && bestCost < Infinity)) return { type: 'take_gold' };
     return { type: 'take_cards' };
