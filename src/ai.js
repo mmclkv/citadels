@@ -25,14 +25,29 @@
   function affordable(player) {
     return player.hand.filter(c => c.cost <= player.gold);
   }
+  function canBuildCard(player, card, gold = player.gold) {
+    return card && card.cost <= gold &&
+      player.city.filter(d => d.name === card.name).length < maxSame(player, card.name);
+  }
+  function buildPlanScore(state, player, gold = player.gold) {
+    let best = 0;
+    player.hand.forEach(card => {
+      if (!canBuildCard(player, card, gold)) return;
+      best = Math.max(best, buildValue(state, player, card));
+    });
+    return best;
+  }
   function buildValue(state, player, card) {
     const have = {};
     player.city.forEach(d => { have[d.color] = true; });
-    let v = card.cost;
+    let v = card.cost * 1.05;
     const colorsOwned = Object.keys(have).length;
     if (!have[card.color]) {
       v += 2.2;
-      if (colorsOwned === 4) v += 3.5;          // 补满五色
+      if (colorsOwned === 4) v += 5.5;          // 补满五色，终局奖励通常比单卡分更重要
+    } else {
+      // 已有同色建筑仍有收入价值，但不应压过补齐颜色或终局建筑。
+      v += Math.min(1.2, colorCount(player, card.color) * 0.25);
     }
     if (card.color === 'purple') v += 1.2;
     if (card.purple) {
@@ -41,21 +56,27 @@
       if (e === 'keepBoth' || e === 'draw3keep1') v += 1.0;
       if (e === 'smithy' || e === 'lab') v += 0.8;
       if (e === 'immune') v += 1.0;
+      if (e === 'anyColorIncome') v += colorCount(player, 'blue') === 0 ? 1.8 : 0.8;
+      if (e === 'extraBuild') v += 1.8;
     }
     // 越接近结束，越偏好高分建筑
     const left = Math.max(0, state.config.endDistricts - player.city.length);
     if (left <= 2) v += card.cost * 0.35;
     // 能直接完成城区门槛时，终局价值远高于普通建筑价值；否则 AI
     // 常会为了更高的单卡评分把胜局拖过一回合。
-    if (left === 1) v += 7.0;
+    if (left === 1) v += 9.0;
     if (left === 0) v -= 8.0;
+    // 对手已经接近结束时，优先能让自己立即完成的建筑，减少被动等待一轮的风险。
+    const opponentThreat = state.players.some(o => o !== player &&
+      o.city.length >= state.config.endDistricts - 1 &&
+      o.hand.some(card => canBuildCard(o, card, o.gold)));
+    if (opponentThreat && left === 1) v += 3.0;
     return v;
   }
   function bestBuildCard(state, player) {
     let best = null, bestV = -1;
     player.hand.forEach(c => {
-      if (c.cost > player.gold) return;
-      if (player.city.filter(d => d.name === c.name).length >= maxSame(player, c.name)) return;
+      if (!canBuildCard(player, c)) return;
       const v = buildValue(state, player, c);
       if (v > bestV) { bestV = v; best = c; }
     });
@@ -337,16 +358,11 @@
   function chooseResource(state, idx, c, level) {
     const p = state.players[idx];
     const target = state.config.endDistricts;
-    // 手牌里能盖得起的最高价值
-    let goldScore = 0;
-    let bestCost = Infinity;
-    p.hand.forEach(card => {
-      if (p.city.filter(d => d.name === card.name).length >= maxSame(p, card.name)) return;
-      if (card.cost <= p.gold + 2 + (c.goldBonus || 0)) {
-        goldScore = Math.max(goldScore, buildValue(state, p, card));
-      }
-      if (card.cost <= p.gold + 1 + (c.goldBonus || 0)) bestCost = Math.min(bestCost, card.cost);
-    });
+    const currentPlan = buildPlanScore(state, p, p.gold);
+    const goldPlan = buildPlanScore(state, p, p.gold + 2 + (c.goldBonus || 0));
+    const goldScore = Math.max(0, goldPlan - currentPlan) + (p.gold < 2 ? 1.2 : 0);
+    const bestCost = p.hand.reduce((best, card) =>
+      canBuildCard(p, card, p.gold + 1 + (c.goldBonus || 0)) ? Math.min(best, card.cost) : best, Infinity);
     const handPoor = p.hand.length <= 1;
     const goldHungry = p.gold < 3;
     if (c.id === 'navigator') {
@@ -356,11 +372,11 @@
     // 最后一栋建筑优先保证金币，不要因为手牌少而错过直接结束游戏的机会。
     if (p.city.length >= target - 1 && bestCost < Infinity) return { type: 'take_gold' };
     if (handPoor && p.gold < 2) return { type: 'take_cards' };
-    if (handPoor) return { type: 'take_cards' };
-    if (goldScore >= 3.2 && !goldHungry) return { type: 'take_gold' };
+    // 抽牌的边际价值：手牌越少、当前没有可建建筑，越应该补充选择空间。
+    const cardScore = (handPoor ? 2.6 : 0) + (p.hand.length <= 2 ? 1.0 : 0) +
+      (currentPlan <= 0 ? 1.8 : 0) - (p.gold >= 6 ? 0.5 : 0);
     if (p.city.length >= target - 2 && goldScore > 0) return { type: 'take_gold' };
-    if (p.hand.length <= 2) return { type: 'take_cards' };
-    if (goldScore >= 2.4) return { type: 'take_gold' };
+    if (goldScore > cardScore || (goldHungry && bestCost < Infinity)) return { type: 'take_gold' };
     return { type: 'take_cards' };
   }
 
