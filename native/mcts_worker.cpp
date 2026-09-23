@@ -216,6 +216,8 @@ int main() {
         const int model_version = int_field(request, "modelVersion", 0);
         if (inference_backend == "libtorch") {
 #ifdef CITADELS_LIBTORCH
+          if (string_field(request, "architecture", "flat") != "flat")
+            throw std::runtime_error("当前 LibTorch 直连暂不支持 entity-transformer-v1；请使用 PyTorch 推理后端");
           if (!direct_neural) {
             direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
               string_field(request, "profile", "balanced"), model_path,
