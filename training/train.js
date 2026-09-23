@@ -796,17 +796,19 @@ function sampleHistory(history, limit = 400) {
 // 把训练配置里「会影响模型走向」的几个维度拼成可读、ASCII 安全、不带歧义的
 // checkpoint 后缀。训练者一眼就能从文件名区分出不同配置的产物：
 //   p<profile>    fast / balanced / large，决定网络层宽与深度
+//   a<architecture> flat / entity-v1，决定网络拓扑与状态编码
 //   m<mctsSims>   每步 MCTS 模拟数（0 = 未启用），决定训练目标分布的平滑度
 //   e<evaluator>  native / gpu，均表示由 C++ MCTS worker 负责搜索
 //   c<charSet>    random / base / dark / mixed，决定训练分布
 //   s<seed>       随机种子，决定初始权重与采样路径
 function configTag(config) {
   const profile = PROFILES[config.profile] ? config.profile : 'balanced';
+  const architecture = config.networkArchitecture === 'entity-v1' ? 'entity-v1' : 'flat';
   const mcts = Math.max(0, Math.min(10000, Math.round(Number(config.mctsSimulations) || 0)));
   const evaluator = config.mctsEvaluator === 'gpu' ? 'gpu' : 'native';
   const charSet = ['base', 'dark', 'mixed', 'random'].includes(config.charSet) ? config.charSet : 'random';
   const seed = Math.floor(Number(config.seed) || 0);
-  return ['p' + profile, 'm' + mcts, 'e' + evaluator, 'c' + charSet, 's' + seed].join('-');
+  return ['p' + profile, 'a' + architecture, 'm' + mcts, 'e' + evaluator, 'c' + charSet, 's' + seed].join('-');
 }
 
 function saveCheckpoint(model, config, game, history) {

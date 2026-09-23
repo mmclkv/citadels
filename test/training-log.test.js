@@ -108,7 +108,7 @@ async function runAndCaptureLogs(config) {
   // 清理：删掉刚才生成的真实 checkpoint 文件（避免污染 training-data/）
   try {
     for (const file of fs.readdirSync(path.join(__dirname, '..', 'training-data'))) {
-      if (/^checkpoint-\d+-pfast-m0-ejs-crandom-s7\.json\.gz$/.test(file)) {
+      if (/^checkpoint-\d+-pfast-aflat-m0-ejs-crandom-s7\.json\.gz$/.test(file)) {
         fs.unlinkSync(path.join(__dirname, '..', 'training-data', file));
       }
     }

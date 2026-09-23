@@ -12,7 +12,7 @@ const { createTrainingManager } = require('../lib/training-manager.js');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'citadels-ckpt-new-'));
   const dataDir = path.join(root, 'training-data');
   fs.mkdirSync(dataDir, { recursive: true });
-  const newName = 'checkpoint-000200-pbalanced-m200-crandom-s20260913.json.gz';
+  const newName = 'checkpoint-000200-pbalanced-aentity-v1-m200-crandom-s20260913.json.gz';
   const newFile = path.join(dataDir, newName);
   fs.writeFileSync(newFile, zlib.gzipSync(JSON.stringify({ game: 200 })));
   // 故意把 mtime 调成具体值，便于断言
@@ -69,10 +69,10 @@ const { createTrainingManager } = require('../lib/training-manager.js');
   const profile = 'balanced', mctsSims = 200, evaluator = 'gpu',
     charSet = 'random', seed = 20260913;
   const expected = 'checkpoint-000100-' +
-    ['p' + profile, 'm' + mctsSims, 'e' + evaluator, 'c' + charSet, 's' + seed].join('-') + '.json.gz';
+    ['p' + profile, 'aentity-v1', 'm' + mctsSims, 'e' + evaluator, 'c' + charSet, 's' + seed].join('-') + '.json.gz';
   assert.strictEqual(expected,
-    'checkpoint-000100-pbalanced-m200-egpu-crandom-s20260913.json.gz',
-    'checkpoint 命名规则 = checkpoint-<6位局数>-p<profile>-m<mctsSims>-e<evaluator>-c<charSet>-s<seed>.json.gz');
+    'checkpoint-000100-pbalanced-aentity-v1-m200-egpu-crandom-s20260913.json.gz',
+    'checkpoint 命名规则 = checkpoint-<6位局数>-p<profile>-a<architecture>-m<mctsSims>-e<evaluator>-c<charSet>-s<seed>.json.gz');
   fs.rmSync(root, { recursive: true, force: true });
 }
 
@@ -81,7 +81,7 @@ const { createTrainingManager } = require('../lib/training-manager.js');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'citadels-ckpt-resume-'));
   const dataDir = path.join(root, 'training-data');
   fs.mkdirSync(dataDir, { recursive: true });
-  const newName = 'checkpoint-000300-pfast-m50-cbase-s99.json.gz';
+  const newName = 'checkpoint-000300-pfast-aflat-m50-cbase-s99.json.gz';
   fs.writeFileSync(path.join(dataDir, newName), 'payload');
   let childSpawned = false;
   const fakeChild = { on() {}, stdout: null, stderr: null, send() {}, kill() {} };
