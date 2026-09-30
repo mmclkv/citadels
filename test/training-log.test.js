@@ -39,6 +39,7 @@ async function runAndCaptureLogs(config) {
   const banner = logs.find(l => l.includes('启动训练：'));
   assert.ok(banner, '应有启动横幅日志');
   assert.ok(banner.includes('profile=fast'), '横幅应包含 profile');
+  assert.ok(banner.includes('架构=flat'), '横幅应包含网络架构');
   assert.ok(banner.includes('目标 4 局'), '横幅应包含目标局数');
   assert.ok(banner.includes('每批 4 局'), '横幅应包含每批局数');
   assert.ok(banner.includes('workers=1'), '横幅应包含 worker 数');

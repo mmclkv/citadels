@@ -855,6 +855,7 @@ async function train(rawConfig, hooks = {}) {
   let torch = null, accelerator = { device: 'JavaScript CPU', torch: '', cuda: '', gpu: '' };
   // 启动横幅：让用户在事件日志里一眼确认配置与设备
   log('启动训练：profile=' + config.profile + ' · 玩家 ' + config.minPlayers + '-' + config.maxPlayers +
+    ' · 架构=' + config.networkArchitecture +
     ' · 目标 ' + config.targetGames + ' 局 · 每批 ' + config.batchGames + ' 局 · ' +
     'workers=' + config.workers + ' · 策略损失=' + (config.policyLossMode === 'auto' && config.mctsSimulations > 0 ? 'MCTS 交叉熵' : config.policyLossMode.toUpperCase()) +
     ' · epochs=' + config.ppoEpochs + ' · miniBatch=' + config.miniBatch +

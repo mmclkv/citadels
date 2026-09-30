@@ -11,10 +11,19 @@ import numpy as np
 import torch
 from torch import nn
 
+# When this file is launched by Node with an absolute path (and especially
+# when it is executed through runpy), Python does not always put the training
+# directory on sys.path.  Keep sibling model implementations importable in
+# both launch modes.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
 try:
     from entity_transformer import EntityTransformerNet
-except ImportError:
+except ImportError as error:
     EntityTransformerNet = None
+    ENTITY_TRANSFORMER_IMPORT_ERROR = error
 
 
 PROFILES = {
@@ -250,7 +259,8 @@ def create_model(architecture, profile):
         return PolicyValueNet(profile)
     if architecture == "entity-v1":
         if EntityTransformerNet is None:
-            raise RuntimeError("无法加载 entity_transformer.py")
+            detail = str(ENTITY_TRANSFORMER_IMPORT_ERROR)
+            raise RuntimeError("无法加载 entity_transformer.py" + (f": {detail}" if detail else ""))
         return EntityTransformerNet(profile)
     raise ValueError("不支持的网络架构：%s" % architecture)
 

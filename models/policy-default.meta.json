@@ -1,15 +1,16 @@
 {
   "format": "json.gz",
-  "game": 45376,
-  "profile": "large",
-  "backend": "libtorch",
-  "trainedAt": "2026-09-22T00:00:00.000Z",
-  "sha256": "d94402a8f7777ed89c65ceb0501f70a4aaee9d37826399527a81559306d0dbb8",
+  "game": 52419,
+  "profile": "fast",
+  "architecture": "entity-v1",
+  "trainedAt": "2026-09-30T13:49:46.313Z",
+  "sha256": "e5a017fb60427167757ff4a6701ca68e1a4ac6b2b04364dfdaa9ee3b4ab7ad3a",
   "stateSize": 672,
   "actionSize": 256,
-  "encodingVersion": 7,
+  "encodingVersion": 8,
   "weightsRoundedTo": 6,
-  "bytes": 8667205,
-  "source": "training-data/checkpoint-045376-plarge-m500-egpu-crandom-s20260913.json.gz",
-  "note": "使用最新 45376 局 checkpoint；权重编码版本 v7，兼容 LibTorch/C++ MCTS 房间推理"
+  "bytes": 1161932,
+  "parameterCount": 345602,
+  "source": "training-data/checkpoint-052419-pfast-aentity-v1-m500-egpu-crandom-s20260913.json.gz",
+  "note": "entity-transformer-v1 默认策略网络权重；从训练 checkpoint 精简并四舍五入到 6 位小数"
 }
