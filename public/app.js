@@ -1,10 +1,10 @@
 /* =========================================================================
  * 富饶之城 — 客户端
- * 支持：本地单人（与电脑对战，引擎跑在浏览器里） / 联机（引擎跑在服务器）
+ * 对局规则和电脑玩家由 Python 服务器驱动；浏览器负责显示与交互。
  * ========================================================================= */
 (function () {
   'use strict';
-  const Cards = window.CitCards, Engine = window.CitEngine, AI = window.CitAI;
+  const Cards = window.CitCards;
   const Theme = window.CitadelThemeManager || {
     current: 'classic',
     is(id) { return id === 'classic'; },
@@ -19,7 +19,8 @@
 
   /* ============================== 全局状态 ============================== */
   const App = {
-    mode: null,            // 'local' | 'net'
+    mode: null,            // 'net'（包含服务器托管的单人房间）
+    localServerGame: false,
     state: null,
     myId: null,
     name: '我',
@@ -95,27 +96,6 @@
   }
   function pace() { return PACE[App.speed] || PACE.normal; }
 
-  /** 电脑刚做完某个动作后应该停多久 */
-  function botDelay(action) {
-    const p = pace();
-    if (!action) return p.min;
-    switch (action.type) {
-      case 'draft_pick': case 'draft_discard':
-        return p.draft;
-      case 'choose_char':                       // 宣告刺杀 / 偷窃 / 施咒
-      case 'build':
-      case 'warlord_destroy': case 'marshal_seize':
-        return p.big;
-      case 'choose_district': case 'choose_player': case 'choose_cards':
-        return p.big;
-      case 'income': case 'take_gold': case 'take_cards':
-      case 'ability': case 'end_turn': case 'ability_skip':
-        return p.act;
-      default:
-        return p.min;
-    }
-  }
-
   function syncSpeedBtn() {
     const b = $('#btn-speed');
     if (!b) return;
@@ -135,8 +115,7 @@
     App.speed = SPEED_ORDER[(i + 1) % SPEED_ORDER.length];
     saveSpeed(); syncSpeedBtn();
     toast('电脑节奏：' + pace().label);
-    if (App.mode === 'local') Local.reschedule();
-    else if (App.mode === 'net') Net.send({ t: 'setPace', pace: pace().act });
+    if (App.mode === 'net') Net.send({ t: 'setPace', pace: pace().act });
   }
 
   /* ============================== 工具 ============================== */
@@ -367,17 +346,25 @@
       botLevel: ['easy', 'normal', 'hard'].includes(fallbackLevel) ? fallbackLevel : 'normal'
     };
   }
-  async function startServerBotSingle(cfg) {
-    const available = cfg.botType === 'agent' ? await checkAgentServer() : await checkNeuralServer();
-    if (!available) return;
-    clearTimeout(Local.timer);
+  async function startPythonSingle(cfg) {
+    if (cfg.botType === 'agent' && !(await checkAgentServer())) return;
+    if (cfg.botType === 'neural' && !(await checkNeuralServer())) return;
+    if (Net.roomId) {
+      Net.send({ t: 'leaveRoom' });
+      Net.roomId = null;
+      clearNetSession();
+    }
+    App.localServerGame = true;
     App.mode = 'net'; App.leavingNetGame = false;
+    App.state = null; App.myId = null; App.noticeSeen = 0;
+    App.botDebugEntries = [];
+    hideEvent(true);
     Net.name = cfg.name;
     Net.connect(() => {
       Net.autoStart = true;
       Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
         playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
-        endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act
+        endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act, voice: false
       }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth', '#cfg-mcts-particles')) });
     });
   }
@@ -448,7 +435,6 @@
     const ov = $('#event-overlay');
     if (ov) ov.hidden = true;
     App.paused = false;
-    if (!silent && App.mode === 'local') Local.resume();
   }
 
   /* -------------------- 读取引擎下发的关键事件并分发 -------------------- */
@@ -782,130 +768,6 @@
     return !!(av.actions && av.actions.length);
   }
 
-  /* ============================== 本地驱动 ============================== */
-  function localActor(st) {
-    if (st.phase === 'draft' && st.draft) {
-      // sanitize() 只向客户端公开 currentPlayer；本地机器人使用原始引擎状态，
-      // 两种状态都要兼容。
-      if (st.draft.currentPlayer != null) {
-        return st.players.find(p => p.id === st.draft.currentPlayer) || null;
-      }
-      const step = st.draft.steps && st.draft.steps[st.draft.stepIdx];
-      return step ? st.players[step.player] : null;
-    }
-    if (st.reaction) return st.players[st.reaction.playerIdx];
-    // 轮末确认：找第一个还没确认的玩家
-    if (st.roundConfirm) {
-      const i = (st.roundConfirm.confirmed || []).findIndex(c => !c);
-      return i >= 0 ? st.players[i] : null;
-    }
-    if (st.turn) return st.players[st.turn.playerIdx];
-    return null;
-  }
-
-  const Local = {
-    state: null, myId: null, timer: null, pendingMs: null,
-    start(cfg) {
-      if (cfg.botType === 'agent' || cfg.botType === 'neural') return startServerBotSingle(cfg);
-      App.botDebugEntries = [];
-      if (App.botDebugOpen) renderBotDebug();
-      const seats = [{ id: 'me', name: cfg.name, isBot: false }];
-      for (let i = 1; i < cfg.players; i++) {
-        seats.push({ id: 'bot' + i, name: '电脑 ' + i, isBot: true, botType: cfg.botType, botLevel: cfg.level });
-      }
-      this.myId = 'me';
-      App.myId = 'me';
-      App.noticeSeen = 0;            // 新开局：从第一条事件起都要提示
-      App.paused = false;
-      hideEvent(true);
-      this.state = Engine.createGame({
-        roomId: 'local', endDistricts: cfg.end, charSetMode: cfg.chars, seats: seats
-      });
-      Engine.startGame(this.state);
-      this.emit();
-      // 关键修复：开局后立即启动机器人驱动循环。
-      // 否则当第一个选角者/行动者是电脑时，循环不会被触发，
-      // 界面会卡在“等待其他玩家选角…”（或对手行动中）且永远不动。
-      this.schedule(pace().min);
-    },
-    emit() {
-      App.state = Engine.sanitize(this.state, this.myId);
-      App.state.available = Engine.getAvailableActions(this.state, this.myId);
-      App.state.isLocal = true;
-      render();
-      if (App.state.phase === 'gameover') showOver(App.state);
-    },
-    send(action) {
-      const res = Engine.applyAction(this.state, this.myId, action);
-      if (!res.ok) { toast('✗ ' + res.error); return; }
-      App.sel = null;
-      this.emit();
-      // 真人操作后给一点“电脑开始思考”的缓冲，别瞬间接上
-      this.schedule(pace().act);
-    },
-    schedule(ms) {
-      clearTimeout(this.timer);
-      this.pendingMs = ms;
-      if (App.paused) return;        // 事件弹层期间挂起，关闭后由 resume() 续上
-      this.timer = setTimeout(() => this.step(), ms);
-    },
-    /** 弹层关闭后继续推进 */
-    resume() {
-      if (!this.state || this.state.phase === 'gameover') return;
-      this.schedule(this.pendingMs == null ? pace().min : Math.min(this.pendingMs, pace().act));
-    },
-    /** 切换速度后让当前等待立即改用新节奏 */
-    reschedule() {
-      if (!this.timer || App.paused) return;
-      this.schedule(pace().min);
-    },
-    step() {
-      const st = this.state;
-      if (!st || st.phase === 'gameover') { this.emit(); return; }
-      const actor = localActor(st);
-      if (actor && actor.isBot) {
-        let action = null;
-        const available = Engine.getAvailableActions(st, actor.id) || {};
-        appendBotDebug({ kind: 'decision_start', at: Date.now(), playerId: actor.id,
-          playerName: actor.name, botType: actor.botType || 'npc', botLevel: actor.botLevel || 'normal',
-          phase: st.phase, round: st.round, legalCount: (available.actions || []).length,
-          state: { gold: actor.gold, hand: actor.hand && actor.hand.length, city: actor.city && actor.city.length } });
-        try { action = AI.decide(st, actor.id); } catch (e) { console.error(e); }
-        appendBotDebug({ kind: 'decision_detail', at: Date.now(), playerId: actor.id,
-          playerName: actor.name, botType: 'npc', botLevel: actor.botLevel || 'normal',
-          action: action ? { type: action.type, ...action } : null, strategy: '启发式评分与规则优先级' });
-        // AI 无法给出决策时，使用引擎返回的第一个合法动作，避免电脑选角停死。
-        if (!action) {
-          const opts = Engine.getAvailableActions(st, actor.id);
-          if (opts && opts.actions && opts.actions.length) action = opts.actions[0];
-        }
-        if (action) {
-          appendBotDebug({ kind: 'action_apply', at: Date.now(), playerId: actor.id,
-            playerName: actor.name, botType: actor.botType || 'npc', action: { type: action.type, ...action } });
-          let res = Engine.applyAction(st, actor.id, action);
-          if (!res.ok) {
-            console.warn('电脑行动失败：' + res.error);
-            if (st.phase === 'draft') {
-              // 选角失败时从合法行动中挑第一个再试一次，避免空转卡死
-              const opts = Engine.getAvailableActions(st, actor.id);
-              if (opts && opts.actions && opts.actions.length) {
-                res = Engine.applyAction(st, actor.id, opts.actions[0]);
-              }
-            }
-            if (!res.ok) {
-              if (st.turn && st.turn.pending) Engine.applyAction(st, actor.id, { type: 'ability_skip' });
-              else if (st.turn) Engine.applyAction(st, actor.id, { type: 'end_turn' });
-            }
-          }
-        }
-        this.emit();
-        this.schedule(botDelay(action));
-        return;
-      }
-      this.emit();
-    }
-  };
-
   /* ============================== 联机驱动 ============================== */
   const Net = {
     autoStart: false,
@@ -978,7 +840,9 @@
           App.noticeSeen = (m.state.notices && m.state.notices.length)
             ? m.state.notices[m.state.notices.length - 1].seq : 0;
           App.paused = false; hideEvent(true);
-          if (m.state.phase === 'lobby') { renderLobbyRoom(m.state); showScreen('screen-lobby'); }
+          if (m.state.phase === 'lobby') {
+            if (!App.localServerGame) { renderLobbyRoom(m.state); showScreen('screen-lobby'); }
+          }
           else { App.state = m.state; showScreen('screen-game'); render(); }
           if (this.autoStart) {
             this.autoStart = false;
@@ -989,7 +853,11 @@
           if (App.leavingNetGame) break;
           App.state = m.state;
           if (m.state.you) App.myId = m.state.you;
-          if (m.state.phase === 'lobby') { App.chatHistory = []; renderLobbyRoom(m.state); showScreen('screen-lobby'); }
+          if (m.state.phase === 'lobby' && App.localServerGame) {
+            App.chatHistory = [];
+            this.send({ t: 'startGame' });
+          }
+          else if (m.state.phase === 'lobby') { App.chatHistory = []; renderLobbyRoom(m.state); showScreen('screen-lobby'); }
           else {
             showScreen('screen-game'); render();
             if (m.state.phase === 'gameover') showOver(m.state);
@@ -1027,7 +895,7 @@
    *
    * SDK 压缩后近 600KB，所以只在第一次点「语音」时才动态加载：单机玩家和不开
    * 语音的联机玩家都不必为它买单。这里从头到尾不接触 LiveKit 的 API Secret ——
-   * 令牌由游戏服务器签发，见 lib/voice.js。
+   * 令牌由 Python 游戏服务器签发，见 python_backend/voice.py。
    * ============================================================================ */
   const VOICE_VOLUME_KEY = 'citadels.voice.volumes';
   const VOICE_SDK_PATH = 'vendor/livekit-client.umd.min.js';
@@ -1444,8 +1312,7 @@
         return;
       }
     }
-    if (App.mode === 'local') Local.send(action);
-    else Net.action(action);
+    Net.action(action);
   }
 
   /* ============================== 卡牌渲染 ============================== */
@@ -1485,10 +1352,24 @@
       d.appendChild(el('div', 'c-name', c.name));
       d.appendChild(el('div', 'c-en', c.en || ''));
     }
-    if (c.beautified) d.appendChild(el('div', 'c-badges', '美'));
-    else if (c.museumCount) d.appendChild(el('div', 'c-badges', '博' + c.museumCount));
+    if (c.museumCount) d.appendChild(el('div', 'c-badges', '博' + c.museumCount));
+    syncBeautifiedDecoration(d, c);
     renderMuseumStack(d, c);
     return d;
+  }
+
+  function syncBeautifiedDecoration(node, c) {
+    if (!node || !node.classList) return;
+    const beautified = !!(c && c.beautified);
+    node.classList.toggle('beautified', beautified);
+    const oldShimmer = node.querySelector('.beautified-shimmer');
+    if (beautified && !oldShimmer) {
+      const shimmer = el('span', 'beautified-shimmer');
+      shimmer.setAttribute('aria-hidden', 'true');
+      node.appendChild(shimmer);
+    } else if (!beautified && oldShimmer && oldShimmer.parentNode) {
+      oldShimmer.parentNode.removeChild(oldShimmer);
+    }
   }
 
   function renderMuseumStack(node, c) {
@@ -1513,9 +1394,13 @@
    * 不重建内部 <img>，从而不触发图片重新解码与闪烁。 */
   function refreshCardNode(node, c, opts) {
     node.className = cardClassOf(c, opts);
+    syncBeautifiedDecoration(node, c);
     if (node.dataset) node.dataset.uid = c.uid;
     node.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
       ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
+    const oldBadge = node.querySelector('.c-badges');
+    if (oldBadge && oldBadge.parentNode) oldBadge.parentNode.removeChild(oldBadge);
+    if (c.museumCount) node.appendChild(el('div', 'c-badges', '博' + c.museumCount));
     renderMuseumStack(node, c);
   }
 
@@ -1573,9 +1458,9 @@
     return roleImage(c);
   }
   function charMeta(id, num) {
-    if (id && Engine && Engine.CHAR_MAP && Engine.CHAR_MAP[id]) return Engine.CHAR_MAP[id];
-    if (Engine && Engine.CHAR_MAP) {
-      const values = Object.values(Engine.CHAR_MAP);
+    if (id && Cards && Cards.CHAR_MAP && Cards.CHAR_MAP[id]) return Cards.CHAR_MAP[id];
+    if (Cards && Cards.CHAR_MAP) {
+      const values = Object.values(Cards.CHAR_MAP);
       return values.find(c => c.num === num) || null;
     }
     return id ? { id: id, num: num, name: String(num || '') } : null;
@@ -2633,10 +2518,6 @@
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.add('building-animation-paused');
     }
-    if (typeof Local !== 'undefined' && Local.timer) {
-      clearTimeout(Local.timer);
-      Local.timer = null;
-    }
   }
 
   function endBuildingAnimation() {
@@ -2646,10 +2527,9 @@
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.remove('building-animation-paused');
     }
-    // 若同时有事件弹层，继续保持暂停；否则恢复本地电脑行动循环。
+    // 若同时有事件弹层，继续保持暂停。
     const eventVisible = $('#event-overlay') && !$('#event-overlay').hidden;
     App.paused = !!eventVisible;
-    if (!eventVisible && App.mode === 'local' && typeof Local !== 'undefined') Local.resume();
   }
 
   /* 领取金币：金币从顶部"金库"（回合横幅/顶栏）飞进该玩家的小框框 */
@@ -2890,7 +2770,8 @@
     const crownP = s.players.find(p => p.hasCrown);
     $('#tb-crown').innerHTML = '<i class="crown-icon" aria-hidden="true">♛</i>' +
       '<span class="crown-owner">' + (crownP ? escapeHtml(crownP.name) : '—') + '</span>';
-    $('#tb-room').textContent = s.roomName || (App.mode === 'local' ? '单人模式' : '联机房间 ' + (s.roomId || ''));
+    $('#tb-room').textContent = App.localServerGame ? '单人模式'
+      : (s.roomName || '联机房间 ' + (s.roomId || ''));
     syncSpeedBtn();
     syncThemeBtn();
     syncChatControl();
@@ -4026,15 +3907,10 @@
     // 2~3 人局每人要选 2 张，hasChosen 为真时仍可能再次轮到，不算卡住；4 人及以上每人只选 1 张
     const multiPickMode = s.players.length <= 3;
     const stuckDraft = !multiPickMode && ((cur && cur.hasChosen) || (allChosen && s.phase === 'draft'));
-    if (stuckDraft && App.mode === 'local') {
-      console.warn('[draft stuck] cur=', cur && cur.name, 'hasChosen=', cur && cur.hasChosen, 'allChosen=', allChosen, 'step=', d.stepIdx, '/', d.totalSteps);
-      // 本地模式：尝试推一把电脑循环，让引擎重新评估当前行动者
-      Local.schedule(pace().min);
-    }
     $('#draft-sub').innerHTML = '进度 ' + Math.min(d.stepIdx + 1, d.totalSteps) + ' / ' + d.totalSteps +
       ' · 当前：' + (cur ? escapeHtml(cur.name) : '-') +
       ' · 明置移除 ' + d.faceUp.length + ' 张 · 暗置移除 ' + d.faceDownCount + ' 张 · 牌池 ' + d.poolCount + ' 张' +
-      (stuckDraft ? ' · <b style="color:#c0392b">选角进度异常，正在尝试恢复…</b>' : '');
+      (stuckDraft ? ' · <b style="color:#c0392b">选角进度异常</b>' : '');
 
     const pool = $('#draft-pool'); pool.innerHTML = '';
     if (!isPicker) {
@@ -4379,7 +4255,9 @@
       const training = data.training && data.training.running
         ? '运行中 · ' + (data.training.game || '自对弈') : '未运行';
       const neural = data.neural && data.neural.message ? data.neural.message : '未配置';
-      const worker = data.nativeWorker ? '运行中' : '未运行';
+      const worker = data.backend === 'python'
+        ? '由 Python 后端承载（无独立 worker）'
+        : data.nativeWorker ? '运行中' : '未运行';
       const rooms = Number.isFinite(data.rooms) ? data.rooms : 0;
       const clients = Number.isFinite(data.clients) ? data.clients : 0;
       const uptime = Number.isFinite(data.uptimeSeconds) ? data.uptimeSeconds : 0;
@@ -4456,7 +4334,9 @@
       const frp = data.frp || {};
       const summary = document.createElement('p');
       summary.className = 'small';
-      summary.textContent = 'worker：' + (state.running ? '运行中' : state.exists ? '已编译但未运行' : '未找到编译产物');
+      summary.textContent = state.backend === 'python'
+        ? '游戏后端：Python（不使用独立原生 worker）'
+        : 'worker：' + (state.running ? '运行中' : state.exists ? '已编译但未运行' : '未找到编译产物');
       if (frp.enabled) summary.textContent += '　FRP：' + (frp.running ? '运行中' : '未运行');
       const log = el('div', 'server-console-log');
       const entries = Array.isArray(data.logs) ? data.logs : [];
@@ -4829,14 +4709,14 @@
       if ($('#cfg-speed') && PACE[$('#cfg-speed').value]) {
         App.speed = $('#cfg-speed').value; saveSpeed();
       }
-      App.lastCfg = cfg; App.mode = 'local'; App.name = cfg.name;
-      if (cfg.botType === 'agent' || cfg.botType === 'neural') { startServerBotSingle(cfg); return; }
-      Local.start(cfg);
-      showScreen('screen-game');
+      App.lastCfg = cfg; App.mode = 'net'; App.localServerGame = true; App.name = cfg.name;
+      startPythonSingle(cfg);
     };
 
     // 联机
     $('#btn-create').onclick = async () => {
+      App.localServerGame = false;
+      App.leavingNetGame = false;
       Net.name = ($('#net-name').value || '玩家').trim();
       Net.connect(() => {
         Net.send({
@@ -4856,6 +4736,7 @@
       App.leavingNetGame = false;
       const code = ($('#net-code').value || '').trim().toUpperCase();
       if (code.length !== 4) { toast('请输入 4 位房间号'); return; }
+      App.localServerGame = false;
       Net.name = ($('#net-name').value || '玩家').trim();
       Net.connect(() => Net.send({ t: 'joinRoom', roomId: code, name: Net.name }));
       App.mode = 'net';
@@ -4889,6 +4770,14 @@
     $('#btn-back-home').onclick = () => {
       if (App.state && App.state.phase !== 'gameover' && !confirm('确定离开当前对局吗？')) return;
       Voice.leave();
+      if (App.localServerGame) {
+        App.leavingNetGame = true;
+        App.localServerGame = false;
+        App.state = null;
+        Net.roomId = null;
+        clearNetSession();
+        Net.send({ t: 'leaveRoom' });
+      }
       showScreen('screen-home');
     };
     $('#btn-chars').onclick = openCharacters;
@@ -4950,8 +4839,8 @@
       closeChatComposer();
     };
     $('#btn-again').onclick = () => {
-      if (App.mode === 'local' && App.lastCfg) {
-        Local.start(App.lastCfg); showScreen('screen-game');
+      if (App.localServerGame && App.lastCfg) {
+        Net.send({ t: 'restart' });
       } else if (App.mode === 'net') {
         Net.send({ t: 'restart' });
         $('#lobby-pre').hidden = true; $('#lobby-room').hidden = false;
@@ -4997,7 +4886,6 @@
     Net.connect(() => Net.send({ t: 'listRooms' }));
   }
   // 供自动化测试驱动使用
-  App.__local = Local;
   App.__net = Net;
   App.__voice = Voice;
   window.__CitadelsApp = App;

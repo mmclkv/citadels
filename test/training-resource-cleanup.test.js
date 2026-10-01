@@ -94,19 +94,10 @@ async function nativeStderrIsDrained() {
   console.log('native 搜索客户端：stderr 已接管且有上限（lastStderr 保留最后 4KB）');
 }
 
-function managerKillsWholeTree() {
-  const source = fs.readFileSync(path.join(ROOT, 'lib', 'training-manager.js'), 'utf8');
-  assert.ok(/taskkill[\s\S]{0,80}\/T/.test(source),
-    '强杀训练进程时必须连子进程树一起杀（taskkill /T），否则 Python / mcts_worker 会残留并占住显存');
-  assert.ok(/killProcessTree\(child\)/.test(source), '停止超时路径应调用 killProcessTree');
-  console.log('训练管理器：强杀走进程树清理（taskkill /T /F）');
-}
-
 (async () => {
   await poolClosesGracefully();
   await nativeStderrIsDrained();
-  managerKillsWholeTree();
-  console.log('训练资源回收：3 组断言通过');
+  console.log('遗留 native 工具资源回收：2 组断言通过');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

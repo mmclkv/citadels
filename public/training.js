@@ -11,7 +11,8 @@ let logPlaceholder = false;
 let logErrorEl = null;
 let logErrorText = '';
 let resumeCheckpointCompatible = null;
-const CURRENT_STATE_ENCODING_VERSION = 7;
+const CURRENT_STATE_ENCODING_VERSION = 11;
+const CURRENT_ACTION_ENCODING_VERSION = 8;
 
 function num(value, digits = 2) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
 function integer(value) { return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('zh-CN') : '0'; }
@@ -30,16 +31,12 @@ async function api(path, options) {
 }
 
 function formConfig() {
-  const rulesEngine = $('rules-engine').value;
-  const mctsEngine = $('mcts-engine').value;
-  const neuralNetworkFramework = $('neural-network-framework').value;
   return {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
     profile: $('profile').value, networkArchitecture: $('network-architecture').value,
-    rulesEngine, mctsEngine, neuralNetworkFramework, device: $('device').value,
-    backend: mctsEngine === 'cpp' ? 'native' : 'gpu',
-    nativeInferenceBackend: neuralNetworkFramework === 'libtorch' ? 'libtorch' : 'python-binary',
+    rulesEngine: 'python', mctsEngine: 'python', neuralNetworkFramework: 'pytorch',
+    backend: 'python', device: $('device').value,
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
     temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
     learningRate: +$('learning-rate').value,
@@ -54,10 +51,6 @@ function formConfig() {
     mctsDirichletAlpha: +$('mcts-dirichlet').value,
     mctsDirichletEpsilon: +$('mcts-diri-eps').value,
     mctsMaxDepth: +$('mcts-max-depth').value,
-    mctsEvaluator: resolveMctsEvaluator(),
-    mctsBatchSize: +$('mcts-batch-size').value,
-    mctsMaxWaitMs: +$('mcts-max-wait').value,
-    mctsCacheSize: +$('mcts-cache-size').value,
     mctsParticles: Math.max(1, +$('mcts-particles').value || 1),
     mctsBelief: !!$('mcts-belief') && $('mcts-belief').checked,
     selfPlayMode: $('self-play-mode').value,
@@ -71,7 +64,7 @@ function formConfig() {
 }
 
 // 存档里保存的 config → 面板控件。新增配置项时同步这张表，否则
-// 「从存档读取参数」会静默漏填该字段（test/training-checkpoint-config.test.js 会盯着）。
+// 「从存档读取参数」会静默漏填该字段（test/training-checkpoint-ui.test.js 会盯着）。
 const CONFIG_FIELDS = [
   ['targetGames', 'target-games', 'number'],
   ['minPlayers', 'min-players', 'select'],
@@ -79,9 +72,6 @@ const CONFIG_FIELDS = [
   ['charSet', 'char-set', 'select'],
   ['profile', 'profile', 'select'],
   ['networkArchitecture', 'network-architecture', 'select'],
-  ['rulesEngine', 'rules-engine', 'select'],
-  ['mctsEngine', 'mcts-engine', 'select'],
-  ['neuralNetworkFramework', 'neural-network-framework', 'select'],
   ['device', 'device', 'select'],
   ['endDistricts', 'end-districts', 'select'],
   ['maxSteps', 'max-steps', 'number'],
@@ -98,9 +88,6 @@ const CONFIG_FIELDS = [
   ['mctsDirichletAlpha', 'mcts-dirichlet', 'number'],
   ['mctsDirichletEpsilon', 'mcts-diri-eps', 'number'],
   ['mctsMaxDepth', 'mcts-max-depth', 'number'],
-  ['mctsBatchSize', 'mcts-batch-size', 'number'],
-  ['mctsMaxWaitMs', 'mcts-max-wait', 'number'],
-  ['mctsCacheSize', 'mcts-cache-size', 'number'],
   ['mctsParticles', 'mcts-particles', 'number'],
   ['mctsBelief', 'mcts-belief', 'checked'],
   ['selfPlayMode', 'self-play-mode', 'select'],
@@ -111,10 +98,6 @@ const CONFIG_FIELDS = [
   ['curriculumStepGames', 'curriculum-step-games', 'number'],
   ['trainNetworkOnly', 'train-network-only', 'bool']
 ];
-
-// 不参与回填的键：resumeCheckpoint 是「读哪个存档」本身；backend /
-// nativeInferenceBackend / mctsEvaluator 由面板其他选项推导，不能被存档值反向覆盖。
-const CONFIG_DERIVED = ['resumeCheckpoint', 'backend', 'nativeInferenceBackend', 'mctsEvaluator'];
 
 // 把存档里的 config 填回面板。返回实际写入项数与跳过项，
 // 便于在按钮下方如实告知「哪些没读到」而不是假装全部成功。
@@ -138,7 +121,7 @@ function applyCheckpointConfig(config) {
     applied += 1;
   });
   // 填完要刷新派生 UI：评估器提示、阵容联动、单步耗时估算都依赖这些值
-  updateMctsEvaluatorUI();
+  updateMctsHint();
   updateCompositionUI();
   estimateMCTS();
   return { applied, skipped };
@@ -199,7 +182,7 @@ async function uploadCheckpointFile(file) {
   out.textContent = '正在上传 ' + file.name + '（' + (file.size / 1024 / 1024).toFixed(1) + ' MB）…';
   try {
     // 直接把原始字节发上去：服务端要的就是 gzip 后的存档本身，
-    // 不走 multipart 就不用在 server.js 里手写一个表单解析器。
+    // 不走 multipart 就无需在 Python 服务端手写表单解析器。
     const data = await api('./api/training/checkpoint/upload?name=' + encodeURIComponent(file.name), {
       method: 'POST',
       headers: { 'Content-Type': 'application/gzip' },
@@ -222,16 +205,11 @@ async function uploadCheckpointFile(file) {
   syncResumeUI();
 }
 
-// JS MCTS 已移除；C++ MCTS 的网络评估由所选 PyTorch/LibTorch 后端完成。
-function resolveMctsEvaluator() {
-  return 'gpu';
-}
-
 function estimateMCTS() {
   const sims = +$('mcts-simulations').value || 0;
   const out = $('mcts-time-estimate');
   if (!sims) { out.textContent = '关闭'; return; }
-  const perStepHint = 'GPU/CPU 原生批量 forward，耗时取决于模拟数、批大小和设备';
+  const perStepHint = 'Python ISMCTS 逐节点调用 PyTorch，耗时随模拟数、粒子数与设备变化';
   let bullet;
   if (sims <= 50) bullet = '轻量 A 档';
   else if (sims <= 200) bullet = '适中 B 档';
@@ -240,14 +218,9 @@ function estimateMCTS() {
   out.textContent = bullet + ' · ' + perStepHint;
 }
 
-function updateMctsEvaluatorUI() {
-  const framework = $('neural-network-framework').value;
-  const native = true;
-  $('neural-framework-hint').textContent = framework === 'libtorch'
-    ? '✓ C++ MCTS 与完整角色规则运行于搜索进程，使用 LibTorch 评估'
-    : '✓ C++ MCTS 与完整角色规则运行于搜索进程，通过 PyTorch 后端评估网络';
-  document.querySelectorAll('.native-only').forEach(el => { el.style.display = ''; });
-  // 切换框架会改变推导出的评估器，单步耗时估算要跟着刷新
+function updateMctsHint() {
+  $('neural-framework-hint').textContent =
+    'Python ISMCTS 使用当前 PyTorch 训练模型，在所选计算设备上评估局面';
   estimateMCTS();
 }
 
@@ -348,18 +321,19 @@ function renderRuntime(status) {
     : '未启用';
   const rows = [
     ['处理器', h.cpu || '—'], ['逻辑核心', h.logicalCores || '—'], ['内存', h.memoryGB ? h.memoryGB + ' GB' : '—'],
-    ['Node.js', h.runtime || '—'], ['训练设备', h.device || c.device || 'JavaScript CPU'], ['显卡', h.gpu || '—'],
+    ['训练运行时', h.runtime || '—'], ['训练设备', h.device || c.device || '—'], ['显卡', h.gpu || '—'],
     ['PyTorch / CUDA', h.torch ? h.torch + ' / ' + (h.cuda || 'CPU') : '—'], ['训练进程', status.pid || '—'], ['参数量', integer(status.parameterCount)],
-    ['网络档位', c.profile || '—'], ['并行自对弈', c.workers ? c.workers + ' 个进程' : '—'],
+    ['网络档位', c.profile || '—'], ['并行自对弈', c.workers ? c.workers + ' 个采样进程' : '—'],
     ['GPU 峰值显存', status.point && status.point.gpuMemoryMB ? num(status.point.gpuMemoryMB, 0) + ' MB' : '—'],
     ['玩家范围', c.minPlayers ? c.minPlayers + '–' + c.maxPlayers + ' 人' : '—'],
-    ['规则引擎', c.rulesEngine === 'cpp' ? 'C++' : (c.rulesEngine === 'js' ? 'JS' : '—')],
-    ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++' : '—'],
-    ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch（C++）' : (c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—')],
+    ['规则引擎', c.rulesEngine === 'cpp' ? 'C++' : (c.rulesEngine === 'js' ? 'JS' : (c.rulesEngine === 'python' ? 'Python' : '—'))],
+    ['MCTS 引擎', c.mctsEngine === 'python' ? 'Python ISMCTS' : '—'],
+    ['神经网络框架', c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—'],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
-    ['状态编码', 'v' + CURRENT_STATE_ENCODING_VERSION + '（JS / C++ 对齐）'],
+    ['状态 / 动作编码', 'v' + (c.networkArchitecture === 'entity-v5' ? CURRENT_STATE_ENCODING_VERSION : c.networkArchitecture === 'entity-v4' ? 10 : c.networkArchitecture === 'entity-v3' ? 9 : 8) +
+      ' / v' + CURRENT_ACTION_ENCODING_VERSION + '（跨引擎对齐）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['启发式难度', c.heuristicDifficulty || '—'],
     ['样本来源', c.trainNetworkOnly === false ? '全部玩家' : '仅策略网络玩家'],
@@ -714,23 +688,19 @@ $('resume-checkpoint-file').onchange = () => {
   else { $('resume-checkpoint').value = ''; $('resume-checkpoint-name').value = ''; resumeCheckpointCompatible = null; syncResumeUI(); }
 };
 $('profile').onchange = () => { if (latest) render(latest); };
-$('rules-engine').onchange = updateMctsEvaluatorUI;
-$('char-set').onchange = updateMctsEvaluatorUI;
-$('mcts-engine').onchange = updateMctsEvaluatorUI;
-$('neural-network-framework').onchange = updateMctsEvaluatorUI;
-$('device').onchange = updateMctsEvaluatorUI;
+$('char-set').onchange = updateMctsHint;
+$('device').onchange = updateMctsHint;
 function updateCompositionUI() {
   const mode = $('self-play-mode').value;
   $('network-player-count').disabled = mode !== 'network-vs-heuristic';
   ['curriculum-start-players', 'curriculum-end-players', 'curriculum-step-games'].forEach(id => { $(id).disabled = mode !== 'curriculum'; });
 }
 $('self-play-mode').onchange = updateCompositionUI;
-['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth',
-  'mcts-batch-size', 'mcts-max-wait', 'mcts-cache-size'].forEach(id => {
+['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth'].forEach(id => {
   $(id).oninput = estimateMCTS;
 });
 estimateMCTS();
-updateMctsEvaluatorUI();
+updateMctsHint();
 updateCompositionUI();
 initResumeOptions();
 syncCheckpointLoadButton();

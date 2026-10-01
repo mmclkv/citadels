@@ -1,12 +1,13 @@
-"""Entity Transformer v1.
+"""Entity Transformer models.
 
-This module mirrors training/entity-transformer-policy.js.  The state protocol
-is intentionally unchanged: 32 global features followed by eight 80-feature
-relative player slots.  The explicit ``ordered`` list is used by the existing
+Entity-v4 stores a
+compact integer for each city building and maps it through a learned embedding
+before player-token projection. The explicit ``ordered`` list is used by the
 flat-weight bridge and must stay in the same order as the JS implementation.
 """
 
 import array
+import math
 import os
 
 import torch
@@ -21,6 +22,15 @@ ENTITY_PROFILES = {
 }
 VALUE_SLOTS = 8
 STATE_SIZE = 672
+ENTITY_V3_STATE_SIZE = 702
+CITY_CARD_FEATURES = 30
+CITY_EMBEDDING_DIM = 8
+CITY_ID_SLOT_SIZE = 4
+PLAYER_FEATURE_SIZE = 56 + 8 * CITY_ID_SLOT_SIZE
+PLAYER_EMBED_FEATURE_SIZE = 56 + 8 * (3 + CITY_EMBEDDING_DIM)
+ENTITY_V4_STATE_SIZE = 32 + 8 * PLAYER_FEATURE_SIZE + CITY_CARD_FEATURES
+PUBLIC_CONTEXT_FEATURES = 72
+ENTITY_V5_STATE_SIZE = ENTITY_V4_STATE_SIZE + PUBLIC_CONTEXT_FEATURES
 ACTION_SIZE = 256
 
 
@@ -55,19 +65,27 @@ class EntityTransformerBlock(nn.Module):
 
 
 class EntityTransformerNet(nn.Module):
-    architecture = "entity-v1"
-
-    def __init__(self, profile="balanced", state_size=STATE_SIZE, action_size=ACTION_SIZE):
+    def __init__(self, profile="balanced", state_size=None, action_size=ACTION_SIZE,
+                 architecture="entity-v5"):
         super().__init__()
-        if state_size != STATE_SIZE or action_size != ACTION_SIZE:
-            raise ValueError("entity-transformer-v1 requires state_size=672 and action_size=256")
+        if architecture not in ("entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5"):
+            raise ValueError("unsupported entity transformer architecture: " + architecture)
+        expects_hands = architecture in ("entity-v3", "entity-v4", "entity-v5")
+        expects_city_ids = architecture in ("entity-v4", "entity-v5")
+        expects_public_context = architecture == "entity-v5"
+        self.player_feature_size = PLAYER_FEATURE_SIZE if expects_city_ids else 80
+        self.state_size = ENTITY_V5_STATE_SIZE if expects_public_context else ENTITY_V4_STATE_SIZE if expects_city_ids else ENTITY_V3_STATE_SIZE if expects_hands else STATE_SIZE
+        if state_size is not None and state_size != self.state_size or action_size != ACTION_SIZE:
+            raise ValueError("entity transformer state/action width mismatch")
+        self.architecture = architecture
         model_dim, heads, layers, ff_dim, action_hidden = ENTITY_PROFILES[profile]
         self.profile = profile
-        self.state_size = state_size
         self.action_size = action_size
         self.model_dim = model_dim
-        self.global_embed = nn.Linear(32, model_dim)
-        self.player_embed = nn.Linear(80, model_dim)
+        self.global_embed = nn.Linear(32 + PUBLIC_CONTEXT_FEATURES if expects_public_context else 32, model_dim)
+        self.city_embed = nn.Embedding(CITY_CARD_FEATURES + 1, CITY_EMBEDDING_DIM, padding_idx=0) if expects_city_ids else None
+        self.player_embed = nn.Linear(PLAYER_EMBED_FEATURE_SIZE if expects_city_ids else self.player_feature_size, model_dim)
+        self.self_embed = nn.Linear((PLAYER_EMBED_FEATURE_SIZE if expects_city_ids else self.player_feature_size) + 30, model_dim) if expects_hands else None
         self.action_embed = nn.Linear(action_size, model_dim)
         self.blocks = nn.ModuleList([
             EntityTransformerBlock(model_dim, heads, ff_dim) for _ in range(layers)
@@ -75,8 +93,22 @@ class EntityTransformerNet(nn.Module):
         self.action1 = nn.Linear(model_dim * 2, action_hidden)
         self.action_out = nn.Linear(action_hidden, 1)
         self.value_out = nn.Linear(model_dim, 1)
+        positional = torch.zeros(9, model_dim, dtype=torch.float32)
+        if architecture in ("entity-v2", "entity-v3", "entity-v4", "entity-v5"):
+            for position in range(9):
+                for index in range(model_dim):
+                    pair = index // 2
+                    angle = position / (10000 ** ((2 * pair) / model_dim))
+                    positional[position, index] = math.sin(angle) if index % 2 == 0 else math.cos(angle)
+        self.register_buffer("position_encoding", positional)
         # Keep this list in exact parity with the JS flatten order.
-        self.ordered = [self.global_embed, self.player_embed, self.action_embed]
+        self.ordered = [self.global_embed]
+        if self.city_embed is not None:
+            self.ordered.append(self.city_embed)
+        self.ordered.append(self.player_embed)
+        if self.self_embed is not None:
+            self.ordered.append(self.self_embed)
+        self.ordered.append(self.action_embed)
         for block in self.blocks:
             self.ordered.extend([
                 block.q, block.k, block.v, block.attn_out,
@@ -86,12 +118,28 @@ class EntityTransformerNet(nn.Module):
         self.ordered.extend([self.action1, self.action_out, self.value_out])
 
     def tokenize(self, states):
-        if states.shape[-1] != STATE_SIZE:
+        global_features = torch.cat((states[..., :32], states[..., ENTITY_V4_STATE_SIZE:]), dim=-1) if self.architecture == "entity-v5" else states[..., :32]
+        global_token = self.global_embed(global_features).unsqueeze(1)
+        if states.shape[-1] != self.state_size:
             raise ValueError("entity transformer state width mismatch")
-        global_token = self.global_embed(states[..., :32]).unsqueeze(1)
-        players = states[..., 32:].reshape(*states.shape[:-1], 8, 80)
+        player_end = 32 + 8 * self.player_feature_size
+        players = states[..., 32:player_end].reshape(*states.shape[:-1], 8, self.player_feature_size)
+        if self.city_embed is not None:
+            city = players[..., 56:].reshape(*states.shape[:-1], 8, 8, CITY_ID_SLOT_SIZE)
+            city_ids = city[..., 3].to(torch.long).clamp(0, CITY_CARD_FEATURES)
+            city_embeddings = self.city_embed(city_ids).flatten(start_dim=-2)
+            city_props = city[..., :3].flatten(start_dim=-2)
+            players = torch.cat((players[..., :56], city_props, city_embeddings), dim=-1)
         player_tokens = self.player_embed(players)
-        return torch.cat((global_token, player_tokens), dim=1)
+        if self.self_embed is not None:
+            hand_end = ENTITY_V4_STATE_SIZE if self.architecture == "entity-v5" else self.state_size
+            self_token_input = torch.cat((players[..., 0, :], states[..., player_end:hand_end]), dim=-1)
+            self_token = self.self_embed(self_token_input).unsqueeze(-2)
+            player_tokens = torch.cat((self_token, player_tokens[..., 1:, :]), dim=-2)
+        tokens = torch.cat((global_token, player_tokens), dim=1)
+        if self.architecture == "entity-v1":
+            return tokens
+        return tokens + self.position_encoding.unsqueeze(0)
 
     def forward(self, states, actions, mask=None, temperatures=None):
         tokens = self.tokenize(states)
@@ -113,7 +161,8 @@ class EntityTransformerNet(nn.Module):
         values = array.array("f")
         with open(filename, "rb") as handle:
             values.fromfile(handle, os.path.getsize(filename) // values.itemsize)
-        expected = sum(layer.weight.numel() + layer.bias.numel() for layer in self.ordered)
+        expected = sum(layer.weight.numel() + (layer.bias.numel() if getattr(layer, "bias", None) is not None else 0)
+                       for layer in self.ordered)
         if len(values) != expected:
             raise ValueError(f"entity transformer parameter count mismatch: {len(values)} != {expected}")
         cursor = 0
@@ -122,9 +171,10 @@ class EntityTransformerNet(nn.Module):
                 weight_count = layer.weight.numel()
                 layer.weight.copy_(torch.tensor(values[cursor:cursor + weight_count]).reshape_as(layer.weight))
                 cursor += weight_count
-                bias_count = layer.bias.numel()
-                layer.bias.copy_(torch.tensor(values[cursor:cursor + bias_count]).reshape_as(layer.bias))
-                cursor += bias_count
+                if getattr(layer, "bias", None) is not None:
+                    bias_count = layer.bias.numel()
+                    layer.bias.copy_(torch.tensor(values[cursor:cursor + bias_count]).reshape_as(layer.bias))
+                    cursor += bias_count
         if cursor != len(values):
             raise ValueError("entity transformer flat weight trailing data")
 
@@ -132,7 +182,8 @@ class EntityTransformerNet(nn.Module):
         values = array.array("f")
         for layer in self.ordered:
             values.extend(layer.weight.detach().cpu().reshape(-1).tolist())
-            values.extend(layer.bias.detach().cpu().reshape(-1).tolist())
+            if getattr(layer, "bias", None) is not None:
+                values.extend(layer.bias.detach().cpu().reshape(-1).tolist())
         with open(filename, "wb") as handle:
             values.tofile(handle)
 

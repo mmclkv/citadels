@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>富饶之城训练框架流程图（Mermaid）</title>
+<title>富饶之城 Python 训练流程图（Mermaid）</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
   body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; margin: 24px; background: #fafafa; color: #222; }
@@ -13,57 +13,53 @@
 </style>
 </head>
 <body>
-<h1>富饶之城 · 训练框架流程图</h1>
+<h1>富饶之城 · Python 训练流程图</h1>
 <div class="chart">
 <pre class="mermaid">
 flowchart TB
-    subgraph JS["Node.js 主进程（train.js + training-manager.js）"]
-        direction TB
-        CFG["训练主循环<br/>配置 sanitize / 课程表 / 进度统计"]
-        POOL["SelfPlayPool（selfplay-pool.js）<br/>两段式关闭：shutdown → closed → terminate"]
-        BUF["rollout 批缓冲<br/>攒满 batchGames 局 → 写盘"]
-        BRIDGE["TorchBridge（torch-bridge.js）<br/>spawn 持久训练进程"]
+    subgraph UI["浏览器（仅控制台 UI）"]
+        PAGE["training.html / training.js<br/>配置、启动/停止、进度与日志"]
     end
 
-    subgraph WK["Worker 线程 ×N（worker_threads）"]
-        SW["selfplay-worker.js<br/>驱动自对弈 / 收集 transitions"]
-        NSC["NativeSearchClient<br/>stdin/stdout JSON 行协议<br/>stderr 只留末 4KB"]
+    subgraph SERVER["Python 后端（python_backend/server.py）"]
+        HTTP["HTTP API<br/>/api/training/start · status · stop"]
+        MANAGER["TrainingManager<br/>配置归一化、生命周期、指标、checkpoint"]
+        HTTP --> MANAGER
     end
 
-    subgraph CPP["C++ 进程 ×N"]
-        MW["mcts_worker(_libtorch).exe<br/>MCTS 搜索 / 规则引擎 / 合法动作<br/>（不含神经网络权重）"]
+    subgraph TRAINER["Python 训练主进程（training_runtime.py）"]
+        GAME["批次调度<br/>课程阵容、座位公平轮换、指标聚合"]
+        MODEL["PyTorch Entity Transformer<br/>策略 / 价值推理与 PPO 更新"]
+        MCTS["Python ISMCTS<br/>确定化粒子、belief 权重、PUCT<br/>可生成 MCTS 策略蒸馏目标"]
+        OPT["optimizer + rollout 批数据<br/>主进程串行更新"]
+        SAVE["压缩 checkpoint<br/>权重、配置、编码版本与训练进度"]
+        GAME --> MCTS
+        MCTS --> MODEL
+        GAME --> OPT
+        OPT --> MODEL
+        MODEL --> SAVE
     end
 
-    SHM[["共享内存槽位区<br/>8 槽 × 8MB<br/>请求超容量自动二分拆批"]]
-
-    subgraph PY["Python 进程（GPU 唯一通道）"]
-        SMD["shared_inference_daemon.py<br/>合并 batch 前向推理<br/>torch 线程数 = 2<br/>RELOADED 热重载"]
-        GT["gpu_trainer.py（持久进程）<br/>PPO 训练：流式解析 rollout<br/>mini-batch 现场补零<br/>训练完 del + gc + empty_cache"]
+    subgraph SAMPLERS["Python spawn 采样进程 ×N（可选）"]
+        WORKER["独立 Python 游戏引擎 / NPC / 编码<br/>采集策略样本与结果指标"]
+        SHARED[["共享内存 CPU 模型快照<br/>每批开始时从训练模型同步"]]
+        SHARED --> WORKER
     end
 
-    MODEL[("model.pt<br/>模型权重文件")]
+    CKPT[("training-data/checkpoint-*.json.gz<br/>可选 .optimizer.pt sidecar")]
 
-    CFG --> POOL
-    POOL -->|"Worker Threads"| SW
-    SW --> NSC
-    NSC <-->|"stdio"| MW
-    MW <--> SHM
-    SHM <--> SMD
-    SW -->|"transitions"| POOL
-    POOL --> BUF
-    BUF -->|"rollout.json.gz<br/>每批写后清空"| GT
-    BRIDGE --- GT
-    GT -->|"保存新权重"| MODEL
-    SMD <-->|"加载 / RELOADED"| MODEL
+    PAGE -->|"HTTP JSON"| HTTP
+    MANAGER --> GAME
+    GAME <-->|"批量自对弈结果与样本"| WORKER
+    SAVE --> CKPT
+    CKPT -. "续训时加载" .-> MODEL
 
     classDef node fill:#e3f2fd,stroke:#1565c0,color:#000
-    classDef cpp fill:#fff3e0,stroke:#ef6c00,color:#000
     classDef py fill:#e8f5e9,stroke:#2e7d32,color:#000
     classDef store fill:#f3e5f5,stroke:#6a1b9a,color:#000
-    class CFG,POOL,BUF,BRIDGE,SW,NSC node
-    class MW,SHM cpp
-    class SMD,GT py
-    class MODEL store
+    class PAGE,HTTP,MANAGER node
+    class GAME,MODEL,MCTS,OPT,WORKER,SHARED py
+    class SAVE,CKPT store
 </pre>
 </div>
 <h2>Mermaid 源码（可直接复制）</h2>

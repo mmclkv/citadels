@@ -50,6 +50,7 @@ inline DistrictCard load_card(const JsonValue& value) {
   DistrictCard card{string_field(value, "uid"), string_field(value, "color"), cost,
                     string_field(value, "name"), int_field(value, "scoreValue", cost),
                     string_field(value, "purpleEffect")};
+  card.en = string_field(value, "en");
   const auto* purple = value.get("purple");
   if (purple && purple->is_object())
     card.purple_effect = string_field(*purple, "effect", card.purple_effect);
@@ -134,6 +135,9 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       if (nums && nums->is_array()) for (const auto& value : nums->as_array()) if (value.is_number()) state.blackmailer_nums.push_back(static_cast<int>(value.as_number()));
       const auto* done = blackmailer->get("done");
       if (done && done->is_array()) for (const auto& value : done->as_array()) if (value.is_number()) state.blackmailer_done.push_back(static_cast<int>(value.as_number()));
+      const auto* revealed = blackmailer->get("revealed");
+      if (revealed && revealed->is_array()) for (const auto& value : revealed->as_array())
+        if (value.is_object() && bool_field(value, "isReal")) state.blackmailer_revealed_real.push_back(int_field(value, "num"));
     }
   }
 
@@ -216,6 +220,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       const auto* card = pending->get("card");
       if (card && card->is_object()) state.pending_cards = {load_card(*card)};
       state.pending_selected = string_array_field(*pending, "selected");
+      state.pending_cursor = int_field(*pending, "cursor");
       const auto* queue = pending->get("queue");
       if (queue && queue->is_array()) for (const auto& value : queue->as_array())
         if (value.is_number()) state.pending_queue.push_back(static_cast<int>(value.as_number()));

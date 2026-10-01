@@ -110,6 +110,7 @@ struct NativeGameState {
   int blackmailer_signed = -1;
   int blackmailer_player = -1;
   std::vector<int> blackmailer_done;
+  std::vector<int> blackmailer_revealed_real;
   int tax_collector_gold = 0;
   std::vector<int> pending_nums;
   int pending_first = -1;
@@ -124,6 +125,7 @@ struct NativeGameState {
   std::string pending_uid;
   std::vector<DistrictCard> pending_cards;
   std::vector<std::string> pending_selected;
+  int pending_cursor = 0;
   std::vector<int> pending_queue;
 
   bool draft_remove(const std::string& id) {
@@ -595,6 +597,7 @@ struct NativeGameState {
     if (reveal) {
       const int owner = blackmailer_player;
       const bool real = pending_signed;
+      if (real) blackmailer_revealed_real.push_back(pending_first);
       if (real && owner >= 0 && owner < static_cast<int>(players.size())) {
         players[owner].gold += target->gold; target->gold = 0;
       }
@@ -712,7 +715,7 @@ struct NativeGameState {
     pending_target = -1; pending_amount = 0; pending_uid.clear();
     pending_nums.clear(); pending_first = -1; pending_signed = -1;
     magistrate_nums.clear(); magistrate_signed = -1; magistrate_player = -1; magistrate_claimed = false;
-    blackmailer_nums.clear(); blackmailer_signed = -1; blackmailer_player = -1; blackmailer_done.clear();
+    blackmailer_nums.clear(); blackmailer_signed = -1; blackmailer_player = -1; blackmailer_done.clear(); blackmailer_revealed_real.clear();
     reaction_kind.clear(); reaction_queue.clear(); has_reaction_card = false; reaction_player = -1;
     std::vector<std::string> pool = char_deck;
     for (size_t i = pool.size(); i > 1; --i) {

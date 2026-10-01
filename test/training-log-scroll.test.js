@@ -53,9 +53,9 @@ test('错误行单独维护，不随每次刷新重复追加', () => {
 });
 
 test('服务端日志带单调递增序号，供前端做增量渲染', () => {
-  const lib = read('lib/training-manager.js');
-  assert.match(lib, /let logSeq = 0;/);
-  assert.match(lib, /seq:\s*\+\+logSeq/, '每条日志都要带 seq，且重启后不回退（前端据此识别整框重画）');
+  const runtime = read('python_backend/training_runtime.py');
+  assert.match(runtime, /self\._log_seq \+= 1/);
+  assert.match(runtime, /"seq": self\._log_seq/, 'Python 训练事件带单调递增序号供前端增量渲染');
 });
 
 test('训练页静态资源版本号已推进（浏览器才会加载新文件）', () => {

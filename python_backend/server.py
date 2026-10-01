@@ -1,0 +1,1186 @@
+"""Standalone stdlib HTTP/WebSocket transport for the Python game server."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import base64
+import copy
+import gzip
+import hashlib
+import hmac
+import io
+import ipaddress
+import json
+import mimetypes
+import os
+import random
+import re
+import secrets
+import struct
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlsplit
+
+from .game import apply_action, get_available_actions
+from .bot import decide as decide_npc
+from .rooms import RoomRegistry, _bot_seat, _empty_seat, _seat_mcts, lobby_view, public_room
+from .views import sanitize
+from .agent import AgentClient, AgentError, config_from_env
+from .voice import VoiceService
+from .neural import NeuralPolicy
+from .training_runtime import TrainingManager
+from .frp import FrpManager
+from .codex_gateway import CodexGateway, detect_codex
+
+ROOT = Path(__file__).resolve().parents[1]
+GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+MAX_HEADER_BYTES = 16384
+MAX_FRAME_BYTES = 1_048_576
+MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
+STATE_ENCODING_VERSION = 11
+LEGACY_STATE_ENCODING_VERSION = 8
+ACTION_ENCODING_VERSION = 8
+
+
+def _json_bytes(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        result = int(value)
+        return result if result > 0 else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def platform_name() -> str:
+    if os.name == "nt":
+        return "win32"
+    if sys.platform == "darwin":
+        return "darwin"
+    return "linux"
+
+
+def _is_loopback_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address | None) -> bool:
+    return bool(address and (address.is_loopback or
+                             (isinstance(address, ipaddress.IPv6Address) and
+                              address.ipv4_mapped and address.ipv4_mapped.is_loopback)))
+
+
+def _gunzip_limited(data: bytes, limit: int = 1_073_741_824) -> bytes:
+    chunks = []
+    total = 0
+    with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+        while chunk := stream.read(min(1024 * 1024, limit + 1 - total)):
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > limit:
+                raise ValueError("解压后的存档超过 1 GiB，拒绝处理")
+    return b"".join(chunks)
+
+
+async def _http_response(writer: asyncio.StreamWriter, code: int, body: bytes,
+                         content_type: str = "application/json; charset=utf-8",
+                         headers: dict[str, str] | None = None) -> None:
+    reason = {200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
+              405: "Method Not Allowed", 401: "Unauthorized", 413: "Payload Too Large",
+              429: "Too Many Requests",
+              426: "Upgrade Required", 501: "Not Implemented", 503: "Service Unavailable",
+              204: "No Content"}.get(code, "Error")
+    header = (f"HTTP/1.1 {code} {reason}\r\nContent-Type: {content_type}\r\n"
+              f"Content-Length: {len(body)}\r\nCache-Control: no-store\r\n"
+              "X-Content-Type-Options: nosniff\r\n" +
+              "".join(f"{key}: {value}\r\n" for key, value in (headers or {}).items()) +
+              "Connection: close\r\n\r\n")
+    writer.write(header.encode("ascii") + body)
+    await writer.drain()
+
+
+def _static_path(url_path: str) -> Path | None:
+    try:
+        decoded = unquote(url_path, errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if decoded == "/":
+        decoded = "/index.html"
+    if decoded.startswith("/src/"):
+        # cards.js is browser presentation metadata; the JavaScript rules and
+        # NPC implementations are no longer client assets or the live backend.
+        if decoded != "/src/cards.js":
+            return None
+        base, relative = ROOT / "src", decoded[5:]
+    elif decoded.startswith("/images/"):
+        base, relative = ROOT / "images", decoded[8:]
+    else:
+        base, relative = ROOT / "public", decoded.lstrip("/")
+    if ("\\" in relative or any(part.startswith(".") for part in relative.split("/"))
+            or not relative or relative.endswith("/")):
+        return None
+    candidate = (base / relative).resolve()
+    if not candidate.is_relative_to(base.resolve()):
+        return None
+    return candidate
+
+
+async def _read_frame(reader: asyncio.StreamReader) -> tuple[int, bytes]:
+    header = await reader.readexactly(2)
+    first, second = header
+    if not first & 0x80:
+        raise ValueError("不支持分片 WebSocket 帧")
+    opcode = first & 0x0F
+    if opcode not in (1, 8, 9, 10):
+        raise ValueError("不支持的 WebSocket 帧类型")
+    if not second & 0x80:
+        raise ValueError("浏览器 WebSocket 帧必须加掩码")
+    size = second & 0x7F
+    if size == 126:
+        size = struct.unpack("!H", await reader.readexactly(2))[0]
+    elif size == 127:
+        size = struct.unpack("!Q", await reader.readexactly(8))[0]
+    if size > MAX_FRAME_BYTES:
+        raise ValueError("WebSocket 消息过大")
+    mask = await reader.readexactly(4)
+    body = await reader.readexactly(size)
+    return opcode, bytes(byte ^ mask[index % 4] for index, byte in enumerate(body))
+
+
+async def _write_frame(writer: asyncio.StreamWriter, opcode: int, body: bytes) -> None:
+    size = len(body)
+    if size < 126:
+        prefix = bytes((0x80 | opcode, size))
+    elif size < 65536:
+        prefix = bytes((0x80 | opcode, 126)) + struct.pack("!H", size)
+    else:
+        prefix = bytes((0x80 | opcode, 127)) + struct.pack("!Q", size)
+    writer.write(prefix + body)
+    await writer.drain()
+
+
+class Client:
+    def __init__(self, writer: asyncio.StreamWriter) -> None:
+        self.writer = writer
+        self.id: str | None = None
+        self.name = "玩家"
+        self.room_id: str | None = None
+        self.last_seen = time.monotonic()
+        self.send_lock = asyncio.Lock()
+
+    async def send(self, payload: dict) -> None:
+        async with self.send_lock:
+            await _write_frame(self.writer, 1, _json_bytes(payload))
+
+
+class PythonServer:
+    def __init__(self) -> None:
+        self.rooms = RoomRegistry()
+        self.clients: set[Client] = set()
+        external_agent_requested = any(os.environ.get(key) for key in
+            ("CITADELS_AGENT_BASE_URL", "CITADELS_AGENT_MODEL", "CITADELS_AGENT_API_KEY"))
+        self.local_codex = detect_codex()
+        self.use_local_codex = (not external_agent_requested and
+                                os.environ.get("CITADELS_DISABLE_LOCAL_CODEX") != "1" and
+                                self.local_codex["available"])
+        agent_env = dict(os.environ)
+        if self.use_local_codex:
+            agent_env.update({"CITADELS_AGENT_BASE_URL": "http://127.0.0.1:8787/api/codex/v1",
+                              "CITADELS_AGENT_MODEL": os.environ.get("CITADELS_CODEX_MODEL") or "codex-cli",
+                              "CITADELS_AGENT_API_KEY": "",
+                              "CITADELS_AGENT_TIMEOUT_MS": os.environ.get("CITADELS_AGENT_TIMEOUT_MS", "150000")})
+        self.agent = AgentClient(config_from_env(agent_env))
+        self.codex_gateway = CodexGateway()
+        self.training_data_dir = ROOT / "training-data"
+        self.neural = NeuralPolicy()
+        self.training = TrainingManager(self.training_data_dir)
+        self.frp = FrpManager(int(os.environ.get("PORT") or 8787), ROOT, self._log_startup)
+        self.voice = VoiceService()
+        self.voice_token_hits: dict[str, tuple[int, float]] = {}
+        self.started_at = time.time()
+        self.port: int | None = None
+        self.listening = False
+        self.logs: list[dict] = []
+        self.console_origins = [origin.strip() for origin in os.environ.get(
+            "CITADELS_CONSOLE_ORIGINS", "https://mmclkv.github.io").split(",") if origin.strip()]
+        self.admin_credentials = self._load_admin_credentials()
+
+    def _log_startup(self, message: str, level: str = "info") -> None:
+        self.logs.append({"at": int(time.time() * 1000), "level": level, "text": str(message)[:1000]})
+        self.logs = self.logs[-200:]
+
+    def _agent_status(self) -> dict:
+        status = self.agent.status()
+        if self.use_local_codex:
+            status.update({"provider": "local-codex", "version": self.local_codex["version"],
+                           "message": "已连接本机 Codex（复用当前电脑保存的登录）"})
+        elif not any(os.environ.get(key) for key in
+                     ("CITADELS_AGENT_BASE_URL", "CITADELS_AGENT_MODEL", "CITADELS_AGENT_API_KEY")):
+            status.update({"configured": False, "provider": "none",
+                           "message": "未找到 Codex CLI；请先安装并登录 Codex，或配置外部模型服务"})
+        else:
+            status["provider"] = "external"
+        return status
+
+    def _load_admin_credentials(self) -> tuple[str, str]:
+        username = (os.environ.get("CITADELS_ADMIN_USERNAME") or "").strip()
+        password = os.environ.get("CITADELS_ADMIN_PASSWORD") or ""
+        if username and password:
+            return username, password
+        configured_file = os.environ.get("CITADELS_ADMIN_FILE")
+        if configured_file:
+            credential_path = Path(configured_file)
+        elif os.environ.get("CITADELS_ADMIN_DIR"):
+            credential_path = Path(os.environ["CITADELS_ADMIN_DIR"]) / "server-admin.json"
+        elif os.name == "nt":
+            credential_path = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "Citadels" / "server-admin.json"
+        else:
+            credential_path = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "citadels" / "server-admin.json"
+        try:
+            saved = json.loads(credential_path.read_text(encoding="utf-8"))
+            if isinstance(saved, dict) and isinstance(saved.get("username"), str) and saved.get("username") and \
+                    isinstance(saved.get("password"), str) and saved.get("password"):
+                return saved["username"], saved["password"]
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            pass
+        generated = {"username": "admin", "password": secrets.token_urlsafe(32),
+                     "createdAt": datetime.now(timezone.utc).isoformat()}
+        try:
+            credential_path.parent.mkdir(parents=True, exist_ok=True)
+            with credential_path.open("x", encoding="utf-8") as stream:
+                json.dump(generated, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+            if os.name != "nt":
+                credential_path.chmod(0o600)
+        except FileExistsError:
+            try:
+                saved = json.loads(credential_path.read_text(encoding="utf-8"))
+                if saved.get("username") and saved.get("password"):
+                    return str(saved["username"]), str(saved["password"])
+            except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+                pass
+            raise RuntimeError("无法读取已存在的服务器控制台管理员凭据")
+        except OSError as exc:
+            raise RuntimeError("无法创建服务器控制台管理员凭据：" + str(exc)) from exc
+        self.logs.append({"at": int(time.time() * 1000), "level": "info",
+                          "text": "已生成服务器控制台管理员凭据，保存在 " + str(credential_path)})
+        self.logs.append({"at": int(time.time() * 1000), "level": "info",
+                          "text": "服务器控制台管理员账号：admin（密码只写入本机配置文件，不写入运行日志）"})
+        return generated["username"], generated["password"]
+
+    def _console_cors(self, headers: dict[str, str]) -> dict[str, str]:
+        origin = headers.get("origin", "")
+        if origin not in self.console_origins:
+            return {}
+        return {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Max-Age": "600", "Vary": "Origin"}
+
+    @staticmethod
+    def _basic_credentials(headers: dict[str, str]) -> tuple[str, str] | None:
+        authorization = headers.get("authorization", "")
+        if not re.match(r"^Basic\s+", authorization, re.IGNORECASE):
+            return None
+        try:
+            decoded = base64.b64decode(re.sub(r"^Basic\s+", "", authorization,
+                                              flags=re.IGNORECASE), validate=True).decode("utf-8")
+        except (ValueError, UnicodeError):
+            return None
+        if ":" not in decoded:
+            return None
+        return tuple(decoded.split(":", 1))
+
+    def _admin_authenticated(self, headers: dict[str, str]) -> bool:
+        if not self.admin_credentials:
+            return False
+        candidate = self._basic_credentials(headers)
+        if not candidate:
+            return False
+        return (hmac.compare_digest(candidate[0].encode("utf-8"), self.admin_credentials[0].encode("utf-8"))
+                and hmac.compare_digest(candidate[1].encode("utf-8"), self.admin_credentials[1].encode("utf-8")))
+
+    def _voice_throttled(self, remote_ip: str) -> bool:
+        now = time.time()
+        if len(self.voice_token_hits) > 200:
+            self.voice_token_hits = {key: item for key, item in self.voice_token_hits.items()
+                                     if now <= item[1]}
+        count, reset_at = self.voice_token_hits.get(remote_ip, (0, now + 60))
+        if now > reset_at:
+            count, reset_at = 0, now + 60
+        if count >= 30:
+            return True
+        self.voice_token_hits[remote_ip] = (count + 1, reset_at)
+        return False
+
+    def _checkpoint_list(self) -> list[dict]:
+        try:
+            files = sorted((path for path in self.training_data_dir.iterdir()
+                            if path.is_file() and re.fullmatch(
+                                r"checkpoint-[A-Za-z0-9_-]+\.json\.gz", path.name)),
+                           key=lambda path: path.name, reverse=True)
+            return [{"name": path.name, "bytes": path.stat().st_size,
+                     "mtimeMs": path.stat().st_mtime_ns // 1_000_000}
+                    for path in files[:40]]
+        except OSError:
+            return []
+
+    def _checkpoint_config(self, name: str) -> dict:
+        if (not re.fullmatch(r"checkpoint-[A-Za-z0-9_-]+\.json\.gz", name)
+                or Path(name).name != name):
+            raise ValueError("存档名不合法，请刷新页面后重新选择")
+        path = self.training_data_dir / name
+        try:
+            if path.stat().st_size > MAX_CHECKPOINT_BYTES:
+                raise ValueError("存档超过 256 MB，拒绝读取")
+            raw = _gunzip_limited(path.read_bytes())
+            payload = json.loads(raw.decode("utf-8"))
+        except FileNotFoundError as exc:
+            raise ValueError("存档不存在，请刷新页面后重新选择") from exc
+        except (OSError, EOFError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("存档无法解析（可能已损坏或不是本项目的 checkpoint）：" + str(exc)) from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("config"), dict):
+            raise ValueError("该存档没有记录训练配置（可能是早期版本产物），无法读取参数")
+        encoding = payload.get("encoding") or {}
+        model = payload.get("model") or {}
+        state_version = _positive_int(encoding.get("state")) or _positive_int(model.get("encodingVersion"))
+        action_version = _positive_int(encoding.get("action"))
+        return {"name": name, "game": _positive_int(payload.get("game")) or 0,
+                "createdAt": payload.get("createdAt") or "", "config": payload["config"],
+                "encodingVersion": state_version, "actionEncodingVersion": action_version,
+                "encodingCompatible": state_version in (STATE_ENCODING_VERSION,
+                                                          LEGACY_STATE_ENCODING_VERSION)
+                and action_version == ACTION_ENCODING_VERSION}
+
+    def _import_checkpoint(self, original_name: str, body: bytes) -> dict:
+        if not body:
+            raise ValueError("选中的文件是空的")
+        if len(body) > MAX_CHECKPOINT_BYTES:
+            raise ValueError("文件超过 256 MB，不像是本项目的权重存档")
+        try:
+            payload = json.loads(_gunzip_limited(body).decode("utf-8"))
+        except (OSError, EOFError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("无法解析：需要本项目导出的 .json.gz 存档：" + str(exc)) from exc
+        if not isinstance(payload, dict) or not payload.get("model"):
+            raise ValueError("文件里没有模型权重（缺少 model 字段），无法用于继续训练")
+        raw_stem = Path(original_name.replace("\\", "/")).name
+        stem = re.sub(r"\.json\.gz$", "", raw_stem, flags=re.IGNORECASE)
+        stem = re.sub(r"\.gz$", "", stem, flags=re.IGNORECASE)
+        stem = re.sub(r"[^A-Za-z0-9_-]+", "-", stem).strip("-")[:60]
+        if not stem or stem == "checkpoint-":
+            stem = "imported-" + time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        if not stem.startswith("checkpoint-"):
+            stem = "checkpoint-" + stem
+        self.training_data_dir.mkdir(parents=True, exist_ok=True)
+        candidate = stem + ".json.gz"
+        suffix = 2
+        while (self.training_data_dir / candidate).exists():
+            candidate = f"{stem}-{suffix}.json.gz"
+            suffix += 1
+        (self.training_data_dir / candidate).write_bytes(body)
+        result = self._checkpoint_metadata(candidate, payload)
+        result["renamed"] = candidate != raw_stem
+        return result
+
+    @staticmethod
+    def _checkpoint_metadata(name: str, payload: dict) -> dict:
+        encoding = payload.get("encoding") or {}
+        model = payload.get("model") or {}
+        state_version = _positive_int(encoding.get("state")) or _positive_int(model.get("encodingVersion"))
+        action_version = _positive_int(encoding.get("action"))
+        return {"name": name, "game": _positive_int(payload.get("game")) or 0,
+                "createdAt": payload.get("createdAt") or "",
+                "encodingVersion": state_version, "actionEncodingVersion": action_version,
+                "encodingCompatible": state_version in (STATE_ENCODING_VERSION,
+                                                          LEGACY_STATE_ENCODING_VERSION)
+                and action_version == ACTION_ENCODING_VERSION}
+
+    def _state_for(self, room: dict, player_id: str | None) -> dict:
+        if not room["state"]:
+            view = lobby_view(room)
+            view["voiceReady"] = self.voice.configured
+            return view
+        view = sanitize(room["state"], player_id)
+        view.update({"roomId": room["id"], "roomName": room["name"],
+                     "hostId": room["seats"][0]["id"], "agentStatus": room.get("agentStatus"),
+                     "voiceReady": self.voice.configured,
+                     "voiceEnabled": room["config"].get("voice") is not False})
+        if player_id:
+            view["available"] = get_available_actions(room["state"], player_id)
+        else:
+            view["available"] = None
+        for player in view["players"]:
+            seat = next((seat for seat in room["seats"] if seat["id"] == player["id"]), None)
+            connected = any(client.id == player["id"] and client.room_id == room["id"]
+                            for client in self.clients)
+            player["connected"] = connected or bool(seat and seat["isBot"])
+            player["disconnected"] = bool(seat and seat.get("disconnected"))
+            player["left"] = bool(seat and seat.get("left"))
+            if player["disconnected"] or player["left"]:
+                player["isBot"] = False
+        return view
+
+    async def _broadcast_state(self, room: dict) -> None:
+        for client in list(self.clients):
+            if client.room_id == room["id"] and client.id:
+                try:
+                    await client.send({"t": "state", "state": self._state_for(room, client.id)})
+                except (ConnectionError, OSError):
+                    pass
+
+    async def _send_room_notice(self, room: dict, notice: dict, excluded_id: str | None = None) -> None:
+        payload = {"t": "roomNotice", "notice": notice}
+        for client in list(self.clients):
+            if client.room_id == room["id"] and client.id and client.id != excluded_id:
+                try:
+                    await client.send(payload)
+                except (ConnectionError, OSError):
+                    pass
+
+    def _bot_actor(self, state: dict) -> str | None:
+        confirmation = state.get("roundConfirm")
+        if confirmation:
+            for index, confirmed in enumerate(confirmation["confirmed"]):
+                player = state["players"][index]
+                if not confirmed and player.get("isBot"):
+                    return player["id"]
+            return None
+        if state["phase"] == "draft":
+            draft = state["draft"]
+            step = draft["steps"][draft["stepIdx"]] if draft["stepIdx"] < len(draft["steps"]) else None
+            return state["players"][step["player"]]["id"] if step else None
+        if state["phase"] == "action":
+            reaction = state.get("reaction")
+            if reaction:
+                return state["players"][reaction["playerIdx"]]["id"]
+            turn = state.get("turn")
+            return state["players"][turn["playerIdx"]]["id"] if turn else None
+        return None
+
+    def _schedule_bot(self, room: dict) -> None:
+        old_task = room.get("botTask")
+        if old_task and not old_task.done():
+            return
+        state = room.get("state")
+        actor_id = self._bot_actor(state) if state else None
+        actor = next((p for p in state["players"] if p["id"] == actor_id), None) if actor_id else None
+        if not actor or not actor.get("isBot") or actor.get("botType", "npc") not in ("npc", "agent", "neural"):
+            return
+
+        async def run_turns() -> None:
+            while room.get("state") is state and state["phase"] != "gameover":
+                actor_id_now = self._bot_actor(state)
+                actor_now = next((p for p in state["players"] if p["id"] == actor_id_now), None)
+                if (not actor_now or not actor_now.get("isBot") or
+                        actor_now.get("botType", "npc") not in ("npc", "agent", "neural")):
+                    break
+                if ((room.get("agentStatus") or {}).get("state") == "error" and
+                        room["agentStatus"].get("playerId") == actor_now["id"] and
+                        not state.get("roundConfirm")):
+                    break
+                await asyncio.sleep(max(0, int(room["config"].get("botPace") or 0)) / 1000)
+                available = get_available_actions(state, actor_now["id"])
+                if state.get("roundConfirm"):
+                    action = next((item for item in available.get("actions", [])
+                                   if item.get("type") == "confirm_round" and
+                                   not item.get("disabled")), None)
+                elif actor_now.get("botType", "npc") == "agent":
+                    if not self._agent_status()["configured"]:
+                        room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
+                                                "model": self._agent_status().get("model", ""),
+                                                "message": self._agent_status()["message"]}
+                        await self._broadcast_state(room)
+                        break
+                    room["agentStatus"] = {"playerId": actor_now["id"], "state": "thinking",
+                                            "model": self._agent_status()["model"]}
+                    await self._broadcast_state(room)
+                    before = copy.deepcopy(state)
+                    try:
+                        decision = await asyncio.to_thread(self.agent.decide, state, actor_now["id"])
+                    except AgentError as exc:
+                        if room.get("state") is state and state == before:
+                            room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
+                                                    "model": self._agent_status()["model"],
+                                                    "message": str(exc)}
+                            await self._broadcast_state(room)
+                        break
+                    if room.get("state") is not state or state != before:
+                        continue
+                    action = decision["action"]
+                elif actor_now.get("botType", "npc") == "neural":
+                    status = self.neural.status()
+                    if not status["configured"]:
+                        room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
+                                                "model": status["checkpoint"], "message": status["message"]}
+                        await self._broadcast_state(room)
+                        break
+                    try:
+                        mcts_config = dict(actor_now.get("mcts") or {})
+                        mcts_config["belief"] = room["config"].get("mctsBelief") is not False
+                        action = await asyncio.to_thread(self.neural.decide, state, actor_now["id"],
+                                                         available, mcts_config)
+                    except Exception as exc:
+                        room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
+                                                "model": status["checkpoint"], "message": str(exc)}
+                        await self._broadcast_state(room)
+                        break
+                else:
+                    action = decide_npc(state, actor_now["id"], available)
+                if action is None:
+                    break
+                result = apply_action(state, actor_now["id"], action)
+                if not result.get("ok"):
+                    if actor_now.get("botType") in ("agent", "neural"):
+                        room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
+                                                "model": self._agent_status()["model"],
+                                                "message": "模型行动未通过游戏规则校验"}
+                        await self._broadcast_state(room)
+                        break
+                    fallback = next((item for item in available.get("actions", [])
+                                     if not item.get("disabled")), None)
+                    if not fallback or not apply_action(state, actor_now["id"], fallback).get("ok"):
+                        break
+                room["agentStatus"] = None
+                await self._broadcast_state(room)
+
+        room["botTask"] = asyncio.create_task(run_turns())
+
+    async def _handle_message(self, client: Client, message: dict) -> None:
+        kind = message.get("t")
+        if kind == "hello":
+            client.id = client.id or "p" + secrets.token_hex(3)
+            client.name = str(message.get("name") or "玩家")
+            resumed = self.rooms.resume_room(str(message.get("resumeToken") or ""),
+                                             str(message.get("roomId") or "").upper())
+            if resumed:
+                room, seat = resumed
+                seat["disconnected"] = seat["left"] = False
+                client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
+                if room["state"]:
+                    player = next((p for p in room["state"]["players"] if p["id"] == seat["id"]), None)
+                    if player:
+                        player["isBot"] = False
+            await client.send({"t": "hello", "youId": client.id, "resumed": bool(resumed)})
+            if resumed:
+                await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
+                                   "resumeToken": seat["resumeToken"],
+                                   "state": self._state_for(room, client.id)})
+                await self._broadcast_state(room)
+                self._schedule_bot(room)
+            else:
+                await client.send({"t": "rooms", "rooms": [public_room(room)
+                                                          for room in self.rooms.rooms.values()]})
+            return
+        if kind == "heartbeat":
+            await client.send({"t": "heartbeat", "ts": message.get("ts") or int(time.time() * 1000)})
+            return
+        if kind == "listRooms":
+            await client.send({"t": "rooms", "rooms": [public_room(room)
+                                                       for room in self.rooms.rooms.values()]})
+            return
+        if kind == "createRoom":
+            config = message.get("config") or {}
+            if not isinstance(config, dict):
+                raise ValueError("房间配置必须是对象")
+            if config.get("botType") == "neural":
+                status = self.neural.status()
+                if not status["configured"]:
+                    raise ValueError(status["message"])
+            if config.get("botType") == "agent" and not self._agent_status()["configured"]:
+                raise ValueError(self._agent_status()["message"])
+            room = self.rooms.create_room(str(message.get("name") or client.name or "房主"), config)
+            seat = room["seats"][0]
+            client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
+            await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
+                               "resumeToken": seat["resumeToken"], "state": self._state_for(room, client.id)})
+            await self._broadcast_state(room)
+            return
+        if kind == "joinRoom":
+            room, seat = self.rooms.join_room(str(message.get("roomId") or "").upper(),
+                                              str(message.get("name") or client.name or "玩家"))
+            client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
+            await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
+                               "resumeToken": seat["resumeToken"], "state": self._state_for(room, client.id)})
+            await self._broadcast_state(room)
+            return
+        room = self.rooms.rooms.get(client.room_id or "")
+        if not room or not client.id:
+            raise ValueError("尚未加入房间")
+        if kind == "botDebugSubscribe":
+            await client.send({"t": "botDebugHistory", "entries": room["botDebug"]})
+            return
+        if kind == "leaveRoom":
+            seat = next((seat for seat in room["seats"] if seat["id"] == client.id), None)
+            if seat:
+                state = room["state"]
+                if state:
+                    seat["left"] = True
+                    seat["disconnected"] = False
+                    player = next((p for p in state["players"]
+                                   if p["id"] == seat["id"]), None)
+                    if player and state["phase"] != "gameover":
+                        player["isBot"] = True
+                    if state["phase"] != "gameover":
+                        from .game import _log
+                        _log(state, seat["name"] + " 已离开对局，由电脑托管。", "sys")
+                    await self._send_room_notice(room, {"kind": "player_left", "playerId": seat["id"],
+                                                        "playerName": seat["name"]}, client.id)
+                else:
+                    leaving_name = seat["name"]
+                    seat.update(_empty_seat())
+                    await self._send_room_notice(room, {"kind": "player_left",
+                                                        "playerName": leaving_name}, client.id)
+            client.room_id = None
+            if not any(seat["taken"] and not seat["isBot"] for seat in room["seats"]):
+                task = room.get("botTask")
+                if task and not task.done():
+                    task.cancel()
+                self.rooms.rooms.pop(room["id"], None)
+            else:
+                await self._broadcast_state(room)
+                self._schedule_bot(room)
+            await client.send({"t": "rooms", "rooms": [public_room(item)
+                                                       for item in self.rooms.rooms.values()]})
+            return
+        if kind == "config":
+            if room["state"]:
+                raise ValueError("无法修改")
+            if room["seats"][0]["id"] != client.id:
+                raise ValueError("仅房主可修改配置")
+            updates = message.get("config") or {}
+            if not isinstance(updates, dict):
+                raise ValueError("房间配置必须是对象")
+            if updates.get("botType") == "neural":
+                status = self.neural.status()
+                if not status["configured"]:
+                    raise ValueError(status["message"])
+            if updates.get("botType") == "agent" and not self._agent_status()["configured"]:
+                raise ValueError(self._agent_status()["message"])
+            for key in ("endDistricts", "charSetMode", "botType", "botLevel"):
+                if updates.get(key):
+                    room["config"][key] = updates[key]
+            if updates.get("botPace"):
+                room["config"]["botPace"] = int(updates["botPace"])
+            for key in ("mctsSimulations", "mctsMaxDepth", "mctsParticles"):
+                if key in updates and updates[key] is not None:
+                    bounds = (0, 2000) if key == "mctsSimulations" else (0, 700) if key == "mctsMaxDepth" else (1, 8)
+                    try:
+                        value = int(float(updates[key]))
+                    except (TypeError, ValueError, OverflowError):
+                        raise ValueError("MCTS 配置必须是数字")
+                    room["config"][key] = max(bounds[0], min(bounds[1], value))
+            if "mctsBelief" in updates:
+                room["config"]["mctsBelief"] = updates["mctsBelief"] is not False
+            if "voice" in updates:
+                room["config"]["voice"] = updates["voice"] is not False
+            if updates.get("playerCount"):
+                total = max(2, min(8, int(updates["playerCount"])))
+                room["config"]["playerCount"] = total
+                while len(room["seats"]) < total:
+                    room["seats"].append(_empty_seat())
+                while len(room["seats"]) > total and not room["seats"][-1]["taken"]:
+                    room["seats"].pop()
+            await self._broadcast_state(room)
+            return
+        if kind == "shuffleSeats":
+            if room["state"]:
+                raise ValueError("只能在开局前打乱座位")
+            if room["seats"][0]["id"] != client.id:
+                raise ValueError("仅房主可打乱座位")
+            tail = room["seats"][1:]
+            random.SystemRandom().shuffle(tail)
+            room["seats"][1:] = tail
+            await self._broadcast_state(room)
+            return
+        if kind == "setSeat":
+            if room["state"]:
+                raise ValueError("无法修改")
+            if room["seats"][0]["id"] != client.id:
+                raise ValueError("仅房主可修改座位")
+            index = message.get("index")
+            if not isinstance(index, int) or index <= 0 or index >= len(room["seats"]):
+                raise ValueError("无效的座位")
+            if message.get("kind") == "bot":
+                if message.get("botType") == "neural":
+                    status = self.neural.status()
+                    if not status["configured"]:
+                        raise ValueError(status["message"])
+                if message.get("botType") == "agent" and not self._agent_status()["configured"]:
+                    raise ValueError(self._agent_status()["message"])
+                previous = room["seats"][index]
+                bot_config = {**room["config"],
+                              "mcts": message.get("mcts") or previous.get("mcts"),
+                              "botType": message.get("botType") or room["config"].get("botType"),
+                              "botLevel": message.get("botLevel") or room["config"].get("botLevel")}
+                room["seats"][index] = _bot_seat(index, bot_config)
+                room["seats"][index]["mcts"] = _seat_mcts(bot_config["mcts"], room["config"])
+            elif message.get("kind") == "open":
+                room["seats"][index] = _empty_seat()
+            else:
+                raise ValueError("无效的座位类型")
+            await self._broadcast_state(room)
+            return
+        if kind == "startGame":
+            if room["seats"][0]["id"] != client.id:
+                raise ValueError("仅房主可开始游戏")
+            uses_agent = (any(seat["taken"] and seat["isBot"] and seat.get("botType") == "agent"
+                              for seat in room["seats"]) or
+                          (len([seat for seat in room["seats"] if seat["taken"]]) <
+                           room["config"]["playerCount"] and room["config"].get("botType") == "agent"))
+            if uses_agent and not self._agent_status()["configured"]:
+                raise ValueError(self._agent_status()["message"])
+            if (room["config"].get("botType") == "neural" or
+                    any(seat.get("botType") == "neural" for seat in room["seats"])):
+                status = self.neural.status()
+                if not status["configured"]:
+                    raise ValueError(status["message"])
+            self.rooms.start_room(room["id"])
+            await self._broadcast_state(room)
+            self._schedule_bot(room)
+            return
+        if kind == "agentControl":
+            if not room["state"] or room["seats"][0]["id"] != client.id:
+                raise ValueError("仅房主可控制 Agent")
+            status = room.get("agentStatus") or {}
+            if status.get("state") != "error":
+                return
+            actor = next((p for p in room["state"]["players"]
+                          if p["id"] == status.get("playerId")), None)
+            if not actor or not actor.get("isBot") or message.get("mode") not in ("retry", "npc"):
+                return
+            task = room.get("botTask")
+            if task and not task.done():
+                task.cancel()
+            room["botTask"] = None
+            room["agentStatus"] = None
+            if message["mode"] == "npc":
+                actor["botType"] = "npc"
+                seat = next((s for s in room["seats"] if s["id"] == actor["id"]), None)
+                if seat:
+                    seat["botType"] = "npc"
+                from .game import _log
+                _log(room["state"], actor["name"] + " 已由房主切换为普通电脑。", "sys")
+            await self._broadcast_state(room)
+            self._schedule_bot(room)
+            return
+        if kind == "action":
+            if not room["state"]:
+                raise ValueError("尚未开局")
+            action = message.get("action") or {}
+            if not isinstance(action, dict):
+                raise ValueError("行动必须是对象")
+            result = apply_action(room["state"], client.id, action)
+            if not result["ok"]:
+                raise ValueError(result["error"])
+            await self._broadcast_state(room)
+            self._schedule_bot(room)
+            return
+        if kind == "restart":
+            if room["seats"][0]["id"] != client.id:
+                raise ValueError("仅房主可重开游戏")
+            task = room.get("botTask")
+            if task and not task.done():
+                task.cancel()
+            room["botTask"] = None
+            room["state"] = None
+            await self._broadcast_state(room)
+            return
+        if kind == "setPace":
+            pace = message.get("pace")
+            if isinstance(pace, (int, float)) and 60 <= pace <= 6000:
+                room["config"]["botPace"] = round(pace)
+            return
+        if kind == "chat":
+            if not room["state"] or room["state"]["phase"] == "gameover":
+                raise ValueError("仅可在进行中的对局内发言")
+            seat = next((seat for seat in room["seats"] if seat["id"] == client.id and seat["taken"]
+                         and not seat["isBot"] and not seat.get("left")), None)
+            if not seat:
+                raise ValueError("没有可发言的真人座位")
+            now = time.monotonic()
+            if getattr(client, "last_chat", 0) and now - client.last_chat < 0.6:
+                raise ValueError("发言太快了，请稍后再试")
+            content = re.sub(r"\s{2,}", " ", re.sub(r"[\r\n\t]+", " ",
+                             str(message.get("text") or "").strip()))[:120]
+            if not content:
+                return
+            client.last_chat = now
+            payload = {"t": "chat", "playerId": seat["id"], "playerName": seat["name"],
+                       "text": content, "sentAt": int(time.time() * 1000)}
+            for other in list(self.clients):
+                if other.room_id == room["id"]:
+                    await other.send(payload)
+            return
+        raise NotImplementedError("Python 服务端消息尚未迁移：" + str(kind))
+
+    async def _websocket(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                         headers: dict[str, str]) -> None:
+        key = headers.get("sec-websocket-key")
+        if not key or headers.get("sec-websocket-version") != "13":
+            await _http_response(writer, 400, _json_bytes({"error": "无效的 WebSocket 握手"}))
+            return
+        try:
+            if len(base64.b64decode(key, validate=True)) != 16:
+                raise ValueError
+        except ValueError:
+            await _http_response(writer, 400, _json_bytes({"error": "无效的 WebSocket 密钥"}))
+            return
+        accept = base64.b64encode(hashlib.sha1((key + GUID).encode("ascii")).digest()).decode("ascii")
+        writer.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                      "Connection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n").encode("ascii"))
+        await writer.drain()
+        client = Client(writer)
+        self.clients.add(client)
+        try:
+            while True:
+                opcode, body = await _read_frame(reader)
+                client.last_seen = time.monotonic()
+                if opcode == 8:
+                    break
+                if opcode == 9:
+                    async with client.send_lock:
+                        await _write_frame(writer, 10, body)
+                    continue
+                if opcode == 10:
+                    continue
+                try:
+                    message = json.loads(body.decode("utf-8"))
+                    if not isinstance(message, dict):
+                        raise ValueError("消息必须是 JSON 对象")
+                    await self._handle_message(client, message)
+                except (ValueError, KeyError, TypeError, UnicodeError, NotImplementedError) as exc:
+                    await client.send({"t": "error", "error": str(exc)})
+        except (asyncio.IncompleteReadError, ConnectionError, OSError, ValueError):
+            pass
+        finally:
+            self.clients.discard(client)
+            room = self.rooms.rooms.get(client.room_id or "")
+            if room and client.id and not any(
+                    other.id == client.id and other.room_id == room["id"] for other in self.clients):
+                seat = next((seat for seat in room["seats"] if seat["id"] == client.id), None)
+                if seat:
+                    seat["disconnected"] = True
+                    seat["left"] = False
+                    if room["state"] and room["state"]["phase"] != "gameover":
+                        player = next((p for p in room["state"]["players"]
+                                       if p["id"] == seat["id"]), None)
+                        if player:
+                            player["isBot"] = True
+                        from .game import _log
+                        _log(room["state"], seat["name"] + " 已断连，由电脑托管。", "sys")
+                    await self._send_room_notice(room, {"kind": "player_disconnected",
+                                                        "playerId": seat["id"],
+                                                        "playerName": seat["name"]}, client.id)
+                    await self._broadcast_state(room)
+                    self._schedule_bot(room)
+
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            raw = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=10)
+            if len(raw) > MAX_HEADER_BYTES:
+                await _http_response(writer, 413, _json_bytes({"error": "请求头过大"}))
+                return
+            lines = raw.decode("iso-8859-1").split("\r\n")
+            method, target, _ = lines[0].split(" ", 2)
+            headers = {}
+            for line in lines[1:]:
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    headers[key.lower()] = value.strip()
+            if headers.get("upgrade", "").lower() == "websocket":
+                await self._websocket(reader, writer, headers)
+                return
+            route = urlsplit(target).path
+            if await self.codex_gateway.handle(reader, writer, method, route, headers):
+                return
+            if route == "/api/server/status" and method == "OPTIONS":
+                cors = self._console_cors(headers)
+                if not cors:
+                    await _http_response(writer, 403, _json_bytes({"error": "未允许的控制台来源"}))
+                    return
+                await _http_response(writer, 204, b"", headers=cors)
+                return
+            if route == "/api/server/status" and method == "GET":
+                cors = self._console_cors(headers)
+                peer = writer.get_extra_info("peername")
+                try:
+                    remote_ip = ipaddress.ip_address(peer[0]) if peer else None
+                except ValueError:
+                    remote_ip = None
+                loopback = _is_loopback_ip(remote_ip)
+                tls = bool(writer.get_extra_info("ssl_object")) or (
+                    os.environ.get("CITADELS_TRUST_PROXY_TLS") == "1" and
+                    headers.get("x-forwarded-proto", "").lower() == "https")
+                if not loopback and not tls:
+                    await _http_response(writer, 400,
+                                         _json_bytes({"error": "公网访问服务器控制台必须使用 HTTPS"}),
+                                         headers=cors)
+                    return
+                if not self._admin_authenticated(headers):
+                    await _http_response(writer, 401, _json_bytes({"error": "需要管理员账号密码"}),
+                                         headers={**cors, "WWW-Authenticate":
+                                                  'Basic realm="Citadels server console", charset="UTF-8"'})
+                    return
+                now = time.time()
+                training = self.training.status()
+                payload = {"startedAt": datetime.fromtimestamp(self.started_at, timezone.utc)
+                           .isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                           "uptimeSeconds": int(max(0, now - self.started_at)),
+                           "pid": os.getpid(), "platform": platform_name(), "port": self.port,
+                           "listening": self.listening, "backend": "python",
+                           "rooms": len(self.rooms.rooms),
+                           "clients": len(self.clients), "nativeWorker": False,
+                           "memory": {"rss": None}, "training": training,
+                           "agent": {key: self._agent_status().get(key) for key in
+                                     ("configured", "provider", "message")},
+                           "neural": self.neural.status(),
+                           "voice": {key: self.voice.status().get(key)
+                                     for key in ("configured", "message")},
+                           "logs": self.logs[-200:]}
+                await _http_response(writer, 200, _json_bytes(payload), headers=cors)
+                return
+            if route == "/api/voice/token":
+                cors = {"Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "POST, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Access-Control-Max-Age": "600"}
+                if method == "OPTIONS":
+                    await _http_response(writer, 204, b"", headers=cors)
+                    return
+                if method != "POST":
+                    await _http_response(writer, 405, _json_bytes({"error": "请使用 POST"}), headers=cors)
+                    return
+                if not self.voice.configured:
+                    await _http_response(writer, 503, _json_bytes({"error": self.voice.status()["message"]}),
+                                         headers=cors)
+                    return
+                peer = writer.get_extra_info("peername")
+                try:
+                    remote_ip = ipaddress.ip_address(peer[0]) if peer else None
+                except ValueError:
+                    remote_ip = None
+                ip_key = str(remote_ip) if remote_ip else "unknown"
+                if self._voice_throttled(ip_key):
+                    await _http_response(writer, 429, _json_bytes({"error": "请求过于频繁，请稍后再试"}),
+                                         headers=cors)
+                    return
+                try:
+                    length = int(headers.get("content-length", "-1"))
+                except ValueError:
+                    length = -1
+                if length < 0 or length > 64 * 1024:
+                    await _http_response(writer, 400, _json_bytes({"error": "请求内容长度无效"}), headers=cors)
+                    return
+                try:
+                    raw = await reader.readexactly(length)
+                    body = json.loads(raw.decode("utf-8"))
+                    if not isinstance(body, dict):
+                        raise ValueError("请求内容必须是 JSON 对象")
+                except (asyncio.IncompleteReadError, UnicodeError, json.JSONDecodeError, ValueError):
+                    await _http_response(writer, 400, _json_bytes({"error": "请求 JSON 无效"}), headers=cors)
+                    return
+                room_id = str(body.get("roomId") or "").upper()
+                resumed = self.rooms.resume_room(str(body.get("resumeToken") or ""), room_id)
+                if not resumed:
+                    await _http_response(writer, 403,
+                                         _json_bytes({"error": "无法验证房间身份，请刷新页面后重试"}),
+                                         headers=cors)
+                    return
+                room, seat = resumed
+                if seat["isBot"]:
+                    await _http_response(writer, 403,
+                                         _json_bytes({"error": "电脑座位不能加入语音"}), headers=cors)
+                    return
+                if room["config"].get("voice") is False:
+                    await _http_response(writer, 403,
+                                         _json_bytes({"error": "房主已关闭本房间的语音"}), headers=cors)
+                    return
+                try:
+                    token = self.voice.token_for(room["id"], seat["id"], seat["name"])
+                    await _http_response(writer, 200, _json_bytes(token), headers=cors)
+                except ValueError as exc:
+                    await _http_response(writer, 400, _json_bytes({"error": str(exc)}), headers=cors)
+                return
+            if route == "/api/training/checkpoint/upload" and method == "POST":
+                peer = writer.get_extra_info("peername")
+                try:
+                    remote_ip = ipaddress.ip_address(peer[0]) if peer else None
+                except ValueError:
+                    remote_ip = None
+                if not _is_loopback_ip(remote_ip):
+                    await _http_response(writer, 403, _json_bytes({"error": "权重只能从服务器本机上传"}))
+                    return
+                try:
+                    length = int(headers.get("content-length", "-1"))
+                except ValueError:
+                    length = -1
+                if length <= 0:
+                    await _http_response(writer, 400, _json_bytes({"error": "上传内容长度无效"}))
+                    return
+                if length > MAX_CHECKPOINT_BYTES:
+                    await _http_response(writer, 413, _json_bytes({"error": "文件超过 256 MB，不像是本项目的权重存档"}))
+                    return
+                try:
+                    body = await reader.readexactly(length)
+                    name = parse_qs(urlsplit(target).query).get("name", [""])[0]
+                    result = self._import_checkpoint(name, body)
+                    await _http_response(writer, 200, _json_bytes(result))
+                except (ValueError, OSError) as exc:
+                    await _http_response(writer, 400, _json_bytes({"error": str(exc)}))
+                return
+            if route in ("/api/training/start", "/api/training/stop"):
+                if method != "POST":
+                    await _http_response(writer, 405, _json_bytes({"error": "请使用 POST"}))
+                    return
+                peer = writer.get_extra_info("peername")
+                try:
+                    remote_ip = ipaddress.ip_address(peer[0]) if peer else None
+                except ValueError:
+                    remote_ip = None
+                if not _is_loopback_ip(remote_ip):
+                    await _http_response(writer, 403, _json_bytes({"error": "训练只能从服务器本机启动或停止"}))
+                    return
+                if route == "/api/training/stop":
+                    await _http_response(writer, 200, _json_bytes(self.training.stop()))
+                    return
+                try:
+                    length = int(headers.get("content-length", "-1"))
+                    if length < 0 or length > 64 * 1024:
+                        raise ValueError("训练配置长度无效")
+                    body = json.loads((await reader.readexactly(length)).decode("utf-8"))
+                    if not isinstance(body, dict):
+                        raise ValueError("训练配置必须是 JSON 对象")
+                    result = self.training.start(body)
+                    await _http_response(writer, 200, _json_bytes(result))
+                except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+                    await _http_response(writer, 400, _json_bytes({"error": str(exc)}))
+                return
+            if method != "GET":
+                await _http_response(writer, 405, _json_bytes({"error": "请使用 GET"}))
+                return
+            if route == "/api/agent/status":
+                await _http_response(writer, 200, _json_bytes(self._agent_status()), headers={
+                    "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
+                return
+            if route == "/api/neural/status":
+                await _http_response(writer, 200, _json_bytes(self.neural.status()), headers={
+                    "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
+                return
+            if route == "/api/voice/status":
+                status = self.voice.status()
+                await _http_response(writer, 200, _json_bytes({"configured": status["configured"],
+                                                               "message": status["message"]}),
+                                     headers={"Access-Control-Allow-Origin": "*"})
+                return
+            if route == "/api/server/startup":
+                await _http_response(writer, 200, _json_bytes({
+                    "logs": self.logs[-100:],
+                    "worker": {"path": "", "exists": False, "running": False,
+                               "backend": "python", "message": "Python 后端不使用独立 C++ 搜索进程"},
+                    "frp": self.frp.status(), "autoBuildNativeWorker": False,
+                    "engine": "python", "listening": self.listening, "port": self.port}))
+                return
+            if route == "/api/training/status":
+                await _http_response(writer, 200, _json_bytes(self.training.status()))
+                return
+            if route == "/api/training/checkpoint":
+                name = parse_qs(urlsplit(target).query).get("name", [""])[0]
+                try:
+                    result = self._checkpoint_config(name)
+                    await _http_response(writer, 200, _json_bytes(result))
+                except ValueError as exc:
+                    await _http_response(writer, 400, _json_bytes({"error": str(exc)}))
+                return
+            if route == "/api/rooms":
+                await _http_response(writer, 200, _json_bytes({"rooms": [
+                    public_room(room) for room in self.rooms.rooms.values()]}))
+                return
+            if route.startswith("/api/"):
+                await _http_response(writer, 501, _json_bytes({"error": "Python 接口尚未迁移：" + route}))
+                return
+            candidate = _static_path(route)
+            if candidate is None:
+                await _http_response(writer, 403, b"forbidden", "text/plain; charset=utf-8")
+                return
+            if not candidate.is_file():
+                await _http_response(writer, 404, b"404", "text/plain; charset=utf-8")
+                return
+            # Python's Windows MIME database commonly labels JavaScript as
+            # text/plain. With nosniff enabled browsers then refuse to execute
+            # the app bundle, leaving every UI control inert.
+            mime = {".js": "application/javascript", ".mjs": "application/javascript",
+                    ".css": "text/css", ".json": "application/json"}.get(
+                        candidate.suffix.lower()) or mimetypes.guess_type(candidate.name)[0] \
+                or "application/octet-stream"
+            if mime.startswith("text/") or mime in ("application/javascript", "application/json"):
+                mime += "; charset=utf-8"
+            await _http_response(writer, 200, candidate.read_bytes(), mime)
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError,
+                asyncio.TimeoutError, UnicodeError, ValueError):
+            try:
+                await _http_response(writer, 400, _json_bytes({"error": "无效的 HTTP 请求"}))
+            except (ConnectionError, OSError):
+                pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (ConnectionError, OSError):
+                pass
+
+
+async def serve(host: str, port: int) -> None:
+    app = PythonServer()
+    server = await asyncio.start_server(app.handle, host, port, limit=MAX_HEADER_BYTES)
+    app.listening = True
+    app.port = server.sockets[0].getsockname()[1] if server.sockets else port
+    app.frp.port = app.port
+    if app.use_local_codex:
+        agent_env = dict(os.environ)
+        agent_env.update({"CITADELS_AGENT_BASE_URL": f"http://127.0.0.1:{app.port}/api/codex/v1",
+                          "CITADELS_AGENT_MODEL": os.environ.get("CITADELS_CODEX_MODEL") or "codex-cli",
+                          "CITADELS_AGENT_API_KEY": "",
+                          "CITADELS_AGENT_TIMEOUT_MS": os.environ.get("CITADELS_AGENT_TIMEOUT_MS", "150000")})
+        app.agent = AgentClient(config_from_env(agent_env))
+    try:
+        await app.frp.start()
+    except Exception as exc:
+        app._log_startup("[frp] 启动失败：" + str(exc), "error")
+    addresses = ", ".join(str(socket.getsockname()) for socket in server.sockets or [])
+    print("Python Citadels 服务器已启动：" + addresses)
+    async with server:
+        try:
+            await server.serve_forever()
+        finally:
+            app.listening = False
+            await app.frp.close()
+
+
+def parse_server_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Citadels Python game server")
+    try:
+        default_port = int(os.environ.get("PORT", "8788"))
+    except ValueError:
+        parser.error("环境变量 PORT 必须是 1～65535 的整数")
+    parser.add_argument("port", nargs="?", type=int, default=default_port)
+    parser.add_argument("--host", default=os.environ.get(
+        "CITADELS_HOST", os.environ.get("HOST", "127.0.0.1")))
+    args = parser.parse_args(argv)
+    allow_ephemeral = os.environ.get("CITADELS_ALLOW_EPHEMERAL_PORT") == "1"
+    minimum_port = 0 if allow_ephemeral else 1
+    if not minimum_port <= args.port <= 65535:
+        parser.error("端口必须在 " + str(minimum_port) + "～65535 之间")
+    if not args.host or any(char.isspace() for char in args.host):
+        parser.error("监听地址不能为空或包含空白字符")
+    return args
+
+
+def main() -> None:
+    args = parse_server_args()
+    asyncio.run(serve(args.host, args.port))
+
+
+if __name__ == "__main__":
+    main()

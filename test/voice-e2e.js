@@ -11,10 +11,8 @@
  */
 'use strict';
 
-const path = require('node:path');
-const { fork } = require('node:child_process');
-const { once } = require('node:events');
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright-core');
+const { startPythonServer } = require('./python-server-process');
 
 const LIVEKIT_WS = process.env.LIVEKIT_WS || 'ws://127.0.0.1:7880';
 const LIVEKIT_KEY = process.env.LIVEKIT_KEY || 'devkey';
@@ -36,24 +34,12 @@ async function until(fn, label, timeout = 15000) {
 }
 
 async function startGameServer() {
-  const child = fork(path.join(__dirname, '..', 'server.js'), ['0'], {
-    cwd: path.join(__dirname, '..'), silent: true,
-    env: Object.assign({}, process.env, {
-      LIVEKIT_URL: LIVEKIT_WS,
-      LIVEKIT_API_KEY: LIVEKIT_KEY,
-      LIVEKIT_API_SECRET: LIVEKIT_SECRET,
-      CITADELS_DISABLE_LOCAL_CODEX: '1'
-    })
+  const server = await startPythonServer({
+    LIVEKIT_URL: LIVEKIT_WS, LIVEKIT_API_KEY: LIVEKIT_KEY,
+    LIVEKIT_API_SECRET: LIVEKIT_SECRET, CITADELS_DISABLE_LOCAL_CODEX: '1'
   });
-  let port, output = '';
-  child.on('message', m => { if (m.type === 'listening') port = m.port; });
-  child.stdout.on('data', s => { output += s; });
-  child.stderr.on('data', s => { output += s; });
-  await until(() => port, '游戏服务器启动');
   return {
-    base: 'http://127.0.0.1:' + port,
-    close: async () => { if (child.exitCode === null) { child.kill(); await once(child, 'exit'); } },
-    output: () => output
+    base: server.base, close: server.close, output: server.output
   };
 }
 

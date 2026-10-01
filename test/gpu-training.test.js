@@ -1,36 +1,43 @@
 'use strict';
 
-const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
+// Exercise the supported Python/PyTorch training CLI, not the retired JS trainer.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
-const python = path.join(root, '.python', 'python.exe');
+const python = process.platform === 'win32'
+  ? path.join(root, '.python', 'python.exe')
+  : path.join(root, '.python', 'bin', 'python');
 if (!fs.existsSync(python)) {
-  console.log('GPU 训练测试：跳过（未安装项目私有 PyTorch 环境）');
+  console.log('Python GPU 训练测试：跳过（未安装项目私有 Python 环境）');
   process.exit(0);
 }
-const config = {
-  targetGames: 2, minPlayers: 2, maxPlayers: 2, charSet: 'base', endDistricts: 7,
-  profile: 'fast', backend: 'gpu', batchGames: 2, workers: 2, ppoEpochs: 1,
-  miniBatch: 128, checkpointEvery: 2, seed: 9917
-};
-const run = spawnSync(process.execPath, [path.join(root, 'training', 'train.js')], {
-  cwd: root, encoding: 'utf8', timeout: 120000,
-  env: { ...process.env, CITADELS_TRAIN_CONFIG: JSON.stringify(config) }
-});
-assert.strictEqual(run.status, 0, run.stderr || run.stdout);
-// [train] 开头的行是 process.send 不可用时的 log() 兜底输出（fork 模式不会产生）；
-// 只解析以 { 开头的 JSON 消息，事件流（started/progress/completed）依然能拿到。
-const messages = run.stdout.trim().split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
-const started = messages.find(message => message.type === 'started');
-const progress = messages.find(message => message.type === 'progress');
-const completed = messages.find(message => message.type === 'completed');
-assert.strictEqual(started.hardware.device, 'cuda', 'PyTorch 训练确实使用 CUDA');
-assert.match(started.hardware.gpu, /GTX 1660 SUPER/i, '识别本机 NVIDIA GPU');
-assert.ok(progress.point.gradientNorm > 0, 'GPU 反向传播产生非零梯度');
-assert.ok(Number.isFinite(progress.point.policyLoss), '策略损失按真实精度输出');
-assert.ok(progress.point.gpuMemoryMB > 0, '记录 CUDA 峰值显存');
-assert.strictEqual(completed.completedGames, 2, 'GPU 训练完成并行自对弈批次');
-console.log('GPU 训练：CUDA、并行轨迹、PPO 梯度和指标全部通过');
+
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'citadels-python-gpu-train-'));
+try {
+  const configPath = path.join(temp, 'config.json');
+  const dataDir = path.join(temp, 'training-data');
+  const config = {
+    targetGames: 2, minPlayers: 2, maxPlayers: 2, charSet: 'base', endDistricts: 7,
+    profile: 'fast', networkArchitecture: 'flat', device: 'cuda',
+    batchGames: 2, workers: 2, ppoEpochs: 1, miniBatch: 128,
+    checkpointEvery: 2, maxRounds: 1, seed: 9917
+  };
+  fs.writeFileSync(configPath, JSON.stringify(config));
+  const run = spawnSync(python, [path.join(root, 'python_backend', 'train.py'), configPath,
+    '--data-dir', dataDir], { cwd: root, encoding: 'utf8', timeout: 120000,
+    env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' } });
+  const output = (run.stdout || '') + (run.stderr || '');
+  assert.strictEqual(run.status, 0, output);
+  assert.match(output, /Python 训练启动/);
+  assert.match(output, /设备=cuda/, '训练入口须确实走 PyTorch CUDA 设备');
+  assert.match(output, /\[train\] 完成：2 局；checkpoint=/);
+  const checkpoints = fs.readdirSync(dataDir).filter(name => /^checkpoint-.*\.json\.gz$/.test(name));
+  assert.equal(checkpoints.length, 1, 'Python CLI 应在指定目录保存训练 checkpoint');
+  console.log('Python GPU 训练 CLI：CUDA、两局自对弈与 checkpoint 保存通过');
+} finally {
+  fs.rmSync(temp, { recursive: true, force: true });
+}

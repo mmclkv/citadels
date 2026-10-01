@@ -8,7 +8,8 @@ test('missing model configuration rejects Agent creation while normal NPC remain
   const c = await connect(f.base, 'host'); t.after(c.close);
   const health = await (await fetch(f.base + '/api/agent/status')).json();
   assert.equal(health.configured, false); assert(!JSON.stringify(health).includes('mock-only-secret'));
-  assert.equal((await fetch(f.base + '/%2e%2e%2fserver.js')).status, 403, 'server-only files cannot escape static mount');
+  assert.equal((await fetch(f.base + '/%2e%2e%2fpython_backend/server.py')).status, 403,
+    'server-only files cannot escape the public static mount');
   c.send({ t: 'createRoom', config: { bots: 1, botType: 'agent' } });
   await until(() => c.messages.some(m => m.t === 'error'), 'unconfigured rejection');
   assert.equal(c.state, null); assert.equal(f.mock.requests.length, 0);

@@ -170,6 +170,7 @@ int main() {
   std::unique_ptr<DirectNeuralEvaluator> direct_neural;
 #endif
   std::string gpu_model_path;
+  std::string evaluator_config_key;
   int gpu_model_version = -1;
   while (std::getline(std::cin, line)) {
     std::string id;
@@ -211,21 +212,35 @@ int main() {
       NativeGameAdapter game;
       UniformNativeEvaluator evaluator;
       const auto inference_backend = string_field(request, "inferenceBackend", "python-binary");
+      const auto architecture = string_field(request, "architecture", "flat");
+      const auto profile = string_field(request, "profile", "balanced");
+      const auto device = string_field(request, "device", "cuda");
+      const int action_encoding_version = int_field(request, "actionEncodingVersion", kActionEncodingVersion);
+      const auto config_key = inference_backend + "|" + architecture + "|" + profile + "|" + device + "|" +
+        std::to_string(action_encoding_version) + "|" + string_field(request, "sharedMemoryName");
+      if (evaluator_config_key != config_key) {
+#ifdef CITADELS_LIBTORCH
+        direct_neural.reset();
+#endif
+        neural.reset(); batch.reset(); gpu.reset();
+        shared_neural.reset(); shared_batch.reset(); shared_inference.reset();
+        gpu_model_path.clear(); gpu_model_version = -1;
+        evaluator_config_key = config_key;
+      }
       if (bool_field(request, "gpuEvaluator") && !string_field(request, "modelPath").empty()) {
         const auto model_path = string_field(request, "modelPath");
         const int model_version = int_field(request, "modelVersion", 0);
         if (inference_backend == "libtorch") {
 #ifdef CITADELS_LIBTORCH
           if (!direct_neural) {
-            const auto architecture = string_field(request, "architecture", "flat");
-            if (architecture == "entity-v1") {
+            if (architecture == "entity-v1" || architecture == "entity-v2" || architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5") {
               direct_neural = std::make_unique<LibTorchEntityTransformerEvaluator>(
-                string_field(request, "profile", "balanced"), model_path,
-                string_field(request, "device", "cuda"));
+                profile, model_path, device, architecture != "entity-v1", action_encoding_version,
+                architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5",
+                architecture == "entity-v4" || architecture == "entity-v5", architecture == "entity-v5");
             } else if (architecture == "flat") {
               direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
-                string_field(request, "profile", "balanced"), model_path,
-                string_field(request, "device", "cuda"));
+                profile, model_path, device, action_encoding_version);
             } else throw std::runtime_error("未知网络架构：" + architecture);
             context += " · 设备=" + direct_neural->device_name();
           } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
@@ -242,7 +257,8 @@ int main() {
               static_cast<uint32_t>(std::max(1024, int_field(request, "sharedMemorySlotBytes", 8 * 1024 * 1024))));
             shared_batch = std::make_unique<BatchEvaluator>(make_shared_memory_batch_backend(*shared_inference));
             shared_neural = std::make_unique<NativeNeuralBatchedEvaluator>(*shared_batch,
-              string_field(request, "profile", "balanced"));
+              profile, action_encoding_version, architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5",
+              architecture == "entity-v4" || architecture == "entity-v5", architecture == "entity-v5");
           }
         } else if (!gpu) {
           gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));
@@ -250,9 +266,10 @@ int main() {
                      string_field(request, "device", "cuda"), "binary",
                      string_field(request, "architecture", "flat"));
           batch = std::make_unique<BatchEvaluator>(make_gpu_batch_backend(gpu,
-            string_field(request, "profile", "balanced")));
-          neural = std::make_unique<NativeNeuralBatchedEvaluator>(*batch,
-            string_field(request, "profile", "balanced"));
+            profile));
+        neural = std::make_unique<NativeNeuralBatchedEvaluator>(*batch,
+          profile, action_encoding_version, architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5",
+          architecture == "entity-v4" || architecture == "entity-v5", architecture == "entity-v5");
         } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
           gpu->reload_model(model_path);
         }
@@ -263,6 +280,8 @@ int main() {
       config.simulations = std::max(1, int_field(request, "simulations", 50));
       config.max_depth = std::max(1, int_field(request, "maxDepth", 200));
       config.c_puct = static_cast<float>(number_field(request, "cPuct", 1.0));
+      config.dirichlet_alpha = static_cast<float>(number_field(request, "dirichletAlpha", 0.3));
+      config.dirichlet_epsilon = static_cast<float>(number_field(request, "dirichletEpsilon", 0.0));
       config.seed = static_cast<uint32_t>(int_field(request, "seed", 1));
       const int batch_size = std::max(1, int_field(request, "batchSize", 32));
       context += " · 模拟=" + std::to_string(config.simulations) +

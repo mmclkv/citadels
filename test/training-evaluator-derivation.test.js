@@ -1,5 +1,5 @@
 'use strict';
-// 回归：JS MCTS 已删除，训练页和服务端只允许 C++ MCTS。
+// 回归：生产训练控制台呈现 Python runtime 的真实能力，不暴露旧 C++ worker 设置。
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -8,52 +8,53 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('训练页不再有「神经网络评估器」选项', () => {
+test('训练页固定展示 Python 规则、Python ISMCTS 与 PyTorch，不保留伪下拉框', () => {
   const html = read('public/training.html');
-  assert.doesNotMatch(html, /神经网络评估器/, '下拉框标签应已删除');
-  assert.doesNotMatch(html, /id="mcts-evaluator"/, 'mcts-evaluator select 应已删除');
-  assert.doesNotMatch(html, /id="mcts-evaluator-hint"/, '旧提示位应已删除');
-  assert.match(html, /option value="cpp" disabled>C\+\+（尚未支持完整规则）/, '未完成的 C++ 规则引擎应禁用');
+  assert.match(html, /class="fixed-setting">Python</, '规则引擎应明确为 Python');
+  assert.match(html, /class="fixed-setting">Python ISMCTS</, '搜索引擎应明确为 Python');
+  assert.match(html, /class="fixed-setting">PyTorch</, '训练模型使用 PyTorch');
+  assert.doesNotMatch(html, /id="(?:rules-engine|mcts-engine|neural-network-framework)"/,
+    '固定后端不应伪装成可切换下拉框');
+  assert.doesNotMatch(html, /id="mcts-(batch-size|max-wait|cache-size)"/, '不应暴露未实现的 C++ evaluator 参数');
 });
 
 test('前端不再残留任何对旧选项的引用', () => {
   const js = read('public/training.js');
-  assert.doesNotMatch(js, /mcts-evaluator/, '不应再有 $(\'mcts-evaluator\') 之类的引用');
+  assert.doesNotMatch(js, /mcts-evaluator|mctsEvaluator|nativeInferenceBackend|nativeSearchWorker/,
+    '前端不应残留旧 evaluator/worker 配置');
 });
 
-test('评估器由神经网络框架 + MCTS 引擎推导，规则与服务端一致', () => {
+test('提交配置明确使用 Python/PyTorch，不透传旧引擎配置', () => {
   const js = read('public/training.js');
-  const fn = js.match(/function resolveMctsEvaluator\(\)\s*\{[\s\S]*?\n\}/);
-  assert.ok(fn, '必须定义 resolveMctsEvaluator()');
-  assert.match(fn[0], /return 'gpu'/, 'C++ MCTS 统一走原生网络评估');
-  // 推导函数必须真的被用于提交配置，而不是另写一份
-  assert.match(js, /mctsEvaluator:\s*resolveMctsEvaluator\(\)/, 'formConfig 必须使用推导值');
+  const fn = js.match(/function formConfig\(\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(fn, '必须定义 formConfig()');
+  assert.match(fn[0], /rulesEngine:\s*'python'/);
+  assert.match(fn[0], /mctsEngine:\s*'python'/);
+  assert.match(fn[0], /neuralNetworkFramework:\s*'pytorch'/);
+  assert.match(fn[0], /backend:\s*'python'/);
+  assert.doesNotMatch(fn[0], /mctsEvaluator|nativeInferenceBackend|nativeSearchWorker/);
 });
 
-test('推导规则与 train.js 的 sanitizeConfig 保持同构', () => {
-  const train = read('training/train.js');
-  assert.match(train, /const mctsEngine = 'cpp'/, '服务端必须固定使用 C++ MCTS');
-});
-
-test('原提示信息迁移到「神经网络框架」下方并仍会随选择刷新', () => {
+test('框架说明准确描述 Python ISMCTS 与 PyTorch', () => {
   const html = read('public/training.html');
   assert.match(html, /id="neural-framework-hint"/, '提示位应挂在神经网络框架上');
   const js = read('public/training.js');
-  assert.match(js, /\$\('neural-framework-hint'\)\.textContent = framework/, '提示文案仍需按网络框架刷新');
-  assert.match(js, /LibTorch 评估/, 'C++ + LibTorch 的提示文案要保留');
+  assert.match(js, /Python ISMCTS 使用当前 PyTorch 训练模型/, '提示必须反映实际评估路径');
 });
 
-test('切换框架会刷新单步耗时估算（评估器变了，估算口径也变）', () => {
+test('变更自对弈条件时刷新 Python MCTS 提示和耗时估算', () => {
   const js = read('public/training.js');
-  const fn = js.match(/function updateMctsEvaluatorUI\(\)\s*\{[\s\S]*?\n\}/);
-  assert.ok(fn, '必须定义 updateMctsEvaluatorUI()');
+  const fn = js.match(/function updateMctsHint\(\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(fn, '必须定义 updateMctsHint()');
   assert.match(fn[0], /estimateMCTS\(\)/, '框架切换后要重算单步估算');
-  assert.match(js, /\$\('neural-network-framework'\)\.onchange = updateMctsEvaluatorUI/,
-    '框架变更必须绑定刷新');
+  assert.match(js, /\$\('char-set'\)\.onchange = updateMctsHint/);
+  assert.match(js, /\$\('device'\)\.onchange = updateMctsHint/);
 });
 
 test('训练页静态资源版本号已推进（浏览器才会加载新文件）', () => {
   const html = read('public/training.html');
   const js = Number((html.match(/training\.js\?v=(\d+)/) || [])[1]);
-  assert.ok(js >= 12, 'training.js 版本号需推进，当前 ' + js);
+  assert.ok(js >= 27, 'training.js 版本号需推进，当前 ' + js);
+  const css = Number((html.match(/training\.css\?v=(\d+)/) || [])[1]);
+  assert.ok(css >= 12, 'training.css 版本号需推进，当前 ' + css);
 });

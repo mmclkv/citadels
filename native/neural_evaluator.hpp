@@ -15,9 +15,13 @@
 
 namespace citadels::native {
 
-inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1) {
-  auto features = encode_features(state, player);
-  features.resize(kStateFeatureSize, 0.0f);
+inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1,
+                                              bool include_own_hand = false,
+                                              bool include_city_identity = false,
+                                              bool include_public_context = false) {
+  auto features = encode_features(state, player, 8, include_own_hand, include_city_identity, include_public_context);
+  features.resize(include_public_context ? kEntityV5StateFeatureSize : include_city_identity ? kEntityV4StateFeatureSize
+    : include_own_hand ? kEntityV3StateFeatureSize : kStateFeatureSize, 0.0f);
   return features;
 }
 
@@ -43,8 +47,8 @@ inline int role_number_for_action(const std::string& id) {
 }
 
 inline int action_type_feature_index(ActionType type) {
-  // Must match ACTION_TYPES in training/train.js exactly. Enum declaration order
-  // is intentionally independent from the model feature order.
+  // Historical model action feature order. Enum declaration order is
+  // intentionally independent from the model feature order.
   static constexpr std::array<ActionType, 43> types = {
     ActionType::AbilitySkip, ActionType::Ability, ActionType::AbbotResource, ActionType::ArtistDone,
     ActionType::BlackmailerBribe, ActionType::BlackmailerRefuse, ActionType::BlackmailerSigned, ActionType::BlackmailerChar,
@@ -64,16 +68,17 @@ inline int action_type_feature_index(ActionType type) {
 
 inline std::vector<float> encode_network_action(const NativeSearchAction& action,
                                                 const NativeGameState* state = nullptr,
-                                                int perspective_player = -1) {
+                                                int perspective_player = -1,
+                                                int action_encoding_version = kActionEncodingVersion) {
   std::vector<float> result(256, 0.0f);
-  result[0] = static_cast<float>(kActionEncodingVersion);
+  result[0] = static_cast<float>(action_encoding_version);
   const int type_index = action_type_feature_index(action.type);
   if (type_index >= 0) result[1 + static_cast<size_t>(type_index)] = 1.0f;
   if (state && perspective_player >= 0 && perspective_player < static_cast<int>(state->players.size())) {
     const int count = static_cast<int>(state->players.size());
     for (int i = 0; i < count; ++i) if (state->players[i].id == action.target) {
       const int relative = (i - perspective_player + count) % count;
-      if (relative < 8) result[42 + relative] = 1.0f;
+      if (relative < 8) result[(action_encoding_version >= 7 ? 124 : 42) + relative] = 1.0f;
       break;
     }
   }
@@ -111,6 +116,8 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
     }
     if (!card) for (const auto& pending : state->pending_cards) if (pending.uid == action.uid) { card = &pending; break; }
     if (card) {
+      const int identity = district_identity_index(*card);
+      if (action_encoding_version >= 8 && identity >= 0) result[132 + static_cast<size_t>(identity)] = 1.0f;
       result[105] = std::min(1.0f, std::max(0.0f, static_cast<float>(card->cost) / 8.0f));
       result[106] = std::min(1.0f, std::max(0.0f, static_cast<float>(card->score_value > 0 ? card->score_value : card->cost) / 10.0f));
       static const std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
@@ -124,8 +131,14 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
 class NativeNeuralBatchedEvaluator final
     : public BatchedEvaluator<NativeGameState, NativeSearchAction> {
  public:
-  NativeNeuralBatchedEvaluator(BatchEvaluator& backend, std::string profile)
-      : backend_(backend), profile_(std::move(profile)) {}
+  NativeNeuralBatchedEvaluator(BatchEvaluator& backend, std::string profile,
+                               int action_encoding_version = kActionEncodingVersion,
+                               bool include_own_hand = false,
+                               bool include_city_identity = false,
+                               bool include_public_context = false)
+      : backend_(backend), profile_(std::move(profile)), action_encoding_version_(action_encoding_version),
+        include_own_hand_(include_own_hand), include_city_identity_(include_city_identity),
+        include_public_context_(include_public_context) {}
 
   Evaluation evaluate(const NativeGameState& state, int player,
                       const std::vector<NativeSearchAction>& actions) override {
@@ -141,12 +154,14 @@ class NativeNeuralBatchedEvaluator final
     std::vector<std::vector<std::vector<float>>> action_vectors;
     state_vectors.reserve(states.size()); action_vectors.reserve(actions.size());
     for (size_t i = 0; i < states.size(); ++i)
-      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1));
+      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1,
+                                                   include_own_hand_, include_city_identity_, include_public_context_));
     for (const auto& group : actions) {
       action_vectors.emplace_back();
       for (const auto& action : group)
         action_vectors.back().push_back(encode_network_action(action, &states[action_vectors.size() - 1],
-                                                              action_vectors.size() - 1 < players.size() ? players[action_vectors.size() - 1] : -1));
+          action_vectors.size() - 1 < players.size() ? players[action_vectors.size() - 1] : -1,
+          action_encoding_version_));
     }
     // 直接调用统一后端接口，避免把 GPU/CPU 设备逻辑复制到规则适配器。
     std::vector<BatchEvaluationRequest> requests;
@@ -173,6 +188,10 @@ class NativeNeuralBatchedEvaluator final
  private:
   BatchEvaluator& backend_;
   std::string profile_;
+  int action_encoding_version_;
+  bool include_own_hand_;
+  bool include_city_identity_;
+  bool include_public_context_;
 };
 
 class NativeNeuralEvaluator final : public Evaluator<NativeGameState, NativeSearchAction> {

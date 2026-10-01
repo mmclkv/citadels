@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=11">
+  <link rel="stylesheet" href="./training.css?v=12">
 </head>
 <body>
   <header class="train-header">
@@ -21,10 +21,10 @@
         <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option></select></label>
         <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
-        <label><span>网络架构</span><select id="network-architecture"><option value="flat" selected>传统全连接（兼容旧权重）</option><option value="entity-v1">Entity Transformer v1（新权重）</option></select><small>新架构不会读取或覆盖旧网络 checkpoint</small></label>
-        <label><span>规则引擎</span><select id="rules-engine"><option value="js" selected>JS</option><option value="cpp" disabled>C++（尚未支持完整规则）</option></select><small>当前只有 JS 规则引擎支持完整对局；C++ 规则选项暂不可用</small></label>
-        <label><span>MCTS 引擎</span><select id="mcts-engine"><option value="cpp" selected>C++</option></select><small>固定使用 C++ MCTS；未找到 worker 时训练直接报错</small></label>
-        <label><span>神经网络框架</span><select id="neural-network-framework"><option value="pytorch" selected>PyTorch</option><option value="libtorch">LibTorch（C++）</option></select><small id="neural-framework-hint">用于神经网络推理</small></label>
+        <label><span>网络架构</span><select id="network-architecture"><option value="flat">传统全连接</option><option value="entity-v5" selected>Entity Transformer v5（公开局面与建筑身份）</option></select><small>v5 增加角色牌组、明置移除、公开效果及本人第二角色；需使用 v5 权重</small></label>
+        <label><span>规则引擎</span><strong class="fixed-setting">Python</strong><small>训练与自对弈均运行于 Python 游戏引擎</small></label>
+        <label><span>MCTS 引擎</span><strong class="fixed-setting">Python ISMCTS</strong><small>用不完美信息搜索访问分布训练策略网络</small></label>
+        <label><span>神经网络框架</span><strong class="fixed-setting">PyTorch</strong><small id="neural-framework-hint">ISMCTS 使用当前 PyTorch 训练模型评估局面</small></label>
         <label><span>计算设备</span><select id="device"><option value="cuda" selected>GPU</option><option value="cpu">CPU</option></select></label>
         <label><span>结束建筑数</span><select id="end-districts"><option value="7">7 栋</option><option value="8" selected>8 栋</option></select></label>
         <label><span>单局最大步数</span><input id="max-steps" type="number" min="1000" max="100000" step="1000" value="60000"></label>
@@ -74,9 +74,7 @@
           <label><span>根节点 Dirichlet 混合 α</span><input id="mcts-dirichlet" type="number" min="0" max="1" step="0.05" value="0.3"><small id="mcts-dirichlet-hint">0 = 关闭噪声</small></label>
           <label><span>Dirichlet 浓度 ε</span><input id="mcts-diri-eps" type="number" min="0.001" max="1" step="0.01" value="0.03"></label>
           <label><span>MCTS 最大搜索深度</span><input id="mcts-max-depth" type="number" min="20" max="1000" step="20" value="200"></label>
-          <label><span>GPU 批量大小</span><input id="mcts-batch-size" type="number" min="1" max="256" step="1" value="32"><small>供 C++ MCTS 的神经网络批量评估使用</small></label>
-          <label><span>最长等待</span><input id="mcts-max-wait" type="number" min="0" max="50" step="1" value="1"><small>毫秒；超过也立即发送（0 = 严格攒满才发）</small></label>
-          <label><span>状态缓存</span><input id="mcts-cache-size" type="number" min="0" max="1048576" step="1024" value="65536"><small>前向结果 LRU 缓存条数（0 = 关闭，重算更准但更慢）</small></label>
+          <p class="mcts-hint">Python ISMCTS 当前逐节点调用 PyTorch；批量推理、等待队列和搜索缓存尚未迁移，因此不显示旧 C++ worker 参数。</p>
           <label><span>隐藏信息粒子数</span><input id="mcts-particles" type="number" min="1" max="16" step="1" value="4"><small>对未知手牌的猜测份数。整池共用一棵搜索树、每条模拟抽一份（1 = 猜一次钉死整棵树）</small></label>
           <label class="checkbox"><span>按公开事实加权粒子</span><input id="mcts-belief" type="checkbox" checked><small>「他有钱、还能建，却没建」⇒ 他手里没有买得起的牌。与这事实矛盾的世界少抽到。关掉 = 均匀瞎猜</small></label>
         </form>
@@ -99,7 +97,7 @@
       <article><span>平均轮数</span><strong id="m-rounds">—</strong><small>轮</small></article>
       <article><span>平均分数</span><strong id="m-score">—</strong><small>分</small></article>
       <article><span>网络名次分</span><strong id="m-nn-reward">—</strong><small>-1~1</small></article>
-      <article><span>网络第一率</span><strong id="m-nn-win">—</strong><small>近 50 局</small></article>
+      <article><span>网络玩家座位第一率</span><strong id="m-nn-win">—</strong><small>近 50 局·同网络人数</small></article>
       <article><span>非法行动兜底</span><strong id="m-fallbacks">0</strong><small>次</small></article>
     </section>
 
@@ -109,7 +107,7 @@
       <article class="panel chart-panel"><div class="section-title"><div><h2>策略损失</h2><p>浅线为原始批次，亮线为移动平均趋势</p></div><span id="policy-now">—</span></div><canvas id="policy-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>KL 散度</h2><p>MCTS 策略与网络策略的近似散度，突升代表更新过猛</p></div><span id="approx-kl-now">—</span></div><canvas id="approx-kl-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>策略网络战力 · 名次分</h2><p>按对局人数分线，每种人数取该人数最近 50 局的策略网络座位名次分</p></div><span id="nn-reward-now">—</span></div><canvas id="network-reward-chart"></canvas></article>
-      <article class="panel chart-panel"><div class="section-title"><div><h2>策略网络战力 · 第一率</h2><p>按对局人数分线，每种人数取该人数最近 50 局的（并列）第一比例</p></div><span id="nn-win-now">—</span></div><canvas id="network-win-chart"></canvas></article>
+      <article class="panel chart-panel"><div class="section-title"><div><h2>策略网络战力 · 座位第一率</h2><p>按对局人数分线，只比较同网络人数阵容；跨课程阶段仍需固定对手评测</p></div><span id="nn-win-now">—</span></div><canvas id="network-win-chart"></canvas></article>
       <article class="panel chart-panel"><div class="section-title"><div><h2>运行性能</h2><p>最近整局耗时与平均推理延迟</p></div><span id="speed-now">—</span></div><canvas id="speed-chart"></canvas></article>
       <article class="panel chart-panel wide"><div class="section-title"><div><h2>座位胜局（按人数分组）</h2><p>每种人数一组，组内为该人数各座位的累计胜局；柱高按组内最高归一，跨人数不可比</p></div></div><canvas id="seat-chart"></canvas></article>
     </section>
@@ -120,6 +118,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=24"></script>
+  <script src="./training.js?v=27"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <string>
 
 #include "json_value.hpp"
 #include "neural_evaluator.hpp"
@@ -8,11 +9,14 @@
 
 int main(int argc, char** argv) {
   const int perspective = argc > 1 ? std::atoi(argv[1]) : 0;
+  const std::string architecture = argc > 2 ? argv[2] : "flat";
+  const bool city_identity = architecture == "entity-v4" || architecture == "entity-v5";
+  const bool public_context = architecture == "entity-v5";
   std::string line;
   if (!std::getline(std::cin, line)) return 2;
   try {
     const auto state = citadels::native::load_native_state(citadels::native::parse_json(line));
-    const auto vector = citadels::native::encode_network_state(state, perspective);
+    const auto vector = citadels::native::encode_network_state(state, perspective, city_identity, city_identity, public_context);
     std::cout << std::setprecision(9);
     for (size_t i = 0; i < vector.size(); ++i) {
       if (i) std::cout << ',';

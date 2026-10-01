@@ -257,11 +257,11 @@ ROLLOUT_HEADER = struct.Struct("<4s7I")
 def create_model(architecture, profile):
     if architecture in (None, "", "flat", "policy-value"):
         return PolicyValueNet(profile)
-    if architecture == "entity-v1":
+    if architecture in ("entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5"):
         if EntityTransformerNet is None:
             detail = str(ENTITY_TRANSFORMER_IMPORT_ERROR)
             raise RuntimeError("无法加载 entity_transformer.py" + (f": {detail}" if detail else ""))
-        return EntityTransformerNet(profile)
+        return EntityTransformerNet(profile, architecture=architecture)
     raise ValueError("不支持的网络架构：%s" % architecture)
 
 
@@ -272,7 +272,7 @@ def load_rollout(filename):
     读成一整条字符串（256 局批次实测 387 MB），再逐行 raw_decode 物化出
     Python 浮点对象（每个 ~32 字节），最后才 np.asarray 成 float32——同一份
     数据在内存里同时存在「文本 + Python 对象 + float32」三份。现在文件本身
-    就是扁平 float32（见 training/rollout-format.js 的布局说明），这里只用
+    就是扁平 float32（布局由 Python rollout writer/reader 共同定义），这里只用
     np.fromfile 顺序读块，torch.from_numpy 与 numpy 缓冲共享内存，不再有文本
     与 Python 浮点对象这两份中间物；输出字典的键与旧实现完全一致，因此
     build_minibatch / train_ppo 一行都不用改。
@@ -407,7 +407,9 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_los
         for indices in torch.randperm(size).split(batch_size):
             batch = build_minibatch(data, indices.numpy(), device)
             adv = advantages[indices].to(device, non_blocking=True)
-            logits, values = model(batch["states"], batch["actions"], batch["masks"], batch["temperatures"])
+            # MCTS π 是未加采样温度的搜索目标；只在 PPO 行为策略比率中使用温度。
+            temperatures = torch.ones_like(batch["temperatures"]) if use_mcts_ce else batch["temperatures"]
+            logits, values = model(batch["states"], batch["actions"], batch["masks"], temperatures)
             probs = torch.softmax(logits, dim=-1)
             if use_mcts_ce:
                 # AlphaZero 风格：用 MCTS 访问分布 π 当策略目标，纯交叉熵

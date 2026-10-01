@@ -4,8 +4,8 @@
 
 namespace citadels::native {
 
-// 与 src/engine.js 的 nextRand 完全一致：所有运算都显式限制为 uint32，
-// 确保 Windows/Linux 及不同编译器下的回放种子可复现。
+// Historical JavaScript-compatible 32-bit RNG retained by the archived native
+// experiment to keep its recorded seeds reproducible across compilers.
 class JsRng {
  public:
   JsRng() : state_(0) {}

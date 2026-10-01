@@ -5,7 +5,7 @@
 
 namespace citadels::native {
 
-// 动作名与 src/engine.js 的 getAvailableActions/applyAction 保持一一对应。
+// Historical action enum for the archived native engine experiment.
 enum class ActionType {
   AbbotResource,
   AbilitySkip,

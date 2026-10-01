@@ -23,23 +23,21 @@ if %errorlevel% equ 0 (
   echo   [WARN] 防火墙放行失败，手机可能连不上。
 )
 
-rem ---- 找到 node（优先 PATH，否则在 WorkBuddy 托管目录里动态查找，避免写死版本号）----
-set "NODE_EXE=node"
-where node >nul 2>&1
-if %errorlevel% neq 0 (
-  set "NODE_EXE="
-  for /d %%D in ("%USERPROFILE%\.workbuddy\binaries\node\versions\*") do (
-    if exist "%%D\node.exe" set "NODE_EXE=%%D\node.exe"
-  )
-  if not defined NODE_EXE (
-    echo   [ERROR] 找不到 node.exe，请先安装 Node.js 或检查 WorkBuddy 托管目录。
+rem ---- Python 后端（优先使用仓库自带运行时，不依赖系统 Python/Node）----
+set "PYTHON_EXE=%~dp0.python\python.exe"
+if not exist "%PYTHON_EXE%" (
+  set "PYTHON_EXE=python"
+  where python >nul 2>&1
+  if errorlevel 1 (
+    echo   [ERROR] 找不到 Python。请恢复仓库 .python\python.exe 或安装 Python 3.12。
     pause
     exit /b 1
   )
 )
 
 echo.
-"%NODE_EXE%" server.js 8787
+echo   正在启动 Python 游戏服务器...
+"%PYTHON_EXE%" python_backend\run.py 8787 --host 0.0.0.0
 echo.
 echo   服务器已停止。
 pause

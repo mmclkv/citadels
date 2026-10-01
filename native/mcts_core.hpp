@@ -129,6 +129,18 @@ struct Evaluator {
 };
 
 // 通用 PUCT 核心。State/Action 由规则适配层定义，搜索核心不依赖游戏规则。
+inline void add_root_noise(std::vector<float>& priors, std::mt19937& rng, float alpha, float epsilon) {
+  if (priors.size() < 2 || alpha <= 0.0f || epsilon <= 0.0f) return;
+  std::gamma_distribution<float> gamma(alpha, 1.0f);
+  std::vector<float> noise(priors.size());
+  float total = 0.0f;
+  for (float& value : noise) { value = gamma(rng); total += value; }
+  if (total <= 0.0f) return;
+  const float mix = std::min(1.0f, epsilon);
+  for (size_t i = 0; i < priors.size(); ++i)
+    priors[i] = (1.0f - mix) * priors[i] + mix * noise[i] / total;
+}
+
 template <typename State, typename Action>
 class Mcts {
  public:
@@ -138,6 +150,8 @@ class Mcts {
     // 防止高深度/高并发配置造成搜索树耗尽进程内存。
     int max_nodes = 20000;
     float c_puct = 1.0f;
+    float dirichlet_alpha = 0.3f;
+    float dirichlet_epsilon = 0.0f;
     uint32_t seed = 1;
   };
 
@@ -186,6 +200,7 @@ class Mcts {
     root.actions = game_.legal_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
     expand(root, seed_state);
+    add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
 
     for (int i = 0; i < config_.simulations; ++i) {
       // 每条模拟重新抽一个粒子：世界只在本次模拟内有效，不是被钉死在树上
@@ -408,6 +423,7 @@ class BatchedMcts {
     root.actions = game_.legal_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
     expand(root, seed_state);
+    add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
     for (int offset = 0; offset < config_.simulations; offset += batch_size) {
       const int count = std::min(batch_size, config_.simulations - offset);
       std::vector<State> states;

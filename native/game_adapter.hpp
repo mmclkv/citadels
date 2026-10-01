@@ -14,7 +14,7 @@
 
 namespace citadels::native {
 
-// Keep terminal rewards equivalent to training/train.js: scoreValue/cost
+// Historical terminal reward implementation: scoreValue/cost
 // building points, museum and beautification points, five-color bonus (with
 // last-round ghost-town exclusion), and completion bonuses.
 inline std::array<float, kValueSlots> native_terminal_reward_vector(
@@ -51,7 +51,7 @@ inline std::array<float, kValueSlots> native_terminal_reward_vector(
     const int player = (perspective_player + static_cast<int>(rel)) % static_cast<int>(state.players.size());
     const float total = scores[static_cast<size_t>(player)].total;
     // Competition ranking: equal totals share a rank; the next rank skips
-    // the tied places. This matches training/train.js exactly.
+    // the tied places. This mirrors the Python training target.
     size_t rank = 0;
     for (const auto& other : scores) if (other.total > total) ++rank;
     result[rel] = scores.size() == 1
@@ -151,34 +151,6 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     BuildContext context{player.role_id, state.turn_phase == "witch_resume",
                          player.gold, state.builds, build_limit, same, quarry};
     return !card.name.empty() && citadels::native::can_build(build_card, context);
-  }
-
-  static std::vector<std::vector<std::string>> redraw_candidates(const NativePlayer& player) {
-    std::vector<std::vector<std::string>> result;
-    result.push_back({});
-    if (!player.hand.empty()) {
-      std::vector<std::string> all;
-      for (const auto& card : player.hand) all.push_back(card.uid);
-      result.push_back(std::move(all));
-    }
-    std::vector<const DistrictCard*> by_cost;
-    by_cost.reserve(player.hand.size());
-    for (const auto& card : player.hand) by_cost.push_back(&card);
-    std::stable_sort(by_cost.begin(), by_cost.end(), [](const auto* left, const auto* right) {
-      if (left->cost != right->cost) return left->cost < right->cost;
-      return left->uid < right->uid;
-    });
-    const size_t limit = std::min<size_t>(4, by_cost.size());
-    for (size_t count = 1; count <= limit; ++count) {
-      std::vector<std::string> low, high;
-      for (size_t i = 0; i < count; ++i) {
-        low.push_back(by_cost[i]->uid);
-        high.push_back(by_cost[by_cost.size() - count + i]->uid);
-      }
-      result.push_back(std::move(low));
-      result.push_back(std::move(high));
-    }
-    return result;
   }
 
   static std::vector<std::vector<std::string>> exact_hand_choices(const NativePlayer& player,
@@ -333,14 +305,15 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (state.pending_kind == "magician_redraw") {
       if (player != state.active_player) return {};
-      std::vector<NativeSearchAction> actions;
-      for (const auto& uids : redraw_candidates(state.players[player])) {
-        const bool duplicate = std::any_of(actions.begin(), actions.end(), [&](const auto& action) {
-          return action.selected_uids == uids;
-        });
-        if (!duplicate) actions.push_back({ActionType::ChooseCards, {}, {}, {}, {}, uids});
-      }
-      return actions;
+      const auto& hand = state.players[player].hand;
+      if (hand.empty()) return {{ActionType::ChooseCards, {}, {}, {}, {}, {}}};
+      if (state.pending_cursor < 0 || state.pending_cursor >= static_cast<int>(hand.size())) return {};
+      NativeSearchAction keep, discard;
+      keep.type = discard.type = ActionType::ChooseCards;
+      keep.uid = discard.uid = hand[state.pending_cursor].uid;
+      keep.name = keep.mode = "skip";
+      discard.name = discard.mode = "use";
+      return {keep, discard};
     }
     if (state.pending_kind == "emperor_crown") {
       if (player != state.active_player) return {};
@@ -675,6 +648,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (action.type == ActionType::MagicianMode && state.pending_kind == "magician_choice") {
       if (player != state.active_player || (action.name != "swap" && action.name != "redraw")) return false;
       state.pending_kind = action.name == "swap" ? "magician_swap" : "magician_redraw";
+      state.pending_cursor = 0;
+      state.pending_selected.clear();
       return true;
     }
     if (action.type == ActionType::ChoosePlayer && state.pending_kind == "magician_swap") {
@@ -705,7 +680,16 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       return true;
     }
     if (action.type == ActionType::ChooseCards && state.pending_kind == "magician_redraw") {
-      const bool ok = player == state.active_player && state.magician_redraw(action.selected_uids);
+      if (player != state.active_player) return false;
+      if (action.mode == "use" || action.mode == "skip") {
+        if (state.pending_cursor < 0 || state.pending_cursor >= static_cast<int>(state.players[player].hand.size()) ||
+            action.uid != state.players[player].hand[state.pending_cursor].uid) return false;
+        if (action.mode == "use") state.pending_selected.push_back(action.uid);
+        ++state.pending_cursor;
+        if (state.pending_cursor < static_cast<int>(state.players[player].hand.size())) return true;
+      }
+      const bool ok = state.magician_redraw(action.mode.empty() ? action.selected_uids : state.pending_selected);
+      if (ok) { state.pending_cursor = 0; state.pending_selected.clear(); }
       if (ok) state.ability_used = true;
       return ok;
     }
@@ -928,6 +912,11 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     // 避免 ostringstream、浮点格式化、大字符串分配和字符串线性查找。
     InformationSetKeyBuilder builder;
     builder.i32(player);
+    if (state.pending_kind == "magician_redraw" && player == state.active_player) {
+      builder.i32(state.pending_cursor);
+      builder.u64(state.pending_selected.size());
+      for (const auto& uid : state.pending_selected) builder.string(uid);
+    }
     const auto features = encode_features(state, player);
     builder.u64(features.size());
     for (float value : features) builder.floating(value);

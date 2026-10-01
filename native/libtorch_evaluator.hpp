@@ -75,8 +75,9 @@ TORCH_MODULE(LibTorchPolicyValueNet);
 class LibTorchNeuralBatchedEvaluator final : public DirectNeuralEvaluator {
  public:
   LibTorchNeuralBatchedEvaluator(std::string profile, std::string model_path,
-                                 std::string device)
-      : profile_(std::move(profile)), device_name_(std::move(device)) {
+                                 std::string device, int action_encoding_version = kActionEncodingVersion)
+      : profile_(std::move(profile)), device_name_(std::move(device)),
+        action_encoding_version_(action_encoding_version) {
     const auto dims = profile_dimensions(profile_);
   model_ = LibTorchPolicyValueNet(672, 256, dims[0], dims[1], dims[2], dims[3], dims[4]);
     if (device_name_ == "cuda") {
@@ -138,7 +139,7 @@ class LibTorchNeuralBatchedEvaluator final : public DirectNeuralEvaluator {
     std::vector<uint8_t> flat_mask(batch * maximum, 0);
     for (size_t i = 0; i < batch; ++i) {
       for (size_t j = 0; j < actions[i].size(); ++j) {
-        const auto encoded = encode_network_action(actions[i][j]);
+        const auto encoded = encode_network_action(actions[i][j], nullptr, -1, action_encoding_version_);
         std::copy(encoded.begin(), encoded.end(),
                   flat_actions.begin() + (i * maximum + j) * action_size);
         flat_mask[i * maximum + j] = 1;
@@ -237,17 +238,25 @@ class LibTorchNeuralBatchedEvaluator final : public DirectNeuralEvaluator {
   }
 
   std::string profile_, device_name_;
+  int action_encoding_version_;
   torch::Device device_{torch::kCPU};
   LibTorchPolicyValueNet model_{nullptr};
 };
 
 class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
  public:
-  LibTorchEntityTransformerEvaluator(std::string profile, std::string model_path, std::string device)
-      : device_name_(std::move(device)) {
-    if (profile == "fast") model_ = EntityTransformerNet(128, 4, 2, 256, 128);
-    else if (profile == "large") model_ = EntityTransformerNet(256, 4, 3, 512, 256);
-    else model_ = EntityTransformerNet(192, 4, 3, 384, 192);
+  LibTorchEntityTransformerEvaluator(std::string profile, std::string model_path, std::string device,
+                                     bool positional_encoding = true,
+                                     int action_encoding_version = kActionEncodingVersion,
+                                     bool own_hand_features = false,
+                                     bool city_identity_features = false,
+                                     bool public_context_features = false)
+      : device_name_(std::move(device)), action_encoding_version_(action_encoding_version),
+        own_hand_features_(own_hand_features), city_identity_features_(city_identity_features),
+        public_context_features_(public_context_features) {
+    if (profile == "fast") model_ = EntityTransformerNet(128, 4, 2, 256, 128, positional_encoding, own_hand_features_, city_identity_features_, public_context_features_);
+    else if (profile == "large") model_ = EntityTransformerNet(256, 4, 3, 512, 256, positional_encoding, own_hand_features_, city_identity_features_, public_context_features_);
+    else model_ = EntityTransformerNet(192, 4, 3, 384, 192, positional_encoding, own_hand_features_, city_identity_features_, public_context_features_);
     if (device_name_ == "cuda") {
       bool available = false;
       try {
@@ -277,19 +286,23 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     for (const auto& group : actions) maximum = std::max(maximum, group.size());
     std::vector<float> flat_states, flat_actions;
     std::vector<uint8_t> flat_mask(states.size() * maximum, 0);
-    flat_states.reserve(states.size() * 672); flat_actions.assign(states.size() * maximum * 256, 0.0f);
+    const size_t state_size = public_context_features_ ? kEntityV5StateFeatureSize : city_identity_features_ ? kEntityV4StateFeatureSize
+      : own_hand_features_ ? kEntityV3StateFeatureSize : kStateFeatureSize;
+    flat_states.reserve(states.size() * state_size); flat_actions.assign(states.size() * maximum * 256, 0.0f);
     for (size_t i = 0; i < states.size(); ++i) {
-      auto encoded = encode_network_state(states[i], i < players.size() ? players[i] : -1);
-      if (encoded.size() != 672) throw std::runtime_error("Entity Transformer 状态特征维度错误");
+      auto encoded = encode_network_state(states[i], i < players.size() ? players[i] : -1,
+                                          own_hand_features_, city_identity_features_, public_context_features_);
+      if (encoded.size() != state_size) throw std::runtime_error("Entity Transformer 状态特征维度错误");
       flat_states.insert(flat_states.end(), encoded.begin(), encoded.end());
       for (size_t j = 0; j < actions[i].size(); ++j) {
-        auto a = encode_network_action(actions[i][j], &states[i], i < players.size() ? players[i] : -1);
+        auto a = encode_network_action(actions[i][j], &states[i],
+          i < players.size() ? players[i] : -1, action_encoding_version_);
         std::copy(a.begin(), a.end(), flat_actions.begin() + (i * maximum + j) * 256);
         flat_mask[i * maximum + j] = 1;
       }
     }
     auto opts = torch::TensorOptions().dtype(torch::kFloat32);
-    auto state_tensor = torch::from_blob(flat_states.data(), {static_cast<int64_t>(states.size()), 672}, opts).clone().to(device_);
+    auto state_tensor = torch::from_blob(flat_states.data(), {static_cast<int64_t>(states.size()), static_cast<int64_t>(state_size)}, opts).clone().to(device_);
     auto action_tensor = torch::from_blob(flat_actions.data(), {static_cast<int64_t>(states.size()), static_cast<int64_t>(maximum), 256}, opts).clone().to(device_);
     auto mask_tensor = torch::from_blob(flat_mask.data(), {static_cast<int64_t>(states.size()), static_cast<int64_t>(maximum)}, torch::TensorOptions().dtype(torch::kBool)).clone().to(device_);
     torch::InferenceMode guard;
@@ -313,7 +326,11 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     size_t total = 0;
     auto count_linear = [&](const torch::nn::Linear& layer) { total += layer->weight.numel() + layer->bias.numel(); };
     auto count_norm = [&](const torch::nn::LayerNorm& layer) { total += layer->weight.numel() + layer->bias.numel(); };
-    count_linear(model_->global_embed); count_linear(model_->player_embed); count_linear(model_->action_embed);
+    count_linear(model_->global_embed);
+    if (city_identity_features_) total += model_->city_embed->weight.numel();
+    count_linear(model_->player_embed);
+    if (own_hand_features_) count_linear(model_->self_embed);
+    count_linear(model_->action_embed);
     for (const auto& block : model_->blocks) {
       count_linear(block->q); count_linear(block->k); count_linear(block->v); count_linear(block->attn_out);
       count_linear(block->ff1); count_linear(block->ff2); count_norm(block->norm1); count_norm(block->norm2);
@@ -328,7 +345,11 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     };
     auto copy_linear = [&](const torch::nn::Linear& layer) { copy_parameter(layer->weight); copy_parameter(layer->bias); };
     auto copy_norm = [&](const torch::nn::LayerNorm& layer) { copy_parameter(layer->weight); copy_parameter(layer->bias); };
-    copy_linear(model_->global_embed); copy_linear(model_->player_embed); copy_linear(model_->action_embed);
+    copy_linear(model_->global_embed);
+    if (city_identity_features_) copy_parameter(model_->city_embed->weight);
+    copy_linear(model_->player_embed);
+    if (own_hand_features_) copy_linear(model_->self_embed);
+    copy_linear(model_->action_embed);
     for (const auto& block : model_->blocks) {
       copy_linear(block->q); copy_linear(block->k); copy_linear(block->v); copy_linear(block->attn_out);
       copy_linear(block->ff1); copy_linear(block->ff2); copy_norm(block->norm1); copy_norm(block->norm2);
@@ -338,6 +359,8 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
   }
  private:
   std::string device_name_; torch::Device device_{torch::kCPU}; EntityTransformerNet model_{nullptr};
+  int action_encoding_version_;
+  bool own_hand_features_, city_identity_features_, public_context_features_;
 };
 
 }  // namespace citadels::native

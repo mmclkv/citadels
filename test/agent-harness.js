@@ -1,8 +1,7 @@
 'use strict';
-const { fork } = require('node:child_process');
-const path = require('node:path');
 const http = require('node:http');
 const { once } = require('node:events');
+const { startPythonServer } = require('./python-server-process');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, label, timeout = 5000) {
   const deadline = Date.now() + timeout;
@@ -26,21 +25,16 @@ async function fixture(configured = true) {
     res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ actionIndex }) } }] }));
   }).listen(0, '127.0.0.1');
   await once(model, 'listening');
-  const child = fork(path.join(__dirname, '..', 'server.js'), ['0'], {
-    cwd: path.join(__dirname, '..'), silent: true,
-    env: { ...process.env, CITADELS_AGENT_BASE_URL: 'http://127.0.0.1:' + model.address().port + '/v1',
-      CITADELS_AGENT_MODEL: configured ? 'smoke-test-model' : '', CITADELS_AGENT_API_KEY: 'mock-only-secret', CITADELS_AGENT_TIMEOUT_MS: '1000' }
+  const server = await startPythonServer({
+    CITADELS_AGENT_BASE_URL: 'http://127.0.0.1:' + model.address().port + '/v1',
+    CITADELS_AGENT_MODEL: configured ? 'smoke-test-model' : '',
+    CITADELS_AGENT_API_KEY: 'mock-only-secret', CITADELS_AGENT_TIMEOUT_MS: '1000'
   });
-  let port, output = '';
-  child.on('message', m => { if (m.type === 'listening') port = m.port; });
-  child.stdout.on('data', s => { output += s; }); child.stderr.on('data', s => { output += s; });
   const close = async () => {
-    if (child.exitCode === null) { child.kill(); await once(child, 'exit'); }
+    await server.close();
     model.closeAllConnections(); await new Promise(r => model.close(r));
   };
-  try { await until(() => port || (child.exitCode !== null && Promise.reject(new Error(output))), 'server startup'); }
-  catch (e) { await close(); throw e; }
-  return { base: 'http://127.0.0.1:' + port, mock, close, output: () => output };
+  return { base: server.base, mock, close, output: server.output };
 }
 async function connect(base, name) {
   const ws = new WebSocket(base.replace(/^http/, 'ws'));

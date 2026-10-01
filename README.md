@@ -2,19 +2,17 @@
 
 基于 [冒險安迪 · 榮耀之城规则](https://andyventure.com/boardgame-citadels/) 与
 [27 种角色能力介绍](https://andyventure.com/boardgame-citadels-characters/) 实现的完整桌游客户端。
-支持 **单人模式**（与电脑 NPC 对战，引擎跑在浏览器里）和 **联机模式**（与真人同房间对战，引擎跑在服务器）。
+支持 **单人模式** 与 **联机模式**。两种模式的对局规则与电脑决策均由 Python 后端执行；浏览器端 JavaScript 负责界面、动画与输入。训练控制台和独立训练命令均使用 Python 后端。
 
 ## 快速开始
 
 ```bash
-node server.js            # 默认端口 8787
-node server.js 9000       # 指定端口
-node server.js 8787 --auto-build-native-worker  # 启动时自动编译并启动 LibTorch worker
+python python_backend/run.py 8787 --host 0.0.0.0  # Python HTTP + WebSocket + 游戏引擎
+python python_backend/run.py 9000 --host 0.0.0.0  # 指定端口
 ```
 
-启动时自动编译 native MCTS worker 默认关闭，避免服务器启动时因为 C++/LibTorch 编译耗时过长。
-需要时可以使用上面的命令行参数，或设置环境变量
-`CITADELS_AUTO_BUILD_NATIVE_WORKER=1` 后启动服务器。关闭该开关不会删除已有的编译产物。
+Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\python.exe`，不需要安装 Node.js。
+也可以安装 Python 3.12 后使用上面的命令。服务端没有 Node.js 启动层或服务端副本；默认端口为 8788，示例显式传入 8787，以保持现有书签和防火墙规则。
 
 启动后浏览器打开：
 
@@ -22,25 +20,34 @@ node server.js 8787 --auto-build-native-worker  # 启动时自动编译并启动
 - 局域网：`http://<你的内网IP>:8787`（启动时会在终端打印，同一 WiFi 下的朋友可直接用它联机；
   浏览器只在 HTTPS 下开放麦克风，所以房间语音需要另外配 HTTPS，见「联机语音」）
 
-零依赖：只用到 Node 内置模块（HTTP、WebSocket 手写实现），无需 `npm install`。
+服务端由 Python 标准库实现 HTTP 与 WebSocket；仓库自带运行时已包含训练/推理所需依赖。
 唯一一个第三方浏览器包（LiveKit 客户端，约 580KB）已经放在 `public/vendor/` 里，
 而且只在第一次点「语音」时才加载，单机玩家不会为它多花流量。
 
 ## 本地策略神经网络训练
 
 启动服务器后访问 `http://localhost:8787/training.html`，也可以从主菜单进入“神经网络训练”。
-训练器直接复用游戏引擎，在独立 Node.js 子进程中执行共享策略网络自对弈。当前电脑已配置项目私有 Python 3.12、PyTorch CUDA 12.6 和 GTX 1660 SUPER 加速环境。
+训练器直接复用 Python 游戏引擎，在服务器进程内执行共享策略网络自对弈，并由 PyTorch 执行策略/价值更新。当前电脑已配置项目私有 Python 3.12、PyTorch CUDA 12.6 和 GTX 1660 SUPER 加速环境。
 
 - 支持开始、优雅停止与从 checkpoint 继续训练；停止时会保存当前模型。
-- 所有座位使用同一个策略价值网络，并且网络输入来自 `Engine.sanitize`，不会读取对手手牌、隐藏角色或牌库顺序。
-- 开 MCTS 时的搜索同样看不到真牌：交给 JS 与 C++ 两个搜索引擎的根局面都由 `training/determinize.js` 换成一份随机猜测（对手手牌、牌库与弃牌堆顺序、暗置移除、对手未打出的角色、真逮捕令），再在猜测局面上重新枚举合法动作一并送进来；训练每步用 1 份猜测，实战神经网络电脑平均 4 份。
+- 所有座位使用同一个策略价值网络；Python 训练输入来自 `python_backend.views.sanitize`，不会读取对手手牌、隐藏角色或牌库顺序。
+- 开 MCTS 时的搜索同样看不到真牌：Python `determinize` 会按玩家可见信息重建对手手牌、牌库/弃牌顺序、暗置移除、未打出的角色和逮捕令，再重新枚举合法动作。训练与实战都使用配置的粒子数（默认 4），并可按公开事实给粒子加权。
 - 使用合法动作枚举与动作掩码，策略只在通过引擎校验的行动中采样。
-- 默认由 4 个 Node worker 并行生成自对弈轨迹，再由 PyTorch 在 CUDA GPU 上批量执行 PPO 更新；也可选择 PyTorch CPU 或旧版 JavaScript CPU 兼容模式。
+- Python 运行时按 `workers` 配置启动独立自对弈进程（同一批次内不超过 `batchGames`）；每批开始前把主训练模型权重同步到共享内存 CPU 模型，采样进程只读推理，PPO 更新在主进程串行进行。PyTorch 训练支持 CUDA 或 CPU。
 - 使用 PPO 裁剪目标、价值损失与探索熵；控制台把策略损失放在独立纵轴，并实时显示 KL 散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
-- `fast`、`balanced`、`large` 三档约为 12.4 万、32.1 万、61.6 万参数；当前电脑建议先用 `balanced` 跑 100 局基准，再决定是否使用 `large`。
+- flat 网络有 `fast`、`balanced`、`large` 三档；Entity Transformer v5 在 v4 基础上新增公开局面特征。建议先用 `fast` 做短跑验证，再按速度选择档位。
 - 训练过程的模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
+
+也可以绕过网页控制台直接运行 Python 训练任务：
+
+```powershell
+.\.python\python.exe python_backend\train.py                         # 默认读取 training/gpu-train-config.json
+.\.python\python.exe python_backend\train.py path\to\train-config.json
+```
+
+按 Ctrl+C 会请求优雅停止并保存 checkpoint。
 - 已训练 52419 局的 `fast` 档 `entity-transformer-v1` 默认推理权重发布在 `models/policy-default.json.gz`（配套元数据 `policy-default.meta.json`）。新拉取的仓库无需复制 checkpoint，创建房间时选择“策略神经网络（仓库自带权重）”即可使用。服务器优先加载这个版本化模型；仅当它缺失时，才回退到 `training-data` 中局数最高的本地 checkpoint。
-- 部署用的模型是从训练 checkpoint 精简而来的：删掉训练历史，只保留架构、profile 和权重；权重四舍五入到 6 位小数。当前默认模型是 `entity-v1`，普通策略推理和 C++/LibTorch MCTS 都会按模型携带的架构加载。同编号的 `.optimizer.pt` 是 GPU 续训用的 optimizer 状态，推理不读它，因此留在 `training-data/`（不入库）。
+- 部署用的模型是从训练 checkpoint 精简而来的：删掉训练历史，只保留架构、profile 和权重；权重四舍五入到 6 位小数。已部署的默认模型仍是 `entity-v1`；新训练使用 `entity-v5`：保留城市建筑 ID embedding 与本人手牌，并增加公开角色牌组、明置移除、公开效果及本人第二角色。旧架构与 v5 的 checkpoint 不能交叉续训。同编号的 `.optimizer.pt` 是 GPU 续训用的 optimizer 状态，推理不读它，因此留在 `training-data/`（不入库）。
 - 开局面板把电脑类型选成「策略神经网络」时，会额外出现两项 MCTS 设置（模拟次数 / 最大搜索深度），默认都是 0 = 关闭。关闭时电脑按策略网络的 TTA 投票走子；打开后服务器先把隐藏信息（对手手牌、牌库与弃牌堆顺序、对手未打出的角色牌、真逮捕令）换成 4 份随机猜测，在每份猜测上做确定化 MCTS，再平均根节点访问分布选动作 —— 电脑不会因此偷看到真牌。模拟次数上限 2000、深度上限 200，超范围由服务器截断。
 - GPU optimizer 状态保存在同编号的 `.optimizer.pt` 文件中；旧 JavaScript checkpoint 可以直接迁移到 GPU 训练。
 
@@ -78,7 +85,7 @@ $env:CITADELS_FRP_SERVER_PORT="7000"
 $env:CITADELS_FRP_TOKEN="与frps一致的token"
 $env:CITADELS_FRP_TYPE="http"
 $env:CITADELS_FRP_DOMAIN="game.example.com"
-node server.js
+python python_backend/run.py 8787 --host 0.0.0.0
 ```
 
 Linux 使用同名环境变量即可。TCP 模式将 `CITADELS_FRP_TYPE` 设为 `tcp`，并额外设置
@@ -207,7 +214,7 @@ node test/voice-e2e.js                # 真实浏览器 + 真实 LiveKit 服务�
 
 旧版 `f64238e` 的 Agent 只是启发式规则包装，不调用模型；本实现替换了该行为。
 
-**默认无需配置模型 API。** 运行 `node server.js` 或双击 `start-server.bat` 时，服务器会
+**默认无需配置模型 API。** 运行 Python 服务或双击 `start-server.bat` 时，服务器会
 检测本机 `codex` 命令，并通过一个内置的 loopback-only HTTP 网关调用当前 Windows
 用户已经登录的 Codex。该网关的兼容接口是
 `POST http://127.0.0.1:8787/api/codex/v1/chat/completions`，仅允许本机请求，账户令牌
@@ -240,8 +247,8 @@ node test/voice-e2e.js                # 真实浏览器 + 真实 LiveKit 服务�
 | `CITADELS_AGENT_API_KEY` | 模型 API 密钥；本机 loopback 模型服务可不填 |
 | `CITADELS_AGENT_TIMEOUT_MS` | 单次请求超时，默认 30000 毫秒，允许 1000–120000 |
 
-可以设置上述环境变量后运行 `node server.js`。支持 `--env-file` 的 Node 也可以在
-仓库根目录创建本机专用 `.env`，写入以上变量，再运行 `node --env-file=.env server.js`。
+可以设置上述环境变量后运行 Python 服务。Python 启动器从进程环境读取配置；可在启动前通过
+PowerShell `$env:变量名="值"` 设置本机专用配置。
 `.env` 已被 Git 忽略；不要把真实密钥放进 `public/`、浏览器存储或 GitHub Pages。
 修改模型配置后重启游戏服务器。GitHub Pages 仍然只负责静态前端；本机 Codex 网关
 必须随游戏服务器运行，不能部署到 GitHub Pages。
@@ -262,8 +269,8 @@ node test/voice-e2e.js                # 真实浏览器 + 真实 LiveKit 服务�
 验证（均使用本地模拟模型，无付费 API 请求；验证协议和行为，不代表真实模型棋力）：
 
 ```bash
-node --test test/agent.test.js test/agent-net.test.js
-node --test test/codex-agent-gateway.test.js
+.python\python.exe python_backend\test_agent.py
+.python\python.exe python_backend\test_server.py
 # 已安装 Playwright + Chromium 时，可选运行真实浏览器验证：
 node test/agent-browser.js
 # 使用系统 Edge 时设置 BROWSER_CHANNEL=msedge
@@ -301,13 +308,10 @@ node test/agent-browser.js
 
 ```
 citadels/
-├── server.js          # HTTP + WebSocket 服务、房间管理、电脑托管驱动
-├── lib/
-│   └── voice.js       # LiveKit 访问令牌签发（HS256 JWT，只用内置 crypto）
+├── python_backend/    # Python HTTP + WebSocket 服务、规则引擎、NPC、训练与联机房间
 ├── src/
-│   ├── cards.js       # 建筑牌与角色牌数据（Node / 浏览器共用）
-│   ├── engine.js      # 规则引擎状态机（Node / 浏览器共用）
-│   └── ai.js          # NPC 启发式决策（easy / normal / hard）
+│   ├── cards.js       # 浏览器牌面元数据；Python 权威数据在 python_backend/cards.py
+├── training/          # Python 模型、编码器、MCTS 与训练器
 ├── public/
 │   ├── index.html     # 主菜单 / 设置 / 大厅 / 对局 / 结算
 │   ├── style.css      # 羊皮纸中世纪风格（浅色）

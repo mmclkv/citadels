@@ -1,8 +1,8 @@
 'use strict';
 
-/* 联机语音：令牌签发与访问控制。
+/* 联机语音：从 Python 服务端到浏览器配置的令牌签发与访问控制。
  *
- * 这里刻意不复用 lib/voice.js 的签名函数来验签，而是用 crypto 重新算一遍
+ * 这里用 crypto 独立复算 HMAC，而不是复用服务端实现来验签，
  * HMAC，并逐条核对 claim —— 令牌格式一旦写错，LiveKit 会直接拒绝连接，
  * 而那种失败在浏览器里只表现为「连不上语音」，很难定位。
  */
@@ -12,11 +12,9 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { fork } = require('node:child_process');
-const { once } = require('node:events');
 const { connect, until } = require('./agent-harness');
+const { startPythonServer } = require('./python-server-process');
 
-const voice = require('../lib/voice.js');
 
 const API_KEY = 'APItestkey123456';
 const API_SECRET = 'test-secret-value-for-hmac-signing-0123456789';
@@ -39,21 +37,8 @@ function verifyJwt(token, secret) {
 
 /* 语音服务和 agent 的 mock 模型无关，这里只起一个带 LIVEKIT_* 的真实服务器。 */
 async function voiceFixture(env) {
-  const child = fork(path.join(__dirname, '..', 'server.js'), ['0'], {
-    cwd: path.join(__dirname, '..'), silent: true,
-    env: Object.assign({}, process.env, env || {})
-  });
-  let port, output = '';
-  child.on('message', m => { if (m.type === 'listening') port = m.port; });
-  child.stdout.on('data', s => { output += s; });
-  child.stderr.on('data', s => { output += s; });
-  const close = async () => {
-    if (child.exitCode === null) { child.kill(); await once(child, 'exit'); }
-  };
-  try {
-    await until(() => port || (child.exitCode !== null && Promise.reject(new Error(output))), 'server startup');
-  } catch (e) { await close(); throw e; }
-  return { base: 'http://127.0.0.1:' + port, close, output: () => output };
+  const server = await startPythonServer(env || {});
+  return { base: server.base, close: server.close, output: server.output };
 }
 
 const CONFIGURED = {
@@ -75,80 +60,6 @@ async function tokenRequest(base, body, method) {
   try { json = JSON.parse(text); } catch (e) { /* 预检没有响应体 */ }
   return { status: res.status, json: json, headers: res.headers };
 }
-
-test('lib/voice: 签发的令牌能被独立验签，claim 与 LiveKit 约定一致', () => {
-  const svc = voice.createVoiceService({ env: CONFIGURED });
-  assert.equal(svc.configured, true);
-
-  const issued = svc.tokenFor({ roomId: 'ab3d', identity: 'p7x9k2', name: '玩家甲' });
-  assert.equal(issued.room, 'citadels-AB3D', '房间名要带前缀并把房号转成大写');
-  assert.equal(issued.url, VOICE_URL);
-  assert.equal(issued.identity, 'p7x9k2');
-
-  const { header, payload } = verifyJwt(issued.token, API_SECRET);
-  assert.equal(header.alg, 'HS256');
-  assert.equal(payload.iss, API_KEY);
-  assert.equal(payload.sub, 'p7x9k2');
-  assert.equal(payload.name, '玩家甲');
-  assert.equal(payload.room, undefined, 'room 必须放在 video 授权块里，不是顶层');
-  assert.deepEqual(payload.video, {
-    roomJoin: true,
-    room: 'citadels-AB3D',
-    canPublish: true,
-    canSubscribe: true
-  });
-
-  const now = Math.floor(Date.now() / 1000);
-  assert.ok(payload.nbf <= now, 'nbf 不应晚于当前时间');
-  assert.ok(payload.exp > now, 'exp 必须还没到期');
-  assert.equal(issued.expiresAt, payload.exp * 1000);
-});
-
-test('lib/voice: 换密钥或篡改 payload 都无法通过验签', () => {
-  const svc = voice.createVoiceService({ env: CONFIGURED });
-  const issued = svc.tokenFor({ roomId: 'AB3D', identity: 'p1', name: '甲' });
-
-  assert.throws(() => verifyJwt(issued.token, 'a-different-secret'),
-    /签名不匹配|签名长度不一致/);
-
-  // 把 video 授权改成别的房间，签名必须失效（否则可以自己给自己扩权）
-  const parts = issued.token.split('.');
-  const payload = JSON.parse(b64urlDecode(parts[1]));
-  payload.video.room = 'citadels-XXXX';
-  const forged = parts[0] + '.' + Buffer.from(JSON.stringify(payload)).toString('base64url') + '.' + parts[2];
-  assert.throws(() => verifyJwt(forged, API_SECRET), /签名不匹配|签名长度不一致/);
-});
-
-test('lib/voice: 非安全来源的房间号被拒绝，TTL 被夹到合理区间', () => {
-  const svc = voice.createVoiceService({ env: CONFIGURED });
-  assert.throws(() => svc.tokenFor({ roomId: 'toolong', identity: 'p1', name: '甲' }), /房间号无效/);
-  assert.throws(() => svc.tokenFor({ roomId: 'ab3d', identity: '', name: '甲' }), /缺少玩家标识/);
-  assert.equal(svc.tokenFor({ roomId: 'ab3d', identity: 'p1', name: '甲' }).token.split('.').length, 3);
-
-  assert.equal(voice.clampTtl('abc'), voice.DEFAULT_TTL_SECONDS, '非数字回落到默认值');
-  assert.equal(voice.clampTtl(0), voice.DEFAULT_TTL_SECONDS, '0 视为没配');
-  assert.equal(voice.clampTtl(600), 600);
-  assert.equal(voice.clampTtl('1'), 60, '过小向上夹到 60 秒下限');
-  assert.equal(voice.clampTtl(999999), 24 * 60 * 60, '过大夹到 24 小时');
-});
-
-test('lib/voice: 缺少配置时保持未配置状态并说明缺哪一项', () => {
-  const svc = voice.createVoiceService({ env: { LIVEKIT_URL: VOICE_URL } });
-  assert.equal(svc.configured, false);
-  assert.match(svc.status().message, /LIVEKIT_API_KEY/);
-  assert.match(svc.status().message, /LIVEKIT_API_SECRET/);
-  assert.throws(() => svc.tokenFor({ roomId: 'ab3d', identity: 'p1', name: '甲' }), /未配置/);
-  // 非法 URL 视为未配置，避免把 ws:// 写错成域名时静默生效
-  assert.equal(voice.createVoiceService({ env: {
-    LIVEKIT_URL: 'voice.example.com', LIVEKIT_API_KEY: API_KEY, LIVEKIT_API_SECRET: API_SECRET
-  } }).configured, false);
-});
-
-test('lib/voice: 把 URL 结尾的斜杠去掉，房间名前缀稳定', () => {
-  const svc = voice.createVoiceService({ env: Object.assign({}, CONFIGURED, { LIVEKIT_URL: VOICE_URL + '//' }) });
-  assert.equal(svc.url, VOICE_URL);
-  assert.equal(voice.roomNameFor('zz99'), 'citadels-ZZ99');
-});
 
 test('未配置 LiveKit 的服务器：状态如实上报，签发接口返回 503', async t => {
   const f = await voiceFixture({ CITADELS_DISABLE_LOCAL_CODEX: '1' });
@@ -311,14 +222,14 @@ test('前端接线：语音入口、侧栏、音频容器与懒加载路径都�
 });
 
 test('服务端接线：令牌接口只在鉴权通过后签发，且不下发 API Secret', () => {
-  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(server, /require\('\.\/lib\/voice\.js'\)/);
-  assert.match(server, /pathname === '\/api\/voice\/token'/);
-  assert.match(server, /pathname === '\/api\/voice\/status' && req\.method === 'GET'/);
-  assert.match(server, /resumeRoom\(body && body\.resumeToken/);
-  assert.match(server, /resumed\.seat\.isBot/);
-  assert.match(server, /voiceTokenThrottle\(req\)/);
-  // Secret 只用于签名，不能出现在任何响应体里
-  assert.doesNotMatch(server, /sendJson\([^)]*apiSecret/);
-  assert.doesNotMatch(server, /status\(\)[^;]*apiSecret/);
+  const server = fs.readFileSync(path.join(__dirname, '..', 'python_backend', 'server.py'), 'utf8');
+  const voice = fs.readFileSync(path.join(__dirname, '..', 'python_backend', 'voice.py'), 'utf8');
+  assert.match(server, /from \.voice import VoiceService/);
+  assert.match(server, /route == "\/api\/voice\/token"/);
+  assert.match(server, /route == "\/api\/voice\/status"/);
+  assert.match(server, /self\.rooms\.resume_room\(str\(body\.get\("resumeToken"\)/);
+  assert.match(server, /seat\["isBot"\]/);
+  assert.match(server, /self\._voice_throttled\(ip_key\)/);
+  assert.match(voice, /hmac\.new\(/, 'JWT 必须由服务端密钥签名');
+  assert.doesNotMatch(server + voice, /apiSecret/, '服务端响应不得包含 API Secret 字段');
 });
