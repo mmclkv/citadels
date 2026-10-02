@@ -68,10 +68,39 @@ int main() {
     require(game.apply(wizard, 0, wizard_target), "wizard target");
     NativeSearchAction wizard_card; wizard_card.type = ActionType::WizardCard; wizard_card.uid = "w1";
     require(game.apply(wizard, 0, wizard_card), "wizard card");
+    auto wizard_choices = game.legal_actions(wizard, 0);
+    require(wizard_choices.size() == 3 && wizard_choices[0].type == ActionType::WizardTake &&
+            wizard_choices[1].type == ActionType::WizardBuild &&
+            wizard_choices[2].type == ActionType::PendingBack,
+      "wizard choice actions should match Python, including returning to choose another card");
+    NativeSearchAction wizard_back; wizard_back.type = ActionType::PendingBack;
+    require(game.apply(wizard, 0, wizard_back) && wizard.pending_kind == "wizard_card" &&
+            wizard.pending_cards.size() == 1 && wizard.pending_cards.front().uid == "w1",
+      "wizard back should restore target hand for card selection");
+    require(game.apply(wizard, 0, wizard_card), "wizard reselect card after backing");
     NativeSearchAction wizard_build; wizard_build.type = ActionType::WizardBuild;
     require(game.apply(wizard, 0, wizard_build), "wizard immediate build");
     require(wizard.players[0].city.size() == 1 && wizard.players[1].hand.empty() && wizard.players[0].gold == 3 && wizard.builds == 0,
       "wizard build should not consume normal build count");
+
+    NativeGameState monk;
+    monk.phase = NativePhase::Action; monk.active_player = 0; monk.pending_kind = "monk_declare";
+    monk.players = {player("monk", "monk", 2)};
+    monk.players[0].city = {{{"blue", "blue", 1, "Temple"}, "Temple"},
+                            {{"purple", "purple", 2, "Ghost Town"}, "Ghost Town", "anyColorIncome"}};
+    auto monk_actions = game.legal_actions(monk, 0);
+    require(monk_actions.size() == 3 && monk_actions[0].gold == 0 && monk_actions[0].cards == 2 &&
+            monk_actions[1].gold == 1 && monk_actions[1].cards == 1 &&
+            monk_actions[2].gold == 2 && monk_actions[2].cards == 0,
+      "monk actions should carry explicit resource fields and count any-color income buildings");
+
+    NativeGameState noble;
+    noble.phase = NativePhase::Action; noble.active_player = 0; noble.resources_taken = true;
+    noble.players = {player("noble", "noble", 2)};
+    const auto noble_actions = game.legal_actions(noble, 0);
+    require(std::none_of(noble_actions.begin(), noble_actions.end(), [](const NativeSearchAction& action) {
+      return action.type == ActionType::Income;
+    }), "noble must not expose income when the Python catalog marks income as null");
 
     // Abbot: religious buildings grant gold; active abbot protects the city from rank-8 roles.
     NativeGameState abbot;

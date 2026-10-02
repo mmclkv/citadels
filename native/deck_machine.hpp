@@ -49,6 +49,12 @@ class DeckMachine {
   size_t deck_count() const { return deck_.size(); }
   size_t discard_count() const { return discard_.size(); }
 
+  // Mutable access is intentionally limited to native information-set sampling.
+  std::vector<DistrictCard>& deck_cards() { return deck_; }
+  std::vector<DistrictCard>& discard_cards() { return discard_; }
+  const std::vector<DistrictCard>& deck_cards() const { return deck_; }
+  const std::vector<DistrictCard>& discard_cards() const { return discard_; }
+
   void load(std::vector<DistrictCard> deck, std::vector<DistrictCard> discard) {
     deck_ = std::move(deck);
     discard_ = std::move(discard);

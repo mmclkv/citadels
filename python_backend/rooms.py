@@ -6,8 +6,6 @@ import secrets
 import string
 import time
 
-from .game import create_game, start_game
-
 ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -142,7 +140,7 @@ class RoomRegistry:
                     return room, seat
         return None
 
-    def start_room(self, room_id: str) -> dict:
+    def prepare_start_room(self, room_id: str) -> tuple[dict, list[dict]]:
         room = self.rooms[room_id]
         if room["state"]:
             raise ValueError("该房间已开局")
@@ -154,11 +152,11 @@ class RoomRegistry:
             seats.append(_bot_seat(bot_index, room["config"]))
             bot_index += 1
         room["seats"] = seats
-        state = create_game({"roomId": room_id, "endDistricts": room["config"]["endDistricts"],
-                             "charSetMode": room["config"]["charSetMode"],
-                             "seats": room["seats"]})
-        result = start_game(state)
-        if not result["ok"]:
-            raise ValueError(result["error"])
+        return room, seats
+
+    def finish_start_room(self, room_id: str, state: dict) -> dict:
+        room = self.rooms[room_id]
+        if room["state"]:
+            raise ValueError("该房间已开局")
         room["state"] = state
         return state

@@ -35,7 +35,7 @@ function formConfig() {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
     profile: $('profile').value, networkArchitecture: $('network-architecture').value,
-    rulesEngine: 'python', mctsEngine: 'python', neuralNetworkFramework: 'pytorch',
+    rulesEngine: 'cpp', mctsEngine: 'cpp', neuralNetworkFramework: 'libtorch',
     backend: 'python', device: $('device').value,
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
     temperatureStart: +$('temperature-start').value, temperatureEnd: +$('temperature-end').value,
@@ -46,11 +46,12 @@ function formConfig() {
     // 「继续已有训练」只有两种模式：从头训练，或加载一个外部权重文件。
     // 后者选完文件后由 uploadCheckpointFile() 把服务器侧落地的存档名写进隐藏域。
     resumeCheckpoint: resumeCheckpointName(),
-    mctsSimulations: Math.max(1, +$('mcts-simulations').value || 1),
+    mctsSimulations: Math.max(1, +$('mcts-simulations').value || 500),
     mctsC_puct: +$('mcts-cpuct').value,
     mctsDirichletAlpha: +$('mcts-dirichlet').value,
     mctsDirichletEpsilon: +$('mcts-diri-eps').value,
     mctsMaxDepth: +$('mcts-max-depth').value,
+    mctsBatchSize: +$('mcts-batch-size').value,
     mctsParticles: Math.max(1, +$('mcts-particles').value || 1),
     mctsBelief: !!$('mcts-belief') && $('mcts-belief').checked,
     selfPlayMode: $('self-play-mode').value,
@@ -58,8 +59,7 @@ function formConfig() {
     heuristicDifficulty: $('heuristic-difficulty').value,
     curriculumStartPlayers: +$('curriculum-start-players').value,
     curriculumEndPlayers: +$('curriculum-end-players').value,
-    curriculumStepGames: +$('curriculum-step-games').value,
-    trainNetworkOnly: $('train-network-only').value === 'true'
+    curriculumStepGames: +$('curriculum-step-games').value
   };
 }
 
@@ -88,6 +88,7 @@ const CONFIG_FIELDS = [
   ['mctsDirichletAlpha', 'mcts-dirichlet', 'number'],
   ['mctsDirichletEpsilon', 'mcts-diri-eps', 'number'],
   ['mctsMaxDepth', 'mcts-max-depth', 'number'],
+  ['mctsBatchSize', 'mcts-batch-size', 'number'],
   ['mctsParticles', 'mcts-particles', 'number'],
   ['mctsBelief', 'mcts-belief', 'checked'],
   ['selfPlayMode', 'self-play-mode', 'select'],
@@ -95,8 +96,7 @@ const CONFIG_FIELDS = [
   ['heuristicDifficulty', 'heuristic-difficulty', 'select'],
   ['curriculumStartPlayers', 'curriculum-start-players', 'number'],
   ['curriculumEndPlayers', 'curriculum-end-players', 'number'],
-  ['curriculumStepGames', 'curriculum-step-games', 'number'],
-  ['trainNetworkOnly', 'train-network-only', 'bool']
+  ['curriculumStepGames', 'curriculum-step-games', 'number']
 ];
 
 // 把存档里的 config 填回面板。返回实际写入项数与跳过项，
@@ -209,7 +209,8 @@ function estimateMCTS() {
   const sims = +$('mcts-simulations').value || 0;
   const out = $('mcts-time-estimate');
   if (!sims) { out.textContent = '关闭'; return; }
-  const perStepHint = 'Python ISMCTS 逐节点调用 PyTorch，耗时随模拟数、粒子数与设备变化';
+  const batchSize = +$('mcts-batch-size').value || 32;
+  const perStepHint = `C++ ISMCTS + LibTorch · 叶节点批量 ${batchSize} · 耗时随模拟数、粒子数与设备变化`;
   let bullet;
   if (sims <= 50) bullet = '轻量 A 档';
   else if (sims <= 200) bullet = '适中 B 档';
@@ -220,7 +221,7 @@ function estimateMCTS() {
 
 function updateMctsHint() {
   $('neural-framework-hint').textContent =
-    'Python ISMCTS 使用当前 PyTorch 训练模型，在所选计算设备上评估局面';
+    'C++ ISMCTS worker 使用 LibTorch 在所选设备上评估局面';
   estimateMCTS();
 }
 
@@ -327,8 +328,8 @@ function renderRuntime(status) {
     ['GPU 峰值显存', status.point && status.point.gpuMemoryMB ? num(status.point.gpuMemoryMB, 0) + ' MB' : '—'],
     ['玩家范围', c.minPlayers ? c.minPlayers + '–' + c.maxPlayers + ' 人' : '—'],
     ['规则引擎', c.rulesEngine === 'cpp' ? 'C++' : (c.rulesEngine === 'js' ? 'JS' : (c.rulesEngine === 'python' ? 'Python' : '—'))],
-    ['MCTS 引擎', c.mctsEngine === 'python' ? 'Python ISMCTS' : '—'],
-    ['神经网络框架', c.neuralNetworkFramework === 'pytorch' ? 'PyTorch' : '—'],
+    ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++ ISMCTS' : '—'],
+    ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch' : '—'],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
@@ -336,8 +337,9 @@ function renderRuntime(status) {
       ' / v' + CURRENT_ACTION_ENCODING_VERSION + '（跨引擎对齐）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['启发式难度', c.heuristicDifficulty || '—'],
-    ['样本来源', c.trainNetworkOnly === false ? '全部玩家' : '仅策略网络玩家'],
-    ['MCTS', mctsLabel],
+    ['训练目标', '仅策略网络行动的 MCTS 访问分布'],
+    ['MCTS', mctsLabel + ' · 深度 ' + (c.mctsMaxDepth || '—') +
+      ' · 粒子 ' + (c.mctsParticles || '—') + ' · batch ' + (c.mctsBatchSize || '—')],
     ['日志文件', c.logFile || status.logFile || '—'],
     ['运行时间', status.startedAt ? duration(Date.now() - new Date(status.startedAt).getTime()) : '—']
   ];
@@ -696,7 +698,7 @@ function updateCompositionUI() {
   ['curriculum-start-players', 'curriculum-end-players', 'curriculum-step-games'].forEach(id => { $(id).disabled = mode !== 'curriculum'; });
 }
 $('self-play-mode').onchange = updateCompositionUI;
-['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth'].forEach(id => {
+['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth', 'mcts-batch-size'].forEach(id => {
   $(id).oninput = estimateMCTS;
 });
 estimateMCTS();

@@ -39,8 +39,6 @@ def _clamp_integer(value, low: int, high: int, fallback: int) -> int | float:
 
 def sanitize_config(raw: dict | None = None) -> dict:
     raw = raw if isinstance(raw, dict) else {}
-    if raw.get("rulesEngine") == "cpp":
-        raise ValueError("Python 训练只支持 Python 规则引擎。")
     min_players = _clamp_or(raw.get("minPlayers"), 2, 8, 4)
     max_players = max(min_players, _clamp_or(raw.get("maxPlayers"), min_players, 8, min_players))
     cpu_count = os.cpu_count() or 1
@@ -65,12 +63,12 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "endDistricts": int(_number(raw.get("endDistricts"))) if _number(raw.get("endDistricts")) in (7, 8) else 8,
         "profile": raw.get("profile") if raw.get("profile") in PROFILES else "balanced",
         "networkArchitecture": raw.get("networkArchitecture") if raw.get("networkArchitecture") in ARCHITECTURES else "flat",
-        "rulesEngine": "python", "mctsEngine": "python",
-        "neuralNetworkFramework": "pytorch", "backend": "python",
+        "rulesEngine": "cpp", "mctsEngine": "cpp",
+        "neuralNetworkFramework": "libtorch", "backend": "python",
         "device": raw.get("device") if raw.get("device") in ("cuda", "cpu") else ("cpu" if raw.get("backend") == "cpu" else "cuda"),
         "learningRate": _clamp_or(raw.get("learningRate"), 1e-6, 0.01, 0.0003),
         "batchGames": _clamp_or(raw.get("batchGames"), 1, 256, 4),
-        "ppoEpochs": _clamp_or(raw.get("ppoEpochs"), 1, 6, 2),
+        "trainingEpochs": _clamp_or(raw.get("trainingEpochs"), 1, 6, 2),
         "miniBatch": _clamp_or(raw.get("miniBatch"), 32, 2048, 256),
         "workers": _clamp_or(raw.get("workers"), 1, 6, default_workers),
         "checkpointEvery": _clamp_or(raw.get("checkpointEvery"), 1, 10000, 100),
@@ -80,19 +78,18 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "temperatureStart": _clamp_or(raw.get("temperatureStart"), 0.2, 2, 1.1),
         "temperatureEnd": _clamp_or(raw.get("temperatureEnd"), 0.15, 1.5, 0.65),
         "resumeCheckpoint": resume,
-        "mctsSimulations": _clamp_or(raw.get("mctsSimulations"), 0, 10000, 0),
+        "mctsSimulations": _clamp_or(raw.get("mctsSimulations"), 1, 10000, 500),
         "mctsC_puct": _clamp_or(raw.get("mctsC_puct"), 0, 10, 1.0),
         "mctsDirichletAlpha": finite_clamp("mctsDirichletAlpha", 0, 1, 0.3),
         "mctsDirichletEpsilon": finite_clamp("mctsDirichletEpsilon", 0, 1, 0.03),
-        "mctsMaxDepth": _clamp_or(raw.get("mctsMaxDepth"), 10, 2000, 200),
+        "mctsMaxDepth": _clamp_or(raw.get("mctsMaxDepth"), 10, 2000, 700),
+        "mctsBatchSize": finite_integer("mctsBatchSize", 1, 256, 32),
         "mctsParticles": finite_integer("mctsParticles", 1, 16, 4),
         "mctsBelief": raw.get("mctsBelief") is not False,
-        "policyLossMode": raw.get("policyLossMode") if raw.get("policyLossMode") in ("auto", "ppo", "mcts_ce") else "auto",
         "selfPlayMode": raw.get("selfPlayMode") if raw.get("selfPlayMode") in ("all-network", "network-vs-heuristic", "curriculum") else "all-network",
         "networkPlayerCount": finite_integer("networkPlayerCount", 0, max_players, 0),
         "heuristicDifficulty": raw.get("heuristicDifficulty") if raw.get("heuristicDifficulty") in ("easy", "normal", "hard", "random") else "normal",
         "curriculumStartPlayers": finite_integer("curriculumStartPlayers", 1, max_players, 1),
         "curriculumEndPlayers": finite_integer("curriculumEndPlayers", 0, max_players, 0),
         "curriculumStepGames": finite_integer("curriculumStepGames", 1, 1_000_000, 1000),
-        "trainNetworkOnly": raw.get("trainNetworkOnly") is not False,
     }

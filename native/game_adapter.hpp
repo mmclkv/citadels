@@ -31,7 +31,8 @@ inline std::array<float, kValueSlots> native_terminal_reward_vector(
     int museum = 0, beautified = 0, usable_ghosts = 0;
     std::array<bool, 5> have{};
     for (const auto& district : player.city) {
-      base += district.card.score_value > 0 ? district.card.score_value : district.card.cost;
+      base += district.card.score_as > 0 ? district.card.score_as
+        : district.card.score_value > 0 ? district.card.score_value : district.card.cost;
       for (size_t color = 0; color < colors.size(); ++color)
         if (district.card.color == colors[color]) have[color] = true;
       museum += static_cast<int>(district.museum_cards.size());
@@ -266,16 +267,19 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (state.pending_kind == "wizard_card") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
-      for (const auto& card : state.pending_cards) { NativeSearchAction action; action.type = ActionType::WizardCard; action.uid = card.uid; actions.push_back(std::move(action)); }
+      for (const auto& card : state.pending_cards) {
+        NativeSearchAction action; action.type = ActionType::WizardCard;
+        action.uid = card.uid; action.color = card.color;
+        actions.push_back(std::move(action));
+      }
       return actions;
     }
     if (state.pending_kind == "wizard_choice") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions{{ActionType::WizardTake}};
-      // 立即建造要付得起那张牌：JS 侧的合法动作列表按「真能落子」筛选，
-      // 这里多给一个走不通的分支就会让根节点动作对不上而退化成均匀先验。
       if (state.pending_cards.size() == 1 && state.active() &&
           state.active()->gold >= state.pending_cards.front().cost) actions.push_back({ActionType::WizardBuild});
+      actions.push_back({ActionType::PendingBack});
       return actions;
     }
     if (state.pending_kind == "abbot_declare") {
@@ -340,18 +344,27 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (state.pending_kind == "monk_declare") {
       if (player != state.active_player) return {};
-      const int blue = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
-        [](const NativeDistrict& d) { return d.card.color == "blue"; }));
+      const int blue = state.blue_districts(player);
       std::vector<NativeSearchAction> actions;
-      for (int gold = 0; gold <= blue; ++gold) actions.push_back({ActionType::MonkResource, {}, std::to_string(gold), std::to_string(blue - gold)});
+      for (int gold = 0; gold <= blue; ++gold) {
+        NativeSearchAction action{ActionType::MonkResource};
+        action.name = std::to_string(gold);
+        action.effect = std::to_string(blue - gold);
+        action.gold = gold;
+        action.cards = blue - gold;
+        actions.push_back(std::move(action));
+      }
       return actions;
     }
     if (state.pending_kind == "scholar_pick" || state.pending_kind == "draw_keep") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
-      for (const auto& card : state.pending_cards) actions.push_back({
-        state.pending_kind == "scholar_pick" ? ActionType::ScholarPick : ActionType::DrawKeep,
-        card.uid, {}, {}, {}});
+      for (const auto& card : state.pending_cards) {
+        NativeSearchAction action{state.pending_kind == "scholar_pick" ? ActionType::ScholarPick : ActionType::DrawKeep,
+                                  card.uid, {}, {}, {}};
+        action.color = card.color;
+        actions.push_back(std::move(action));
+      }
       return actions;
     }
     if (state.pending_kind == "prophet_give") {
@@ -469,13 +482,12 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         // 才能与 JS 对齐（uid 仍保留，供 native 规则自行结算）。
         NativeSearchAction action;
         action.type = picking ? ActionType::DraftPick : ActionType::DraftDiscard;
-        action.uid = id;
         action.name = id;
         actions.push_back(action);
       }
       if (state.draft_sub == "discard") {
         actions.erase(std::remove_if(actions.begin(), actions.end(), [&](const auto& action) {
-          return char_number(action.uid) == 4;
+          return char_number(action.name) == 4;
         }), actions.end());
       }
       return actions;
@@ -503,7 +515,6 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (state.resources_taken && !state.income_taken) {
       if (state.players[player].role_id == "king" || state.players[player].role_id == "emperor" ||
-          state.players[player].role_id == "noble" ||
           state.players[player].role_id == "bishop" || state.players[player].role_id == "abbot" || state.players[player].role_id == "merchant" ||
           state.players[player].role_id == "businessman" ||
           state.players[player].role_id == "warlord" || state.players[player].role_id == "diplomat" ||
@@ -523,8 +534,11 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (state.resources_taken) {
       for (const auto& card : p->hand) {
-        if (can_build(state, *p, card))
-          actions.push_back({ActionType::Build, card.uid, card.name, card.purple_effect});
+        if (can_build(state, *p, card)) {
+          NativeSearchAction action{ActionType::Build, card.uid, card.name, card.purple_effect};
+          action.color = card.color;
+          actions.push_back(std::move(action));
+        }
         else if (p->role_id == "bishop" && card.cost > p->gold && p->hand.size() > 1) {
           NativePlayer funded = *p; funded.gold = card.cost;
           if (!can_build(state, funded, card)) continue;
@@ -538,6 +552,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           if (has_payer) {
             NativeSearchAction action; action.type = ActionType::Build; action.uid = card.uid;
             action.name = card.name; action.effect = card.purple_effect;
+            action.color = card.color;
             actions.push_back(std::move(action));
           }
         }
@@ -638,6 +653,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       const auto it = std::find_if(state.pending_cards.begin(), state.pending_cards.end(), [&](const DistrictCard& c) { return c.uid == action.uid; });
       if (it == state.pending_cards.end()) return false;
       const DistrictCard chosen = *it; state.pending_cards = {chosen}; state.pending_kind = "wizard_choice"; return true;
+    }
+    if (action.type == ActionType::PendingBack && player == state.active_player &&
+        state.pending_kind == "wizard_choice" && state.pending_target >= 0 &&
+        state.pending_target < static_cast<int>(state.players.size())) {
+      state.pending_cards = state.players[state.pending_target].hand;
+      state.pending_kind = "wizard_card";
+      return !state.pending_cards.empty();
     }
     if (action.type == ActionType::WizardTake && player == state.active_player && state.pending_kind == "wizard_choice") return state.wizard_take(false);
     if (action.type == ActionType::WizardBuild && player == state.active_player && state.pending_kind == "wizard_choice") return state.wizard_take(true);
@@ -825,14 +847,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (state.phase == NativePhase::Draft) {
       if (player != state.draft_current_player) return false;
       if (action.type == ActionType::DraftPick && state.draft_sub == "pick") {
-        if (!state.draft_remove(action.uid)) return false;
-        state.players[player].role_ids.push_back(action.uid);
-        state.players[player].role_id = action.uid;
+        if (!state.draft_remove(action.name)) return false;
+        state.players[player].role_ids.push_back(action.name);
+        state.players[player].role_id = action.name;
         return state.advance_draft();
       }
       if (action.type == ActionType::DraftDiscard && state.draft_sub == "discard") {
-        if (!state.draft_remove(action.uid)) return false;
-        state.draft_face_down.push_back(action.uid);
+        if (!state.draft_remove(action.name)) return false;
+        state.draft_face_down.push_back(action.name);
         return state.advance_draft();
       }
       return false;
@@ -889,13 +911,18 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   }
 
   int next_player(const NativeGameState& state) const override {
-    return state.reaction_kind.empty() ? state.active_player : state.reaction_player;
+    if (!state.reaction_kind.empty()) return state.reaction_player;
+    if (state.phase == NativePhase::Draft) return state.draft_current_player;
+    if (state.phase == NativePhase::RoundConfirm) {
+      for (size_t i = 0; i < state.players.size(); ++i)
+        if (i >= state.round_confirmed.size() || !state.round_confirmed[i]) return static_cast<int>(i);
+      return -1;
+    }
+    return state.active_player;
   }
 
   bool terminal(const NativeGameState& state) const override {
-    return std::any_of(state.players.begin(), state.players.end(), [&](const NativePlayer& p) {
-      return p.city.size() >= static_cast<size_t>(state.end_districts);
-    });
+    return state.phase == NativePhase::GameOver;
   }
 
   float terminal_value(const NativeGameState& state, int player) const override {
@@ -917,7 +944,11 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       builder.u64(state.pending_selected.size());
       for (const auto& uid : state.pending_selected) builder.string(uid);
     }
-    const auto features = encode_features(state, player);
+    // Hash the richest observable representation. This keeps nodes distinct
+    // whenever any supported policy version can distinguish own-hand cards,
+    // public district identities, or public context; older policies may merely
+    // leave some of these features unused.
+    const auto features = encode_features(state, player, 8, true, true, true);
     builder.u64(features.size());
     for (float value : features) builder.floating(value);
     const auto actions = legal_actions(state, player);

@@ -41,6 +41,9 @@ struct NativePlayer {
   bool is_bot = false;
   bool connected = true;
   std::vector<std::string> played;
+  std::string name;
+  std::string bot_type;
+  std::string bot_level;
 };
 
 struct NativeDraftStep {
@@ -56,9 +59,18 @@ struct NativeCallEntry {
   int player = -1;
 };
 
+struct NativeObservation {
+  bool valid = false;
+  int round = 0;
+  int gold = 0;
+  int hand_size = 0;
+  std::vector<std::string> free_colors;
+};
+
 struct NativeGameState {
   NativePhase phase = NativePhase::Unknown;
   std::vector<NativePlayer> players;
+  std::vector<NativeObservation> observations;
   DeckMachine deck;
   JsRng rng;
   int active_player = -1;
@@ -70,6 +82,7 @@ struct NativeGameState {
   int call_index = 0;
   int end_districts = 8;
   int first_to_finish = -1;
+  int pending_queen = -1;
   int builds = 0;
   int spent_on_build = 0;
   bool resources_taken = false;
@@ -150,12 +163,14 @@ struct NativeGameState {
       std::stable_sort(call_queue.begin(), call_queue.end(),
         [](const NativeCallEntry& left, const NativeCallEntry& right) { return left.number < right.number; });
       call_index = 0;
-      if (call_queue.empty()) active_player = -1;
+      if (call_queue.empty()) { active_player = -1; has_turn = false; }
       else {
         active_player = call_queue.front().player;
         players[active_player].role_id = call_queue.front().char_id;
+        has_turn = true;
         turn_phase = "main";
         resources_taken = false; income_taken = false; monk_extra_taken = false;
+        ability_used = false; bonus_done = false;
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
       }
     } else draft_current_player = draft_steps[draft_step].player;
@@ -497,7 +512,7 @@ struct NativeGameState {
     auto* p = active();
     if (!p || income_taken) return false;
     std::string color;
-    if (p->role_id == "king" || p->role_id == "noble") color = "yellow";
+    if (p->role_id == "king" || p->role_id == "emperor") color = "yellow";
     else if (p->role_id == "bishop") {
       const int count = blue_districts(active_player);
       auto drawn = deck.draw(count, rng);
@@ -506,11 +521,11 @@ struct NativeGameState {
       return true;
     }
     else if (p->role_id == "abbot") color = "blue";
-    else if (p->role_id == "merchant") color = "green";
+    else if (p->role_id == "merchant" || p->role_id == "businessman") color = "green";
     else if (p->role_id == "warlord" || p->role_id == "diplomat" || p->role_id == "marshal") color = "red";
     else return false;
     const int amount = color == "blue" ? blue_districts(active_player) : static_cast<int>(std::count_if(p->city.begin(), p->city.end(),
-      [&](const NativeDistrict& d) { return d.card.color == color; }));
+      [&](const NativeDistrict& d) { return d.card.color == color || d.effect == "anyColorIncome"; }));
     p->gold += amount;
     income_taken = true;
     return true;
@@ -710,6 +725,9 @@ struct NativeGameState {
   bool begin_next_round() {
     if (players.size() < 2 || char_deck.empty()) return false;
     ++round;
+    pending_queen = -1;
+    assassinated = -1; thief_target = -1; thief_player = -1;
+    bewitched = -1; witch_player = -1;
     for (auto& player : players) { player.role_ids.clear(); player.role_id.clear(); player.played.clear(); }
     pending_kind.clear(); pending_queue.clear(); pending_cards.clear(); pending_selected.clear();
     pending_target = -1; pending_amount = 0; pending_uid.clear();
@@ -757,6 +775,7 @@ struct NativeGameState {
     draft_pool = std::move(pool); draft_step = 0; draft_total_steps = static_cast<int>(draft_steps.size());
     draft_current_player = draft_steps.empty() ? -1 : draft_steps.front().player;
     draft_sub = "pick"; phase = NativePhase::Draft; active_player = -1;
+    has_turn = false; turn_phase.clear();
     round_confirm_count = 0; round_confirmed.assign(players.size(), false);
     return true;
   }
@@ -767,7 +786,13 @@ struct NativeGameState {
     if (round_confirmed[player]) return false;
     round_confirmed[player] = true;
     round_confirm_count = static_cast<int>(std::count(round_confirmed.begin(), round_confirmed.end(), true));
-    if (round_confirm_count == static_cast<int>(players.size())) return begin_next_round();
+    if (round_confirm_count == static_cast<int>(players.size())) {
+      const bool finished = std::any_of(players.begin(), players.end(), [&](const NativePlayer& value) {
+        return value.city.size() >= static_cast<size_t>(end_districts);
+      });
+      if (finished) { phase = NativePhase::GameOver; has_turn = false; active_player = -1; return true; }
+      return begin_next_round();
+    }
     return true;
   }
 
@@ -801,7 +826,11 @@ struct NativeGameState {
       if (d.effect == "quarry") ++quarry;
     }
     BuildCard card{resolved_name, it->color, it->cost};
-    BuildContext context{p->role_id, turn_phase == "witch_resume", p->gold, builds, 1, same, quarry};
+    int build_limit = 1;
+    if (p->role_id == "architect") build_limit = 3;
+    else if (p->role_id == "prophet" || p->role_id == "scholar") build_limit = 2;
+    else if (p->role_id == "navigator") build_limit = turn_phase == "witch_resume" ? 1 : 0;
+    BuildContext context{p->role_id, turn_phase == "witch_resume", p->gold, builds, build_limit, same, quarry};
     if (!can_build(card, context)) return false;
     p->gold -= it->cost;
     spent_on_build += it->cost;
@@ -890,6 +919,22 @@ struct NativeGameState {
     TurnState turn{active()->role_id, false, active()->gold, spent_on_build,
                    0, 0, false};
     if (!citadels::native::end_turn(turn)) return false;
+    if (turn_phase != "witch_resume" && active()->role_id != "navigator" &&
+        active()->role_id != "bishop") {
+      int build_limit = 1;
+      if (active()->role_id == "architect") build_limit = 3;
+      else if (active()->role_id == "prophet" || active()->role_id == "scholar") build_limit = 2;
+      if (builds < build_limit && active()->gold >= 1) {
+        if (observations.size() < players.size()) observations.resize(players.size());
+        auto& observation = observations[static_cast<size_t>(active_player)];
+        observation.valid = true;
+        observation.round = round;
+        observation.gold = active()->gold;
+        observation.hand_size = static_cast<int>(active()->hand.size());
+        observation.free_colors = active()->role_id == "businessman"
+          ? std::vector<std::string>{"green"} : std::vector<std::string>{};
+      }
+    }
     active()->gold = turn.gold;
     // 与 JS 引擎一致：行动结束才把该角色登记为「已打出」，住持保护等公开判定读这个列表。
     if (!active()->role_id.empty()) active()->played.push_back(active()->role_id);
@@ -898,7 +943,29 @@ struct NativeGameState {
       ++call_index;
       while (call_index < static_cast<int>(call_queue.size())) {
         const auto& entry = call_queue[call_index];
-        if (assassinated == entry.number) { ++call_index; continue; }
+        if (assassinated == entry.number) {
+          if (entry.number == 4) {
+            if (entry.char_id == "king" || entry.char_id == "noble") {
+              for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
+            } else if (entry.char_id == "emperor") {
+              std::vector<int> others;
+              for (size_t i = 0; i < players.size(); ++i)
+                if (static_cast<int>(i) != entry.player) others.push_back(static_cast<int>(i));
+              if (!others.empty()) {
+                const int crown = others[static_cast<size_t>(rng.next() * others.size())];
+                for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == crown;
+              }
+            }
+            if (pending_queen >= 0) {
+              const int distance = std::abs(pending_queen - entry.player);
+              if (distance == 1 || distance == static_cast<int>(players.size()) - 1)
+                players[pending_queen].gold += 3;
+              pending_queen = -1;
+            }
+          }
+          ++call_index;
+          continue;
+        }
         if (thief_target == entry.number && thief_player >= 0 && thief_player < static_cast<int>(players.size()) &&
             entry.player >= 0 && entry.player < static_cast<int>(players.size())) {
           players[thief_player].gold += players[entry.player].gold;
@@ -907,6 +974,7 @@ struct NativeGameState {
         }
         active_player = entry.player;
         players[active_player].role_id = entry.char_id;
+        has_turn = true; phase = NativePhase::Action;
         turn_phase = bewitched == entry.number ? "bewitched" : "main";
         resources_taken = false; income_taken = false; monk_extra_taken = false;
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
@@ -929,7 +997,7 @@ struct NativeGameState {
         }
         if (entry.char_id == "noble") {
           const int count = static_cast<int>(std::count_if(players[entry.player].city.begin(), players[entry.player].city.end(),
-            [](const NativeDistrict& district) { return district.card.color == "yellow"; }));
+            [](const NativeDistrict& district) { return district.card.color == "yellow" || district.effect == "anyColorIncome"; }));
           auto cards = deck.draw(count, rng);
           players[entry.player].hand.insert(players[entry.player].hand.end(),
             std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
@@ -942,17 +1010,25 @@ struct NativeGameState {
               return role_number(role) == 4;
             })) holder = static_cast<int>(i);
           if (holder >= 0) {
-            const int distance = std::abs(entry.player - holder);
-            if (distance == 1 || distance == static_cast<int>(players.size()) - 1) players[entry.player].gold += 3;
+            if (assassinated == 4) pending_queen = entry.player;
+            else {
+              const int distance = std::abs(entry.player - holder);
+              if (distance == 1 || distance == static_cast<int>(players.size()) - 1) players[entry.player].gold += 3;
+            }
           }
         }
         return true;
       }
-      active_player = -1; turn_phase.clear(); phase = NativePhase::RoundConfirm;
+      active_player = -1; has_turn = false; turn_phase.clear();
+      const bool finished = std::any_of(players.begin(), players.end(), [&](const NativePlayer& value) {
+        return value.city.size() >= static_cast<size_t>(end_districts);
+      });
+      phase = finished ? NativePhase::GameOver : NativePhase::RoundConfirm;
       round_confirmed.assign(players.size(), false); round_confirm_count = 0;
       return true;
     }
     active_player = (active_player + 1) % static_cast<int>(players.size());
+    has_turn = true;
     if (active_player == 0) ++round;
     builds = 0;
     spent_on_build = 0;

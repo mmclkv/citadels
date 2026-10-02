@@ -1,4 +1,4 @@
-"""Python rules engine, ported against the JS engine's state/action wire format.
+"""Test-only Python rules reference; production code must use the C++ engine.
 
 The draft and a growing subset of action rules are implemented here. Remaining
 unsupported branches fail explicitly rather than silently delegating to JS or
@@ -10,8 +10,8 @@ from __future__ import annotations
 import random
 import time
 
-from . import cards
-from .scoring import compute_scores
+from test import cards_reference as cards
+from test.python_scoring_reference import compute_scores
 
 MASK = 0xFFFFFFFF
 
@@ -550,10 +550,13 @@ def get_available_actions(state: dict, player_id: str) -> dict:
             return {"prompt": "【法师】选择一张牌", "actions": actions or [
                 {"type": "ability_skip", "label": "没有可选项，放弃使用能力"}]}
         if pending["kind"] == "wizard_choice":
-            return {"prompt": "【法师】将牌加入手牌或立即建造", "actions": [
-                {"type": "wizard_take", "label": "加入手牌"},
-                {"type": "wizard_build", "label": "立即建造（不占建造次数）"},
-                {"type": "pending_back", "to": "wizard_card", "label": "« 返回重新选择手牌"}]}
+            actions = [{"type": "wizard_take", "label": "加入手牌"}]
+            card = pending.get("card") or {}
+            if card and player["gold"] >= int(card.get("cost", 0)):
+                actions.append({"type": "wizard_build", "label": "立即建造（不占建造次数）"})
+            actions.append({"type": "pending_back", "to": "wizard_card",
+                            "label": "« 返回重新选择手牌"})
+            return {"prompt": "【法师】将牌加入手牌或立即建造", "actions": actions}
         if pending["kind"] == "tax_collect":
             return {"prompt": "【税务官】收取税务标记上的金币", "actions": [
                 {"type": "tax_collect", "label": f"收取 {state['effects'].get('taxCollectorGold') or 0} 枚金币"}]}
@@ -1219,6 +1222,23 @@ def _check_warrant(state: dict, turn: dict, player_index: int, card: dict) -> bo
     return True
 
 
+def _collect_building_tax(state: dict, player_index: int) -> bool:
+    """Charge one coin after a build when the builder can still afford it."""
+    if "tax_collector" not in state["charDeck"]:
+        return False
+    collector_index = next((index for index, player in enumerate(state["players"])
+                            if "tax_collector" in player["chars"]), -1)
+    player = state["players"][player_index]
+    if collector_index == player_index or player["gold"] <= 0:
+        return False
+    player["gold"] -= 1
+    state["effects"]["taxCollectorGold"] += 1
+    _log(state, f"{player['name']} 缴纳 1 枚建筑税，放入税务官标记。", "magic")
+    _notify(state, "tax_paid", {"playerIdx": player_index, "playerId": player["id"],
+                                 "playerName": player["name"], "amount": 1})
+    return True
+
+
 def _build(state: dict, turn: dict, player_index: int, card: dict,
            confiscate_index: int = -1) -> dict:
     player = state["players"][player_index]
@@ -1240,14 +1260,8 @@ def _build(state: dict, turn: dict, player_index: int, card: dict,
             "byIdx": confiscate_index, "byId": magistrate["id"], "byName": magistrate["name"],
             "playerIdx": player_index, "playerId": player["id"], "playerName": player["name"],
             "card": {"uid": card["uid"], "name": card["name"], "cost": card["cost"]}})
-    collector_index = next((index for index, collector in enumerate(state["players"])
-                            if "tax_collector" in collector["chars"]), -1)
-    tax_payer = state["players"][confiscate_index] if confiscate_index >= 0 else player
-    if ("tax_collector" in state["charDeck"] and collector_index !=
-            (confiscate_index if confiscate_index >= 0 else player_index) and tax_payer["gold"] > 0):
-        tax_payer["gold"] -= 1
-        state["effects"]["taxCollectorGold"] += 1
-        _log(state, "【税务官】收取 1 枚建筑税。")
+    tax_payer_index = confiscate_index if confiscate_index >= 0 else player_index
+    _collect_building_tax(state, tax_payer_index)
     _log(state, f"{player['name']} 建造了『{card['name']}』（{card['cost']} 金）。", "build")
     _notify(state, "built", {"playerIdx": player_index, "playerId": player["id"],
                              "playerName": player["name"],
@@ -1546,13 +1560,7 @@ def _apply_turn_action(state: dict, index: int, action: dict) -> dict:
         target["hand"] = [item for item in target["hand"] if item["uid"] != card["uid"]]
         built = {**card, "beautified": 0, "builtRound": state["round"], "museum": []}
         player["city"].append(built)
-        collector_index = next((i for i, other in enumerate(state["players"])
-                                if "tax_collector" in other["chars"]), -1)
-        if "tax_collector" in state["charDeck"] and index != collector_index and player["gold"] > 0:
-            player["gold"] -= 1
-            state["effects"]["taxCollectorGold"] += 1
-            _notify(state, "tax_paid", {"playerIdx": index, "playerId": player["id"],
-                                         "playerName": player["name"], "amount": 1})
+        _collect_building_tax(state, index)
         if len(player["city"]) >= state["config"]["endDistricts"] and state["firstToFinish"] < 0:
             state["firstToFinish"] = index
         turn["abilityUsed"] = True

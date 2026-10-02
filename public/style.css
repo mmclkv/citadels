@@ -233,7 +233,6 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
   align-items:center;justify-content:center;font-size:14px;font-weight:700;letter-spacing:.06em;padding:22px 0 4px}
 .card .c-en{flex:0 0 auto;text-align:center;font-size:7.5px;color:var(--dim);
   padding:2px 3px;letter-spacing:.02em;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.card .c-badges{position:absolute;bottom:2px;right:3px;display:flex;gap:2px;font-size:10px}
 .beautified-shimmer{position:absolute;inset:0;z-index:3;overflow:hidden;border-radius:inherit;pointer-events:none}
 .beautified-shimmer::before{content:"";position:absolute;inset:-45% -75%;
   background:linear-gradient(112deg,transparent 42%,rgba(255,255,220,.08) 47%,rgba(255,249,190,.78) 50%,rgba(255,255,235,.16) 53%,transparent 59%);
@@ -569,7 +568,6 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opponents[data-layout="mobile-ring"] .opp-city{gap:2px;min-height:34px}
 .opponents[data-layout="mobile-ring"] .opp-city>.card{width:40px;height:60px}
 .opponents[data-layout="mobile-ring"] .opp .cs-card{width:40px;height:60px}
-.opponents[data-layout="mobile-ring"] .opp .cs-name{font-size:10px}
 .opponents[data-layout="mobile-ring"] .opp-city{flex-wrap:nowrap;overflow:hidden}
 .opponents[data-layout="mobile-ring"] .opp-city>.card{width:var(--mobile-city-card-width,40px);height:var(--mobile-city-card-height,60px);flex:0 0 auto}
 .opponents[data-layout="mobile-ring"] .opp[data-compact="4"]{padding:4px 5px!important;font-size:.74em}
@@ -626,8 +624,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 /* 玩家小框框里的角色卡状态（盖牌 / 翻面） */
 .opp-char{display:flex;align-items:center;gap:8px;margin-bottom:9px}
 .me-char{display:flex;align-items:center;gap:8px;margin:2px 0 9px}
-/* 角色名（翻面后跟在卡牌右侧）/ 盖牌占位 */
-.cs-name{font-weight:800;font-size:15px;color:#6a4f18;line-height:1.1}
+/* 角色牌翻面后只显示牌面，不在牌侧重复显示角色名。 */
 .cs-label{font-size:11px;color:var(--dim)}
 .cs-card{position:relative;width:64px;height:96px;flex:0 0 auto}
 .cs-card.none{border:1px dashed var(--line2);border-radius:7px;background:transparent;opacity:.72}
@@ -672,6 +669,8 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 @keyframes buildingArrivalExpand{0%,100%{box-shadow:var(--shadow),0 0 0 rgba(200,149,43,0)}35%{box-shadow:0 0 0 4px rgba(200,149,43,.28),0 0 28px rgba(200,149,43,.35)}}
 .me-area.active{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,149,43,.16),0 10px 28px rgba(200,149,43,.18)}
 .zone-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 7px}
+/* 选角时个人面板顶部只有金币/皇冠状态；默认 zone-head 上边距会在角色牌前留下空档。 */
+#screen-game.draft-phase .me-area>.zone-head:first-child{margin-top:0;margin-bottom:2px}
 .zone-head h3{font-size:14px;color:#6a4f18}
 /* 我的城市右上角的金币+分数集群：与其它玩家框（.opp-head 内的 .opp-gold + .score-badge）保持同一套样式 */
 .me-stats{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
@@ -1166,12 +1165,14 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 
   #screen-game.draft-phase .play-area{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
   #screen-game.draft-phase .table-arena{
-    flex:1 1 auto;min-height:520px!important;display:block;position:relative;
+    /* 让 flex 布局先确定棋盘的最终高度，再由绝对定位的对手区用 inset 填满；
+       height:0 + min-height 会让 100% 子级在首轮选角时退化成零高度。 */
+    flex:1 1 0;height:auto;min-height:520px!important;display:block;position:relative;
     margin:0;padding-top:0;overflow:hidden}
   /* 使用完整棋盘高度恢复圆桌座位分布；当前玩家留在下方，其他玩家沿上方和两侧展开。 */
   #screen-game.draft-phase .opponents[data-layout="ring"]{
     position:absolute!important;inset:0!important;display:block!important;
-    width:100%;height:100%!important;min-height:0!important;margin:0!important;
+    width:auto!important;height:auto!important;min-height:0!important;margin:0!important;
     overflow:visible;padding:0}
   #screen-game.draft-phase .opponents[data-layout="ring"] .opp{
     position:absolute!important;
@@ -1488,7 +1489,6 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-char-stats{font-size:13px;min-width:72px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-body{gap:8px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .opp-city{gap:5px;min-height:54px}
-  #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-name{font-size:14px}
   #screen-game .opponents[data-layout="mobile-ring"] .opp .cs-card{
     width:56px!important;height:84px!important;
     min-width:56px!important;min-height:84px!important;

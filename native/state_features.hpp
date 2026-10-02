@@ -147,7 +147,8 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     ? static_cast<float>(rel(state.draft_current_player) + 1) / 9.0f : 0.0f;
   features[14] = state.reaction_player < 0 ? 0.0f : static_cast<float>(rel(state.reaction_player) + 1) / 9.0f;
   features[15] = static_cast<float>(state.round_confirm_count) / 8.0f;
-  features[16] = state.pending_target < 0 ? 0.0f : static_cast<float>(rel(state.pending_target) + 1) / 9.0f;
+  const int pending_target = state.pending_target;
+  features[16] = pending_target < 0 ? 0.0f : static_cast<float>(rel(pending_target) + 1) / 9.0f;
   features[17] = state.pending_from_crown < 0 ? 0.0f : static_cast<float>(rel(state.pending_from_crown) + 1) / 9.0f;
   features[18] = static_cast<float>(pending_kind_code(state.pending_kind)) / 34.0f;
   features[19] = static_cast<float>(state.has_turn ? turn_phase_code(state.turn_phase) : 4) / 4.0f;
@@ -160,7 +161,11 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[26] = state.used_smithy ? 1.0f : 0.0f;
   features[27] = state.used_museum ? 1.0f : 0.0f;
   features[28] = state.bonus_done ? 1.0f : 0.0f;
-  features[29] = static_cast<float>(state.pending_kind == "bishop_repay" ? state.pending_amount : static_cast<int>(state.pending_cards.size())) / 8.0f;
+  const int pending_count_or_amount = state.pending_kind == "bishop_repay" || state.pending_kind == "bishop_payer"
+      ? state.pending_amount
+      : (state.pending_kind == "draw_keep" || state.pending_kind == "scholar_pick" ||
+         state.pending_kind == "wizard_card" ? static_cast<int>(state.pending_cards.size()) : 0);
+  features[29] = static_cast<float>(pending_count_or_amount) / 8.0f;
   features[30] = static_cast<float>(state.builds) / 4.0f;
   features[31] = static_cast<float>(state.spent_on_build) / 20.0f;
   constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
@@ -172,7 +177,8 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     int city_score = 0, city_cost = 0, purple = 0, museum = 0, beautified = 0;
     std::array<bool, 5> have{};
     for (const auto& district : p.city) {
-      city_score += district.card.score_value > 0 ? district.card.score_value : district.card.cost;
+      city_score += district.card.score_as > 0 ? district.card.score_as
+        : district.card.score_value > 0 ? district.card.score_value : district.card.cost;
       city_cost += district.card.cost;
       for (size_t c = 0; c < colors.size(); ++c) if (district.card.color == colors[c]) have[c] = true;
       if (!district.effect.empty() || !district.card.purple_effect.empty()) ++purple;
@@ -192,7 +198,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     const bool chosen = !p.role_ids.empty();
     const bool draft_complete = state.phase != NativePhase::Draft || static_cast<int>(p.role_ids.size()) >= (player_count <= 3 ? 2 : 1);
     features[base] = static_cast<float>(p.gold) / 20.0f;
-    features[base + 1] = static_cast<float>(p.hand_count) / 20.0f;
+    features[base + 1] = static_cast<float>(p.hand.size()) / 20.0f;
     features[base + 2] = static_cast<float>(p.city.size()) / std::max(1, state.end_districts);
     features[base + 3] = p.has_crown ? 1.0f : 0.0f;
     features[base + 4] = absolute == active ? 1.0f : 0.0f;
@@ -212,7 +218,10 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     // 与 JS 编码保持一致：绝对座位号会让固定座位训练产生位置捷径，
     // 这里保留槽位但不再写入绝对 seat。
     features[base + 18] = 0.0f;
-    features[base + 19] = absolute == active ? static_cast<float>(state.pending_cards.size()) / 8.0f : 0.0f;
+    const bool pending_exposes_count = state.pending_kind == "draw_keep" ||
+        state.pending_kind == "scholar_pick" || state.pending_kind == "wizard_card";
+    features[base + 19] = absolute == active && pending_exposes_count
+        ? static_cast<float>(state.pending_cards.size()) / 8.0f : 0.0f;
     if (revealed >= 1 && revealed <= 9) features[base + 19 + static_cast<size_t>(revealed)] = 1.0f;
     for (size_t role = 0; role < kRoleIds.size(); ++role)
       if (revealed_id == kRoleIds[role]) { features[base + 29 + role] = 1.0f; break; }

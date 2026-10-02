@@ -1,15 +1,15 @@
-"""In-process Python self-play/PPO runtime and lifecycle manager."""
+"""Training orchestration and PyTorch updates around the native game/search worker."""
 
 from __future__ import annotations
 
 import array
+import atexit
 import copy
 import gzip
 import json
 import multiprocessing
 import os
 import platform
-import random
 import re
 import tempfile
 import threading
@@ -20,26 +20,34 @@ from pathlib import Path
 
 import numpy as np
 
-from .bot import decide as decide_npc
-from .encoding import ACTION_SIZE, encode_action, encode_state
-from .game import apply_action, create_game, get_available_actions, start_game
-from .belief import belief_weights
-from .determinize import determinize
-from .mcts import InformationSetMCTS
-from .neural import NeuralPolicy
-from .scoring import compute_scores
+from . import cards
+from .native_worker import NativeMctsWorker
 from .training_config import sanitize_config
-from .views import sanitize
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = ROOT / "training"
+ACTION_SIZE = 256
 FLAT_PROFILES = {"fast": (256, 128, 128, 64, 64),
                  "balanced": (384, 256, 256, 128, 128),
                  "large": (512, 384, 384, 192, 192)}
 
-_SAMPLER_MODEL = None
 _SAMPLER_CONFIG = None
 _SAMPLER_STOP = None
+_SAMPLER_NATIVE_WORKER = None
+_SERVER_NATIVE_WORKER = None
+
+
+def set_server_native_worker(worker) -> None:
+    """Use the server-owned worker for serial training samplers when available."""
+    global _SERVER_NATIVE_WORKER
+    _SERVER_NATIVE_WORKER = worker
+
+
+def _close_sampler_worker() -> None:
+    global _SAMPLER_NATIVE_WORKER
+    if _SAMPLER_NATIVE_WORKER is not None:
+        _SAMPLER_NATIVE_WORKER.close()
+        _SAMPLER_NATIVE_WORKER = None
 
 
 def _system_memory_gb() -> float | None:
@@ -84,20 +92,6 @@ def _load_trainer():
     return torch, gpu_trainer
 
 
-def _current_actor(state: dict) -> dict | None:
-    if state["phase"] == "draft" and state.get("draft"):
-        draft = state["draft"]
-        step = draft["steps"][draft["stepIdx"]] if draft["stepIdx"] < len(draft["steps"]) else None
-        return state["players"][step["player"]] if step else None
-    if state.get("reaction"):
-        return state["players"][state["reaction"]["playerIdx"]]
-    if state.get("roundConfirm"):
-        idx = next((i for i, done in enumerate(state["roundConfirm"]["confirmed"]) if not done), -1)
-        return state["players"][idx] if idx >= 0 else None
-    turn = state.get("turn")
-    return state["players"][turn["playerIdx"]] if turn else None
-
-
 def _network_count(config: dict, game_number: int, player_count: int) -> int:
     mode = config["selfPlayMode"]
     if mode == "all-network":
@@ -110,263 +104,112 @@ def _network_count(config: dict, game_number: int, player_count: int) -> int:
     return min(end, start + increments)
 
 
-def _rank_rewards(state: dict) -> dict[str, float]:
-    scores = state.get("scores") or compute_scores(state)
-    player_count = len(scores)
-    rewards = {}
-    for row in scores:
-        rank = sum(other["total"] > row["total"] for other in scores)
-        rewards[state["players"][row["playerIdx"]]["id"]] = (
-            1.0 if player_count == 1 else 1.0 - 2.0 * rank / (player_count - 1))
-    return rewards
+def _native_worker(config: dict):
+    global _SAMPLER_NATIVE_WORKER
+    worker_path = config.get("nativeWorkerPath") or os.environ.get("CITADELS_NATIVE_MCTS_WORKER")
+    if not worker_path:
+        worker_path = ROOT / "native" / "mcts_worker_libtorch.exe"
+    worker = _SAMPLER_NATIVE_WORKER or _SERVER_NATIVE_WORKER
+    if worker is not None:
+        process = getattr(worker, "process", None)
+        streams = (getattr(process, "stdin", None), getattr(process, "stdout", None))
+        if (process is None or process.poll() is not None or
+                any(stream is None or stream.closed for stream in streams)):
+            if worker is _SAMPLER_NATIVE_WORKER:
+                try:
+                    worker.close()
+                finally:
+                    _SAMPLER_NATIVE_WORKER = None
+            worker = None
+    if worker is None:
+        _SAMPLER_NATIVE_WORKER = NativeMctsWorker(worker_path)
+        atexit.register(_close_sampler_worker)
+        worker = _SAMPLER_NATIVE_WORKER
+    return worker
 
 
-def _value_target(player_ids: list[str], player_id: str, rewards: dict[str, float]):
-    start = player_ids.index(player_id)
-    values = np.zeros(8, dtype=np.float32)
-    mask = np.zeros(8, dtype=np.float32)
-    for relative in range(min(8, len(player_ids))):
-        values[relative] = rewards[player_ids[(start + relative) % len(player_ids)]]
-        mask[relative] = 1
-    return values, mask
-
-
-def _training_search(state: dict, player_id: str, actions: list[dict], model, device,
-                     config: dict, rng: random.Random):
-    """Return an ISMCTS visit target, using only root determinizations observable to the actor."""
-    import torch
-    from .views import sanitize
-
-    architecture = "entity-v1" if config["networkArchitecture"] == "flat" else "entity-v5"
-    particles = []
-    baseline = json.dumps(actions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    for _ in range(int(config["mctsParticles"]) * 3):
-        if len(particles) >= int(config["mctsParticles"]):
-            break
-        try:
-            candidate = determinize(state, player_id, rng.random)
-            legal = NeuralPolicy._expand(candidate, player_id,
-                get_available_actions(candidate, player_id).get("actions") or [])
-            signature = json.dumps(legal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            if signature == baseline:
-                particles.append(candidate)
-        except (KeyError, IndexError, TypeError, ValueError):
-            continue
-    if not particles:
-        return None
-    weights = (belief_weights(particles, player_id, 0.15)
-               if config.get("mctsBelief", True) else None)
-
-    inference_ms = 0.0
-
-    def evaluate(search_state: dict, player_index: int, candidates: list[dict]):
-        nonlocal inference_ms
-        actor_id = search_state["players"][player_index]["id"]
-        view = sanitize(search_state, actor_id)
-        vector, context = encode_state(view, actor_id, architecture)
-        action_vectors = np.stack([encode_action(action, context) for action in candidates])
-        state_tensor = torch.from_numpy(vector.copy()).to(device).unsqueeze(0)
-        action_tensor = torch.from_numpy(action_vectors.copy()).to(device).unsqueeze(0)
-        mask = torch.ones((1, len(candidates)), dtype=torch.bool, device=device)
-        temperature = torch.ones((1,), dtype=torch.float32, device=device)
-        started = time.perf_counter()
-        with torch.inference_mode():
-            logits, values = model(state_tensor, action_tensor, mask, temperature)
-            priors = torch.softmax(logits, dim=-1)[0].detach().cpu().numpy().astype(np.float32)
-            value_vector = values[0].detach().cpu().numpy().astype(np.float32)
-        inference_ms += (time.perf_counter() - started) * 1000
-        return priors, value_vector
-
-    search = InformationSetMCTS(evaluate, simulations=int(config["mctsSimulations"]),
-        max_depth=int(config["mctsMaxDepth"]), c_puct=float(config["mctsC_puct"]),
-        seed=rng.randrange(0, 2**32), dirichlet_alpha=float(config["mctsDirichletAlpha"]),
-        dirichlet_epsilon=float(config["mctsDirichletEpsilon"]))
-    result = search.search(particles, player_id, actions, weights)
-    if len(result.policy) != len(actions) or not np.isfinite(result.policy).all() or float(result.policy.sum()) <= 0:
-        return None
-    policy = np.maximum(result.policy.astype(np.float64), 0)
-    policy /= policy.sum()
-    return {"policy": policy.astype(np.float32), "value": result.value_vector,
-            "visits": result.visits, "particles": len(particles),
-            "expansions": result.expansions, "inferenceMs": inference_ms}
-
-
-def _sample_game(model, device, config: dict, game_number: int, stop_event: threading.Event):
+def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     game_started = time.perf_counter()
-    import torch
-    rng = random.Random((int(config["seed"]) + game_number * 0x9E3779B1) & 0xFFFFFFFF)
-    player_count = rng.randint(int(config["minPlayers"]), int(config["maxPlayers"]))
+    seed = (int(config["seed"]) + game_number * 0x9E3779B1) & 0xFFFFFFFF
+    rng = np.random.default_rng(seed)
+    player_count = int(rng.integers(int(config["minPlayers"]), int(config["maxPlayers"]) + 1))
     network_count = _network_count(config, game_number, player_count)
     network_seats = set((game_number - 1 + offset) % player_count for offset in range(network_count))
     seats = [{"id": f"train-{game_number}-{i}", "name": f"玩家 {i + 1}", "isBot": True,
               "botType": "neural" if i in network_seats else "npc",
               "botLevel": config["heuristicDifficulty"]} for i in range(player_count)]
-    state = create_game({"roomId": f"training-{game_number}", "seed": rng.randrange(1, 2**32),
-                         "endDistricts": config["endDistricts"], "charSetMode": config["charSet"],
-                         "seats": seats})
-    if not start_game(state)["ok"]:
-        raise RuntimeError("Python 游戏引擎无法启动自对弈局")
-    architecture = config["networkArchitecture"]
-    encode_arch = "entity-v1" if architecture == "flat" else "entity-v5"
+    if stop_event.is_set():
+        return None
+    worker = _native_worker(config)
+    model_path = str(config["nativeModelPath"])
+    native_result = worker.selfplay(
+        new_game={"seed": int(rng.integers(1, 2**32)), "endDistricts": config["endDistricts"],
+                  "charSetMode": config["charSet"], "initialCrownSeat": 0,
+                  "startingHand": 4, "startingGold": 2, "seats": seats,
+                  "catalog": cards._catalog},
+        network_player_ids=[seats[index]["id"] for index in sorted(network_seats)],
+        model_path=model_path, model_version=Path(model_path).stat().st_mtime_ns % 2_000_000_000,
+        profile=config["profile"], architecture=config["networkArchitecture"],
+        device=config["device"], simulations=config["mctsSimulations"],
+        max_depth=config["mctsMaxDepth"], c_puct=config["mctsC_puct"],
+        dirichlet_alpha=config["mctsDirichletAlpha"],
+        dirichlet_epsilon=config["mctsDirichletEpsilon"], seed=seed,
+        batch_size=config.get("mctsBatchSize", 32), max_rounds=config["maxRounds"],
+        max_steps=config["maxSteps"], action_encoding_version=8,
+        particles=config["mctsParticles"], belief=config.get("mctsBelief", True))
     rows = []
-    steps = 0
-    inference_ms = 0.0
-    fallback_count = 0
-    while state["phase"] != "gameover" and state["round"] <= config["maxRounds"] and steps < config["maxSteps"]:
-        if stop_event.is_set():
-            return None
-        actor = _current_actor(state)
-        if actor is None:
-            raise RuntimeError(f"局 {game_number} 无当前行动者（phase={state['phase']}）")
-        player_id = actor["id"]
-        available = get_available_actions(state, player_id)
-        options = NeuralPolicy._expand(state, player_id, available.get("actions") or [])
-        if not options:
-            raise RuntimeError(f"局 {game_number} {player_id} 没有合法候选行动")
-        view = sanitize(state, player_id)
-        encoded_state, context = encode_state(view, player_id, encode_arch)
-        action_vectors = np.stack([encode_action(action, context) for action in options])
-        is_network = actor.get("botType") == "neural"
-        chosen = 0
-        old_probability = 1.0 / len(options)
-        value_vector = np.zeros(8, dtype=np.float32)
-        temperature_progress = min(1.0, game_number / max(1, config["targetGames"] * 0.7))
-        temperature = config["temperatureStart"] + (config["temperatureEnd"] - config["temperatureStart"]) * temperature_progress
-        if is_network:
-            states_t = torch.from_numpy(encoded_state.copy()).to(device).unsqueeze(0)
-            actions_t = torch.from_numpy(action_vectors.copy()).to(device).unsqueeze(0)
-            mask_t = torch.ones((1, len(options)), dtype=torch.bool, device=device)
-            temp_t = torch.tensor([temperature], dtype=torch.float32, device=device)
-            inference_started = time.perf_counter()
-            with torch.inference_mode():
-                logits, values = model(states_t, actions_t, mask_t, temp_t)
-                probs = torch.softmax(logits, dim=-1)[0]
-                value_vector = values[0].detach().cpu().numpy().astype(np.float32, copy=True)
-                chosen = int(torch.multinomial(probs, 1).item())
-                old_probability = float(probs[chosen].item())
-            inference_ms += (time.perf_counter() - inference_started) * 1000
-            search_result = None
-            if config["mctsSimulations"] > 0 and len(options) > 1:
-                search_result = _training_search(state, player_id, options, model, device, config, rng)
-            if search_result:
-                inference_ms += search_result["inferenceMs"]
-                policy = torch.as_tensor(search_result["policy"], dtype=torch.float32, device=device)
-                chosen = int(torch.multinomial(policy, 1).item())
-                old_probability = float(policy[chosen].item())
-                value_vector = np.asarray(search_result["value"], dtype=np.float32).copy()
-            if len(options) > 1:
-                row = {"playerId": player_id, "state": encoded_state.copy(),
-                             "actions": action_vectors.copy(), "chosen": chosen,
-                             "oldProb": old_probability, "oldValue": value_vector,
-                             "temperature": float(temperature)}
-                if search_result:
-                    row["pi"] = search_result["policy"].copy()
-                    row["mctsVisits"] = search_result["visits"]
-                    row["mctsParticles"] = search_result["particles"]
-                rows.append(row)
-        else:
-            action = decide_npc(state, player_id, available)
-            chosen = next((i for i, item in enumerate(options) if item == action), 0)
-            if not config["trainNetworkOnly"] and len(options) > 1:
-                rows.append({"playerId": player_id, "state": encoded_state.copy(),
-                             "actions": action_vectors.copy(), "chosen": chosen,
-                             "oldProb": 1.0 / len(options), "oldValue": value_vector,
-                             "temperature": float(temperature)})
-        action = options[chosen]
-        result = apply_action(state, player_id, action)
-        if not result.get("ok"):
-            fallback_count += 1
-            replacement = None
-            for candidate in options:
-                trial = copy.deepcopy(state)
-                if apply_action(trial, player_id, candidate).get("ok"):
-                    replacement = candidate
-                    break
-            if replacement is None:
-                raise RuntimeError("模型选择的行动无效，且找不到合法兜底：" + result.get("error", ""))
-            result = apply_action(state, player_id, replacement)
-        steps += 1
-    if state["phase"] != "gameover":
-        if stop_event.is_set():
-            return None
-        state["scores"] = compute_scores(state)
-    rewards = _rank_rewards(state)
-    player_ids = [player["id"] for player in state["players"]]
-    for row in rows:
-        row["reward"], row["valueMask"] = _value_target(player_ids, row["playerId"], rewards)
-    network_indices = [i for i, seat in enumerate(seats) if seat["botType"] == "neural"]
-    network_rewards = [rewards[player_ids[i]] for i in network_indices]
-    winning_indices = {row["playerIdx"] for row in state["scores"]
-                       if row["total"] == max(score["total"] for score in state["scores"])}
-    network_scores = [row["total"] for row in state["scores"] if row["playerIdx"] in network_indices]
-    return {"rows": rows, "steps": steps, "scores": state["scores"], "rounds": state["round"],
-            "playerCount": player_count, "inferenceMs": inference_ms, "fallbacks": fallback_count,
-            "samplerPid": os.getpid(),
-            "gameMs": (time.perf_counter() - game_started) * 1000,
-            "networkReward": sum(network_rewards) / max(1, len(network_rewards)),
-            "networkWin": sum(index in winning_indices for index in network_indices) / max(1, len(network_indices)),
-            "networkScore": sum(network_scores) / max(1, len(network_scores)),
-            "winners": sorted(winning_indices)}
+    for row in native_result.get("rows") or []:
+        player_index = int(row["playerIdx"])
+        rows.append({"playerId": seats[player_index]["id"],
+                     "state": np.asarray(row["state"], dtype=np.float32),
+                     "actions": np.asarray(row["actions"], dtype=np.float32),
+                     "pi": np.asarray(row["pi"], dtype=np.float32),
+                     "reward": np.asarray(row["reward"], dtype=np.float32),
+                     "valueMask": np.asarray(row["valueMask"], dtype=np.float32)})
+    native_result["rows"] = rows
+    native_result.update({"samplerPid": os.getpid(), "fallbacks": 0,
+                          "gameMs": (time.perf_counter() - game_started) * 1000,
+                          "inferenceMs": native_result.get("inferenceMs", 0.0)})
+    return native_result
 
 
-def _initialize_sampler(model, config: dict, stop_event) -> None:
-    """Install a shared, read-only CPU model in a spawned self-play process."""
-    global _SAMPLER_MODEL, _SAMPLER_CONFIG, _SAMPLER_STOP
-    import torch
-    torch.set_num_threads(1)
-    _SAMPLER_MODEL = model.eval()
+def _initialize_sampler(config: dict, stop_event) -> None:
+    """Install lightweight sampler state; native worker owns search/inference."""
+    global _SAMPLER_CONFIG, _SAMPLER_STOP
     _SAMPLER_CONFIG = config
     _SAMPLER_STOP = stop_event
 
 
 def _sample_game_in_worker(game_number: int):
-    if _SAMPLER_MODEL is None or _SAMPLER_CONFIG is None or _SAMPLER_STOP is None:
+    if _SAMPLER_CONFIG is None or _SAMPLER_STOP is None:
         raise RuntimeError("自对弈进程尚未初始化")
-    import torch
-    return _sample_game(_SAMPLER_MODEL, torch.device("cpu"), _SAMPLER_CONFIG,
-                        int(game_number), _SAMPLER_STOP)
-
-
-def _sync_shared_model(torch, source, destination) -> None:
-    state = {key: value.detach().to("cpu") for key, value in source.state_dict().items()}
-    with torch.no_grad():
-        destination.load_state_dict(state, strict=True)
+    return _sample_game(_SAMPLER_CONFIG, int(game_number), _SAMPLER_STOP)
 
 
 def _training_data(torch, rows: list[dict]) -> dict:
     if not rows:
-        return {"states": torch.zeros((0, 672)), "chosen": torch.zeros(0, dtype=torch.long),
-                "old_probs": torch.zeros(0), "old_values": torch.zeros((0, 8)),
-                "rewards": torch.zeros((0, 8)), "value_masks": torch.zeros((0, 8)),
-                "temperatures": torch.zeros(0), "actions_flat": np.zeros((0, ACTION_SIZE), np.float32),
+        return {"states": torch.zeros((0, 672)), "rewards": torch.zeros((0, 8)),
+                "value_masks": torch.zeros((0, 8)), "actions_flat": np.zeros((0, ACTION_SIZE), np.float32),
                 "lengths": np.zeros(0, np.int64), "offsets": np.zeros(1, np.int64),
-                "action_width": ACTION_SIZE, "pi_flat": None, "pi_offsets": None,
-                "pi_lengths": None, "has_pi": torch.zeros(0, dtype=torch.bool)}
+                "action_width": ACTION_SIZE, "pi_flat": np.zeros(0, np.float32),
+                "pi_offsets": np.zeros(1, np.int64), "pi_lengths": np.zeros(0, np.int64)}
     lengths = np.asarray([len(row["actions"]) for row in rows], dtype=np.int64)
     offsets = np.zeros(len(rows) + 1, dtype=np.int64)
     np.cumsum(lengths, out=offsets[1:])
-    has_pi = np.asarray(["pi" in row for row in rows], dtype=np.bool_)
-    pi_lengths = np.asarray([len(row["actions"]) if "pi" in row else 0 for row in rows], dtype=np.int64)
+    pi_lengths = lengths.copy()
     pi_offsets = np.zeros(len(rows) + 1, dtype=np.int64)
     np.cumsum(pi_lengths, out=pi_offsets[1:])
-    pi_flat = (np.concatenate([np.asarray(row["pi"], dtype=np.float32) for row in rows if "pi" in row])
-               if np.any(has_pi) else None)
+    pi_flat = np.concatenate([np.asarray(row["pi"], dtype=np.float32) for row in rows])
     return {"states": torch.from_numpy(np.stack([row["state"] for row in rows]).astype(np.float32)),
-            "chosen": torch.tensor([row["chosen"] for row in rows], dtype=torch.long),
-            "old_probs": torch.tensor([row["oldProb"] for row in rows], dtype=torch.float32),
-            "old_values": torch.from_numpy(np.stack([row["oldValue"] for row in rows]).astype(np.float32)),
             "rewards": torch.from_numpy(np.stack([row["reward"] for row in rows]).astype(np.float32)),
             "value_masks": torch.from_numpy(np.stack([row["valueMask"] for row in rows]).astype(np.float32)),
-            "temperatures": torch.tensor([row["temperature"] for row in rows], dtype=torch.float32),
             "actions_flat": np.concatenate([row["actions"] for row in rows], axis=0).astype(np.float32),
             "lengths": lengths, "offsets": offsets, "action_width": ACTION_SIZE,
-            "pi_flat": pi_flat, "pi_offsets": pi_offsets if pi_flat is not None else None,
-            "pi_lengths": pi_lengths if pi_flat is not None else None,
-            "has_pi": torch.from_numpy(has_pi)}
+            "pi_flat": pi_flat, "pi_offsets": pi_offsets, "pi_lengths": pi_lengths}
 
 
 class TrainingManager:
-    def __init__(self, data_dir: str | Path | None = None):
+    def __init__(self, data_dir: str | Path | None = None, native_worker=None):
         self.data_dir = Path(data_dir or ROOT / "training-data")
         self._lock = threading.RLock()
         self._stop = threading.Event()
@@ -377,6 +220,7 @@ class TrainingManager:
         self._torch = None
         self._trainer = None
         self._device = None
+        set_server_native_worker(native_worker)
         self._log_seq = 0
         self._status = {"state": "idle", "running": False, "stopping": False,
                         "preparing": False, "completedGames": 0, "targetGames": 0,
@@ -420,8 +264,8 @@ class TrainingManager:
                 raise ValueError("训练任务已经在运行")
             self._stop.clear()
             self._worker_stop.clear()
-            config.update({"rulesEngine": "python", "mctsEngine": "python",
-                           "neuralNetworkFramework": "pytorch", "backend": "python"})
+            config.update({"rulesEngine": "cpp", "mctsEngine": "cpp",
+                           "neuralNetworkFramework": "libtorch", "backend": "python"})
             self._status.update({"state": "preparing", "running": True, "stopping": False,
                                  "preparing": True, "completedGames": 0,
                                  "targetGames": int(config["targetGames"]),
@@ -445,16 +289,19 @@ class TrainingManager:
         games = 0
         saved_game = 0
         sampler_pool = None
-        shared_sampler_model = None
+        native_model_dir = None
         try:
+            self._log("正在初始化 PyTorch 训练环境…")
             torch, trainer = _load_trainer()
             self._torch, self._trainer = torch, trainer
+            self._log(f"PyTorch 已加载（{torch.__version__}），正在初始化随机种子与设备…")
             torch.manual_seed(int(config["seed"]))
             np.random.seed(int(config["seed"]) & 0xFFFFFFFF)
             if config["device"] == "cuda" and not torch.cuda.is_available():
                 raise RuntimeError("已要求 CUDA，但 PyTorch 无法访问 CUDA")
             self._device = torch.device("cuda" if config["device"] == "cuda" else "cpu")
             architecture = config["networkArchitecture"]
+            self._log(f"正在创建网络：架构={architecture}，profile={config['profile']}…")
             self._model = trainer.create_model(architecture, config["profile"]).to(self._device)
             resume_path = None
             if config["resumeCheckpoint"]:
@@ -496,10 +343,20 @@ class TrainingManager:
                 if optimizer_path.is_file():
                     self._optimizer.load_state_dict(torch.load(optimizer_path, map_location=self._device,
                                                                weights_only=True))
+            worker_path = (config.get("nativeWorkerPath") or
+                           os.environ.get("CITADELS_NATIVE_MCTS_WORKER") or
+                           str(ROOT / "native" / "mcts_worker_libtorch.exe"))
+            if not Path(worker_path).is_file():
+                raise FileNotFoundError(f"找不到 C++ LibTorch MCTS worker：{worker_path}")
+            native_model_dir = tempfile.TemporaryDirectory(prefix="citadels-native-model-")
+            config["nativeWorkerPath"] = str(worker_path)
+            config["nativeModelPath"] = str(Path(native_model_dir.name) / "model.bin")
+            self._model.save_flat(config["nativeModelPath"])
             with self._lock:
                 hardware = {"cpu": os.environ.get("PROCESSOR_IDENTIFIER") or platform.processor(),
                             "logicalCores": os.cpu_count() or 1, "memoryGB": _system_memory_gb(),
-                            "runtime": "Python", "torch": torch.__version__, "device": str(self._device),
+                            "runtime": "Python launcher + C++ MCTS/LibTorch inference",
+                            "torch": torch.__version__, "device": str(self._device),
                             "cuda": torch.version.cuda or ""}
                 if self._device.type == "cuda":
                     properties = torch.cuda.get_device_properties(self._device)
@@ -510,16 +367,17 @@ class TrainingManager:
                                      "hardware": hardware})
             sampler_count = min(int(config["workers"]), int(config["batchGames"]))
             if sampler_count > 1:
+                self._log(f"正在启动 {sampler_count} 个自对弈采样进程…")
                 process_context = multiprocessing.get_context("spawn")
-                shared_sampler_model = trainer.create_model(architecture, config["profile"]).cpu()
-                _sync_shared_model(torch, self._model, shared_sampler_model)
-                shared_sampler_model.share_memory()
                 sampler_pool = process_context.Pool(
                     processes=sampler_count, initializer=_initialize_sampler,
-                    initargs=(shared_sampler_model, config, self._worker_stop))
-            self._log(f"Python 训练启动：profile={config['profile']}，架构={architecture}，设备={self._device}；" +
+                    initargs=(config, self._worker_stop))
+            self._log(f"训练启动：profile={config['profile']}，架构={architecture}，设备={self._device}；" +
                       f"采样进程={sampler_count}；" +
-                      (f"ISMCTS={config['mctsSimulations']} simulations" if config["mctsSimulations"] > 0 else "MCTS=关闭"))
+                      f"C++ ISMCTS={config['mctsSimulations']} simulations，深度={config['mctsMaxDepth']}，" +
+                      f"粒子={config['mctsParticles']}，batch={config['mctsBatchSize']}，" +
+                      f"c_puct={config['mctsC_puct']}，Dirichlet α={config['mctsDirichletAlpha']} " +
+                      f"ε={config['mctsDirichletEpsilon']}；LibTorch 前向推理")
             totals = {"steps": 0, "gameMs": 0.0, "inferenceMs": 0.0,
                       "rounds": 0, "fallbacks": 0, "networkByPlayers": {}, "winSeatsByPlayers": {}}
             while games < config["targetGames"] and not self._stop.is_set():
@@ -530,13 +388,19 @@ class TrainingManager:
                 batch_results = []
                 batch_count = int(min(config["batchGames"], config["targetGames"] - games))
                 game_numbers = [games + offset + 1 for offset in range(batch_count)]
+                self._log(f"开始采样批次：第 {game_numbers[0]}–{game_numbers[-1]} 局（共 {batch_count} 局）…")
                 if sampler_pool:
-                    _sync_shared_model(torch, self._model, shared_sampler_model)
-                    sampled_games = sampler_pool.map(_sample_game_in_worker, game_numbers, chunksize=1)
+                    self._model.save_flat(config["nativeModelPath"])
+                    sampled_games = sampler_pool.imap_unordered(_sample_game_in_worker, game_numbers, chunksize=1)
                 else:
-                    sampled_games = [_sample_game(self._model, self._device, config,
-                                                  game_number, self._stop)
-                                     for game_number in game_numbers]
+                    def serial_samples():
+                        self._model.save_flat(config["nativeModelPath"])
+                        for game_number in game_numbers:
+                            if self._stop.is_set():
+                                break
+                            self._log(f"正在采样第 {game_number}/{config['targetGames']} 局…")
+                            yield _sample_game(config, game_number, self._stop)
+                    sampled_games = serial_samples()
                 sampler_pids = set()
                 for result in sampled_games:
                     if result is None:
@@ -579,22 +443,18 @@ class TrainingManager:
                             "gpuMemoryMB": (torch.cuda.max_memory_allocated(self._device) / (1024 ** 2)
                                             if self._device.type == "cuda" else 0),
                             "winSeatsByPlayers": copy.deepcopy(totals["winSeatsByPlayers"])}
+                    self._log(f"自对弈进度：已完成 {games}/{config['targetGames']} 局")
                     if games % 10 == 0 or games == config["targetGames"]:
                         self._log(f"已完成 {games}/{config['targetGames']} 局；样本 {len(rows)}")
                 if self._stop.is_set():
                     break
                 if rows:
+                    self._log(f"采样批次完成（{len(rows)} 条训练样本），正在执行 MCTS 策略蒸馏更新…")
                     data = _training_data(torch, rows)
-                    mcts_ce_required = config["mctsSimulations"] > 0 and config["policyLossMode"] != "ppo"
-                    if mcts_ce_required:
-                        sample_total = int(data["has_pi"].numel())
-                        coverage = float(data["has_pi"].float().mean()) if sample_total else 0.0
-                        if sample_total == 0 or coverage < 0.5:
-                            raise RuntimeError(f"MCTS 策略目标覆盖率过低：{coverage:.0%}（低于 50%），停止训练避免污染权重")
                     self._model.train()
-                    batch_metrics = trainer.train_ppo(self._model, self._optimizer, self._device, data,
-                                                      int(config["ppoEpochs"]), int(config["miniBatch"]),
-                                                      config["policyLossMode"], mcts_ce_required)
+                    batch_metrics = trainer.train_mcts_distillation(
+                        self._model, self._optimizer, self._device, data,
+                        int(config["trainingEpochs"]), int(config["miniBatch"]))
                     self._model.eval()
                     batch_metrics["game"] = games
                     with self._lock:
@@ -602,6 +462,7 @@ class TrainingManager:
                         self._status["history"].append(copy.deepcopy(self._status["point"]))
                         self._status["history"] = self._status["history"][-400:]
                 if games and (games % config["checkpointEvery"] == 0 or games >= config["targetGames"] or self._stop.is_set()):
+                    self._log(f"正在保存 checkpoint（{games} 局）…")
                     self._save_checkpoint(config, games)
                     saved_game = games
             if games and saved_game != games:
@@ -626,6 +487,10 @@ class TrainingManager:
                                      "preparing": False, "error": str(exc),
                                      "endedAt": datetime.now(timezone.utc).isoformat()})
             self._log("训练失败：" + "".join(traceback.format_exception(exc))[-800:])
+        finally:
+            _close_sampler_worker()
+            if native_model_dir is not None:
+                native_model_dir.cleanup()
 
     def _save_checkpoint(self, config: dict, game_number: int) -> str:
         self.data_dir.mkdir(parents=True, exist_ok=True)

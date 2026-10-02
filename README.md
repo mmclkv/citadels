@@ -2,12 +2,12 @@
 
 基于 [冒險安迪 · 榮耀之城规则](https://andyventure.com/boardgame-citadels/) 与
 [27 种角色能力介绍](https://andyventure.com/boardgame-citadels-characters/) 实现的完整桌游客户端。
-支持 **单人模式** 与 **联机模式**。两种模式的对局规则与电脑决策均由 Python 后端执行；浏览器端 JavaScript 负责界面、动画与输入。训练控制台和独立训练命令均使用 Python 后端。
+支持 **单人模式** 与 **联机模式**。浏览器端 JavaScript 负责界面、动画与输入；Python 后端承载 HTTP/WebSocket 与训练编排，实时游戏规则、合法动作和状态转移统一由 C++ worker 执行。训练控制台和独立训练命令均使用 Python 启动器。
 
 ## 快速开始
 
 ```bash
-python python_backend/run.py 8787 --host 0.0.0.0  # Python HTTP + WebSocket + 游戏引擎
+python python_backend/run.py 8787 --host 0.0.0.0  # Python HTTP + WebSocket + C++ 游戏 worker
 python python_backend/run.py 9000 --host 0.0.0.0  # 指定端口
 ```
 
@@ -27,14 +27,14 @@ Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\pyth
 ## 本地策略神经网络训练
 
 启动服务器后访问 `http://localhost:8787/training.html`，也可以从主菜单进入“神经网络训练”。
-训练器直接复用 Python 游戏引擎，在服务器进程内执行共享策略网络自对弈，并由 PyTorch 执行策略/价值更新。当前电脑已配置项目私有 Python 3.12、PyTorch CUDA 12.6 和 GTX 1660 SUPER 加速环境。
+训练由 Python 调度，C++/LibTorch worker 负责游戏状态机、自对弈搜索、状态/动作编码与网络前向；PyTorch 在训练进程中负责梯度更新。当前电脑已配置项目私有 Python 3.12、PyTorch CUDA 12.6 和 GTX 1660 SUPER 加速环境。
 
 - 支持开始、优雅停止与从 checkpoint 继续训练；停止时会保存当前模型。
-- 所有座位使用同一个策略价值网络；Python 训练输入来自 `python_backend.views.sanitize`，不会读取对手手牌、隐藏角色或牌库顺序。
-- 开 MCTS 时的搜索同样看不到真牌：Python `determinize` 会按玩家可见信息重建对手手牌、牌库/弃牌顺序、暗置移除、未打出的角色和逮捕令，再重新枚举合法动作。训练与实战都使用配置的粒子数（默认 4），并可按公开事实给粒子加权。
+- 所有座位使用同一个策略价值网络；Python 训练输入来自 C++ worker 返回的样本，实战视图脱敏只做协议映射，不重新执行规则。
+- 开 MCTS 时的搜索由 C++ 按玩家可见信息生成确定化粒子、重建隐藏状态并枚举合法动作；训练与实战都使用配置的粒子数（默认 4），并可按公开事实给粒子加权。
 - 使用合法动作枚举与动作掩码，策略只在通过引擎校验的行动中采样。
-- Python 运行时按 `workers` 配置启动独立自对弈进程（同一批次内不超过 `batchGames`）；每批开始前把主训练模型权重同步到共享内存 CPU 模型，采样进程只读推理，PPO 更新在主进程串行进行。PyTorch 训练支持 CUDA 或 CPU。
-- 使用 PPO 裁剪目标、价值损失与探索熵；控制台把策略损失放在独立纵轴，并实时显示 KL 散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
+- Python 训练调度器按 `workers` 配置并行自对弈；各采样进程通过常驻 C++ MCTS worker 调用 LibTorch 做网络前向，主进程用 PyTorch 串行执行 MCTS 蒸馏更新。启动 Python 服务端时会检查 worker 源码/LibTorch 版本，必要时用 clang++ 自动重编译并拉起 worker，服务退出时清理。
+- 使用 MCTS 访问分布交叉熵、终局价值损失与熵正则；控制台把策略损失放在独立纵轴，并实时显示 MCTS 策略散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
 - flat 网络有 `fast`、`balanced`、`large` 三档；Entity Transformer v5 在 v4 基础上新增公开局面特征。建议先用 `fast` 做短跑验证，再按速度选择档位。
 - 训练过程的模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
 
@@ -61,7 +61,7 @@ POST /api/training/stop
 ```
 
 控制台的「从存档读取参数」按钮会调用 `GET /api/training/checkpoint`，把所选存档里保存的那份
-训练配置（目标局数、网络规模、MCTS、PPO、阵容与课程等 30 余项）一键填回面板——换电脑或隔了
+训练配置（目标局数、网络规模、MCTS、阵容与课程等 30 余项）一键填回面板——换电脑或隔了
 几天想按同一套超参数续训时，不必再凭记忆手抄。它只读配置、不改动所选存档，也不下发模型权重。
 
 建议先进行 100～500 局短跑，确认平均整局耗时和损失变化正常，再启动 10,000 局正式训练。
@@ -308,7 +308,7 @@ node test/agent-browser.js
 
 ```
 citadels/
-├── python_backend/    # Python HTTP + WebSocket 服务、规则引擎、NPC、训练与联机房间
+├── python_backend/    # Python HTTP + WebSocket 服务、训练编排与联机房间；NPC 策略在 C++ worker
 ├── src/
 │   ├── cards.js       # 浏览器牌面元数据；Python 权威数据在 python_backend/cards.py
 ├── training/          # Python 模型、编码器、MCTS 与训练器

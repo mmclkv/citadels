@@ -346,6 +346,18 @@
       botLevel: ['easy', 'normal', 'hard'].includes(fallbackLevel) ? fallbackLevel : 'normal'
     };
   }
+  function clearGameBoardView() {
+    // Restarting a local Python room briefly passes through lobby without
+    // leaving the game screen. Drop cached card DOM so the previous game can
+    // never remain visible while the fresh state is being created/rendered.
+    ['#draft-pool', '#opponents', '#my-city', '#my-hand'].forEach(sel => {
+      const node = $(sel);
+      if (node) node.innerHTML = '';
+    });
+    App._reveal = Object.create(null);
+    App.noticeSeen = 0;
+    hideEvent(true);
+  }
   async function startPythonSingle(cfg) {
     if (cfg.botType === 'agent' && !(await checkAgentServer())) return;
     if (cfg.botType === 'neural' && !(await checkNeuralServer())) return;
@@ -358,7 +370,7 @@
     App.mode = 'net'; App.leavingNetGame = false;
     App.state = null; App.myId = null; App.noticeSeen = 0;
     App.botDebugEntries = [];
-    hideEvent(true);
+    clearGameBoardView();
     Net.name = cfg.name;
     Net.connect(() => {
       Net.autoStart = true;
@@ -542,6 +554,22 @@
         return;
       }
 
+      case 'blackmailer_declare': {
+        // 勒索者的目标角色公开，但真威胁标记落在哪个目标上不公开。
+        // 发动者可从自己的操作/战报确认，不向本人重复弹；其余玩家均显示居中提示。
+        if (byMe) return;
+        const list = (Array.isArray(n.targets) && n.targets.length)
+          ? n.targets
+          : (n.nums || []).map(num => ({ num: num, name: num + ' 号角色' }));
+        const names = list.map(t => '<b>' + t.num + ' 号·' + escapeHtml(t.name) + '</b>').join('、');
+        queueEvent({
+          tone: 'warn', icon: '†', title: '勒索者已发动威胁', hold: 5600,
+          text: '【勒索者】' + escapeHtml(n.byName || '其他玩家') + ' 把威胁标记发给了 ' + names + '。<br>' +
+                '其中只有<b>一个是真威胁</b>，但目前还不知道具体是哪一个。被命中的玩家可选择支付一半金币赎回。'
+        });
+        return;
+      }
+
       case 'assassinated':
         if (isMe) {
           // 极少数情况（中途接管 / 漏掉了宣告）没提前警告过，这里补一次弹层
@@ -636,6 +664,7 @@
 
       case 'tax_paid':
         flyCoinToTaxPot(n.playerIdx, n.amount || 1);
+        if (isMe) toast('税务官收取了你 ' + (n.amount || 1) + ' 枚建筑税');
         return;
 
       case 'beautified':
@@ -855,6 +884,7 @@
           if (m.state.you) App.myId = m.state.you;
           if (m.state.phase === 'lobby' && App.localServerGame) {
             App.chatHistory = [];
+            clearGameBoardView();
             this.send({ t: 'startGame' });
           }
           else if (m.state.phase === 'lobby') { App.chatHistory = []; renderLobbyRoom(m.state); showScreen('screen-lobby'); }
@@ -1352,7 +1382,6 @@
       d.appendChild(el('div', 'c-name', c.name));
       d.appendChild(el('div', 'c-en', c.en || ''));
     }
-    if (c.museumCount) d.appendChild(el('div', 'c-badges', '博' + c.museumCount));
     syncBeautifiedDecoration(d, c);
     renderMuseumStack(d, c);
     return d;
@@ -1398,9 +1427,6 @@
     if (node.dataset) node.dataset.uid = c.uid;
     node.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
       ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
-    const oldBadge = node.querySelector('.c-badges');
-    if (oldBadge && oldBadge.parentNode) oldBadge.parentNode.removeChild(oldBadge);
-    if (c.museumCount) node.appendChild(el('div', 'c-badges', '博' + c.museumCount));
     renderMuseumStack(node, c);
   }
 
@@ -2056,14 +2082,17 @@
   function charStatusHTML(p) {
     let st = 'none';
     if (p.hasChosen && p.draftComplete !== false) {
-      st = (p.revealedCharNum != null) ? 'up' : 'down';
+      // 选角期间其他玩家的角色始终是暗牌；即便收到上一轮残留的
+      // revealedCharNum，也不能把它渲染成正面。
+      const isHiddenDraftRole = App.state && App.state.phase === 'draft' && p.id !== App.myId;
+      st = (p.revealedCharNum != null && !isHiddenDraftRole) ? 'up' : 'down';
     }
     // 检测本帧是否从「盖牌」变为「翻面」，是则播放翻牌动画
     const prev = App._reveal[p.seat];
     let flip = '';
     if (prev === 'down' && st === 'up') flip = ' flip-in';
     App._reveal[p.seat] = st;
-    let front = '', nameSpan = '';
+    let front = '';
     if (st === 'up') {
       const ch = charMeta(p.revealedCharId, p.revealedCharNum) ||
         { id: p.revealedCharId, num: p.revealedCharNum, name: String(p.revealedCharNum || '') };
@@ -2072,8 +2101,6 @@
       front = img
         ? '<img src="' + img + '" alt="' + escapeHtml(ch.name) + '" decoding="async">'
         : '<div class="cs-emoji">' + escapeHtml(String(p.revealedCharNum || '?')) + '</div>';
-      const nm = ch.name || ROLE_IMG[p.revealedCharNum] || ('' + p.revealedCharNum);
-      nameSpan = '<span class="cs-name">' + escapeHtml(nm) + '</span>';
       var zoomAttr = img ? ' data-zoom-src="' + escapeHtml(full || img) + '" data-zoom-title="' + escapeHtml(ch.name) + '"' : ' data-zoom-back="1"';
     } else if (st === 'down') {
       var zoomAttr = ' data-zoom-back="1"';
@@ -2085,7 +2112,7 @@
         '<div class="cs-face cs-back">▧</div>' +
         '<div class="cs-face cs-front">' + front + '</div>' +
       '</div>';
-    return '<div class="cs-card ' + st + flip + '"' + zoomAttr + '>' + cardBody + '</div>' + nameSpan;
+    return '<div class="cs-card ' + st + flip + '"' + zoomAttr + '>' + cardBody + '</div>';
   }
 
   /* 角色牌右侧只显示手牌数量：牌背 × 数字，牌背会复用当前主题的牌背样式。 */
@@ -2761,6 +2788,10 @@
     const s = App.state;
     if (!s) return;
     if (s.phase === 'lobby') return;
+    // The per-view state is authoritative for identity. Refresh this before
+    // rendering the draft pool and player panels so a reconnect/state update
+    // cannot leave every opponent filtered or the local panel unresolved.
+    if (s.you) App.myId = s.you;
     // 记录滚动位置，渲染完恢复（避免每次行动后画面跳动）
     const _scrollSnap = snapshotScroll();
 
@@ -2812,6 +2843,7 @@
       renderTableGuide(s);
       renderOpponents(s);
       renderMe(s);
+      scheduleDraftBoardLayout(s);
       scheduleMobilePanelInnerCollisionPass();
       renderLog(s);
       requestAnimationFrame(positionPlayerChatBubbles);
@@ -2975,6 +3007,7 @@
     hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
     const wrap = $('#opponents');
     const totalPlayers = s.players.length || 1;
+    const viewerId = s.you || App.myId;
     const mobileRingLayout = isMobileOpponentLayout() && totalPlayers >= 5;
     const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
     const viewportH = (typeof window !== 'undefined' && window.innerHeight) || 720;
@@ -2998,7 +3031,7 @@
       arena.dataset.layout = wrap.dataset.layout;
     }
     // 多人时顶部玩家卡片更容易向下延伸，圆桌下移到环形座位的空白中心，避免相互覆盖。
-    const me = s.players.find(p => p.id === App.myId);
+    const me = s.players.find(p => p.id === viewerId);
     const meSeat = me ? me.seat : 0;
     const picking = districtSelectMode();
     // 按 seat 复用对手区块，避免整盘重建导致城区卡图在移动端闪烁
@@ -3007,7 +3040,7 @@
     const keep = {};
     const frag = document.createDocumentFragment();
     s.players.forEach((p, i) => {
-      if (p.id === App.myId) return;
+      if (p.id === viewerId) return;
       let d = existing[p.seat];
       if (!d) {
         d = el('div', 'opp');
@@ -3113,6 +3146,19 @@
     const touch = (typeof navigator !== 'undefined' &&
       (navigator.maxTouchPoints > 0 || 'ontouchstart' in window));
     return window.innerWidth <= 1000 || (touch && window.innerWidth <= 1400);
+  }
+
+  // 首次进入对局时，选角状态可能在棋盘从 display:none 切为可见前抵达。
+  // 等浏览器完成一次布局后重新测量座位，并同步手牌/城市，避免首屏留白。
+  function scheduleDraftBoardLayout(s) {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
+    window.requestAnimationFrame(() => {
+      const screen = $('#screen-game');
+      if (App.state !== s || s.phase !== 'draft' || !screen || !screen.classList.contains('active')) return;
+      renderOpponents(s);
+      renderMe(s);
+      scheduleMobilePanelInnerCollisionPass();
+    });
   }
 
   // Mobile card/text rules can force adjacent items to overlap even when the
@@ -3726,9 +3772,10 @@
 
   function renderMe(s) {
     hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
-    const me = s.players.find(p => p.id === App.myId);
+    const viewerId = s.you || App.myId;
+    const me = s.players.find(p => p.id === viewerId);
     if (!me) return;
-    App.myIdx = s.players.findIndex(p => p.id === App.myId);
+    App.myIdx = s.players.findIndex(p => p.id === viewerId);
     const meArea = $('#me-area');
     if (meArea) {
       meArea.dataset.seat = App.myIdx;
@@ -4088,10 +4135,12 @@
     if (App.buildingAnimPaused) return;
     switch (a.type) {
       case 'lab':
+        if (a.discardUid) { send(a); return; }
         App.sel = { kind: 'handpick', items: [], label: '【实验室】点击一张手牌弃掉，换取 1 金',
           commit(uids) { App.sel = null; send({ type: 'lab', uid: a.uid, discardUid: uids[0] }); } };
         render(); return;
       case 'museum':
+        if (a.cardUid) { send(a); return; }
         App.sel = { kind: 'handpick', items: [], label: '【博物馆】点击一张手牌放入，计分 +1',
           commit(uids) { App.sel = null; send({ type: 'museum', uid: a.uid, cardUid: uids[0] }); } };
         render(); return;

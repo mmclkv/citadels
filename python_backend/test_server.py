@@ -20,9 +20,64 @@ sys.path.insert(0, str(ROOT))
 
 from python_backend.server import Client, PythonServer, _static_path, parse_server_args  # noqa: E402
 from python_backend.rooms import RoomRegistry  # noqa: E402
-from python_backend.game import apply_action, get_available_actions  # noqa: E402
+from test.python_game_reference import (apply_action, create_game, get_available_actions,
+                                        start_game)  # noqa: E402
+from python_backend.training_runtime import TrainingManager  # noqa: E402
 from python_backend.voice import VoiceService  # noqa: E402
 from python_backend.codex_gateway import CodexGateway  # noqa: E402
+
+
+class _ReferenceRulesWorker:
+    """Test double for the C++ worker API, backed by the test reference rules."""
+
+    def __init__(self):
+        self.npc_decisions = 0
+
+    def create_game(self, new_game: dict) -> dict:
+        state = create_game({key: new_game[key] for key in
+                             ("seed", "endDistricts", "charSetMode", "seats")})
+        result = start_game(state)
+        if not result.get("ok"):
+            raise ValueError(result.get("error"))
+        return state
+
+    @staticmethod
+    def legal_actions(*, state: dict, player_id: str) -> dict:
+        result = get_available_actions(state, player_id)
+        return {"phase": state["phase"], **result}
+
+    def decide_npc(self, *, state: dict, player_id: str, seed: int = 1) -> dict | None:
+        del seed
+        if self.npc_decisions >= 2:
+            return None
+        self.npc_decisions += 1
+        actions = get_available_actions(state, player_id).get("actions") or []
+        return actions[0] if actions else None
+
+    @staticmethod
+    def apply(*, state: dict, player_id: str, action: dict) -> dict:
+        result = apply_action(state, player_id, action)
+        if not result.get("ok"):
+            raise ValueError(result.get("error"))
+        return state
+
+
+class _ReferenceWorkerManager:
+    running = True
+
+    def __init__(self):
+        self.worker = _ReferenceRulesWorker()
+
+
+def _start_reference_room(rooms: RoomRegistry, room_id: str) -> dict:
+    room, seats = rooms.prepare_start_room(room_id)
+    state = _ReferenceRulesWorker().create_game({
+        "seed": room["config"].get("seed", 71),
+        "endDistricts": room["config"]["endDistricts"],
+        "charSetMode": room["config"]["charSetMode"], "seats": seats})
+    state.update({"roomId": room_id, "config": room["config"], "createdAt": 0,
+                  "log": [], "notices": [], "noticeSeq": 0, "witchResume": None})
+    return rooms.finish_start_room(room_id, state)
 
 
 class ServerArgumentTests(unittest.TestCase):
@@ -103,7 +158,10 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.admin_temp = tempfile.TemporaryDirectory()
         previous_admin_file = os.environ.get("CITADELS_ADMIN_FILE")
         os.environ["CITADELS_ADMIN_FILE"] = str(Path(self.admin_temp.name) / "server-admin.json")
-        self.app = PythonServer()
+        self.app = PythonServer(_ReferenceWorkerManager())
+        # HTTP training tests exercise the real runtime independently from the
+        # reference-rule test double used for room transport coverage.
+        self.app.training = TrainingManager(native_worker=None)
         if previous_admin_file is None:
             os.environ.pop("CITADELS_ADMIN_FILE", None)
         else:
@@ -116,6 +174,14 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         await self.listener.wait_closed()
         self.admin_temp.cleanup()
 
+    async def test_live_rules_fail_closed_without_native_worker(self):
+        app = PythonServer()
+        result = await app._apply_game_action({"state": {}}, "p0", {"type": "end_turn"})
+        self.assertFalse(result["ok"])
+        self.assertIn("拒绝处理游戏行动", result["error"])
+        room = app.rooms.create_room("Host", {"playerCount": 2})
+        self.assertFalse(hasattr(app.rooms, "start_room"))
+
     async def test_http_static_and_python_api(self) -> None:
         code, body = await _request(self.port, "/api/rooms")
         self.assertEqual((code, json.loads(body)), (200, {"rooms": []}))
@@ -124,7 +190,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b"<html", body.lower())
         code, body = await _request(self.port, "/training.html")
         self.assertEqual(code, 200)
-        self.assertIn(b'class="fixed-setting">Python ISMCTS', body)
+        self.assertIn(b'class="fixed-setting">C++ ISMCTS', body)
         self.assertNotIn(b'id="mcts-engine"', body)
         self.assertNotIn(b'id="neural-network-framework"', body)
         for path, expected_type in (("/app.js", "application/javascript; charset=utf-8"),
@@ -286,7 +352,8 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                       "rulesEngine": "js", "mctsEngine": "cpp",
                       "neuralNetworkFramework": "libtorch", "backend": "native",
                       "nativeInferenceBackend": "libtorch", "mctsEvaluator": "native",
-                      "mctsSimulations": 0, "batchGames": 1, "ppoEpochs": 1,
+                      "mctsSimulations": 1, "mctsBatchSize": 16,
+                      "batchGames": 1, "trainingEpochs": 1,
                       "miniBatch": 32, "checkpointEvery": 1, "maxRounds": 1, "seed": 901}
             code, body = await _request(self.port, "/api/training/start", "POST",
                                         json.dumps(config).encode("utf-8"),
@@ -294,9 +361,10 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(code, 200, body)
             started = json.loads(body)
             self.assertTrue(started["running"])
-            self.assertEqual(started["config"]["rulesEngine"], "python")
-            self.assertEqual(started["config"]["mctsEngine"], "python")
-            self.assertEqual(started["config"]["neuralNetworkFramework"], "pytorch")
+            self.assertEqual(started["config"]["rulesEngine"], "cpp")
+            self.assertEqual(started["config"]["mctsEngine"], "cpp")
+            self.assertEqual(started["config"]["neuralNetworkFramework"], "libtorch")
+            self.assertEqual(started["config"]["mctsBatchSize"], 16)
             self.assertEqual(started["config"]["backend"], "python")
             self.assertNotIn("nativeInferenceBackend", started["config"])
             self.assertNotIn("mctsEvaluator", started["config"])
@@ -317,7 +385,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         rooms = RoomRegistry()
         room = rooms.create_room("Host", {"playerCount": 2})
         _, guest = rooms.join_room(room["id"], "Guest")
-        rooms.start_room(room["id"])
+        _start_reference_room(rooms, room["id"])
         same_room, host = rooms.join_room(room["id"], "Host")
         self.assertIs(same_room, room)
         self.assertEqual(host["id"], room["seats"][0]["id"])
@@ -351,7 +419,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
         room = self.app.rooms.create_room("Host", {"playerCount": 2})
         _, guest = self.app.rooms.join_room(room["id"], "Guest")
-        state = self.app.rooms.start_room(room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"])
         host_id = room["seats"][0]["id"]
         host_client = StubClient(host_id, room["id"])
         guest_client = StubClient(guest["id"], room["id"])
@@ -377,7 +445,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         host = StubClient(room["seats"][0]["id"], room["id"])
         await self.app._handle_message(host, {"t": "setSeat", "index": 2, "kind": "bot"})
         original_bot = room["seats"][2]["id"]
-        state = self.app.rooms.start_room(room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"])
         self.assertEqual([seat["id"] for seat in room["seats"][:2]],
                          [host.id, original_bot])
         self.assertEqual([seat["name"] for seat in room["seats"][2:]], ["电脑 1", "电脑 2"])
@@ -419,7 +487,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_python_npc_driver_takes_a_legal_draft_action(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
                                                      "botPace": 0, "seed": 91})
-        state = self.app.rooms.start_room(room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"])
         original_step = state["draft"]["stepIdx"]
         self.app._schedule_bot(room)
         for _ in range(40):
@@ -428,9 +496,9 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             actor_id = self.app._bot_actor(state)
             actor = next(player for player in state["players"] if player["id"] == actor_id)
             if not actor["isBot"]:
-                options = self.app._state_for(room, actor_id)["available"]["actions"]
+                options = (await self.app._state_for_client(room, actor_id))["available"]["actions"]
                 self.assertTrue(options)
-                from python_backend.game import apply_action
+                from test.python_game_reference import apply_action
                 self.assertTrue(apply_action(state, actor_id, options[0])["ok"])
                 self.app._schedule_bot(room)
             await asyncio.sleep(0.01)
@@ -443,7 +511,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         room = self.app.rooms.create_room("Host", {"playerCount": 3, "bots": 2,
                                                      "botType": "agent", "botPace": 0,
                                                      "seed": 92})
-        state = self.app.rooms.start_room(room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"])
         state["phase"] = "action"
         state["roundConfirm"] = {"round": state["round"],
                                   "confirmed": [False] * len(state["players"])}
@@ -474,17 +542,17 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             def status(self):
                 return {"configured": True, "model": "test-model", "message": "ready"}
 
-            def decide(self, state, player_id):
+            def decide(self, state, player_id, available):
                 if self.fail:
                     from python_backend.agent import AgentError
                     raise AgentError("http_error", "模型服务返回 HTTP 503")
-                action = get_available_actions(state, player_id)["actions"][0]
+                action = available["actions"][0]
                 return {"action": action, "model": "test-model"}
 
         self.app.agent = StubAgent(fail=True)
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
                                                      "botType": "agent", "botPace": 0})
-        state = self.app.rooms.start_room(room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"])
         self.app._schedule_bot(room)
         for _ in range(30):
             actor_id = self.app._bot_actor(state)

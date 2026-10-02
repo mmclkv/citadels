@@ -16,25 +16,25 @@
     <section class="panel controls">
       <div class="section-title"><div><h2>训练任务</h2><p>所有座位共享同一神经网络，仅使用各自可见状态进行自对弈。</p></div></div>
       <form id="train-form">
-        <label><span>目标对局数</span><input id="target-games" type="number" min="1" max="1000000" value="10000"></label>
+        <label><span>目标对局数</span><input id="target-games" type="number" min="1" max="1000000" value="200000"></label>
         <label><span>最少玩家</span><select id="min-players"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
-        <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option></select></label>
-        <label><span>角色组</span><select id="char-set"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
-        <label><span>网络规模</span><select id="profile"><option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
-        <label><span>网络架构</span><select id="network-architecture"><option value="flat">传统全连接</option><option value="entity-v5" selected>Entity Transformer v5（公开局面与建筑身份）</option></select><small>v5 增加角色牌组、明置移除、公开效果及本人第二角色；需使用 v5 权重</small></label>
-        <label><span>规则引擎</span><strong class="fixed-setting">Python</strong><small>训练与自对弈均运行于 Python 游戏引擎</small></label>
-        <label><span>MCTS 引擎</span><strong class="fixed-setting">Python ISMCTS</strong><small>用不完美信息搜索访问分布训练策略网络</small></label>
-        <label><span>神经网络框架</span><strong class="fixed-setting">PyTorch</strong><small id="neural-framework-hint">ISMCTS 使用当前 PyTorch 训练模型评估局面</small></label>
+        <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
+        <label><span>角色组</span><select id="char-set"><option value="random" selected>随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
+        <label><span>网络规模</span><select id="profile"><option value="fast" selected>快速</option><option value="balanced">均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
+        <label><span>网络架构</span><select id="network-architecture"><option value="flat">Entity Transformer v1（兼容旧权重）</option><option value="entity-v5" selected>Entity Transformer v5（公开局面与建筑身份）</option></select><small>v5 增加角色牌组、明置移除、公开效果及本人第二角色；旧 entity-v1 权重与当前编码不兼容，不能直接续训</small></label>
+        <label><span>规则引擎</span><strong class="fixed-setting">C++</strong><small>自对弈与实时对局由原生 C++ 游戏引擎推进</small></label>
+        <label><span>MCTS 引擎</span><strong class="fixed-setting">C++ ISMCTS</strong><small>原生搜索 worker 生成访问分布作为策略训练目标</small></label>
+        <label><span>神经网络框架</span><strong class="fixed-setting">LibTorch</strong><small id="neural-framework-hint">C++ worker 在所选设备上批量执行网络前向</small></label>
         <label><span>计算设备</span><select id="device"><option value="cuda" selected>GPU</option><option value="cpu">CPU</option></select></label>
         <label><span>结束建筑数</span><select id="end-districts"><option value="7">7 栋</option><option value="8" selected>8 栋</option></select></label>
         <label><span>单局最大步数</span><input id="max-steps" type="number" min="1000" max="100000" step="1000" value="60000"></label>
         <label><span>起始温度</span><input id="temperature-start" type="number" min="0.2" max="2" step="0.05" value="1.1"></label>
         <label><span>结束温度</span><input id="temperature-end" type="number" min="0.15" max="1.5" step="0.05" value="0.65"></label>
         <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" max="0.01" step="0.00001" value="0.0003"></label>
-        <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="256" value="4" title="攒够多少局做一次策略更新。上限 256：越大单次更新的样本越多、训练进程内存峰值越高（256 局约合 12 万条样本）。"></label>
-        <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="4"></label>
-        <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" max="2048" step="32" value="256"></label>
-        <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="100"></label>
+        <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="256" value="64" title="攒够多少局做一次策略更新。上限 256：越大单次更新的样本越多、训练进程内存峰值越高（256 局约合 12 万条样本）。"></label>
+        <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="1"><small>每个采样进程会启动独立 C++ worker；GPU 推理建议先从 1 开始</small></label>
+        <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" max="2048" step="32" value="64"></label>
+        <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="2000"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"></select><small id="resume-checkpoint-file-name">未选择权重文件</small></label>
         <!-- 选「加载权重继续训练」时用它弹出系统文件管理器；选完立刻上传，
@@ -50,31 +50,31 @@
         <h2>自对弈阵容与课程训练</h2>
         <form id="composition-form" class="mcts-form">
           <label><span>自对弈阵容</span><select id="self-play-mode">
-            <option value="all-network" selected>全策略网络</option>
+            <option value="all-network">全策略网络</option>
             <option value="network-vs-heuristic">策略网络 + 启发式</option>
-            <option value="curriculum">课程式递增</option>
+            <option value="curriculum" selected>课程式递增</option>
           </select><small>决定每局由策略网络和启发式玩家组成的比例</small></label>
           <label><span>策略网络玩家数</span><input id="network-player-count" type="number" min="1" max="8" value="1"><small>混合模式生效；全策略网络模式自动使用全部玩家</small></label>
           <label><span>启发式难度</span><select id="heuristic-difficulty">
-            <option value="normal" selected>标准</option><option value="easy">简单</option>
-            <option value="hard">困难</option><option value="random">每局随机</option>
+            <option value="normal">标准</option><option value="easy">简单</option>
+            <option value="hard">困难</option><option value="random" selected>每局随机</option>
           </select></label>
           <label><span>课程起始网络玩家数</span><input id="curriculum-start-players" type="number" min="1" max="8" value="1"></label>
           <label><span>课程目标网络玩家数</span><input id="curriculum-end-players" type="number" min="0" max="8" value="0"><small>0 = 随当前局人数达到全员</small></label>
-          <label><span>课程每阶段局数</span><input id="curriculum-step-games" type="number" min="1" max="1000000" value="1000"><small>每经过此数量的对局增加 1 名策略网络玩家</small></label>
-          <label><span>训练样本来源</span><select id="train-network-only"><option value="true" selected>仅策略网络玩家</option><option value="false">全部玩家</option></select><small>推荐仅使用策略网络玩家，避免把启发式策略直接当作网络目标</small></label>
+          <label><span>课程每阶段局数</span><input id="curriculum-step-games" type="number" min="1" max="1000000" value="20000"><small>每经过此数量的对局增加 1 名策略网络玩家</small></label>
         </form>
       </section>
       <section class="mcts-section">
         <h2>MCTS 配置（必选）</h2>
         <form id="mcts-form" class="mcts-form">
           <p class="mcts-hint">每步走子前展开若干模拟，使用访问分布 π 作为策略训练目标。MCTS 已强制启用。</p>
-          <label><span>MCTS 模拟次数 / 步</span><input id="mcts-simulations" type="number" min="1" max="2000" step="10" value="50"><small id="mcts-time-estimate"></small></label>
+          <label><span>MCTS 模拟次数 / 步</span><input id="mcts-simulations" type="number" min="1" max="10000" step="50" value="500"><small id="mcts-time-estimate"></small></label>
           <label><span>探索常数 c_puct</span><input id="mcts-cpuct" type="number" min="0" max="10" step="0.1" value="1.0"></label>
           <label><span>根节点 Dirichlet 混合 α</span><input id="mcts-dirichlet" type="number" min="0" max="1" step="0.05" value="0.3"><small id="mcts-dirichlet-hint">0 = 关闭噪声</small></label>
-          <label><span>Dirichlet 浓度 ε</span><input id="mcts-diri-eps" type="number" min="0.001" max="1" step="0.01" value="0.03"></label>
-          <label><span>MCTS 最大搜索深度</span><input id="mcts-max-depth" type="number" min="20" max="1000" step="20" value="200"></label>
-          <p class="mcts-hint">Python ISMCTS 当前逐节点调用 PyTorch；批量推理、等待队列和搜索缓存尚未迁移，因此不显示旧 C++ worker 参数。</p>
+          <label><span>Dirichlet 浓度 ε</span><input id="mcts-diri-eps" type="number" min="0" max="1" step="0.01" value="0.03"><small>0 = 关闭根节点噪声</small></label>
+          <label><span>MCTS 最大搜索深度</span><input id="mcts-max-depth" type="number" min="10" max="2000" step="10" value="700"></label>
+          <label><span>叶节点评估批量</span><input id="mcts-batch-size" type="number" min="1" max="256" step="8" value="32"><small>每批送入 LibTorch 的候选局面数；增大可能提高 GPU 利用率，也会增加显存占用</small></label>
+          <p class="mcts-hint">C++ worker 执行 ISMCTS，并在 LibTorch 中批量评估叶节点。显存不足时 worker 会将评估批量临时缩小后重试。</p>
           <label><span>隐藏信息粒子数</span><input id="mcts-particles" type="number" min="1" max="16" step="1" value="4"><small>对未知手牌的猜测份数。整池共用一棵搜索树、每条模拟抽一份（1 = 猜一次钉死整棵树）</small></label>
           <label class="checkbox"><span>按公开事实加权粒子</span><input id="mcts-belief" type="checkbox" checked><small>「他有钱、还能建，却没建」⇒ 他手里没有买得起的牌。与这事实矛盾的世界少抽到。关掉 = 均匀瞎猜</small></label>
         </form>

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from .cards import CHAR_MAP
-from .game import _build_limit, _can_build
-from .scoring import compute_scores, district_score
 
 
 def _role(character_id: str, include_english: bool = False) -> dict:
@@ -23,7 +21,7 @@ def _public_character_numbers(state: dict, player_index: int, viewer_index: int)
         return [CHAR_MAP[character_id]["num"] for character_id in player["chars"]]
     result = []
     turn = state.get("turn")
-    if turn and turn["playerIdx"] == player_index:
+    if state["phase"] == "action" and turn and turn["playerIdx"] == player_index:
         result.append(CHAR_MAP[turn["charId"]]["num"])
     result.extend(CHAR_MAP[character_id]["num"] for character_id in player["played"])
     return result
@@ -58,20 +56,20 @@ def _warrant_mark(state: dict, player_index: int, viewer_index: int) -> dict | N
 def _card_public(card: dict) -> dict:
     return {"uid": card["uid"], "name": card["name"], "en": card["en"],
             "color": card["color"], "cost": card["cost"],
-            "scoreValue": district_score(card), "beautified": card.get("beautified") or 0,
+            "scoreValue": card.get("scoreValue") or card.get("cost", 0),
+            "beautified": card.get("beautified") or 0,
             "museumCount": len(card.get("museum") or []), "builtRound": card.get("builtRound") or 0,
             "purpleEffect": (card.get("purple") or {}).get("effect") or "",
             "desc": card.get("desc") or ""}
 
 
-def _hand_card_public(state: dict, player: dict, card: dict) -> dict:
-    turn = state.get("turn")
+def _hand_card_public(card: dict, buildable_uids: set[str]) -> dict:
     return {"uid": card["uid"], "name": card["name"], "en": card["en"],
             "color": card["color"], "cost": card["cost"],
-            "scoreValue": district_score(card),
+            "scoreValue": card.get("scoreValue") or card.get("cost", 0),
             "purpleEffect": (card.get("purple") or {}).get("effect") or "",
             "desc": card.get("desc") or "",
-            "canBuild": _can_build(state, player, card, turn) if turn else False}
+            "canBuild": card.get("uid") in buildable_uids}
 
 
 PENDING_PROMPTS = {
@@ -146,14 +144,18 @@ def _notice_for_viewer(notice: dict, viewer_index: int) -> dict:
             if key not in ("cardNames", "matching", "cards")}
 
 
-def sanitize(state: dict, player_id: str | None) -> dict:
+def sanitize(state: dict, player_id: str | None,
+             legal_actions: list[dict] | None = None) -> dict:
     viewer_index = next((index for index, player in enumerate(state["players"])
                          if player["id"] == player_id), -1)
     players = []
     turn = state.get("turn")
+    buildable_uids = {action.get("uid") for action in (legal_actions or [])
+                      if action.get("type") == "build" and action.get("uid")}
     for index, player in enumerate(state["players"]):
         revealed_id = (player["chars"][0] if index == viewer_index and player["chars"] else
-                       turn["charId"] if turn and turn["playerIdx"] == index else
+                       turn["charId"] if state["phase"] == "action" and turn and
+                       turn["playerIdx"] == index else
                        player["played"][0] if player["played"] else None)
         row = {"id": player["id"], "name": player["name"], "seat": player["seat"],
                "isBot": player["isBot"], "botType": player["botType"], "gold": player["gold"],
@@ -169,7 +171,7 @@ def sanitize(state: dict, player_id: str | None) -> dict:
                "revealedCharId": revealed_id,
                "revealedCharNum": CHAR_MAP[revealed_id]["num"] if revealed_id else None}
         if index == viewer_index:
-            row["hand"] = [_hand_card_public(state, player, card) for card in player["hand"]]
+            row["hand"] = [_hand_card_public(card, buildable_uids) for card in player["hand"]]
             row["chars"] = [{**_role(character_id),
                              "played": character_id in player["played"]}
                             for character_id in player["chars"]]
@@ -181,6 +183,7 @@ def sanitize(state: dict, player_id: str | None) -> dict:
     threat = effects.get("blackmailer")
     warrant = effects.get("magistrate")
     draft = state.get("draft")
+    scores = state.get("scores") or []
     result = {
         "roomId": state["roomId"], "phase": state["phase"], "round": state["round"],
         "config": state["config"], "you": player_id if viewer_index >= 0 else None,
@@ -200,7 +203,7 @@ def sanitize(state: dict, player_id: str | None) -> dict:
                                    "playerIdx": warrant["playerIdx"]} if warrant else None},
         "firstToFinish": state["firstToFinish"], "log": state["log"][-120:],
         "notices": [_notice_for_viewer(notice, viewer_index) for notice in state["notices"][-12:]],
-        "scores": compute_scores(state), "winner": state["winner"],
+        "scores": scores, "winner": state["winner"],
         "removed": {"faceUp": [{key: _role(character_id)[key] for key in ("id", "num", "name")}
                                for character_id in draft["faceUp"]] if draft else [],
                     "faceDownCount": len(draft["faceDown"]) if draft else 0},
@@ -227,7 +230,7 @@ def sanitize(state: dict, player_id: str | None) -> dict:
                      "abilityUsed": turn["abilityUsed"], "spentOnBuild": turn["spentOnBuild"],
                      "usedLab": turn["usedLab"], "usedSmithy": turn["usedSmithy"],
                      "usedMuseum": turn["usedMuseum"], "bonusDone": turn["bonusDone"],
-                     "buildLimit": _build_limit(turn), "builds": turn["builds"],
+                     "buildLimit": turn.get("buildLimit", 0), "builds": turn["builds"],
                      "pending": _pending_public(turn["pending"], turn["playerIdx"] == viewer_index)
                      if turn.get("pending") else None}
         if "monkExtraTaken" in turn:

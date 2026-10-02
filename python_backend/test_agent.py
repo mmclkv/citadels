@@ -10,8 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from python_backend.agent import AgentClient, AgentError, config_from_env, prepare_decision  # noqa: E402
-from python_backend.game import create_game, start_game  # noqa: E402
+from python_backend.agent import (AgentClient, AgentError, config_from_env,
+                                  prepare_decision, resolve_decision)  # noqa: E402
+from test.python_game_reference import create_game, get_available_actions, start_game  # noqa: E402
 
 
 class _Response:
@@ -35,6 +36,7 @@ class AgentTests(unittest.TestCase):
         self.state = create_game({"seats": [{"id": "p0", "name": "A"},
                                              {"id": "p1", "name": "B"}], "seed": 71})
         start_game(self.state)
+        self.available = get_available_actions(self.state, "p0")
 
     def test_config_validation_and_local_keyless_mode(self) -> None:
         env = {"CITADELS_AGENT_BASE_URL": "http://localhost:1234/v1/",
@@ -47,26 +49,39 @@ class AgentTests(unittest.TestCase):
         self.assertFalse(config_from_env(env)["configured"])
 
     def test_observation_is_player_scoped_and_decision_is_validated(self) -> None:
-        prepared = prepare_decision(self.state, "p0")
+        prepared = prepare_decision(self.state, "p0", self.available)
         encoded = json.dumps(prepared)
         self.assertNotIn('"deck"', encoded)
         self.assertNotIn("resumeToken", encoded)
         self.assertNotIn("opponent-secret", encoded)
         self.state["players"][1]["hand"][0]["name"] = "opponent-secret"
-        prepared = prepare_decision(self.state, "p0")
+        prepared = prepare_decision(self.state, "p0", self.available)
         self.assertNotIn("opponent-secret", json.dumps(prepared))
 
         client = AgentClient({"endpoint": "http://localhost/v1/chat/completions",
                               "model": "test-model", "apiKey": "secret-key",
                               "timeoutMs": 1000, "configured": True},
                              opener=_FakeOpener())
-        result = client.decide(self.state, "p0")
+        result = client.decide(self.state, "p0", self.available)
         self.assertEqual(result["model"], "test-model")
         self.assertEqual(result["action"]["type"], "draft_pick")
         request = client.opener.request
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
         body = json.loads(request.data)
         self.assertNotIn("secret-key", json.dumps(body["messages"][1]["content"]))
+
+    def test_native_candidates_bypass_python_rule_generation_and_validation(self) -> None:
+        action = {"type": "draft_pick", "charId": self.state["draft"]["pool"][0]}
+        available = {"phase": "draft", "prompt": "选择角色", "actions": [action]}
+        self.state["scores"] = []
+        prepared = prepare_decision(self.state, "p0", available)
+        selected = resolve_decision(prepared, {"actionIndex": 0}, self.state, "p0")
+        self.assertTrue(prepared["nativeAuthoritative"])
+        self.assertEqual(selected, action)
+
+    def test_agent_requires_engine_supplied_legal_actions(self) -> None:
+        with self.assertRaises(TypeError):
+            prepare_decision(self.state, "p0")
 
     def test_agent_does_not_leak_upstream_error_body(self) -> None:
         class BrokenOpener:
@@ -77,7 +92,7 @@ class AgentTests(unittest.TestCase):
                               "model": "test-model", "apiKey": "secret-key",
                               "timeoutMs": 1000, "configured": True}, opener=BrokenOpener())
         with self.assertRaises(AgentError) as caught:
-            client.decide(self.state, "p0")
+            client.decide(self.state, "p0", self.available)
         self.assertEqual(caught.exception.code, "network_error")
         self.assertNotIn("secret", str(caught.exception))
 

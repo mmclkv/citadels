@@ -17,6 +17,8 @@ struct DistrictCard {
   int score_value = 0;
   std::string purple_effect;
   std::string en;
+  int score_as = 0;
+  std::string desc;
 };
 
 inline std::vector<DistrictCard> build_base_district_deck(uint32_t seed) {

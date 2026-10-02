@@ -11,8 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from python_backend.cards import CHAR_MAP, DISTRICTS  # noqa: E402
-from python_backend.game import apply_action, create_game, get_available_actions, start_game  # noqa: E402
+from test.python_game_reference import (apply_action, create_game, get_available_actions,
+                                        start_game, start_round)  # noqa: E402
+from test.python_scoring_reference import compute_scores  # noqa: E402
 from python_backend.views import sanitize  # noqa: E402
+
+
+def test_view(state: dict, player_id: str | None) -> dict:
+    state["scores"] = compute_scores(state)
+    actions = get_available_actions(state, player_id)["actions"] if player_id else []
+    return sanitize(state, player_id, actions)
 
 def fixture(role: str) -> dict:
     state = create_game({"seats": [{"id": f"p{i}", "name": f"Player {i}"} for i in range(4)],
@@ -49,6 +57,63 @@ def witch_fixture(target_role: str) -> dict:
 
 
 class RoleParityTests(unittest.TestCase):
+    def test_view_uses_supplied_engine_build_actions_for_hand_affordance(self) -> None:
+        state = fixture("assassin")
+        hand = state["players"][0]["hand"]
+        selected_uid = hand[-1]["uid"]
+        view = sanitize(state, "p0", [{"type": "build", "uid": selected_uid}])
+        buildable = {card["uid"] for card in view["players"][0]["hand"] if card["canBuild"]}
+        self.assertEqual(buildable, {selected_uid})
+
+    def test_view_does_not_fall_back_to_python_rules_implicitly(self) -> None:
+        state = fixture("assassin")
+        view = sanitize(state, "p0")
+        self.assertEqual(view["scores"], [])
+        self.assertFalse(any(card["canBuild"] for card in view["players"][0]["hand"]))
+
+    def test_next_round_clears_previous_roles_before_draft(self) -> None:
+        state = fixture("assassin")
+        state["phase"] = "roundConfirm"
+        state["players"][0]["played"] = ["assassin"]
+        state["players"][0]["chars"] = ["assassin"]
+        state["players"][1]["played"] = ["thief"]
+        state["players"][1]["chars"] = ["thief"]
+
+        start_round(state)
+
+        self.assertEqual(state["phase"], "draft")
+        for player in state["players"]:
+            self.assertEqual(player["chars"], [])
+            self.assertEqual(player["played"], [])
+        view = test_view(state, "p0")
+        for opponent in view["players"]:
+            if opponent["id"] != "p0":
+                self.assertFalse(opponent["hasChosen"])
+                self.assertIsNone(opponent["revealedCharId"])
+                self.assertIsNone(opponent["revealedCharNum"])
+
+    def test_draft_hides_unplayed_roles_despite_stale_turn(self) -> None:
+        state = fixture("assassin")
+        state["phase"] = "draft"
+        state["players"][1]["chars"] = ["thief"]
+        state["turn"] = {**state["turn"], "charId": "thief", "num": CHAR_MAP["thief"]["num"],
+                          "playerIdx": 1}
+        state["effects"]["blackmailer"] = {
+            "nums": [CHAR_MAP["thief"]["num"]], "signed": CHAR_MAP["thief"]["num"],
+            "playerIdx": 0, "done": [], "revealed": []}
+
+        view = test_view(state, "p2")
+        opponent = view["players"][1]
+        self.assertIsNone(opponent["revealedCharId"])
+        self.assertIsNone(opponent["revealedCharNum"])
+        self.assertIsNone(opponent["threat"])
+
+    def test_action_phase_still_reveals_active_role(self) -> None:
+        state = fixture("assassin")
+        opponent = test_view(state, "p1")["players"][0]
+        self.assertEqual(opponent["revealedCharId"], "assassin")
+        self.assertEqual(opponent["revealedCharNum"], CHAR_MAP["assassin"]["num"])
+
     def compare_steps(self, state: dict, actions: list[dict]) -> None:
         for index, step in enumerate(actions):
             player_id = step.get("playerId", "p0")
@@ -58,9 +123,9 @@ class RoleParityTests(unittest.TestCase):
                 if not result["ok"]:
                     # Skip actions that are not legal in the current Python fixture.
                     continue
-                self.assertIsInstance(sanitize(state, player_id), dict)
-                self.assertIsInstance(sanitize(state, None), dict)
-                views = [sanitize(state, player["id"]) for player in state["players"]]
+                self.assertIsInstance(test_view(state, player_id), dict)
+                self.assertIsInstance(test_view(state, None), dict)
+                views = [test_view(state, player["id"]) for player in state["players"]]
                 self.assertEqual(len(views), len(state["players"]))
 
     def test_magician_swap(self) -> None:
@@ -116,6 +181,22 @@ class RoleParityTests(unittest.TestCase):
         state["effects"]["taxCollectorGold"] = 3
         self.compare_steps(state, [{"type": "take_gold"}, {"type": "ability"},
                                    {"type": "tax_collect"}])
+
+    def test_other_player_build_pays_and_notifies_building_tax(self) -> None:
+        state = fixture("merchant")
+        state["charDeck"].append("tax_collector")
+        state["players"][2]["chars"] = ["tax_collector"]
+        card = state["players"][0]["hand"][0]
+        state["players"][0]["gold"] = card["cost"] + 2
+
+        result = apply_action(state, "p0", {"type": "build", "uid": card["uid"]})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(state["players"][0]["gold"], 1)
+        self.assertEqual(state["effects"]["taxCollectorGold"], 1)
+        tax_notice = next(notice for notice in state["notices"] if notice["kind"] == "tax_paid")
+        self.assertEqual(tax_notice["playerId"], "p0")
+        self.assertEqual(tax_notice["amount"], 1)
 
     def test_emperor_crown_take_and_back(self) -> None:
         for mode in ("gold", "card"):
@@ -262,6 +343,12 @@ class RoleParityTests(unittest.TestCase):
         self.compare_steps(state, [{"type": "take_gold"}, {"type": "ability"},
                                    {"type": "ability_skip"}])
 
+    def test_noble_has_no_income_action_when_catalog_income_is_null(self) -> None:
+        state = fixture("noble")
+        state["turn"]["takenResources"] = True
+        actions = get_available_actions(state, "p0")["actions"]
+        self.assertNotIn("income", [action["type"] for action in actions])
+
     def test_wizard_take_or_immediate_build(self) -> None:
         for mode in ("wizard_take", "wizard_build"):
             with self.subTest(mode=mode):
@@ -287,6 +374,14 @@ class RoleParityTests(unittest.TestCase):
             other["hand"] = []
         self.compare_steps(state, [{"type": "take_gold"}, {"type": "ability"},
                                    {"type": "ability_skip"}])
+
+    def test_wizard_choice_hides_immediate_build_when_unaffordable(self) -> None:
+        state = fixture("wizard")
+        card = next(item for item in state["players"][1]["hand"] if item["cost"] > 0)
+        state["players"][0]["gold"] = card["cost"] - 1
+        state["turn"]["pending"] = {"kind": "wizard_choice", "targetIdx": 1, "card": card}
+        actions = get_available_actions(state, "p0")["actions"]
+        self.assertEqual([action["type"] for action in actions], ["wizard_take", "pending_back"])
 
     def test_magistrate_warrant_build_response(self) -> None:
         for use, tax in ((False, False), (True, False), (True, True)):

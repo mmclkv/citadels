@@ -24,8 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .game import apply_action, get_available_actions
-from .bot import decide as decide_npc
+from . import cards
 from .rooms import RoomRegistry, _bot_seat, _empty_seat, _seat_mcts, lobby_view, public_room
 from .views import sanitize
 from .agent import AgentClient, AgentError, config_from_env
@@ -34,6 +33,7 @@ from .neural import NeuralPolicy
 from .training_runtime import TrainingManager
 from .frp import FrpManager
 from .codex_gateway import CodexGateway, detect_codex
+from .native_worker_manager import NativeWorkerManager
 
 ROOT = Path(__file__).resolve().parents[1]
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -43,6 +43,13 @@ MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
 STATE_ENCODING_VERSION = 11
 LEGACY_STATE_ENCODING_VERSION = 8
 ACTION_ENCODING_VERSION = 8
+
+
+def _append_game_log(state: dict, message: str, kind: str = "info") -> None:
+    log = state.setdefault("log", [])
+    log.append({"i": len(log), "text": message, "type": kind, "round": state.get("round", 0)})
+    if len(log) > 400:
+        del log[:-400]
 
 
 def _json_bytes(value: object) -> bytes:
@@ -177,7 +184,7 @@ class Client:
 
 
 class PythonServer:
-    def __init__(self) -> None:
+    def __init__(self, native_worker_manager: NativeWorkerManager | None = None) -> None:
         self.rooms = RoomRegistry()
         self.clients: set[Client] = set()
         external_agent_requested = any(os.environ.get(key) for key in
@@ -195,8 +202,11 @@ class PythonServer:
         self.agent = AgentClient(config_from_env(agent_env))
         self.codex_gateway = CodexGateway()
         self.training_data_dir = ROOT / "training-data"
-        self.neural = NeuralPolicy()
-        self.training = TrainingManager(self.training_data_dir)
+        self.neural = NeuralPolicy(worker=native_worker_manager.worker if native_worker_manager else None)
+        self.native_worker_manager = native_worker_manager
+        self._native_action_lock = asyncio.Lock()
+        self.training = TrainingManager(self.training_data_dir,
+            native_worker=native_worker_manager.worker if native_worker_manager else None)
         self.frp = FrpManager(int(os.environ.get("PORT") or 8787), ROOT, self._log_startup)
         self.voice = VoiceService()
         self.voice_token_hits: dict[str, tuple[int, float]] = {}
@@ -402,13 +412,20 @@ class PythonServer:
             view = lobby_view(room)
             view["voiceReady"] = self.voice.configured
             return view
-        view = sanitize(room["state"], player_id)
+        manager = self.native_worker_manager
+        native_live = bool(manager and manager.running)
+        if not native_live:
+            raise RuntimeError("C++ 游戏引擎不可用，无法生成游戏视图")
+        view = sanitize(room["state"], player_id,
+                        legal_actions=[])
         view.update({"roomId": room["id"], "roomName": room["name"],
                      "hostId": room["seats"][0]["id"], "agentStatus": room.get("agentStatus"),
                      "voiceReady": self.voice.configured,
                      "voiceEnabled": room["config"].get("voice") is not False})
         if player_id:
-            view["available"] = get_available_actions(room["state"], player_id)
+            # The synchronous sanitizer cannot query the worker. Its async caller
+            # fills this field from C++ before sending the view to a client.
+            view["available"] = None
         else:
             view["available"] = None
         for player in view["players"]:
@@ -422,11 +439,78 @@ class PythonServer:
                 player["isBot"] = False
         return view
 
+    async def _state_for_client(self, room: dict, player_id: str | None) -> dict:
+        """Build a client view, sourcing actionable choices from the native rules."""
+        view = self._state_for(room, player_id)
+        manager = self.native_worker_manager
+        worker = manager.worker if manager and manager.running else None
+        if not worker:
+            if room.get("state"):
+                raise RuntimeError("C++ 游戏引擎不可用，无法准备客户端游戏状态")
+            return view
+        if not player_id or not room.get("state"):
+            return view
+        # Always query native here: some action/reaction states are deliberately
+        # not implemented in the Python presentation shim anymore.
+        view["available"] = await self._bot_available_actions(room["state"], player_id)
+        build_uids = {action.get("uid") for action in view["available"].get("actions", [])
+                      if action.get("type") == "build"}
+        for player in view.get("players", []):
+            if player.get("id") == player_id:
+                for card in player.get("hand", []):
+                    card["canBuild"] = card.get("uid") in build_uids
+        return view
+
+    async def _apply_game_action(self, room: dict, player_id: str, action: dict) -> dict:
+        """Apply live rules through the authoritative C++ game engine."""
+        manager = self.native_worker_manager
+        worker = manager.worker if manager and manager.running else None
+        if worker is None:
+            return {"ok": False, "error": "C++ 游戏引擎不可用，拒绝处理游戏行动"}
+        async with self._native_action_lock:
+            current = room.get("state")
+            if not current:
+                return {"ok": False, "error": "尚未开局"}
+            try:
+                native_state = await asyncio.to_thread(
+                    worker.apply, state=copy.deepcopy(current), player_id=player_id, action=action)
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+            # A restart can replace the room state while the worker is processing.
+            if room.get("state") is not current:
+                return {"ok": False, "error": "房间状态已变化，请刷新后重试"}
+            retained = {key: current[key] for key in
+                        ("roomId", "config", "createdAt", "log", "notices", "noticeSeq", "witchResume")
+                        if key in current}
+            old_players = {player.get("id"): player for player in current.get("players", [])}
+            for player in native_state.get("players", []):
+                old = old_players.get(player.get("id"), {})
+                if "mcts" in old:
+                    player["mcts"] = old["mcts"]
+                for key in ("disconnected", "left"):
+                    if key in old:
+                        player[key] = old[key]
+            merged = {**retained, **native_state}
+            state_log = merged.setdefault("log", [])
+            actor = old_players.get(player_id, {})
+            action_names = {"take_gold": "拿取金币", "take_cards": "抽牌", "income": "领取收入",
+                            "build": "建造", "end_turn": "结束回合", "confirm_round": "确认战果"}
+            action_type = str(action.get("type") or "行动")
+            state_log.append({"i": len(state_log),
+                              "text": f"{actor.get('name') or player_id}：{action_names.get(action_type, action_type)}",
+                              "type": "info", "round": merged.get("round", 0)})
+            if len(state_log) > 400:
+                del state_log[:-400]
+            current.clear()
+            current.update(merged)
+            return {"ok": True}
+
     async def _broadcast_state(self, room: dict) -> None:
         for client in list(self.clients):
             if client.room_id == room["id"] and client.id:
                 try:
-                    await client.send({"t": "state", "state": self._state_for(room, client.id)})
+                    state = await self._state_for_client(room, client.id)
+                    await client.send({"t": "state", "state": state})
                 except (ConnectionError, OSError):
                     pass
 
@@ -459,6 +543,95 @@ class PythonServer:
             return state["players"][turn["playerIdx"]]["id"] if turn else None
         return None
 
+    async def _bot_available_actions(self, state: dict, player_id: str) -> dict:
+        manager = self.native_worker_manager
+        worker = manager.worker if manager and manager.running else None
+        if worker is None:
+            raise RuntimeError("C++ 游戏引擎不可用，无法查询合法动作")
+        native = await asyncio.to_thread(worker.legal_actions, state=copy.deepcopy(state), player_id=player_id)
+        actions = [self._native_action_view(state, action) for action in native["actions"]]
+        prompt = self._native_prompt(state, player_id, actions)
+        return {"phase": native["phase"], "actions": actions, "prompt": prompt}
+
+    @staticmethod
+    def _native_action_view(state: dict, action: dict) -> dict:
+        rendered = dict(action)
+        kind = action.get("type", "action")
+        players = state.get("players", [])
+        by_id = {player.get("id"): player for player in players}
+        cards_by_uid = {card.get("uid"): card for player in players
+                        for card in [*(player.get("hand") or []), *(player.get("city") or [])]}
+        labels = {"take_gold": "拿取金币", "take_cards": "抽取建筑牌", "income": "领取收入",
+                  "end_turn": "结束回合", "confirm_round": "确认本轮战果", "build": "建造",
+                  "ability": "发动角色能力", "choose_cards": "确认选择", "choose_player": "选择玩家",
+                  "choose_district": "选择建筑", "choose_char": "选择角色", "draft_pick": "选取角色",
+                  "draft_discard": "弃置角色", "reaction": "响应", "lab": "使用实验室",
+                  "museum": "使用博物馆", "smithy": "使用铁匠铺", "pending_back": "返回上一步",
+                  "magician_mode": "选择魔术师能力", "wizard_target": "选择查看对象",
+                  "wizard_take": "取得手牌", "wizard_build": "建造", "wizard_card": "选择卡牌",
+                  "draw_keep": "保留建筑牌", "scholar_pick": "选择建筑牌", "prophet_give": "归还手牌",
+                  "emperor_take": "选择资源", "emperor_crown": "移交皇冠", "tax_collect": "收取建筑税",
+                  "spy_target": "调查玩家", "spy_color": "选择调查类型", "navigator_bonus": "选择奖励"}
+        if kind in ("draft_pick", "draft_discard"):
+            role = cards.CHAR_MAP.get(action.get("charId") or "", {})
+            label = ("选取 " if kind == "draft_pick" else "弃置 ") + role.get("name", action.get("charId", "角色"))
+        elif kind == "reaction":
+            label = "发动" if action.get("use") else "不发动"
+        elif kind in ("build", "wizard_build"):
+            district = cards_by_uid.get(action.get("uid"), {})
+            label = f"建造『{district.get('name') or action.get('name') or '建筑'}』"
+        elif kind in ("lab", "museum"):
+            district = cards_by_uid.get(action.get("secondaryUid") or
+                                        action.get("discardUid") or action.get("cardUid"), {})
+            label = f"{labels[kind]}：{district.get('name', '选择手牌')}"
+        elif kind == "choose_player":
+            target = by_id.get(action.get("target"), {})
+            label = target.get("name", labels[kind])
+        elif kind in ("draw_keep", "scholar_pick"):
+            district = cards_by_uid.get(action.get("uid"), {})
+            label = district.get("name", labels[kind])
+        elif kind in ("emperor_take", "magician_mode"):
+            label = {"gold": "拿取金币", "card": "抽取手牌", "swap": "交换手牌", "redraw": "弃牌重抽"}.get(
+                action.get("mode") or action.get("name"), labels[kind])
+        else:
+            label = labels.get(kind, kind.replace("_", " "))
+        rendered["label"] = label
+        return rendered
+
+    @staticmethod
+    def _native_prompt(state: dict, player_id: str, actions: list[dict]) -> str:
+        if state.get("reaction"):
+            return state["reaction"].get("prompt") or "请选择是否响应"
+        if state.get("roundConfirm"):
+            confirmation = state["roundConfirm"]
+            done = sum(bool(value) for value in confirmation.get("confirmed", []))
+            return f"第 {confirmation.get('round', state.get('round', 0))} 轮结束（已确认 {done}/{len(state.get('players', []))}）"
+        if state.get("phase") == "draft":
+            current_id = (state.get("draft") or {}).get("currentPlayer")
+            if current_id and current_id != player_id:
+                current = next((item for item in state.get("players", []) if item.get("id") == current_id), {})
+                return f"等待 {current.get('name', '其他玩家')} 选择角色…"
+            return "选择角色" if actions else "等待其他玩家选择角色…"
+        turn = state.get("turn") or {}
+        active_id = turn.get("playerId")
+        if active_id is None and isinstance(turn.get("playerIdx"), int):
+            players = state.get("players", [])
+            index = turn["playerIdx"]
+            active_id = players[index].get("id") if 0 <= index < len(players) else None
+        if active_id and active_id != player_id:
+            active = next((item for item in state.get("players", []) if item.get("id") == active_id), {})
+            return f"等待 {active.get('name', '其他玩家')} 行动…"
+        pending = turn.get("pending") or {}
+        prompts = {"assassin": "选择要刺杀的角色", "thief": "选择要偷窃的角色",
+                   "wizard_target": "选择要查看的玩家", "wizard_card": "选择要取得的建筑牌",
+                   "draw_keep": "选择要保留的建筑牌", "scholar_pick": "选择一张建筑牌",
+                   "bishop_repay": "选择偿还代偿的手牌", "magician_choice": "选择魔术师能力",
+                   "magician_swap": "选择交换手牌的玩家", "magician_redraw": "选择要弃掉的手牌",
+                   "artist": "选择要美化的建筑", "warlord_destroy": "选择要摧毁的建筑",
+                   "marshal_seize": "选择要抢夺的建筑", "diplomat_mine": "选择自己的建筑",
+                   "diplomat_theirs": "选择对方的建筑"}
+        return prompts.get(pending.get("kind"), "请选择行动")
+
     def _schedule_bot(self, room: dict) -> None:
         old_task = room.get("botTask")
         if old_task and not old_task.done():
@@ -481,7 +654,7 @@ class PythonServer:
                         not state.get("roundConfirm")):
                     break
                 await asyncio.sleep(max(0, int(room["config"].get("botPace") or 0)) / 1000)
-                available = get_available_actions(state, actor_now["id"])
+                available = await self._bot_available_actions(state, actor_now["id"])
                 if state.get("roundConfirm"):
                     action = next((item for item in available.get("actions", [])
                                    if item.get("type") == "confirm_round" and
@@ -498,7 +671,8 @@ class PythonServer:
                     await self._broadcast_state(room)
                     before = copy.deepcopy(state)
                     try:
-                        decision = await asyncio.to_thread(self.agent.decide, state, actor_now["id"])
+                        decision = await asyncio.to_thread(self.agent.decide, state,
+                                                           actor_now["id"], available)
                     except AgentError as exc:
                         if room.get("state") is state and state == before:
                             room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
@@ -527,10 +701,16 @@ class PythonServer:
                         await self._broadcast_state(room)
                         break
                 else:
-                    action = decide_npc(state, actor_now["id"], available)
+                    worker = (self.native_worker_manager.worker
+                              if self.native_worker_manager and self.native_worker_manager.running else None)
+                    if worker is None:
+                        raise RuntimeError("NPC 策略需要运行中的 C++ MCTS worker")
+                    action = await asyncio.to_thread(
+                        worker.decide_npc, state=copy.deepcopy(state), player_id=actor_now["id"],
+                        seed=secrets.randbits(32))
                 if action is None:
                     break
-                result = apply_action(state, actor_now["id"], action)
+                result = await self._apply_game_action(room, actor_now["id"], action)
                 if not result.get("ok"):
                     if actor_now.get("botType") in ("agent", "neural"):
                         room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
@@ -540,7 +720,7 @@ class PythonServer:
                         break
                     fallback = next((item for item in available.get("actions", [])
                                      if not item.get("disabled")), None)
-                    if not fallback or not apply_action(state, actor_now["id"], fallback).get("ok"):
+                    if not fallback or not (await self._apply_game_action(room, actor_now["id"], fallback)).get("ok"):
                         break
                 room["agentStatus"] = None
                 await self._broadcast_state(room)
@@ -566,7 +746,7 @@ class PythonServer:
             if resumed:
                 await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
                                    "resumeToken": seat["resumeToken"],
-                                   "state": self._state_for(room, client.id)})
+                                   "state": await self._state_for_client(room, client.id)})
                 await self._broadcast_state(room)
                 self._schedule_bot(room)
             else:
@@ -594,7 +774,8 @@ class PythonServer:
             seat = room["seats"][0]
             client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
             await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
-                               "resumeToken": seat["resumeToken"], "state": self._state_for(room, client.id)})
+                               "resumeToken": seat["resumeToken"],
+                               "state": await self._state_for_client(room, client.id)})
             await self._broadcast_state(room)
             return
         if kind == "joinRoom":
@@ -602,7 +783,8 @@ class PythonServer:
                                               str(message.get("name") or client.name or "玩家"))
             client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
             await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
-                               "resumeToken": seat["resumeToken"], "state": self._state_for(room, client.id)})
+                               "resumeToken": seat["resumeToken"],
+                               "state": await self._state_for_client(room, client.id)})
             await self._broadcast_state(room)
             return
         room = self.rooms.rooms.get(client.room_id or "")
@@ -623,8 +805,7 @@ class PythonServer:
                     if player and state["phase"] != "gameover":
                         player["isBot"] = True
                     if state["phase"] != "gameover":
-                        from .game import _log
-                        _log(state, seat["name"] + " 已离开对局，由电脑托管。", "sys")
+                        _append_game_log(state, seat["name"] + " 已离开对局，由电脑托管。", "sys")
                     await self._send_room_notice(room, {"kind": "player_left", "playerId": seat["id"],
                                                         "playerName": seat["name"]}, client.id)
                 else:
@@ -736,7 +917,32 @@ class PythonServer:
                 status = self.neural.status()
                 if not status["configured"]:
                     raise ValueError(status["message"])
-            self.rooms.start_room(room["id"])
+            if self.native_worker_manager and self.native_worker_manager.running:
+                start_room, seats = self.rooms.prepare_start_room(room["id"])
+                config = start_room["config"]
+                native_state = await asyncio.to_thread(
+                    self.native_worker_manager.worker.create_game,
+                    {"seed": secrets.randbits(32), "endDistricts": config["endDistricts"],
+                     "charSetMode": config["charSetMode"], "initialCrownSeat": 0,
+                     "startingHand": 4, "startingGold": 2,
+                     "seats": [{key: seat.get(key) for key in
+                                ("id", "name", "isBot", "botType", "botLevel")} for seat in seats],
+                     "catalog": cards._catalog})
+                for player in native_state["players"]:
+                    seat = next(item for item in seats if item["id"] == player["id"])
+                    player["botLevel"] = seat.get("botLevel") or "normal"
+                    player["mcts"] = seat.get("mcts")
+                native_state.update({"roomId": room["id"],
+                                     "config": {**config, "playerCount": len(seats),
+                                                 "initialCrownSeat": 0, "startingHand": 4,
+                                                 "startingGold": 2},
+                                     "createdAt": int(time.time() * 1000),
+                                     "log": [{"i": 0, "text": "游戏开始，进入选角阶段。",
+                                              "type": "sys", "round": native_state["round"]}],
+                                     "notices": [], "noticeSeq": 0, "witchResume": None})
+                self.rooms.finish_start_room(room["id"], native_state)
+            else:
+                raise RuntimeError("C++ 游戏引擎不可用，无法开始游戏")
             await self._broadcast_state(room)
             self._schedule_bot(room)
             return
@@ -760,8 +966,7 @@ class PythonServer:
                 seat = next((s for s in room["seats"] if s["id"] == actor["id"]), None)
                 if seat:
                     seat["botType"] = "npc"
-                from .game import _log
-                _log(room["state"], actor["name"] + " 已由房主切换为普通电脑。", "sys")
+                _append_game_log(room["state"], actor["name"] + " 已由房主切换为普通电脑。", "sys")
             await self._broadcast_state(room)
             self._schedule_bot(room)
             return
@@ -771,7 +976,7 @@ class PythonServer:
             action = message.get("action") or {}
             if not isinstance(action, dict):
                 raise ValueError("行动必须是对象")
-            result = apply_action(room["state"], client.id, action)
+            result = await self._apply_game_action(room, client.id, action)
             if not result["ok"]:
                 raise ValueError(result["error"])
             await self._broadcast_state(room)
@@ -868,8 +1073,7 @@ class PythonServer:
                                        if p["id"] == seat["id"]), None)
                         if player:
                             player["isBot"] = True
-                        from .game import _log
-                        _log(room["state"], seat["name"] + " 已断连，由电脑托管。", "sys")
+                        _append_game_log(room["state"], seat["name"] + " 已断连，由电脑托管。", "sys")
                     await self._send_room_notice(room, {"kind": "player_disconnected",
                                                         "playerId": seat["id"],
                                                         "playerName": seat["name"]}, client.id)
@@ -931,7 +1135,9 @@ class PythonServer:
                            "pid": os.getpid(), "platform": platform_name(), "port": self.port,
                            "listening": self.listening, "backend": "python",
                            "rooms": len(self.rooms.rooms),
-                           "clients": len(self.clients), "nativeWorker": False,
+                           "clients": len(self.clients),
+                           "nativeWorker": bool(self.native_worker_manager and
+                                                self.native_worker_manager.running),
                            "memory": {"rss": None}, "training": training,
                            "agent": {key: self._agent_status().get(key) for key in
                                      ("configured", "provider", "message")},
@@ -1132,30 +1338,34 @@ class PythonServer:
 
 
 async def serve(host: str, port: int) -> None:
-    app = PythonServer()
-    server = await asyncio.start_server(app.handle, host, port, limit=MAX_HEADER_BYTES)
-    app.listening = True
-    app.port = server.sockets[0].getsockname()[1] if server.sockets else port
-    app.frp.port = app.port
-    if app.use_local_codex:
-        agent_env = dict(os.environ)
-        agent_env.update({"CITADELS_AGENT_BASE_URL": f"http://127.0.0.1:{app.port}/api/codex/v1",
-                          "CITADELS_AGENT_MODEL": os.environ.get("CITADELS_CODEX_MODEL") or "codex-cli",
-                          "CITADELS_AGENT_API_KEY": "",
-                          "CITADELS_AGENT_TIMEOUT_MS": os.environ.get("CITADELS_AGENT_TIMEOUT_MS", "150000")})
-        app.agent = AgentClient(config_from_env(agent_env))
+    native_worker = NativeWorkerManager(lambda message: print(message, flush=True))
+    await asyncio.to_thread(native_worker.start)
     try:
-        await app.frp.start()
-    except Exception as exc:
-        app._log_startup("[frp] 启动失败：" + str(exc), "error")
-    addresses = ", ".join(str(socket.getsockname()) for socket in server.sockets or [])
-    print("Python Citadels 服务器已启动：" + addresses)
-    async with server:
+        app = PythonServer(native_worker)
+        server = await asyncio.start_server(app.handle, host, port, limit=MAX_HEADER_BYTES)
+        app.listening = True
+        app.port = server.sockets[0].getsockname()[1] if server.sockets else port
+        app.frp.port = app.port
+        if app.use_local_codex:
+            agent_env = dict(os.environ)
+            agent_env.update({"CITADELS_AGENT_BASE_URL": f"http://127.0.0.1:{app.port}/api/codex/v1",
+                              "CITADELS_AGENT_MODEL": os.environ.get("CITADELS_CODEX_MODEL") or "codex-cli",
+                              "CITADELS_AGENT_API_KEY": "",
+                              "CITADELS_AGENT_TIMEOUT_MS": os.environ.get("CITADELS_AGENT_TIMEOUT_MS", "150000")})
+            app.agent = AgentClient(config_from_env(agent_env))
         try:
+            await app.frp.start()
+        except Exception as exc:
+            app._log_startup("[frp] 启动失败：" + str(exc), "error")
+        addresses = ", ".join(str(socket.getsockname()) for socket in server.sockets or [])
+        print("Python Citadels 服务器已启动：" + addresses)
+        async with server:
             await server.serve_forever()
-        finally:
+    finally:
+        if "app" in locals():
             app.listening = False
             await app.frp.close()
+        await asyncio.to_thread(native_worker.close)
 
 
 def parse_server_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -29,9 +29,9 @@ flowchart TB
 
     subgraph TRAINER["Python 训练主进程（training_runtime.py）"]
         GAME["批次调度<br/>课程阵容、座位公平轮换、指标聚合"]
-        MODEL["PyTorch Entity Transformer<br/>策略 / 价值推理与 PPO 更新"]
-        MCTS["Python ISMCTS<br/>确定化粒子、belief 权重、PUCT<br/>可生成 MCTS 策略蒸馏目标"]
-        OPT["optimizer + rollout 批数据<br/>主进程串行更新"]
+        MODEL["Entity Transformer<br/>LibTorch 前向推理；PyTorch 负责梯度更新"]
+        MCTS["C++ ISMCTS worker<br/>确定化粒子、belief 权重、PUCT<br/>生成 MCTS 策略蒸馏目标"]
+        OPT["MCTS 访问分布 + 终局回报<br/>主进程串行更新"]
         SAVE["压缩 checkpoint<br/>权重、配置、编码版本与训练进度"]
         GAME --> MCTS
         MCTS --> MODEL
@@ -41,8 +41,8 @@ flowchart TB
     end
 
     subgraph SAMPLERS["Python spawn 采样进程 ×N（可选）"]
-        WORKER["独立 Python 游戏引擎 / NPC / 编码<br/>采集策略样本与结果指标"]
-        SHARED[["共享内存 CPU 模型快照<br/>每批开始时从训练模型同步"]]
+        WORKER["C++ 游戏引擎 / NPC 回合编排<br/>采集对局与训练样本"]
+        SHARED[["C++ worker 常驻进程<br/>LibTorch 加载每批权重"]]
         SHARED --> WORKER
     end
 

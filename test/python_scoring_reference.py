@@ -1,8 +1,8 @@
-"""Authoritative Python city scoring; preserves the JavaScript result shape."""
+"""Test-only Python scoring reference; production scoring comes from C++."""
 
 from __future__ import annotations
 
-from .cards import COLORS
+from python_backend.cards import COLORS
 
 
 def district_score(card: dict) -> int:

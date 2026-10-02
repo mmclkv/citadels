@@ -1,6 +1,5 @@
-"""Persistent PyTorch PPO trainer used by the Node.js self-play coordinator."""
+"""PyTorch model definitions and MCTS-target training helpers."""
 import array
-import gc
 import json
 import os
 import struct
@@ -249,11 +248,6 @@ class PolicyValueNet(nn.Module):
                 time.sleep(0.025 * (attempt + 1))
 
 
-ROLLOUT_MAGIC = b"CTRL"
-ROLLOUT_VERSION = 1
-ROLLOUT_HEADER = struct.Struct("<4s7I")
-
-
 def create_model(architecture, profile):
     if architecture in (None, "", "flat", "policy-value"):
         return PolicyValueNet(profile)
@@ -265,96 +259,6 @@ def create_model(architecture, profile):
     raise ValueError("不支持的网络架构：%s" % architecture)
 
 
-def load_rollout(filename):
-    """读取二进制 rollout，转成训练用的 numpy/torch 缓冲。
-
-    内存说明：旧实现是 gzip + 整段 JSON。`handle.read()` 先把解压后的全文
-    读成一整条字符串（256 局批次实测 387 MB），再逐行 raw_decode 物化出
-    Python 浮点对象（每个 ~32 字节），最后才 np.asarray 成 float32——同一份
-    数据在内存里同时存在「文本 + Python 对象 + float32」三份。现在文件本身
-    就是扁平 float32（布局由 Python rollout writer/reader 共同定义），这里只用
-    np.fromfile 顺序读块，torch.from_numpy 与 numpy 缓冲共享内存，不再有文本
-    与 Python 浮点对象这两份中间物；输出字典的键与旧实现完全一致，因此
-    build_minibatch / train_ppo 一行都不用改。
-    """
-    with open(filename, "rb") as handle:
-        header = handle.read(ROLLOUT_HEADER.size)
-        if len(header) != ROLLOUT_HEADER.size:
-            raise ValueError("rollout 头部长度不足")
-        (magic, version, row_count, action_slots, state_size, action_size,
-         value_slots, pi_slots) = ROLLOUT_HEADER.unpack(header)
-        if magic != ROLLOUT_MAGIC:
-            raise ValueError("rollout 魔数不匹配：%r" % (magic,))
-        if version != ROLLOUT_VERSION:
-            raise ValueError("rollout 版本不支持：%d" % version)
-        if not row_count:
-            raise ValueError("rollout 为空")
-
-        def read_f32(count):
-            values = np.fromfile(handle, dtype="<f4", count=count)
-            if values.size != count:
-                raise ValueError("rollout 数据不完整")
-            return values
-
-        def read_i32(count):
-            values = np.fromfile(handle, dtype="<i4", count=count)
-            if values.size != count:
-                raise ValueError("rollout 数据不完整")
-            return values
-
-        states = read_f32(row_count * state_size).reshape(row_count, state_size)
-        actions_flat = read_f32(action_slots * action_size).reshape(action_slots, action_size)
-        counts = read_i32(row_count)
-        chosen = read_i32(row_count)
-        old_probs = read_f32(row_count)
-        temperatures = read_f32(row_count)
-        read_f32(row_count)  # mctsValues：保留布局完整性，训练侧不使用
-        pi_flat = read_f32(pi_slots)
-        has_pi = np.fromfile(handle, dtype="u1", count=row_count)
-        if has_pi.size != row_count:
-            raise ValueError("rollout 数据不完整")
-        old_values = read_f32(row_count * value_slots).reshape(row_count, value_slots)
-        rewards = read_f32(row_count * value_slots).reshape(row_count, value_slots)
-        value_masks = read_f32(row_count * value_slots).reshape(row_count, value_slots)
-        read_f32(row_count * value_slots)  # mctsValueVectors：同上
-        trailing = handle.read(1)
-        if trailing:
-            raise ValueError("rollout 尾部有多余字节")
-
-    offsets = np.zeros(row_count + 1, dtype=np.int64)
-    np.cumsum(counts, out=offsets[1:])
-    use_pi = bool(pi_slots)
-    if use_pi:
-        pi_lengths = np.where(has_pi.astype(bool), counts, 0).astype(np.int64)
-        pi_offsets = np.zeros(row_count + 1, dtype=np.int64)
-        np.cumsum(pi_lengths, out=pi_offsets[1:])
-        if int(pi_offsets[-1]) != pi_flat.size:
-            raise ValueError("rollout 的 π 槽位数与索引不一致")
-    else:
-        pi_flat = None
-        pi_offsets = None
-        pi_lengths = None
-
-    return {
-        "states": torch.from_numpy(states),
-        "chosen": torch.from_numpy(chosen.astype(np.int64)),
-        "old_probs": torch.from_numpy(old_probs),
-        "old_values": torch.from_numpy(old_values),
-        "rewards": torch.from_numpy(rewards),
-        "value_masks": torch.from_numpy(value_masks),
-        "temperatures": torch.from_numpy(temperatures),
-        # 变宽字段：mini-batch 组装时才 pad
-        "actions_flat": actions_flat,
-        "lengths": counts.astype(np.int64),
-        "offsets": offsets,
-        "action_width": int(action_size),
-        "pi_flat": pi_flat,
-        "pi_offsets": pi_offsets,
-        "pi_lengths": pi_lengths,
-        "has_pi": torch.from_numpy(has_pi.astype(bool)),
-    }
-
-
 def build_minibatch(data, indices, device):
     """按 mini-batch 组装训练批并搬上 device。
 
@@ -364,13 +268,8 @@ def build_minibatch(data, indices, device):
     """
     batch = {
         "states": data["states"][indices].to(device, non_blocking=True),
-        "chosen": data["chosen"][indices].to(device, non_blocking=True),
-        "old_probs": data["old_probs"][indices].to(device, non_blocking=True),
-        "old_values": data["old_values"][indices].to(device, non_blocking=True),
         "rewards": data["rewards"][indices].to(device, non_blocking=True),
         "value_masks": data["value_masks"][indices].to(device, non_blocking=True),
-        "temperatures": data["temperatures"][indices].to(device, non_blocking=True),
-        "policy_valid": data["has_pi"][indices].to(device, non_blocking=True),
     }
     lengths = data["lengths"][indices]
     m = len(indices)
@@ -395,63 +294,40 @@ def build_minibatch(data, indices, device):
     return batch
 
 
-def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_loss_mode="auto", mcts_ce_required=False):
-    total = {"policy": 0.0, "value": 0.0, "entropy": 0.0, "clip": 0.0,
+def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=256):
+    """Optimize policy cross-entropy to MCTS visits and masked terminal value loss."""
+    if data["pi_flat"] is None:
+        raise ValueError("MCTS 训练样本缺少策略访问分布")
+    total = {"policy": 0.0, "value": 0.0, "entropy": 0.0,
              "kl": 0.0, "gradient": 0.0, "samples": 0}
-    has_pi = data["pi_flat"] is not None
-    use_mcts_ce = policy_loss_mode == "mcts_ce" or (policy_loss_mode == "auto" and (mcts_ce_required or has_pi))
     size = len(data["rewards"])
-    advantages = data["rewards"][:, 0] - data["old_values"][:, 0]
-    advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
     for _ in range(epochs):
         for indices in torch.randperm(size).split(batch_size):
             batch = build_minibatch(data, indices.numpy(), device)
-            adv = advantages[indices].to(device, non_blocking=True)
-            # MCTS π 是未加采样温度的搜索目标；只在 PPO 行为策略比率中使用温度。
-            temperatures = torch.ones_like(batch["temperatures"]) if use_mcts_ce else batch["temperatures"]
-            logits, values = model(batch["states"], batch["actions"], batch["masks"], temperatures)
+            logits, values = model(batch["states"], batch["actions"], batch["masks"],
+                                   torch.ones(len(indices), dtype=torch.float32, device=device))
             probs = torch.softmax(logits, dim=-1)
-            if use_mcts_ce:
-                # AlphaZero 风格：用 MCTS 访问分布 π 当策略目标，纯交叉熵
-                if "pi" in batch:
-                    pi = batch["pi"]
-                else:
-                    pi = torch.zeros_like(probs)
-                    pi.scatter_(1, batch["chosen"].unsqueeze(1), 1.0)
-                pi = pi.masked_fill(~batch["masks"], 0.0)
-                pi_sum = pi.sum(dim=-1)
-                policy_valid = batch["policy_valid"] & (pi_sum > 1e-8)
-                pi = pi / pi_sum.unsqueeze(1).clamp_min(1e-12)
-                # 取最低有效动作位置的截断，避免 mask=False 的零位被梯度拉低（已 mask 后在 -1e9）
-                masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
-                norm_probs = masked_probs / masked_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-                per_sample_policy_loss = -(pi * (norm_probs.clamp_min(1e-12)).log()).sum(dim=-1)
-                valid_count = policy_valid.sum().clamp_min(1)
-                policy_loss = (per_sample_policy_loss * policy_valid).sum() / valid_count
-                # 用当前策略在所选动作上的概率反推 KL 估计（旧/新在同一分布上比较即可，意义近似）
-                selected = norm_probs.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-12)
-                pi_selected = pi.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-12)
-                per_sample_kl = (pi.clamp_min(1e-12) * (pi.clamp_min(1e-12).log() - norm_probs.clamp_min(1e-12).log())).sum(dim=-1)
-                approx_kl = (per_sample_kl * policy_valid).sum() / valid_count
-                clip_frac = torch.zeros((), device=device)
-            else:
-                selected = probs.gather(1, batch["chosen"].unsqueeze(1)).squeeze(1).clamp_min(1e-8)
-                old = batch["old_probs"].clamp_min(1e-8)
-                ratio = selected / old
-                clipped = ratio.clamp(0.8, 1.2)
-                policy_loss = -torch.minimum(ratio * adv, clipped * adv).mean()
-                approx_kl = (old.log() - selected.log()).mean()
-                clip_frac = ((ratio - 1.0).abs() > 0.2).float().mean()
+            pi = batch["pi"].masked_fill(~batch["masks"], 0.0)
+            pi_sum = pi.sum(dim=-1, keepdim=True)
+            valid = pi_sum.squeeze(-1) > 1e-8
+            if not bool(valid.any()):
+                continue
+            pi = pi / pi_sum.clamp_min(1e-12)
+            masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
+            norm_probs = masked_probs / masked_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+            per_sample_policy_loss = -(pi * norm_probs.clamp_min(1e-12).log()).sum(dim=-1)
+            valid_count = valid.sum().clamp_min(1)
+            policy_loss = (per_sample_policy_loss * valid).sum() / valid_count
+            pi_safe = pi.clamp_min(1e-12)
+            per_sample_kl = (pi_safe * (pi_safe.log() - norm_probs.clamp_min(1e-12).log())).sum(dim=-1)
+            approx_kl = (per_sample_kl * valid).sum() / valid_count
             squared_value_error = (values - batch["rewards"]) ** 2
             value_mask = batch["value_masks"]
             value_loss = ((squared_value_error * value_mask).sum(dim=-1) /
                           value_mask.sum(dim=-1).clamp_min(1.0)).mean()
             masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
             per_sample_entropy = -(masked_probs * masked_probs.log()).sum(dim=-1)
-            if use_mcts_ce:
-                entropy = (per_sample_entropy * policy_valid).sum() / valid_count
-            else:
-                entropy = per_sample_entropy.mean()
+            entropy = (per_sample_entropy * valid).sum() / valid_count
             loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -461,7 +337,6 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_los
             total["policy"] += policy_loss.item() * count
             total["value"] += value_loss.item() * count
             total["entropy"] += entropy.item() * count
-            total["clip"] += clip_frac.item() * count
             total["kl"] += approx_kl.item() * count
             total["gradient"] += float(gradient) * count
             total["samples"] += count
@@ -474,11 +349,10 @@ def train_ppo(model, optimizer, device, data, epochs, batch_size=256, policy_los
         "valueLoss": value,
         "totalLoss": policy + 0.5 * value - 0.01 * entropy,
         "entropy": entropy,
-        "clipFraction": total["clip"] / denominator,
         "approxKl": total["kl"] / denominator,
         "gradientNorm": total["gradient"] / denominator,
         "samples": size,
-        "policySamples": int(data["has_pi"].sum().item()) * epochs,
+        "policySamples": size * epochs,
     }
 
 
@@ -487,7 +361,7 @@ def reply(value):
 
 
 def main():
-    model = optimizer = device = None
+    model = device = None
     for raw_line in sys.stdin.buffer:
         try:
             line = raw_line.decode("utf-8")
@@ -502,10 +376,6 @@ def main():
                 model.load_flat(command["modelPath"])
                 model.to(device)
                 model.eval()
-                optimizer = torch.optim.Adam(model.parameters(), lr=command["learningRate"])
-                optimizer_path = command.get("optimizerPath")
-                if optimizer_path and os.path.exists(optimizer_path):
-                    optimizer.load_state_dict(torch.load(optimizer_path, map_location=device, weights_only=True))
                 reply({"ok": True, "device": str(device), "torch": torch.__version__,
                        "cuda": torch.version.cuda, "gpu": torch.cuda.get_device_name(0) if use_cuda else ""})
                 if command.get("protocol") == "binary":
@@ -518,35 +388,9 @@ def main():
                 model.to(device)
                 model.eval()
                 reply({"ok": True})
-            elif command["cmd"] == "train":
-                # 训练器与 Node 侧总是同版本部署，格式标记只用于挡住「旧 trainer
-                # 配新 bridge」这类错配；字节数是廉价但有效的截断写校验。
-                declared = command.get("rolloutFormat")
-                if declared and declared != "ctrl-binary":
-                    raise ValueError("rollout 格式不支持：%s" % declared)
-                expected_bytes = command.get("rolloutBytes")
-                if expected_bytes:
-                    actual_bytes = os.path.getsize(command["rolloutPath"])
-                    if actual_bytes != expected_bytes:
-                        raise ValueError(
-                            "rollout 文件字节数不符：%d != %d" % (actual_bytes, expected_bytes))
-                data = load_rollout(command["rolloutPath"])
-                metrics = train_ppo(model, optimizer, device, data, command["epochs"], command.get("miniBatch", 256),
-                                    command.get("policyLossMode", "auto"), command.get("mctsCeRequired", False))
-                if device.type == "cuda":
-                    metrics["gpuMemoryMB"] = torch.cuda.max_memory_allocated() / 1048576
-                # 立刻释放整批样本：旧实现把它一直持有到下一批 train，
-                # 自对弈阶段平白多驻留一整批 rollout（数百 MB 级）。
-                del data
-                gc.collect()
-                if device.type == "cuda":
-                    torch.cuda.empty_cache()
-                    torch.cuda.reset_peak_memory_stats()
-                model.save_flat(command["modelPath"])
-                reply({"ok": True, "metrics": metrics})
             elif command["cmd"] == "batch_eval":
                 # MCTS 批量前向：一次性跑若干 (state, [actions]) 对，返回 probsList 与 values。
-                # 与 load_rollout 同款 padding 逻辑：动作列数对齐到 batch 内最大值，mask 屏蔽 padding。
+                # 动作列数对齐到 batch 内最大值，mask 屏蔽 padding。
                 state_vectors = command.get("stateVectors", [])
                 action_groups = command.get("actionVectorsList", [])
                 if not state_vectors:
@@ -575,9 +419,6 @@ def main():
                 if device.type == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                 reply({"ok": True, "probsList": trimmed, "valueVectors": value_vectors_cpu, "values": values_cpu})
-            elif command["cmd"] == "checkpoint":
-                torch.save(optimizer.state_dict(), command["optimizerPath"])
-                reply({"ok": True})
             elif command["cmd"] == "close":
                 reply({"ok": True})
                 return

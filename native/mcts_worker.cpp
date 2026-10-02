@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <iostream>
+#include <iomanip>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -11,11 +12,15 @@
 #include <vector>
 
 #include "game_adapter.hpp"
+#include "npc_policy.hpp"
+#include "game_setup.hpp"
 #include "json_value.hpp"
 #include "gpu_trainer_client.hpp"
 #include "neural_evaluator.hpp"
 #include "shared_memory_inference.hpp"
+#include "selfplay.hpp"
 #include "state_loader.hpp"
+#include "state_writer.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #include <dbghelp.h>
@@ -57,6 +62,20 @@ int player_index(const NativeGameState& state, const std::string& id) {
 // 「不关心」，只比对方填了的那些。抽出来是因为现在要比两次：主局面一次，
 // 每个粒子一次 —— 粒子只有在动作列表逐项对得上时才允许进同一棵树，否则同一
 // 棵树上的节点会对应不同的动作下标，统计量直接串味。
+bool action_matches(const NativeSearchAction& native, const NativeSearchAction& supplied) {
+  return native.type == supplied.type &&
+    (supplied.uid.empty() || native.uid == supplied.uid) &&
+    (supplied.target.empty() || native.target == supplied.target) &&
+    (supplied.secondary_uid.empty() || native.secondary_uid == supplied.secondary_uid) &&
+    (supplied.selected_uids.empty() || native.selected_uids == supplied.selected_uids) &&
+    (!supplied.has_num || native.num == supplied.num) &&
+    (supplied.gold < 0 || native.gold == supplied.gold) &&
+    (supplied.cards < 0 || native.cards == supplied.cards) &&
+    (supplied.type != ActionType::SpyColor || native.color == supplied.color) &&
+    (supplied.name.empty() || native.name == supplied.name) &&
+    (supplied.type != ActionType::Reaction || native.name == supplied.name);
+}
+
 bool actions_aligned(const std::vector<NativeSearchAction>& native_actions,
                      const std::vector<NativeSearchAction>& supplied, int* mismatch_index = nullptr) {
   if (native_actions.size() != supplied.size()) {
@@ -64,19 +83,7 @@ bool actions_aligned(const std::vector<NativeSearchAction>& native_actions,
     return false;
   }
   for (size_t i = 0; i < supplied.size(); ++i) {
-    if (native_actions[i].type != supplied[i].type ||
-        (!supplied[i].uid.empty() && native_actions[i].uid != supplied[i].uid) ||
-        (!supplied[i].target.empty() && native_actions[i].target != supplied[i].target) ||
-        (!supplied[i].secondary_uid.empty() &&
-         native_actions[i].secondary_uid != supplied[i].secondary_uid) ||
-        (!supplied[i].selected_uids.empty() &&
-         native_actions[i].selected_uids != supplied[i].selected_uids) ||
-        (supplied[i].has_num && native_actions[i].num != supplied[i].num) ||
-        (supplied[i].gold >= 0 && native_actions[i].gold != supplied[i].gold) ||
-        (supplied[i].cards >= 0 && native_actions[i].cards != supplied[i].cards) ||
-        (supplied[i].type == ActionType::SpyColor && native_actions[i].color != supplied[i].color) ||
-        (!supplied[i].name.empty() && native_actions[i].name != supplied[i].name) ||
-        (supplied[i].type == ActionType::Reaction && native_actions[i].name != supplied[i].name)) {
+    if (!action_matches(native_actions[i], supplied[i])) {
       if (mismatch_index) *mismatch_index = static_cast<int>(i);
       return false;
     }
@@ -120,6 +127,63 @@ NativeSearchAction decode_action(const JsonValue& value) {
 void emit_error(const std::string& id, const std::string& message) {
   std::cout << "{\"v\":1,\"t\":\"error\",\"id\":\"" << escape(id)
             << "\",\"error\":\"" << escape(message) << "\"}\n" << std::flush;
+}
+
+void write_float_array(const std::vector<float>& values) {
+  std::cout << '[';
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i) std::cout << ',';
+    std::cout << values[i];
+  }
+  std::cout << ']';
+}
+
+void emit_selfplay_result(const std::string& id, const NativeSelfPlayResult& result,
+                          int player_count) {
+  std::cout << "{\"v\":1,\"t\":\"selfplay_result\",\"id\":\"" << escape(id)
+            << "\",\"rows\":[" << std::setprecision(9);
+  for (size_t i = 0; i < result.rows.size(); ++i) {
+    if (i) std::cout << ',';
+    const auto& row = result.rows[i];
+    std::cout << "{\"playerIdx\":" << row.player << ",\"state\":";
+    write_float_array(row.state);
+    std::cout << ",\"actions\":[";
+    for (size_t j = 0; j < row.actions.size(); ++j) {
+      if (j) std::cout << ',';
+      write_float_array(row.actions[j]);
+    }
+    std::cout << "],\"pi\":";
+    write_float_array(row.policy);
+    std::cout << ",\"reward\":[";
+    for (size_t j = 0; j < kValueSlots; ++j) {
+      if (j) std::cout << ',';
+      std::cout << row.reward[j];
+    }
+    std::cout << "],\"valueMask\":[";
+    for (size_t j = 0; j < kValueSlots; ++j) {
+      if (j) std::cout << ',';
+      std::cout << row.value_mask[j];
+    }
+    std::cout << "]}";
+  }
+  std::cout << "],\"scores\":[";
+  for (size_t i = 0; i < result.scores.size(); ++i) {
+    if (i) std::cout << ',';
+    const auto& score = result.scores[i];
+    std::cout << "{\"playerIdx\":" << score.player << ",\"base\":" << score.base
+              << ",\"bonus\":" << score.bonus << ",\"total\":" << score.total << '}';
+  }
+  std::cout << "],\"winners\":[";
+  for (size_t i = 0; i < result.winners.size(); ++i) {
+    if (i) std::cout << ',';
+    std::cout << result.winners[i];
+  }
+  std::cout << "],\"steps\":" << result.steps << ",\"rounds\":" << result.rounds
+            << ",\"playerCount\":" << player_count
+            << ",\"networkReward\":" << result.network_reward
+            << ",\"networkWin\":" << result.network_win
+            << ",\"networkScore\":" << result.network_score
+            << ",\"inferenceMs\":" << result.search_ms << "}\n" << std::flush;
 }
 
 }  // namespace
@@ -182,16 +246,103 @@ int main() {
       const auto& id_value = required_field(request, "id");
       id = id_value.as_string();
       context += " · id=" + id;
-      const auto& state_value = required_field(request, "state");
-      const auto& actions_value = required_field(request, "legalActions");
+      const bool selfplay_mode = string_field(request, "mode") == "selfplay";
+      const bool apply_mode = string_field(request, "mode") == "apply";
+      const bool create_mode = string_field(request, "mode") == "create";
+      const bool actions_mode = string_field(request, "mode") == "actions";
+      const bool npc_mode = string_field(request, "mode") == "npc";
+      const bool determinize_mode = string_field(request, "mode") == "determinize";
+      const auto* state_value = request.get("state");
+      const auto* new_game = request.get("newGame");
+      if ((!state_value || state_value->is_null()) && (!(selfplay_mode || create_mode) || !new_game))
+        throw std::runtime_error("协议请求缺少 state / newGame");
+      const auto* actions_value = request.get("legalActions");
       const auto root_id = string_field(request, "rootPlayerId");
-      if (!actions_value.is_array() || actions_value.as_array().empty())
+      if (!selfplay_mode && !apply_mode && !create_mode && !actions_mode && !npc_mode && !determinize_mode && (!actions_value || !actions_value->is_array() || actions_value->as_array().empty()))
         throw std::runtime_error("legalActions 不能为空");
-      NativeGameState state = load_native_state(state_value);
+      NativeGameState state = (selfplay_mode || create_mode) && new_game
+        ? create_native_game(*new_game) : load_native_state(*state_value);
+      NativeGameAdapter game;
+      if (create_mode) {
+        std::cout << "{\"v\":1,\"t\":\"create_result\",\"id\":\"" << escape(id) << "\",\"state\":";
+        write_native_state(std::cout, state);
+        std::cout << "}\n" << std::flush;
+        continue;
+      }
+      if (actions_mode) {
+        const int actor = player_index(state, string_field(request, "playerId"));
+        const auto legal = actor < 0 ? std::vector<NativeSearchAction>{} : game.legal_actions(state, actor);
+        std::cout << "{\"v\":1,\"t\":\"legal_actions_result\",\"id\":\"" << escape(id)
+                  << "\",\"phase\":";
+        write_json_string(std::cout, native_phase_name(state.phase));
+        std::cout << ",\"actions\":[";
+        for (size_t i = 0; i < legal.size(); ++i) {
+          if (i) std::cout << ',';
+          write_native_action(std::cout, legal[i]);
+        }
+        std::cout << "]}\n" << std::flush;
+        continue;
+      }
+      if (npc_mode) {
+        const int actor = player_index(state, string_field(request, "playerId"));
+        const auto legal = actor < 0 ? std::vector<NativeSearchAction>{} : game.legal_actions(state, actor);
+        const int selected = NativeNpcPolicy::choose(state, actor, legal,
+          static_cast<uint32_t>(int_field(request, "seed", 1)));
+        std::cout << "{\"v\":1,\"t\":\"npc_result\",\"id\":\"" << escape(id) << "\",\"action\":";
+        if (selected < 0 || selected >= static_cast<int>(legal.size())) std::cout << "null";
+        else write_native_action(std::cout, legal[static_cast<size_t>(selected)]);
+        std::cout << "}\n" << std::flush;
+        continue;
+      }
+      if (determinize_mode) {
+        const int viewer = player_index(state, string_field(request, "playerId"));
+        if (viewer < 0) throw std::runtime_error("determinize 请求的 playerId 不存在");
+        const int count = std::max(1, std::min(8, int_field(request, "count", 4)));
+        const uint32_t seed = static_cast<uint32_t>(int_field(request, "seed", 1));
+        std::vector<NativeGameState> samples;
+        samples.reserve(static_cast<size_t>(count));
+        for (int sample = 0; sample < count; ++sample) {
+          const uint32_t sample_seed = seed ^
+            (static_cast<uint32_t>(sample + 1) * 0x9E3779B1u) ^
+            (static_cast<uint32_t>(viewer + 1) * 0x85EBCA6Bu);
+          samples.push_back(determinize_native_state(state, viewer, sample_seed));
+        }
+        const auto weights = native_belief_weights(samples, viewer, bool_field(request, "belief", true));
+        std::cout << "{\"v\":1,\"t\":\"determinize_result\",\"id\":\"" << escape(id) << "\",\"particles\":[";
+        for (size_t sample = 0; sample < samples.size(); ++sample) {
+          if (sample) std::cout << ',';
+          write_native_state(std::cout, samples[sample]);
+        }
+        std::cout << "],\"weights\":[";
+        for (size_t sample = 0; sample < weights.size(); ++sample) {
+          if (sample) std::cout << ',';
+          std::cout << weights[sample];
+        }
+        std::cout << "]}\n" << std::flush;
+        continue;
+      }
+      if (apply_mode) {
+        const std::string player_id = string_field(request, "playerId");
+        const int actor = player_index(state, player_id);
+        const auto* action_value = request.get("action");
+        if (actor < 0 || !action_value) throw std::runtime_error("apply 请求缺少有效 playerId/action");
+        const int expected = game.next_player(state);
+        if (actor != expected) throw std::runtime_error("不是该玩家的行动时机");
+        const auto action = decode_action(*action_value);
+        const auto legal = game.legal_actions(state, actor);
+        if (std::none_of(legal.begin(), legal.end(), [&](const NativeSearchAction& candidate) {
+              return action_matches(candidate, action);
+            })) throw std::runtime_error("行动不在 C++ 当前合法动作列表中");
+        if (!game.apply(state, actor, action)) throw std::runtime_error("C++ 游戏引擎拒绝该行动");
+        std::cout << "{\"v\":1,\"t\":\"apply_result\",\"id\":\"" << escape(id) << "\",\"state\":";
+        write_native_state(std::cout, state);
+        std::cout << "}\n" << std::flush;
+        continue;
+      }
       // 粒子池：其余几份「隐藏信息猜测」。整池进同一棵搜索树，每条模拟抽一份
       // （ISMCTS）；动作列表对不上的会在下面对齐校验里被丢掉。
       std::vector<NativeGameState> particles;
-      if (const auto* particles_value = request.get("particles")) {
+      if (!selfplay_mode) if (const auto* particles_value = request.get("particles")) {
         if (particles_value->is_array()) {
           particles.reserve(particles_value->as_array().size());
           for (const auto& value : particles_value->as_array()) {
@@ -202,20 +353,25 @@ int main() {
       context += " · 玩家=" + std::to_string(state.players.size()) +
         " · round=" + std::to_string(state.round) +
         " · 粒子=" + std::to_string(1 + particles.size());
-      const int root = player_index(state, root_id);
-      if (root < 0) throw std::runtime_error("rootPlayerId 不存在");
+      const int root = selfplay_mode ? 0 : player_index(state, root_id);
+      if (!selfplay_mode && root < 0) throw std::runtime_error("rootPlayerId 不存在");
       std::vector<NativeSearchAction> supplied;
-      supplied.reserve(actions_value.as_array().size());
-      for (const auto& value : actions_value.as_array()) supplied.push_back(decode_action(value));
+      if (actions_value && actions_value->is_array()) {
+        supplied.reserve(actions_value->as_array().size());
+        for (const auto& value : actions_value->as_array()) supplied.push_back(decode_action(value));
+      }
       context += " · 动作=" + std::to_string(supplied.size());
 
-      NativeGameAdapter game;
       UniformNativeEvaluator evaluator;
       const auto inference_backend = string_field(request, "inferenceBackend", "python-binary");
       const auto architecture = string_field(request, "architecture", "flat");
       const auto profile = string_field(request, "profile", "balanced");
       const auto device = string_field(request, "device", "cuda");
       const int action_encoding_version = int_field(request, "actionEncodingVersion", kActionEncodingVersion);
+      const bool include_own_hand = architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5";
+      const bool include_city_identity = architecture == "entity-v4" || architecture == "entity-v5";
+      const bool include_public_context = architecture == "entity-v5";
+      const bool include_training_features = bool_field(request, "includeTrainingFeatures");
       const auto config_key = inference_backend + "|" + architecture + "|" + profile + "|" + device + "|" +
         std::to_string(action_encoding_version) + "|" + string_field(request, "sharedMemoryName");
       if (evaluator_config_key != config_key) {
@@ -236,8 +392,7 @@ int main() {
             if (architecture == "entity-v1" || architecture == "entity-v2" || architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5") {
               direct_neural = std::make_unique<LibTorchEntityTransformerEvaluator>(
                 profile, model_path, device, architecture != "entity-v1", action_encoding_version,
-                architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5",
-                architecture == "entity-v4" || architecture == "entity-v5", architecture == "entity-v5");
+                include_own_hand, include_city_identity, include_public_context);
             } else if (architecture == "flat") {
               direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
                 profile, model_path, device, action_encoding_version);
@@ -289,6 +444,49 @@ int main() {
         " · maxNodes=" + std::to_string(config.max_nodes) +
         " · batch=" + std::to_string(batch_size) +
         " · 后端=" + inference_backend;
+      auto run_search = [&](const std::vector<NativeGameState>& states, int perspective,
+                            int batch, const std::vector<float>& weights) {
+#ifdef CITADELS_LIBTORCH
+        if (direct_neural)
+          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
+            .search(states, perspective, batch, weights);
+#endif
+        if (shared_neural)
+          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
+            .search(states, perspective, batch, weights);
+        if (neural)
+          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
+            .search(states, perspective, batch, weights);
+        return Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
+          .search(states, perspective, weights);
+      };
+      if (selfplay_mode) {
+        std::unordered_set<std::string> network_players;
+        for (const auto& player_id : string_array_field(request, "networkPlayerIds"))
+          network_players.insert(player_id);
+        if (network_players.empty())
+          throw std::runtime_error("C++ 自对弈必须至少指定一名策略网络玩家");
+        const int max_rounds = std::max(1, int_field(request, "maxRounds", 1000));
+        const int max_steps = std::max(1, int_field(request, "maxSteps", 60000));
+        const uint32_t search_seed = static_cast<uint32_t>(int_field(request, "seed", 1));
+        auto search_turn = [&](const std::vector<NativeGameState>& states, int perspective,
+                               const std::vector<float>& weights) {
+          config.seed = search_seed + static_cast<uint32_t>(state.turns_completed + state.draft_step + 2) * 0x9E3779B1u;
+          try {
+            return run_search(states, perspective, batch_size, weights);
+          } catch (const std::exception& error) {
+            if (!is_cuda_oom(error.what())) throw;
+            return run_search(states, perspective, std::min(batch_size, 8), weights);
+          }
+        };
+        auto result = run_native_selfplay(state, game, search_turn, network_players,
+          max_rounds, max_steps, action_encoding_version, include_own_hand,
+          include_city_identity, include_public_context,
+          int_field(request, "particles", 4), search_seed,
+          bool_field(request, "belief", true));
+        emit_selfplay_result(id, result, static_cast<int>(state.players.size()));
+        continue;
+      }
       const auto native_actions = game.legal_actions(state, root);
       context += " · 原生动作=" + std::to_string(native_actions.size());
       std::vector<float> policy;
@@ -332,34 +530,16 @@ int main() {
         // 搜索可能因显存不足失败（评估发生在搜索内部）。先按原批跑；OOM 就清一次
         // 缓存、把评估批缩到 8 再跑一次。仍然失败才真正报错 —— 缩小批次只是让
         // 这一步慢一点，不会改变搜索语义（分批只影响叶节点收集）。
-        auto run_search = [&](int batch) {
-#ifdef CITADELS_LIBTORCH
-          if (direct_neural) {
-            return BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
-              .search(pool, root, batch, pool_weights);
-          }
-#endif
-          if (shared_neural) {
-            return BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
-              .search(pool, root, batch, pool_weights);
-          }
-          if (neural) {
-            return BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
-              .search(pool, root, batch, pool_weights);
-          }
-          return Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
-            .search(pool, root, pool_weights);
-        };
         Mcts<NativeGameState, NativeSearchAction>::Result result;
         try {
-          result = run_search(batch_size);
+          result = run_search(pool, root, batch_size, pool_weights);
         } catch (const std::exception& error) {
           if (!is_cuda_oom(error.what())) throw;
           // 缓存分配器手里可能还攒着「已释放但没还给驱动」的块，这里没有别的
           // 回收手段（清缓存要引 CUDA 头文件，反而让编译多一条依赖），只能靠缩
           // 小评估批降低峰值；真正彻底的重置交给 JS 侧：它会把整个 worker 进程
           // 重启一次（连 CUDA 上下文一起还回去）再重试。
-          result = run_search(std::min(batch_size, 8));
+          result = run_search(pool, root, std::min(batch_size, 8), pool_weights);
         }
         policy = result.policy; visits = result.visits; expansions = result.expansions;
         root_value = result.value;
@@ -395,7 +575,30 @@ int main() {
         if (i) std::cout << ',';
         std::cout << '"' << action_type_name(supplied[i].type) << '"';
       }
-      std::cout << "],\"backend\":\"native-mcts\"}\n" << std::flush;
+      std::cout << ']';
+      if (include_training_features && actions_match && !pool.empty()) {
+        const auto state_features = encode_network_state(pool.front(), root, include_own_hand,
+                                                         include_city_identity, include_public_context);
+        std::cout << ",\"stateFeatures\":[" << std::setprecision(9);
+        for (size_t i = 0; i < state_features.size(); ++i) {
+          if (i) std::cout << ',';
+          std::cout << state_features[i];
+        }
+        std::cout << "],\"actionFeatures\":[";
+        for (size_t i = 0; i < native_actions.size(); ++i) {
+          if (i) std::cout << ',';
+          const auto features = encode_network_action(native_actions[i], &pool.front(), root,
+                                                      action_encoding_version);
+          std::cout << '[';
+          for (size_t j = 0; j < features.size(); ++j) {
+            if (j) std::cout << ',';
+            std::cout << features[j];
+          }
+          std::cout << ']';
+        }
+        std::cout << ']';
+      }
+      std::cout << ",\"backend\":\"native-mcts\"}\n" << std::flush;
     } catch (const std::bad_alloc& error) {
       // MSVC 下 bad_alloc::what() 固定是「bad allocation」，即主机内存申请失败；
       // CUDA 显存不足走下面的 std::exception 分支，文本是 torch 自己的报错。

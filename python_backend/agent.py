@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import itertools
 import json
 import os
 import socket
@@ -11,7 +10,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .game import apply_action, get_available_actions
 from .views import sanitize
 
 SYSTEM_PROMPT = """You control one player in Citadels. Maximize your final score: district values,
@@ -58,8 +56,11 @@ def config_from_env(env: dict[str, str] | None = None) -> dict:
             "timeoutMs": timeout, "configured": bool(endpoint and model and (api_key or local))}
 
 
-def prepare_decision(state: dict, player_id: str) -> dict:
-    observation = copy.deepcopy(sanitize(state, player_id))
+def prepare_decision(state: dict, player_id: str, available: dict) -> dict:
+    if not isinstance(available, dict) or not isinstance(available.get("actions"), list):
+        raise RuntimeError("Agent 必须使用 C++ worker 提供的合法动作")
+    observation = copy.deepcopy(sanitize(state, player_id,
+                                         legal_actions=available.get("actions") or []))
     me = next((player for player in observation["players"] if player["id"] == player_id), None)
     if not me:
         raise AgentError("invalid_player", "Agent 玩家不存在")
@@ -67,34 +68,20 @@ def prepare_decision(state: dict, player_id: str) -> dict:
     observation.pop("log", None)
     if observation.get("turn") and observation["turn"].get("playerId") != player_id:
         observation["turn"]["pending"] = None
-    available = get_available_actions(state, player_id)
     actions: list[dict] = []
     pending = (state.get("turn") or {}).get("pending") or {}
     for action in available.get("actions") or []:
         if action.get("disabled"):
             continue
         kind = action.get("type")
-        if kind in ("lab", "museum"):
-            field = "discardUid" if kind == "lab" else "cardUid"
-            actions.extend({**action, field: card["uid"],
-                            "label": action.get("label", "") + "：" + card["name"]}
-                           for card in me.get("hand") or [])
-        elif kind == "choose_cards" and pending.get("kind") == "bishop_repay":
-            pool = [card for card in me.get("hand") or [] if card["uid"] != pending.get("uid")]
-            amount = pending.get("amount", -1)
-            if isinstance(amount, int) and 0 <= amount <= len(pool):
-                actions.extend({**action, "uids": [card["uid"] for card in chosen]}
-                               for chosen in itertools.islice(itertools.combinations(pool, amount), 2048))
-        else:
-            actions.append(copy.deepcopy(action))
-    legal = []
-    for action in actions:
-        trial = copy.deepcopy(state)
-        if apply_action(trial, player_id, action).get("ok"):
-            legal.append(action)
+        # C++ legal-action generation expands parameterized and multi-card
+        # choices. Do not regenerate or revalidate them in the Python service.
+        actions.append(copy.deepcopy(action))
+    legal = actions
     if not legal:
         raise AgentError("no_actions", "Agent 当前没有合法行动")
-    return {"observation": observation, "prompt": available.get("prompt", ""), "actions": legal}
+    return {"observation": observation, "prompt": available.get("prompt", ""),
+            "actions": legal, "nativeAuthoritative": True}
 
 
 def resolve_decision(prepared: dict, reply: object, state: dict, player_id: str) -> dict:
@@ -116,9 +103,6 @@ def resolve_decision(prepared: dict, reply: object, state: dict, player_id: str)
                 any(not isinstance(uid, str) or uid not in allowed_uids for uid in selected)):
             raise AgentError("invalid_action", "模型选中了不可用的卡牌")
         action["uids"] = selected
-    trial = copy.deepcopy(state)
-    if not apply_action(trial, player_id, action).get("ok"):
-        raise AgentError("invalid_action", "模型行动未通过游戏规则校验")
     return action
 
 
@@ -134,10 +118,10 @@ class AgentClient:
                 "message": ("模型已配置（首次行动时验证连接）" if config["configured"] else
                             "服务器尚未配置 AI 模型，请设置模型地址、模型名称及密钥后重启服务器")}
 
-    def decide(self, state: dict, player_id: str) -> dict:
+    def decide(self, state: dict, player_id: str, available: dict) -> dict:
         if not self.config["configured"]:
             raise AgentError("not_configured", self.status()["message"])
-        prepared = prepare_decision(state, player_id)
+        prepared = prepare_decision(state, player_id, available)
         body = json.dumps({"model": self.config["model"], "stream": False,
                            "response_format": {"type": "json_object"},
                            "messages": [{"role": "system", "content": SYSTEM_PROMPT},

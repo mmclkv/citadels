@@ -20,6 +20,7 @@ class JsRng {
   }
 
   double next() { return static_cast<double>(next_u32()) / 4294967296.0; }
+  uint32_t state() const { return state_; }
 
  private:
   static uint32_t imul(uint32_t a, uint32_t b) {

@@ -1,4 +1,4 @@
-"""End-to-end smoke test for the Python self-play PPO runtime."""
+"""End-to-end smoke tests for native self-play and MCTS distillation."""
 from __future__ import annotations
 
 import sys
@@ -13,13 +13,31 @@ from python_backend.training_runtime import TrainingManager  # noqa: E402
 
 
 class TrainingRuntimeTests(unittest.TestCase):
-    def test_one_python_selfplay_game_trains_and_saves_checkpoint(self):
+    def test_mixed_selfplay_uses_native_state_engine(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = TrainingManager(directory)
+            config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
+                      "selfPlayMode": "network-vs-heuristic", "networkPlayerCount": 1,
+                      "heuristicDifficulty": "random", "charSet": "base",
+                      "profile": "fast", "networkArchitecture": "entity-v5",
+                      "device": "cpu", "backend": "cpu", "mctsSimulations": 1,
+                      "mctsParticles": 1, "mctsMaxDepth": 12,
+                      "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
+                      "checkpointEvery": 1, "maxRounds": 1, "seed": 8162}
+            self.assertTrue(manager.start(config)["running"])
+            status = self._wait(manager)
+            self.assertEqual(status["state"], "completed", status)
+            self.assertEqual(status["completedGames"], 1)
+            self.assertEqual(status["point"]["fallbacks"], 0)
+            self.assertGreater(status["point"]["policySamples"], 0)
+
+    def test_one_native_selfplay_game_trains_and_saves_checkpoint(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = TrainingManager(directory)
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
                       "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
-                      "device": "cpu", "backend": "cpu", "mctsSimulations": 0,
-                      "batchGames": 1, "ppoEpochs": 1, "miniBatch": 32,
+                      "device": "cpu", "backend": "cpu", "mctsSimulations": 1,
+                      "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
                       "checkpointEvery": 1, "maxRounds": 1, "seed": 8127}
             self.assertTrue(manager.start(config)["running"])
             deadline = time.monotonic() + 60
@@ -49,8 +67,8 @@ class TrainingRuntimeTests(unittest.TestCase):
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
                       "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
                       "device": "cpu", "backend": "cpu", "mctsSimulations": 2,
-                      "mctsParticles": 1, "mctsMaxDepth": 10, "policyLossMode": "mcts_ce",
-                      "batchGames": 1, "ppoEpochs": 1, "miniBatch": 32,
+                      "mctsParticles": 1, "mctsMaxDepth": 10,
+                      "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
                       "checkpointEvery": 1, "maxRounds": 1, "seed": 8130}
             self.assertTrue(manager.start(config)["running"])
             status = self._wait(manager)
@@ -64,8 +82,8 @@ class TrainingRuntimeTests(unittest.TestCase):
             manager = TrainingManager(directory)
             config = {"targetGames": 4, "minPlayers": 2, "maxPlayers": 2,
                       "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
-                      "device": "cpu", "backend": "cpu", "mctsSimulations": 0,
-                      "workers": 2, "batchGames": 4, "ppoEpochs": 1, "miniBatch": 32,
+                      "device": "cpu", "backend": "cpu", "mctsSimulations": 1,
+                      "workers": 2, "batchGames": 4, "trainingEpochs": 1, "miniBatch": 32,
                       "checkpointEvery": 4, "maxRounds": 1, "seed": 8131}
             self.assertTrue(manager.start(config)["running"])
             status = self._wait(manager)
@@ -80,8 +98,8 @@ class TrainingRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
                       "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
-                      "device": "cpu", "mctsSimulations": 0, "batchGames": 1,
-                      "ppoEpochs": 1, "miniBatch": 32, "checkpointEvery": 1,
+                      "device": "cpu", "mctsSimulations": 1, "batchGames": 1,
+                      "trainingEpochs": 1, "miniBatch": 32, "checkpointEvery": 1,
                       "maxRounds": 1, "seed": 8128}
             initial = TrainingManager(directory)
             initial.start(config)

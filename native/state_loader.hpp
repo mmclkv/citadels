@@ -51,9 +51,13 @@ inline DistrictCard load_card(const JsonValue& value) {
                     string_field(value, "name"), int_field(value, "scoreValue", cost),
                     string_field(value, "purpleEffect")};
   card.en = string_field(value, "en");
+  card.desc = string_field(value, "desc");
   const auto* purple = value.get("purple");
   if (purple && purple->is_object())
-    card.purple_effect = string_field(*purple, "effect", card.purple_effect);
+    {
+      card.purple_effect = string_field(*purple, "effect", card.purple_effect);
+      card.score_as = int_field(*purple, "scoreAs", 0);
+    }
   return card;
 }
 
@@ -74,8 +78,13 @@ inline NativeDistrict load_city_card(const JsonValue& value) {
   district.name = string_field(value, "name");
   district.beautified = bool_field(value, "beautified") || number_field(value, "beautified", 0.0) != 0.0;
   district.built_round = int_field(value, "builtRound", 0);
-  const int museum_count = int_field(value, "museumCount", 0);
-  for (int i = 0; i < museum_count; ++i) district.museum_cards.push_back({});
+  const auto* museum = value.get("museum");
+  if (museum && museum->is_array()) {
+    for (const auto& card : museum->as_array()) district.museum_cards.push_back(load_card(card));
+  } else {
+    const int museum_count = int_field(value, "museumCount", 0);
+    for (int i = 0; i < museum_count; ++i) district.museum_cards.push_back({});
+  }
   const auto* purple = value.get("purple");
   if (purple && purple->is_object()) {
     district.effect = string_field(*purple, "effect");
@@ -103,11 +112,29 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   state.phase = load_phase(snapshot);
   state.round = int_field(snapshot, "round", 1);
   state.first_to_finish = int_field(snapshot, "firstToFinish", -1);
+  const auto* pending_queen = snapshot.get("pendingQueen");
+  if (pending_queen && pending_queen->is_object())
+    state.pending_queen = int_field(*pending_queen, "playerIdx", -1);
   state.call_index = int_field(snapshot, "callIdx", 0);
   state.turns_completed = int_field(snapshot, "turnsCompleted", 0);
   state.rng = JsRng(static_cast<uint32_t>(int_field(snapshot, "rngState")));
   const auto* config = snapshot.get("config");
   if (config && config->is_object()) state.end_districts = int_field(*config, "endDistricts", 8);
+  const auto* observations = snapshot.get("observations");
+  if (observations && observations->is_array()) {
+    state.observations.reserve(observations->as_array().size());
+    for (const auto& value : observations->as_array()) {
+      NativeObservation observation;
+      if (value.is_object()) {
+        observation.valid = true;
+        observation.round = int_field(value, "round");
+        observation.gold = int_field(value, "gold");
+        observation.hand_size = int_field(value, "handSize");
+        observation.free_colors = string_array_field(value, "freeColors");
+      }
+      state.observations.push_back(std::move(observation));
+    }
+  }
   const auto* char_deck = snapshot.get("charDeck");
   if (char_deck && char_deck->is_array()) for (const auto& id : char_deck->as_array())
     if (id.is_string()) state.char_deck.push_back(id.as_string());
@@ -148,6 +175,9 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (!value.is_object()) throw std::runtime_error("玩家必须是对象");
     NativePlayer player;
     player.id = string_field(value, "id");
+    player.name = string_field(value, "name", player.id);
+    player.bot_type = string_field(value, "botType", "npc");
+    player.bot_level = string_field(value, "botLevel", "normal");
     player.seat = int_field(value, "seat", 0);
     player.gold = int_field(value, "gold");
     player.hand_count = int_field(value, "handCount", 0);
@@ -203,6 +233,8 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (pending && pending->is_object()) {
       state.pending_kind = string_field(*pending, "kind");
       state.pending_target = int_field(*pending, "targetIdx", -1);
+      if (state.pending_target < 0 && state.pending_kind == "bishop_repay")
+        state.pending_target = int_field(*pending, "payerIdx", -1);
       state.pending_amount = int_field(*pending, "amount");
       state.pending_from_crown = int_field(*pending, "_fromCrownIdx", -1);
       state.pending_uid = string_field(*pending, "mineUid");

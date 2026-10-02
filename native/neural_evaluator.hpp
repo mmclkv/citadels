@@ -82,7 +82,14 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
       break;
     }
   }
-  const int role = action.has_num && action.num != 0 ? action.num : role_number_for_action(action.name);
+  // Only explicit numeric role selections belong in this feature. Some actions
+  // (notably MonkResource) use `name` for a numeric amount, not a character.
+  const bool draft_action = action.type == ActionType::DraftPick || action.type == ActionType::DraftDiscard;
+  const int role = draft_action ? role_number_for_action(action.name)
+    : action.has_num && action.num != 0 ? action.num
+    : (action.type == ActionType::ChooseChar || action.type == ActionType::MagistrateSigned ||
+       action.type == ActionType::MagistrateChar || action.type == ActionType::BlackmailerChar ||
+       action.type == ActionType::BlackmailerSigned ? role_number_for_action(action.name) : 0);
   if (role >= 1 && role <= 9) result[50 + role - 1] = 1.0f;
   for (size_t i = 0; i < kRoleIds.size(); ++i)
     if (action.name == kRoleIds[i]) { result[68 + i] = 1.0f; break; }
@@ -99,7 +106,7 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
   if (action.num >= 0) result[107] = std::min(1.0f, static_cast<float>(action.num) / 9.0f);
   if (action.gold >= 0) result[108] = std::min(1.0f, static_cast<float>(action.gold) / 20.0f);
   if (action.cards >= 0) result[109] = std::min(1.0f, static_cast<float>(action.cards) / 8.0f);
-  result[110] = action.use ? 1.0f : 0.0f;
+  result[110] = (action.use || (action.type == ActionType::Reaction && action.name == "use")) ? 1.0f : 0.0f;
   result[111] = action.uid.empty() ? 0.0f : 1.0f;
   result[112] = action.secondary_uid.empty() ? 0.0f : 1.0f;
   result[113] = std::min(1.0f, static_cast<float>(action.selected_uids.size()) / 8.0f);

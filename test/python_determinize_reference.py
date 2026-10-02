@@ -1,11 +1,11 @@
-"""Sample a legal hidden-information world without changing the authoritative state."""
+"""Test-only Python reference for native hidden-information sampling."""
 from __future__ import annotations
 
 import copy
 import math
 import random
 
-from .cards import CHAR_MAP
+from python_backend.cards import CHAR_MAP
 
 
 def _shuffle(values: list, rng) -> list:
@@ -89,15 +89,17 @@ def _rebuild_call_queue(state: dict) -> None:
     if not isinstance(queue, list) or not queue:
         return
     keep_through = min(state.get("callIdx") or 0, len(queue) - 1)
+    preserved = queue[:keep_through + 1]
+    queued_roles = {item.get("charId") for item in preserved if isinstance(item, dict)}
     rest = []
     for player_index, player in enumerate(state["players"]):
         played = set(player.get("played") or [])
         for char_id in player.get("chars") or []:
             info = CHAR_MAP.get(char_id)
-            if info and char_id not in played:
+            if info and char_id not in played and char_id not in queued_roles:
                 rest.append({"charId": char_id, "num": info["num"], "playerIdx": player_index})
     rest.sort(key=lambda item: item["num"])
-    state["callQueue"] = queue[:keep_through + 1] + rest
+    state["callQueue"] = preserved + rest
 
 
 def _reguess_signed(effect: dict | None, viewer_index: int, candidates: list,
