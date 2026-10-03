@@ -40,9 +40,13 @@ GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_HEADER_BYTES = 16384
 MAX_FRAME_BYTES = 1_048_576
 MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
-STATE_ENCODING_VERSION = 11
+STATE_ENCODING_VERSION = 12
 LEGACY_STATE_ENCODING_VERSION = 8
-ACTION_ENCODING_VERSION = 8
+ACTION_ENCODING_VERSION = 9
+
+
+def _encoding_compatible(state_version: int | None, action_version: int | None) -> bool:
+    return (state_version, action_version) in ((12, 9), (11, 8), (8, 8))
 
 
 def _append_game_log(state: dict, message: str, kind: str = "info") -> None:
@@ -206,7 +210,8 @@ class PythonServer:
         self.native_worker_manager = native_worker_manager
         self._native_action_lock = asyncio.Lock()
         self.training = TrainingManager(self.training_data_dir,
-            native_worker=native_worker_manager.worker if native_worker_manager else None)
+            native_worker=native_worker_manager.worker if native_worker_manager else None,
+            game_worker=native_worker_manager.game_worker if native_worker_manager else None)
         self.frp = FrpManager(int(os.environ.get("PORT") or 8787), ROOT, self._log_startup)
         self.voice = VoiceService()
         self.voice_token_hits: dict[str, tuple[int, float]] = {}
@@ -360,9 +365,7 @@ class PythonServer:
         return {"name": name, "game": _positive_int(payload.get("game")) or 0,
                 "createdAt": payload.get("createdAt") or "", "config": payload["config"],
                 "encodingVersion": state_version, "actionEncodingVersion": action_version,
-                "encodingCompatible": state_version in (STATE_ENCODING_VERSION,
-                                                          LEGACY_STATE_ENCODING_VERSION)
-                and action_version == ACTION_ENCODING_VERSION}
+                "encodingCompatible": _encoding_compatible(state_version, action_version)}
 
     def _import_checkpoint(self, original_name: str, body: bytes) -> dict:
         if not body:
@@ -403,9 +406,7 @@ class PythonServer:
         return {"name": name, "game": _positive_int(payload.get("game")) or 0,
                 "createdAt": payload.get("createdAt") or "",
                 "encodingVersion": state_version, "actionEncodingVersion": action_version,
-                "encodingCompatible": state_version in (STATE_ENCODING_VERSION,
-                                                          LEGACY_STATE_ENCODING_VERSION)
-                and action_version == ACTION_ENCODING_VERSION}
+                "encodingCompatible": _encoding_compatible(state_version, action_version)}
 
     def _state_for(self, room: dict, player_id: str | None) -> dict:
         if not room["state"]:
@@ -443,7 +444,7 @@ class PythonServer:
         """Build a client view, sourcing actionable choices from the native rules."""
         view = self._state_for(room, player_id)
         manager = self.native_worker_manager
-        worker = manager.worker if manager and manager.running else None
+        worker = manager.game_worker if manager and manager.running else None
         if not worker:
             if room.get("state"):
                 raise RuntimeError("C++ 游戏引擎不可用，无法准备客户端游戏状态")
@@ -464,7 +465,7 @@ class PythonServer:
     async def _apply_game_action(self, room: dict, player_id: str, action: dict) -> dict:
         """Apply live rules through the authoritative C++ game engine."""
         manager = self.native_worker_manager
-        worker = manager.worker if manager and manager.running else None
+        worker = manager.game_worker if manager and manager.running else None
         if worker is None:
             return {"ok": False, "error": "C++ 游戏引擎不可用，拒绝处理游戏行动"}
         async with self._native_action_lock:
@@ -473,7 +474,7 @@ class PythonServer:
                 return {"ok": False, "error": "尚未开局"}
             try:
                 native_state = await asyncio.to_thread(
-                    worker.apply, state=copy.deepcopy(current), player_id=player_id, action=action)
+                    worker.apply, game_id=str(room["id"]), player_id=player_id, action=action)
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
             # A restart can replace the room state while the worker is processing.
@@ -491,13 +492,12 @@ class PythonServer:
                     if key in old:
                         player[key] = old[key]
             merged = {**retained, **native_state}
+            self._append_gain_notices(current, merged, action)
             state_log = merged.setdefault("log", [])
             actor = old_players.get(player_id, {})
-            action_names = {"take_gold": "拿取金币", "take_cards": "抽牌", "income": "领取收入",
-                            "build": "建造", "end_turn": "结束回合", "confirm_round": "确认战果"}
-            action_type = str(action.get("type") or "行动")
+            action_text = self._game_action_log_text(current, action)
             state_log.append({"i": len(state_log),
-                              "text": f"{actor.get('name') or player_id}：{action_names.get(action_type, action_type)}",
+                              "text": f"{actor.get('name') or player_id}：{action_text}",
                               "type": "info", "round": merged.get("round", 0)})
             if len(state_log) > 400:
                 del state_log[:-400]
@@ -545,10 +545,10 @@ class PythonServer:
 
     async def _bot_available_actions(self, state: dict, player_id: str) -> dict:
         manager = self.native_worker_manager
-        worker = manager.worker if manager and manager.running else None
+        worker = manager.game_worker if manager and manager.running else None
         if worker is None:
             raise RuntimeError("C++ 游戏引擎不可用，无法查询合法动作")
-        native = await asyncio.to_thread(worker.legal_actions, state=copy.deepcopy(state), player_id=player_id)
+        native = await asyncio.to_thread(worker.legal_actions, game_id=str(state["roomId"]), player_id=player_id)
         actions = [self._native_action_view(state, action) for action in native["actions"]]
         prompt = self._native_prompt(state, player_id, actions)
         return {"phase": native["phase"], "actions": actions, "prompt": prompt}
@@ -561,17 +561,26 @@ class PythonServer:
         by_id = {player.get("id"): player for player in players}
         cards_by_uid = {card.get("uid"): card for player in players
                         for card in [*(player.get("hand") or []), *(player.get("city") or [])]}
+        turn = state.get("turn") or {}
+        role_id = turn.get("charId")
+        turn_phase = turn.get("phase")
         labels = {"take_gold": "拿取金币", "take_cards": "抽取建筑牌", "income": "领取收入",
                   "end_turn": "结束回合", "confirm_round": "确认本轮战果", "build": "建造",
-                  "ability": "发动角色能力", "choose_cards": "确认选择", "choose_player": "选择玩家",
+                  "ability": "发动角色能力", "ability_skip": "跳过", "artist_done": "完成美化",
+                  "blackmailer_bribe": "支付贿金", "blackmailer_refuse": "拒绝支付贿金",
+                  "choose_cards": "确认选择", "choose_player": "选择玩家",
                   "choose_district": "选择建筑", "choose_char": "选择角色", "draft_pick": "选取角色",
                   "draft_discard": "弃置角色", "reaction": "响应", "lab": "使用实验室",
                   "museum": "使用博物馆", "smithy": "使用铁匠铺", "pending_back": "返回上一步",
                   "magician_mode": "选择魔术师能力", "wizard_target": "选择查看对象",
-                  "wizard_take": "取得手牌", "wizard_build": "建造", "wizard_card": "选择卡牌",
+                  "wizard_take": "取得1张手牌", "wizard_build": "建造", "wizard_card": "选择卡牌",
                   "draw_keep": "保留建筑牌", "scholar_pick": "选择建筑牌", "prophet_give": "归还手牌",
                   "emperor_take": "选择资源", "emperor_crown": "移交皇冠", "tax_collect": "收取建筑税",
-                  "spy_target": "调查玩家", "spy_color": "选择调查类型", "navigator_bonus": "选择奖励"}
+                  "spy_target": "调查玩家", "spy_color": "选择调查类型", "navigator_bonus": "选择奖励",
+                  "magistrate_signed": "指定真逮捕令角色", "magistrate_char": "选择逮捕令候选角色",
+                  "blackmailer_signed": "指定真威胁目标角色", "blackmailer_char": "选择威胁标记角色",
+                  "abbot_resource": "分配住持资源", "monk_resource": "分配僧侣资源",
+                  "monk_take": "从最富有玩家处拿取1枚金币"}
         if kind in ("draft_pick", "draft_discard"):
             role = cards.CHAR_MAP.get(action.get("charId") or "", {})
             label = ("选取 " if kind == "draft_pick" else "弃置 ") + role.get("name", action.get("charId", "角色"))
@@ -579,24 +588,186 @@ class PythonServer:
             label = "发动" if action.get("use") else "不发动"
         elif kind in ("build", "wizard_build"):
             district = cards_by_uid.get(action.get("uid"), {})
-            label = f"建造『{district.get('name') or action.get('name') or '建筑'}』"
+            if not district and kind == "wizard_build":
+                district = (turn.get("pending") or {}).get("card") or {}
+            cost = district.get("cost")
+            cost_label = f"（造价 {cost} 金币）" if isinstance(cost, int) else ""
+            label = f"建造『{district.get('name') or action.get('name') or '建筑'}』{cost_label}"
+        elif kind == "take_gold":
+            amount = 2 + int(role_id == "merchant" and turn_phase != "witch_resume")
+            detail = "，建筑师额外抽2张建筑牌" if role_id == "architect" and turn_phase != "witch_resume" else ""
+            label = f"拿取金币（{amount} 枚{detail}）"
+        elif kind == "take_cards":
+            active = players[turn.get("playerIdx", -1)] if isinstance(turn.get("playerIdx"), int) and 0 <= turn.get("playerIdx", -1) < len(players) else {}
+            city = active.get("city") or []
+            effects = {card.get("purpleEffect") or (card.get("purple") or {}).get("effect") for card in city}
+            amount = 3 if "draw3keep1" in effects else 2
+            detail = "，保留1张" if amount == 3 else "，全部保留" if "keepBoth" in effects else ""
+            if role_id == "architect" and turn_phase != "witch_resume":
+                detail += "，建筑师额外抽2张"
+            if role_id == "merchant" and turn_phase != "witch_resume":
+                detail += "，另得1金币"
+            label = f"抽取建筑牌（{amount} 张{detail}）"
+        elif kind == "income":
+            active = players[turn.get("playerIdx", -1)] if isinstance(turn.get("playerIdx"), int) and 0 <= turn.get("playerIdx", -1) < len(players) else {}
+            city = active.get("city") or []
+            if role_id == "bishop":
+                amount = sum(1 for card in city if card.get("color") == "blue" or
+                             (card.get("purpleEffect") or (card.get("purple") or {}).get("effect")) == "anyColorIncome")
+                label = f"领取收入（抽取 {amount} 张建筑牌）"
+            else:
+                colors = {"king": "yellow", "emperor": "yellow", "abbot": "blue",
+                          "merchant": "green", "businessman": "green", "warlord": "red",
+                          "diplomat": "red", "marshal": "red"}
+                color = colors.get(role_id)
+                amount = sum(1 for card in city if card.get("color") == color or
+                             (card.get("purpleEffect") or (card.get("purple") or {}).get("effect")) == "anyColorIncome") if color else 0
+                label = f"领取收入（{amount} 金币）"
         elif kind in ("lab", "museum"):
             district = cards_by_uid.get(action.get("secondaryUid") or
                                         action.get("discardUid") or action.get("cardUid"), {})
             label = f"{labels[kind]}：{district.get('name', '选择手牌')}"
-        elif kind == "choose_player":
+        elif kind in ("choose_player", "emperor_crown", "spy_target", "wizard_target"):
             target = by_id.get(action.get("target"), {})
-            label = target.get("name", labels[kind])
+            seat = target.get("seat")
+            seat_label = f"座位 {seat + 1} · " if isinstance(seat, int) else ""
+            label = seat_label + target.get("name", labels[kind])
+        elif kind in ("choose_char", "magistrate_signed", "magistrate_char",
+                      "blackmailer_signed", "blackmailer_char"):
+            try:
+                number = int(action.get("num", action.get("name")))
+            except (TypeError, ValueError):
+                number = 0
+            role = next((item for item in cards.CHAR_MAP.values() if item.get("num") == number), {})
+            label = f"{number}号 · {role.get('name', '角色')}" if number else labels.get(kind, kind)
+            if kind == "magistrate_signed":
+                label = "真逮捕令 · " + label
+            elif kind == "magistrate_char":
+                label = "逮捕令候选 · " + label
+            elif kind == "blackmailer_signed":
+                label = "真威胁目标 · " + label
+            elif kind == "blackmailer_char":
+                label = "威胁标记候选 · " + label
+        elif kind in ("abbot_resource", "monk_resource"):
+            label = f"金币 {action.get('gold', 0)} · 建筑牌 {action.get('cards', 0)}"
+        elif kind == "spy_color":
+            color_names = {"yellow": "黄色", "blue": "蓝色", "green": "绿色",
+                           "red": "红色", "purple": "紫色"}
+            label = color_names.get(action.get("color"), labels[kind])
+        elif kind == "navigator_bonus":
+            mode = action.get("name") or action.get("mode")
+            label = {"gold": "拿取金币（4 枚）", "cards": "抽取建筑牌（4 张）"}.get(mode, labels[kind])
+        elif kind == "choose_district":
+            target = by_id.get(action.get("target"), {})
+            district = cards_by_uid.get(action.get("uid"), {})
+            label = f"座位 {target.get('seat', 0) + 1} · {target.get('name', '玩家')}：{district.get('name', '选择建筑')}"
+        elif kind == "choose_cards" and (action.get("mode") or action.get("name")) in ("skip", "use"):
+            label = "保留这张手牌" if (action.get("mode") or action.get("name")) == "skip" else "弃掉这张手牌"
         elif kind in ("draw_keep", "scholar_pick"):
             district = cards_by_uid.get(action.get("uid"), {})
             label = district.get("name", labels[kind])
         elif kind in ("emperor_take", "magician_mode"):
-            label = {"gold": "拿取金币", "card": "抽取手牌", "swap": "交换手牌", "redraw": "弃牌重抽"}.get(
+            label = {"gold": "拿取1枚金币", "card": "取得1张手牌", "swap": "交换手牌", "redraw": "弃牌重抽"}.get(
                 action.get("mode") or action.get("name"), labels[kind])
         else:
             label = labels.get(kind, kind.replace("_", " "))
         rendered["label"] = label
         return rendered
+
+    @staticmethod
+    def _append_gain_notices(previous: dict, updated: dict, action: dict) -> None:
+        """Restore public gain events consumed by the browser's coin/card flights."""
+        old_players = previous.get("players") or []
+        new_players = updated.get("players") or []
+        size = min(len(old_players), len(new_players))
+        gold_delta = [int((new_players[i].get("gold") or 0)) -
+                      int((old_players[i].get("gold") or 0)) for i in range(size)]
+        hand_delta = [len(new_players[i].get("hand") or []) -
+                      len(old_players[i].get("hand") or []) for i in range(size)]
+
+        def source_for(deltas: list[int], recipient: int) -> int | None:
+            sources = [i for i, delta in enumerate(deltas) if delta < 0 and i != recipient]
+            return sources[0] if len(sources) == 1 else None
+
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = int(updated.get("noticeSeq") or previous.get("noticeSeq") or 0)
+
+        def append(kind: str, player_idx: int, amount: int, from_idx: int | None = None) -> None:
+            nonlocal seq
+            if amount <= 0:
+                return
+            seq += 1
+            notice = {"seq": seq, "kind": kind, "playerIdx": player_idx, "amount": amount}
+            if from_idx is not None:
+                notice["fromIdx"] = from_idx
+            if kind == "hand_gain":
+                notice["why"] = "获得手牌"
+            notices.append(notice)
+
+        for i, amount in enumerate(gold_delta):
+            if amount > 0:
+                append("got_gold", i, amount, source_for(gold_delta, i))
+        for i, amount in enumerate(hand_delta):
+            if amount > 0:
+                append("hand_gain", i, amount, source_for(hand_delta, i))
+
+        # The Magician redraw replaces cards one-for-one, so a player can gain
+        # new cards with no net hand-size change. Emit the final redraw animation.
+        old_turn = previous.get("turn") or {}
+        pending = old_turn.get("pending") or {}
+        mode = action.get("mode") or action.get("name")
+        new_pending = ((updated.get("turn") or {}).get("pending") or {}).get("kind")
+        if (action.get("type") == "choose_cards" and pending.get("kind") == "magician_redraw" and
+                mode in ("skip", "use") and new_pending != "magician_redraw"):
+            player_idx = int(old_turn.get("playerIdx", 0))
+            amount = len(pending.get("selected") or []) + int(mode == "use")
+            if amount and (player_idx >= size or hand_delta[player_idx] <= 0):
+                append("hand_gain", player_idx, amount)
+
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
+    def _game_action_log_text(state: dict, action: dict) -> str:
+        """Readable public log text; never expose hidden cards or secret role marks."""
+        kind = action.get("type", "")
+        turn = state.get("turn") or {}
+        pending = turn.get("pending") or {}
+        if kind in ("draft_pick", "draft_discard"):
+            return "选取了一个角色" if kind == "draft_pick" else "弃置了一个角色"
+        if kind in ("magistrate_signed", "magistrate_char"):
+            return "布置了行政官逮捕令"
+        if kind in ("blackmailer_signed", "blackmailer_char"):
+            return "布置了勒索威胁标记"
+        if kind in ("wizard_target", "wizard_card", "wizard_take"):
+            return {"wizard_target": "选择查看一名玩家的手牌",
+                    "wizard_card": "选择取得一张建筑牌",
+                    "wizard_take": "取得了1张手牌"}[kind]
+        if kind in ("draw_keep", "scholar_pick"):
+            return "保留了1张建筑牌" if kind == "draw_keep" else "选取了1张建筑牌"
+        if kind == "prophet_give":
+            return "归还了1张手牌"
+        if kind == "choose_cards":
+            mode = action.get("mode") or action.get("name")
+            if mode in ("skip", "use"):
+                return "保留了当前手牌" if mode == "skip" else "弃掉当前手牌"
+            uids = action.get("uids") or action.get("selectedUids") or []
+            count = len(uids) if isinstance(uids, list) else 0
+            if pending.get("kind") == "bishop_repay":
+                return f"选择了{count}张手牌偿还主教代偿"
+            if pending.get("kind") == "magician_redraw":
+                return f"弃掉了{count}张手牌并重抽"
+            return f"选择了{count}张手牌"
+        if kind == "ability":
+            role_name = turn.get("charName") or "角色"
+            return f"发动了【{role_name}】能力"
+        if kind == "spy_target":
+            return "选择了调查对象"
+        if kind == "lab":
+            return "使用了实验室"
+        if kind == "museum":
+            return "使用了博物馆"
+        return PythonServer._native_action_view(state, action).get("label", "进行了行动")
 
     @staticmethod
     def _native_prompt(state: dict, player_id: str, actions: list[dict]) -> str:
@@ -623,10 +794,23 @@ class PythonServer:
             return f"等待 {active.get('name', '其他玩家')} 行动…"
         pending = turn.get("pending") or {}
         prompts = {"assassin": "选择要刺杀的角色", "thief": "选择要偷窃的角色",
-                   "wizard_target": "选择要查看的玩家", "wizard_card": "选择要取得的建筑牌",
+                   "witch_target": "选择要施咒的角色", "wizard_target": "选择要查看的玩家",
+                   "spy_target": "选择要调查的玩家", "spy_color": "选择要调查的建筑颜色",
+                   "wizard_card": "选择要取得的建筑牌",
                    "draw_keep": "选择要保留的建筑牌", "scholar_pick": "选择一张建筑牌",
+                   "bishop_payer": "选择承担主教代偿的玩家",
                    "bishop_repay": "选择偿还代偿的手牌", "magician_choice": "选择魔术师能力",
                    "magician_swap": "选择交换手牌的玩家", "magician_redraw": "选择要弃掉的手牌",
+                   "emperor_crown": "选择接收皇冠的玩家", "emperor_take": "选择拿取金币或手牌",
+                   "magistrate_declare": "指定真逮捕令角色",
+                   "magistrate_second": "选择逮捕令候选角色",
+                   "magistrate_third": "选择逮捕令候选角色",
+                   "blackmailer_declare": "选择威胁标记角色",
+                   "blackmailer_second": "选择第二个威胁标记角色",
+                   "blackmailer_signed": "指定真威胁目标角色",
+                   "abbot_declare": "分配住持的金币与建筑牌",
+                   "monk_declare": "分配僧侣的金币与建筑牌",
+                   "navigator_bonus": "选择额外奖励",
                    "artist": "选择要美化的建筑", "warlord_destroy": "选择要摧毁的建筑",
                    "marshal_seize": "选择要抢夺的建筑", "diplomat_mine": "选择自己的建筑",
                    "diplomat_theirs": "选择对方的建筑"}
@@ -701,12 +885,12 @@ class PythonServer:
                         await self._broadcast_state(room)
                         break
                 else:
-                    worker = (self.native_worker_manager.worker
+                    worker = (self.native_worker_manager.game_worker
                               if self.native_worker_manager and self.native_worker_manager.running else None)
                     if worker is None:
                         raise RuntimeError("NPC 策略需要运行中的 C++ MCTS worker")
                     action = await asyncio.to_thread(
-                        worker.decide_npc, state=copy.deepcopy(state), player_id=actor_now["id"],
+                        worker.decide_npc, game_id=str(room["id"]), player_id=actor_now["id"],
                         seed=secrets.randbits(32))
                 if action is None:
                     break
@@ -921,13 +1105,13 @@ class PythonServer:
                 start_room, seats = self.rooms.prepare_start_room(room["id"])
                 config = start_room["config"]
                 native_state = await asyncio.to_thread(
-                    self.native_worker_manager.worker.create_game,
+                    self.native_worker_manager.game_worker.create_game,
                     {"seed": secrets.randbits(32), "endDistricts": config["endDistricts"],
                      "charSetMode": config["charSetMode"], "initialCrownSeat": 0,
                      "startingHand": 4, "startingGold": 2,
                      "seats": [{key: seat.get(key) for key in
                                 ("id", "name", "isBot", "botType", "botLevel")} for seat in seats],
-                     "catalog": cards._catalog})
+                     "catalog": cards._catalog}, str(room["id"]))
                 for player in native_state["players"]:
                     seat = next(item for item in seats if item["id"] == player["id"])
                     player["botLevel"] = seat.get("botLevel") or "normal"

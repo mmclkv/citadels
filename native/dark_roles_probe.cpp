@@ -27,6 +27,24 @@ int main() {
   try {
     NativeGameAdapter game;
 
+    // Alternate character sets may contain rank-9 roles. The assassin's
+    // legal-action generator includes roles from char_deck; execution must
+    // accept the same rank instead of applying the base-set 1..8 limit.
+    NativeGameState assassin_rank_nine;
+    assassin_rank_nine.phase = NativePhase::Action;
+    assassin_rank_nine.active_player = 0;
+    assassin_rank_nine.pending_kind = "assassin";
+    assassin_rank_nine.char_deck = {"assassin", "tax_collector"};
+    assassin_rank_nine.players = {player("assassin", "assassin", 0),
+                                 player("tax", "tax_collector", 0)};
+    const auto assassin_targets = game.legal_actions(assassin_rank_nine, 0);
+    const auto rank_nine = std::find_if(assassin_targets.begin(), assassin_targets.end(),
+      [](const NativeSearchAction& action) { return action.num == 9; });
+    require(rank_nine != assassin_targets.end(), "rank-9 role should be a legal assassin target");
+    require(game.apply(assassin_rank_nine, 0, *rank_nine) &&
+            assassin_rank_nine.assassinated == 9,
+      "assassin should be able to target an available rank-9 role");
+
     // Magistrate: declare one real + two false warrants; intercept and seize a build.
     NativeGameState s;
     s.phase = NativePhase::Action; s.active_player = 0; s.resources_taken = true;
@@ -93,6 +111,9 @@ int main() {
             monk_actions[1].gold == 1 && monk_actions[1].cards == 1 &&
             monk_actions[2].gold == 2 && monk_actions[2].cards == 0,
       "monk actions should carry explicit resource fields and count any-color income buildings");
+    require(game.apply(monk, 0, monk_actions[2]) && monk.players[0].gold == 4 &&
+            monk.pending_kind.empty(),
+      "monk execution should use the same blue/any-color building count as legal actions");
 
     NativeGameState noble;
     noble.phase = NativePhase::Action; noble.active_player = 0; noble.resources_taken = true;

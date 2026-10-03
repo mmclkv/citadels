@@ -77,6 +77,7 @@ inline NativeDistrict load_city_card(const JsonValue& value) {
   district.card.score_value = int_field(value, "scoreValue", district.card.cost);
   district.name = string_field(value, "name");
   district.beautified = bool_field(value, "beautified") || number_field(value, "beautified", 0.0) != 0.0;
+  district.fortress = bool_field(value, "fortress", false);
   district.built_round = int_field(value, "builtRound", 0);
   const auto* museum = value.get("museum");
   if (museum && museum->is_array()) {
@@ -88,10 +89,9 @@ inline NativeDistrict load_city_card(const JsonValue& value) {
   const auto* purple = value.get("purple");
   if (purple && purple->is_object()) {
     district.effect = string_field(*purple, "effect");
-    district.fortress = district.effect == "immune";
   }
   if (district.effect.empty()) district.effect = string_field(value, "purpleEffect");
-  district.fortress = district.fortress || district.effect == "immune";
+  if (!value.get("fortress")) district.fortress = district.effect == "immune";
   return district;
 }
 
@@ -284,6 +284,11 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
         state.draft_step < static_cast<int>(state.draft_steps.size()))
       state.draft_current_player = state.draft_steps[state.draft_step].player;
   }
+  // This public history must survive after the draft view becomes null.
+  // It constrains later role-number actions but reveals no face-down pick.
+  const auto* draft_public = snapshot.get("draftPublic");
+  if (draft_public && draft_public->is_object())
+    state.draft_face_up = string_array_field(*draft_public, "faceUp");
   const auto* call_queue = snapshot.get("callQueue");
   if (call_queue && call_queue->is_array()) for (const auto& value : call_queue->as_array()) {
     if (!value.is_object()) continue;

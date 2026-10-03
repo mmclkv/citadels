@@ -32,21 +32,39 @@ class _ReferenceRulesWorker:
 
     def __init__(self):
         self.npc_decisions = 0
+        self.games = {}
 
-    def create_game(self, new_game: dict) -> dict:
+    def create_game(self, new_game: dict, game_id: str | None = None) -> dict:
         state = create_game({key: new_game[key] for key in
                              ("seed", "endDistricts", "charSetMode", "seats")})
         result = start_game(state)
         if not result.get("ok"):
             raise ValueError(result.get("error"))
+        if game_id:
+            self.games[game_id] = state
         return state
 
-    @staticmethod
-    def legal_actions(*, state: dict, player_id: str) -> dict:
+    def _state(self, game_id=None, state=None):
+        return state if state is not None else self.games[game_id]
+
+    def current(self, game_id: str) -> dict:
+        state = self.games[game_id]
+        if state["phase"] == "draft":
+            actor = state["players"][state["draft"]["steps"][state["draft"]["stepIdx"]]["player"]]["id"]
+        elif state["phase"] == "action":
+            actor = state["players"][state["turn"]["playerIdx"]]["id"]
+        else:
+            actor = None
+        return {"playerId": actor, "gameOver": state["phase"] == "gameover", "rewards": []}
+
+    def legal_actions(self, *, player_id: str, state: dict | None = None, game_id: str | None = None) -> dict:
+        state = self._state(game_id, state)
         result = get_available_actions(state, player_id)
         return {"phase": state["phase"], **result}
 
-    def decide_npc(self, *, state: dict, player_id: str, seed: int = 1) -> dict | None:
+    def decide_npc(self, *, player_id: str, seed: int = 1, state: dict | None = None,
+                   game_id: str | None = None) -> dict | None:
+        state = self._state(game_id, state)
         del seed
         if self.npc_decisions >= 2:
             return None
@@ -54,8 +72,9 @@ class _ReferenceRulesWorker:
         actions = get_available_actions(state, player_id).get("actions") or []
         return actions[0] if actions else None
 
-    @staticmethod
-    def apply(*, state: dict, player_id: str, action: dict) -> dict:
+    def apply(self, *, player_id: str, action: dict, state: dict | None = None,
+              game_id: str | None = None) -> dict:
+        state = self._state(game_id, state)
         result = apply_action(state, player_id, action)
         if not result.get("ok"):
             raise ValueError(result.get("error"))
@@ -67,9 +86,10 @@ class _ReferenceWorkerManager:
 
     def __init__(self):
         self.worker = _ReferenceRulesWorker()
+        self.game_worker = self.worker
 
 
-def _start_reference_room(rooms: RoomRegistry, room_id: str) -> dict:
+def _start_reference_room(rooms: RoomRegistry, room_id: str, game_worker=None) -> dict:
     room, seats = rooms.prepare_start_room(room_id)
     state = _ReferenceRulesWorker().create_game({
         "seed": room["config"].get("seed", 71),
@@ -77,10 +97,113 @@ def _start_reference_room(rooms: RoomRegistry, room_id: str) -> dict:
         "charSetMode": room["config"]["charSetMode"], "seats": seats})
     state.update({"roomId": room_id, "config": room["config"], "createdAt": 0,
                   "log": [], "notices": [], "noticeSeq": 0, "witchResume": None})
+    if game_worker is not None:
+        game_worker.games[room_id] = state
     return rooms.finish_start_room(room_id, state)
 
 
 class ServerArgumentTests(unittest.TestCase):
+    def test_native_action_labels_distinguish_character_choices(self) -> None:
+        state = {"players": [
+            {"id": "p1", "name": "甲", "seat": 0, "hand": [], "city": []},
+            {"id": "p2", "name": "乙", "seat": 1, "hand": [], "city": []},
+        ]}
+        target_labels = [PythonServer._native_action_view(state, {
+            "type": "choose_player", "target": player_id,
+        })["label"] for player_id in ("p1", "p2")]
+        self.assertEqual(target_labels, ["座位 1 · 甲", "座位 2 · 乙"])
+
+        role_labels = [PythonServer._native_action_view(state, {
+            "type": "magistrate_char", "num": number,
+        })["label"] for number in (1, 2, 3)]
+        self.assertEqual(len(set(role_labels)), 3)
+        self.assertTrue(all(label.startswith("逮捕令候选 · ") for label in role_labels))
+
+    def test_native_action_labels_distinguish_other_role_effect_options(self) -> None:
+        state = {"players": [
+            {"id": "p1", "name": "甲", "seat": 0, "hand": [], "city": []},
+            {"id": "p2", "name": "乙", "seat": 1, "hand": [], "city": []},
+        ]}
+        labels = [PythonServer._native_action_view(state, action)["label"] for action in (
+            {"type": "spy_color", "color": "blue"},
+            {"type": "spy_color", "color": "red"},
+            {"type": "abbot_resource", "gold": 0, "cards": 2},
+            {"type": "abbot_resource", "gold": 1, "cards": 1},
+            {"type": "navigator_bonus", "name": "gold"},
+            {"type": "navigator_bonus", "name": "cards"},
+            {"type": "choose_cards", "mode": "skip"},
+            {"type": "choose_cards", "mode": "use"},
+        )]
+        self.assertEqual(labels, ["蓝色", "红色", "金币 0 · 建筑牌 2", "金币 1 · 建筑牌 1",
+                                  "拿取金币（4 枚）", "抽取建筑牌（4 张）",
+                                  "保留这张手牌", "弃掉这张手牌"])
+
+    def test_resource_and_build_actions_show_quantities(self) -> None:
+        state = {"turn": {"playerIdx": 0, "charId": "merchant", "phase": "main"},
+                 "players": [{"id": "p1", "name": "甲", "seat": 0,
+                              "hand": [{"uid": "h1", "name": "灯塔", "cost": 4}],
+                              "city": [{"uid": "c1", "name": "观测台", "color": "purple",
+                                        "cost": 5, "purpleEffect": "draw3keep1"}]}]}
+        labels = [PythonServer._native_action_view(state, action)["label"] for action in (
+            {"type": "take_gold"}, {"type": "take_cards"},
+            {"type": "build", "uid": "h1", "name": "灯塔"},
+        )]
+        self.assertEqual(labels, ["拿取金币（3 枚）", "抽取建筑牌（3 张，保留1张，另得1金币）",
+                                  "建造『灯塔』（造价 4 金币）"])
+
+    def test_income_and_navigator_bonus_show_exact_amounts(self) -> None:
+        state = {"turn": {"playerIdx": 0, "charId": "bishop", "phase": "main"},
+                 "players": [{"id": "p1", "name": "甲", "seat": 0, "hand": [],
+                              "city": [{"uid": "c1", "color": "blue"},
+                                       {"uid": "c2", "color": "purple", "purpleEffect": "anyColorIncome"}]}]}
+        self.assertEqual(PythonServer._native_action_view(state, {"type": "income"})["label"],
+                         "领取收入（抽取 2 张建筑牌）")
+        self.assertEqual(PythonServer._native_action_view(state, {
+            "type": "navigator_bonus", "name": "cards"})["label"], "抽取建筑牌（4 张）")
+
+    def test_battle_report_uses_readable_text_without_revealing_hidden_choices(self) -> None:
+        state = {"turn": {"charId": "wizard", "charName": "法师",
+                          "pending": {"kind": "wizard_target"}},
+                 "players": [{"id": "p1", "name": "甲", "seat": 0,
+                              "hand": [{"uid": "secret", "name": "秘密建筑", "cost": 6}],
+                              "city": []}]}
+        self.assertEqual(PythonServer._game_action_log_text(state, {"type": "take_gold"}),
+                         "拿取金币（2 枚）")
+        self.assertEqual(PythonServer._game_action_log_text(state, {"type": "wizard_target", "target": "p1"}),
+                         "选择查看一名玩家的手牌")
+        self.assertEqual(PythonServer._game_action_log_text(state, {
+            "type": "magistrate_signed", "num": 8}), "布置了行政官逮捕令")
+        self.assertNotIn("秘密建筑", PythonServer._game_action_log_text(state, {
+            "type": "wizard_card", "uid": "secret"}))
+
+    def test_gain_notices_restore_coin_and_hand_animations(self) -> None:
+        previous = {"noticeSeq": 4, "notices": [], "players": [
+            {"gold": 5, "hand": [{"uid": "a"}, {"uid": "b"}]},
+            {"gold": 2, "hand": [{"uid": "c"}]},
+        ]}
+        updated = {"players": [
+            {"gold": 4, "hand": [{"uid": "a"}]},
+            {"gold": 4, "hand": [{"uid": "c"}, {"uid": "d"}, {"uid": "e"}]},
+        ]}
+        PythonServer._append_gain_notices(previous, updated, {"type": "choose_cards"})
+        self.assertEqual(updated["noticeSeq"], 6)
+        self.assertEqual(updated["notices"], [
+            {"seq": 5, "kind": "got_gold", "playerIdx": 1, "amount": 2, "fromIdx": 0},
+            {"seq": 6, "kind": "hand_gain", "playerIdx": 1, "amount": 2, "fromIdx": 0,
+             "why": "获得手牌"},
+        ])
+
+    def test_magician_redraw_animates_replacement_cards(self) -> None:
+        previous = {"players": [{"gold": 2, "hand": [{"uid": "a"}, {"uid": "b"}]}],
+                    "turn": {"playerIdx": 0,
+                             "pending": {"kind": "magician_redraw", "selected": ["a"]}}}
+        updated = {"players": [{"gold": 2, "hand": [{"uid": "b"}, {"uid": "c"}]}],
+                   "turn": {"playerIdx": 0, "pending": None}}
+        PythonServer._append_gain_notices(previous, updated,
+                                          {"type": "choose_cards", "mode": "use"})
+        self.assertEqual(updated["notices"][0]["kind"], "hand_gain")
+        self.assertEqual(updated["notices"][0]["amount"], 2)
+
     def test_deployment_environment_defaults_and_cli_precedence(self) -> None:
         with mock.patch.dict(os.environ, {"PORT": "9123", "HOST": "0.0.0.0",
                                           "CITADELS_HOST": "192.0.2.10"}, clear=True):
@@ -419,7 +542,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
         room = self.app.rooms.create_room("Host", {"playerCount": 2})
         _, guest = self.app.rooms.join_room(room["id"], "Guest")
-        state = _start_reference_room(self.app.rooms, room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         host_id = room["seats"][0]["id"]
         host_client = StubClient(host_id, room["id"])
         guest_client = StubClient(guest["id"], room["id"])
@@ -445,7 +568,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         host = StubClient(room["seats"][0]["id"], room["id"])
         await self.app._handle_message(host, {"t": "setSeat", "index": 2, "kind": "bot"})
         original_bot = room["seats"][2]["id"]
-        state = _start_reference_room(self.app.rooms, room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         self.assertEqual([seat["id"] for seat in room["seats"][:2]],
                          [host.id, original_bot])
         self.assertEqual([seat["name"] for seat in room["seats"][2:]], ["电脑 1", "电脑 2"])
@@ -487,7 +610,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_python_npc_driver_takes_a_legal_draft_action(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
                                                      "botPace": 0, "seed": 91})
-        state = _start_reference_room(self.app.rooms, room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         original_step = state["draft"]["stepIdx"]
         self.app._schedule_bot(room)
         for _ in range(40):
@@ -511,7 +634,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         room = self.app.rooms.create_room("Host", {"playerCount": 3, "bots": 2,
                                                      "botType": "agent", "botPace": 0,
                                                      "seed": 92})
-        state = _start_reference_room(self.app.rooms, room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         state["phase"] = "action"
         state["roundConfirm"] = {"round": state["round"],
                                   "confirmed": [False] * len(state["players"])}
@@ -552,7 +675,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.app.agent = StubAgent(fail=True)
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
                                                      "botType": "agent", "botPace": 0})
-        state = _start_reference_room(self.app.rooms, room["id"])
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         self.app._schedule_bot(room)
         for _ in range(30):
             actor_id = self.app._bot_actor(state)
@@ -650,6 +773,14 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             guest_state = (await _recv_json(guest_reader))["state"]
             self.assertEqual(host_state["phase"], "draft")
             self.assertEqual(guest_state["phase"], "draft")
+            self.assertEqual(len(host_state["players"]), 2)
+            self.assertEqual(len(guest_state["players"]), 2)
+            host_viewer = next(player for player in host_state["players"]
+                               if player["id"] == host_state["you"])
+            guest_viewer = next(player for player in guest_state["players"]
+                                if player["id"] == guest_state["you"])
+            self.assertEqual(len(host_viewer["hand"]), 4)
+            self.assertEqual(len(guest_viewer["hand"]), 4)
             actor_state = host_state if host_state["available"]["actions"] else guest_state
             other_state = guest_state if actor_state is host_state else host_state
             self.assertTrue(actor_state["draft"]["pool"])

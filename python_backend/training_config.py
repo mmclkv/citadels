@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 PROFILES = {"fast", "balanced", "large"}
-ARCHITECTURES = {"flat", "entity-v5"}
+ARCHITECTURES = {"flat", "entity-v5", "entity-v6"}
 
 
 def _number(value, fallback=0.0) -> float:
@@ -62,7 +62,7 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "charSet": raw.get("charSet") if raw.get("charSet") in ("base", "dark", "mixed", "random") else "random",
         "endDistricts": int(_number(raw.get("endDistricts"))) if _number(raw.get("endDistricts")) in (7, 8) else 8,
         "profile": raw.get("profile") if raw.get("profile") in PROFILES else "balanced",
-        "networkArchitecture": raw.get("networkArchitecture") if raw.get("networkArchitecture") in ARCHITECTURES else "flat",
+        "networkArchitecture": raw.get("networkArchitecture") if raw.get("networkArchitecture") in ARCHITECTURES else "entity-v6",
         "rulesEngine": "cpp", "mctsEngine": "cpp",
         "neuralNetworkFramework": "libtorch", "backend": "python",
         "device": raw.get("device") if raw.get("device") in ("cuda", "cpu") else ("cpu" if raw.get("backend") == "cpu" else "cuda"),

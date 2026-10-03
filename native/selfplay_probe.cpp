@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "selfplay.hpp"
+#include "game_adapter.hpp"
 
 using namespace citadels::native;
 

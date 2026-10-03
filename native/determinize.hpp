@@ -25,8 +25,14 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
   result.rng = JsRng(seed ^ 0xA511E9B3u);
 
   std::vector<DistrictCard*> hidden_cards;
+  const bool viewer_has_seen_wizard_hand = result.active_player == viewer &&
+      (result.pending_kind == "wizard_card" || result.pending_kind == "wizard_choice") &&
+      result.pending_target >= 0 && result.pending_target < static_cast<int>(result.players.size());
   for (size_t player = 0; player < result.players.size(); ++player) {
     if (static_cast<int>(player) == viewer) continue;
+    // Wizard sees the target's complete hand before choosing one card. Keep
+    // those identities pinned in every particle; wizard_take resolves by UID.
+    if (viewer_has_seen_wizard_hand && static_cast<int>(player) == result.pending_target) continue;
     for (auto& card : result.players[player].hand) hidden_cards.push_back(&card);
     for (auto& district : result.players[player].city)
       for (auto& card : district.museum_cards) hidden_cards.push_back(&card);
@@ -84,6 +90,13 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
       if (std::find(result.blackmailer_done.begin(), result.blackmailer_done.end(), number) ==
           result.blackmailer_done.end()) candidates.push_back(number);
     if (!candidates.empty()) result.blackmailer_signed = candidates[rng() % candidates.size()];
+  }
+  if (result.blackmailer_player != viewer && result.blackmailer_signed >= 0) {
+    const int threatened_number = result.pending_kind == "blackmailer_threat"
+        ? result.pending_first
+        : result.reaction_kind == "blackmailer" ? result.reaction_num : -1;
+    if (threatened_number >= 1 && threatened_number <= 9)
+      result.pending_signed = result.blackmailer_signed == threatened_number ? 1 : 0;
   }
 
   // Draft choices already made by opponents are hidden; reconstruct the

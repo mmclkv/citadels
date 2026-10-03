@@ -26,5 +26,5 @@ native/*.obj
 native/*.pdb
 native/*.exp
 native/*.dll
-native/mcts_worker_libtorch.build.json
+native/*.build.json
 *.dmp

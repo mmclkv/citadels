@@ -2784,6 +2784,20 @@
   }
 
   /* ============================== 渲染主函数 ============================== */
+  function viewerIdForState(s) {
+    const players = Array.isArray(s && s.players) ? s.players : [];
+    const hasPlayer = id => id != null && players.some(player => player && player.id === id);
+    // The per-view `you` field is authoritative. The cached socket identity can
+    // briefly belong to the previous room/game while the first state arrives.
+    if (hasPlayer(s && s.you)) return s.you;
+    // Private hand data is only included for the viewer. It safely recovers the
+    // local identity if an initial/reconnected state omitted `you`.
+    const privatePlayer = players.find(player => player && Array.isArray(player.hand));
+    if (privatePlayer) return privatePlayer.id;
+    // Use the cached identity only when it still refers to a player in this state.
+    return hasPlayer(App.myId) ? App.myId : null;
+  }
+
   function render() {
     const s = App.state;
     if (!s) return;
@@ -2791,7 +2805,8 @@
     // The per-view state is authoritative for identity. Refresh this before
     // rendering the draft pool and player panels so a reconnect/state update
     // cannot leave every opponent filtered or the local panel unresolved.
-    if (s.you) App.myId = s.you;
+    const viewerId = viewerIdForState(s);
+    if (viewerId != null) App.myId = viewerId;
     // 记录滚动位置，渲染完恢复（避免每次行动后画面跳动）
     const _scrollSnap = snapshotScroll();
 
@@ -2989,9 +3004,9 @@
       guide.style.visibility = 'visible';
       guide.setAttribute('aria-hidden', 'false');
     }
-    const actor = localActor(s);
-    const actorIdx = actor ? s.players.findIndex(p => p.id === actor.id) : -1;
-    const roleHint = s.turn && s.turn.charNum != null ? ' · ' + s.turn.charNum + '号角色' : '';
+    const actorIdx = s.phase === 'draft'
+      ? s.players.findIndex(p => p.id === (s.draft && s.draft.currentPlayer))
+      : (s.turn && Number.isInteger(s.turn.playerIdx) ? s.turn.playerIdx : -1);
     guide.innerHTML = '<span class="order-label">行动指引</span>' +
       '<span class="order-note">角色按编号顺序行动</span>' +
       s.players.map((p, i) =>
@@ -3007,7 +3022,7 @@
     hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
     const wrap = $('#opponents');
     const totalPlayers = s.players.length || 1;
-    const viewerId = s.you || App.myId;
+    const viewerId = viewerIdForState(s);
     const mobileRingLayout = isMobileOpponentLayout() && totalPlayers >= 5;
     const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
     const viewportH = (typeof window !== 'undefined' && window.innerHeight) || 720;
@@ -3772,7 +3787,7 @@
 
   function renderMe(s) {
     hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
-    const viewerId = s.you || App.myId;
+    const viewerId = viewerIdForState(s);
     const me = s.players.find(p => p.id === viewerId);
     if (!me) return;
     App.myIdx = s.players.findIndex(p => p.id === viewerId);
@@ -3941,8 +3956,8 @@
   /* ============================== 选角阶段 ============================== */
   function renderDraft(s) {
     const d = s.draft; if (!d) return;
-    const me = s.players.find(p => p.id === App.myId);
-    const viewerId = s.you || App.myId;
+    const viewerId = viewerIdForState(s);
+    const me = s.players.find(p => p.id === viewerId);
     const hasDraftAction = !!(s.available && s.available.actions &&
       s.available.actions.some(a => a.type === 'draft_pick' || a.type === 'draft_discard'));
     // 以状态里的 you / available 为准，避免重连或本地状态切换时 App.myId 短暂滞后。
@@ -4021,10 +4036,11 @@
       fd.innerHTML = '';
       for (let i = 0; i < faceDownCount; i++) fd.appendChild(el('div', 'facedown sm', '？'));
     }
-    const empty = faceUp.length === 0 && faceDownCount === 0;
     const count = $('#removed-widget-count');
     if (count) count.textContent = String(faceUp.length + faceDownCount);
-    corner.hidden = empty;
+    // Keep the corner control visible throughout an active game, including
+    // the opening draft before any role cards have been removed.
+    corner.hidden = false;
   }
 
   /* ============================== 行动栏 ============================== */
@@ -4082,7 +4098,49 @@
     promptEl.innerHTML = escapeHtml(av.prompt || '请选择行动');
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
+    const representedActions = new Set();
+    const playerActions = av.actions.filter(a =>
+      ['choose_player', 'spy_target', 'wizard_target', 'emperor_crown'].includes(a.type));
+    if (playerActions.length) {
+      playerActions.forEach(a => representedActions.add(a));
+      const prompt = s.turn && s.turn.pending && s.turn.pending.kind === 'emperor_crown'
+        ? '选择接收皇冠的玩家'
+        : '选择目标玩家';
+      const confirm = s.turn && s.turn.pending && s.turn.pending.kind === 'emperor_crown'
+        ? '移交皇冠' : '确认玩家';
+      appendActionChoiceSelect(actionsEl, promptEl, playerActions, prompt, '请选择玩家', confirm);
+    }
+    const roleActions = av.actions.filter(a =>
+      ['choose_char', 'magistrate_signed', 'magistrate_char',
+       'blackmailer_signed', 'blackmailer_char'].includes(a.type));
+    if (roleActions.length) {
+      roleActions.forEach(a => representedActions.add(a));
+      appendActionChoiceSelect(actionsEl, promptEl, roleActions,
+        av.prompt || '选择角色', '请选择角色', '确认角色');
+    }
+    if (districtSelectMode()) {
+      av.actions.filter(a => a.type === 'choose_district').forEach(a => representedActions.add(a));
+    }
+    const pendingKind = s.turn && s.turn.pending && s.turn.pending.kind;
+    const cardPickTypes = {
+      draw_keep: 'draw_keep', scholar_pick: 'scholar_pick',
+      prophet_give: 'prophet_give', wizard_card: 'wizard_card'
+    };
+    const cardPickType = cardPickTypes[pendingKind];
+    if (cardPickType) {
+      av.actions.filter(a => a.type === cardPickType).forEach(a => representedActions.add(a));
+    }
+    if (pendingKind === 'bishop_repay') {
+      const repayActions = av.actions.filter(a => a.type === 'choose_cards');
+      repayActions.forEach(a => representedActions.add(a));
+      if (repayActions.length && !(App.sel && App.sel.kind === 'multi')) {
+        const choose = el('button', 'act main', '选择手牌偿还代偿');
+        onTap(choose, () => runAction(repayActions[0]));
+        actionsEl.appendChild(choose);
+      }
+    }
     av.actions.forEach(a => {
+      if (representedActions.has(a)) return;
       // 多选已开始（魔术师弃牌重抽）时，引擎还会给一个「确定（可点选手牌后再确定）」，
       // 与下面追加的「✓ 确定（N）」重复，两个都叫确定容易误点 —— 这里只保留带计数的那个。
       if (a.type === 'choose_cards' && App.sel && App.sel.kind === 'multi') return;
@@ -4120,6 +4178,32 @@
       onTap(b, openPickModal);
       actionsEl.appendChild(b);
     }
+  }
+
+  function appendActionChoiceSelect(actionsEl, promptEl, choices, prompt, placeholder, confirmLabel) {
+    promptEl.textContent = prompt;
+    const select = document.createElement('select');
+    select.className = 'act crown-target-select';
+    select.setAttribute('aria-label', prompt);
+    const first = document.createElement('option');
+    first.value = '';
+    first.textContent = placeholder;
+    select.appendChild(first);
+    choices.forEach((action, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = action.label || action.type;
+      select.appendChild(option);
+    });
+    const confirm = el('button', 'act main', confirmLabel);
+    confirm.disabled = true;
+    select.addEventListener('change', () => { confirm.disabled = select.value === ''; });
+    onTap(confirm, () => {
+      const index = Number(select.value);
+      if (select.value !== '' && choices[index]) runAction(choices[index]);
+    });
+    actionsEl.appendChild(select);
+    actionsEl.appendChild(confirm);
   }
 
   function actionBtn(a, cls) {

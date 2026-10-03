@@ -249,8 +249,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       std::vector<NativeSearchAction> actions;
       for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player) {
         // 法师只列有手牌的玩家：选中空手玩家下一步无牌可选，会和 JS 引擎卡住的分支不一致。
-        if (state.pending_kind == "wizard_target" && state.players[i].hand.empty() &&
-            state.players[i].hand_count <= 0) continue;
+        if (state.pending_kind == "wizard_target" && state.players[i].hand.empty()) continue;
         NativeSearchAction action; action.type = state.pending_kind == "spy_target" ? ActionType::SpyTarget : ActionType::WizardTarget;
         action.target = state.players[i].id; actions.push_back(std::move(action));
       }
@@ -277,8 +276,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (state.pending_kind == "wizard_choice") {
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions{{ActionType::WizardTake}};
-      if (state.pending_cards.size() == 1 && state.active() &&
-          state.active()->gold >= state.pending_cards.front().cost) actions.push_back({ActionType::WizardBuild});
+      const auto selected = std::find_if(state.pending_cards.begin(), state.pending_cards.end(),
+        [&](const DistrictCard& card) { return card.uid == state.pending_uid; });
+      if (selected != state.pending_cards.end() && state.active() &&
+          state.active()->gold >= selected->cost) actions.push_back({ActionType::WizardBuild});
       actions.push_back({ActionType::PendingBack});
       return actions;
     }
@@ -647,17 +648,19 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (action.type == ActionType::WizardTarget && player == state.active_player && state.pending_kind == "wizard_target") {
       const int target = state.find_player(action.target);
       if (target < 0 || target == player) return false;
-      state.pending_target = target; state.pending_cards = state.players[target].hand; state.pending_kind = "wizard_card"; return true;
+      state.pending_target = target; state.pending_uid.clear();
+      state.pending_cards = state.players[target].hand; state.pending_kind = "wizard_card"; return true;
     }
     if (action.type == ActionType::WizardCard && player == state.active_player && state.pending_kind == "wizard_card") {
       const auto it = std::find_if(state.pending_cards.begin(), state.pending_cards.end(), [&](const DistrictCard& c) { return c.uid == action.uid; });
       if (it == state.pending_cards.end()) return false;
-      const DistrictCard chosen = *it; state.pending_cards = {chosen}; state.pending_kind = "wizard_choice"; return true;
+      state.pending_uid = it->uid; state.pending_kind = "wizard_choice"; return true;
     }
     if (action.type == ActionType::PendingBack && player == state.active_player &&
         state.pending_kind == "wizard_choice" && state.pending_target >= 0 &&
         state.pending_target < static_cast<int>(state.players.size())) {
       state.pending_cards = state.players[state.pending_target].hand;
+      state.pending_uid.clear();
       state.pending_kind = "wizard_card";
       return !state.pending_cards.empty();
     }
@@ -826,7 +829,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       try { number = std::stoi(action.name); } catch (...) { return false; }
       bool known = false;
       for (const auto& id : state.char_deck) if (char_number(id) == number) known = true;
-      if (!known || number < 1 || number > 8) return false;
+      // Alternate character sets include rank-9 roles (e.g. Tax Collector,
+      // Queen, Artist). legal_actions exposes them from char_deck, so the
+      // executor must not reject them with the base-set 1..8 limit.
+      if (!known || number <= 0) return false;
       if (state.pending_kind == "assassin") state.assassinated = number;
       else { state.thief_target = number; state.thief_player = player; }
       state.pending_kind.clear();
@@ -948,7 +954,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     // whenever any supported policy version can distinguish own-hand cards,
     // public district identities, or public context; older policies may merely
     // leave some of these features unused.
-    const auto features = encode_features(state, player, 8, true, true, true);
+    const auto features = encode_features(state, player, 8, true, true, true, true);
     builder.u64(features.size());
     for (float value : features) builder.floating(value);
     const auto actions = legal_actions(state, player);

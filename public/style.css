@@ -738,6 +738,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .actions{display:flex;flex-wrap:wrap;gap:8px}
 .act{padding:8px 14px;border-radius:9px;border:1px solid var(--line2);background:#fffdf8;
   cursor:pointer;font-size:13px;transition:.15s;font-weight:600;color:var(--ink);text-align:left}
+.act.crown-target-select{min-width:min(250px,70vw);max-width:100%;font:inherit;line-height:1.4}
 .act:hover{background:#fdf3dd;border-color:var(--gold);transform:translateY(-1px)}
 .act.main{background:linear-gradient(180deg,#d9a836,#c0881f);color:#fff;border-color:#a97c15}
 .act.main:hover{filter:brightness(1.07)}
@@ -1619,6 +1620,16 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
     padding:6px;overflow-x:auto;overflow-y:hidden;align-content:stretch}
   #my-city.city-row>.card{width:42px!important;height:59px!important;flex:none}
   #my-hand.hand-row>.card{width:42px!important;height:59px!important}
+}
+
+/* PWA 中自己的建筑固定单行横排，数量超出时横向滚动，不折到第二排。 */
+@media (display-mode:standalone), (display-mode:fullscreen){
+  #screen-game #my-city.city-row{
+    display:flex!important;flex-direction:row;flex-wrap:nowrap!important;
+    grid-auto-flow:unset;grid-template-rows:none;grid-auto-columns:unset;
+    overflow-x:auto;overflow-y:hidden
+  }
+  #screen-game #my-city.city-row>.card{flex:0 0 auto}
 }
 
 /* 移动端统一卡牌缩放：普通卡与角色卡均缩为原来的约一半，桌面端不变。 */

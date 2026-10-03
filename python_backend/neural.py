@@ -5,12 +5,15 @@ from __future__ import annotations
 import array
 import gzip
 import json
+import math
 import os
 import random
 import tempfile
 from pathlib import Path
 
 import numpy as np
+
+from .model_contract import validate_checkpoint_contract
 
 class NeuralPolicy:
     def __init__(self, checkpoint: str | None = None, profile: str | None = None,
@@ -25,8 +28,8 @@ class NeuralPolicy:
         self.device_name = device or os.environ.get("CITADELS_NEURAL_DEVICE", "auto")
         if self.device_name == "auto":
             self.device_name = "cuda"
-        self.architecture = os.environ.get("CITADELS_NEURAL_ARCHITECTURE", "entity-v5")
-        self.action_version = 8
+        self.architecture = os.environ.get("CITADELS_NEURAL_ARCHITECTURE", "entity-v6")
+        self.action_version = 9 if self.architecture == "entity-v6" else 8
         self.worker = worker
         self.model_path = ""
         self._model_dir = None
@@ -55,13 +58,22 @@ class NeuralPolicy:
                     checkpoint = json.load(handle)
                 metadata = checkpoint.get("model") or {}
                 self.architecture = metadata.get("architecture") or "flat"
-                if self.architecture not in ("flat", "entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5"):
+                if self.architecture not in ("flat", "entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5", "entity-v6"):
                     raise ValueError(f"不支持的 checkpoint 网络架构：{self.architecture}")
-                self.profile = profile or metadata.get("profile") or (checkpoint.get("config") or {}).get("profile") or "balanced"
-                self.action_version = int((checkpoint.get("encoding") or {}).get("action") or 8)
+                contract = validate_checkpoint_contract(checkpoint, self.architecture)
+                checkpoint_profile = metadata.get("profile") or (checkpoint.get("config") or {}).get("profile") or "balanced"
+                if checkpoint_profile not in ("fast", "balanced", "large"):
+                    raise ValueError(f"不支持的 checkpoint profile：{checkpoint_profile}")
+                if profile and profile != checkpoint_profile:
+                    raise ValueError(
+                        f"指定的 profile={profile} 与 checkpoint profile={checkpoint_profile} 不匹配")
+                self.profile = checkpoint_profile
+                self.action_version = contract["action"]
                 weights = metadata.get("flat") or []
                 if len(weights) != metadata.get("parameterCount"):
                     raise ValueError("checkpoint 参数数量与元数据不符")
+                if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in weights):
+                    raise ValueError("checkpoint 权重包含非有限数值")
                 self._model_dir = tempfile.TemporaryDirectory(prefix="citadels-live-policy-")
                 self.model_path = str(Path(self._model_dir.name) / "model.bin")
                 values = array.array("f", (float(value) for value in weights))

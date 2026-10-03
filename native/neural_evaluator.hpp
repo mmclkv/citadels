@@ -18,9 +18,10 @@ namespace citadels::native {
 inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1,
                                               bool include_own_hand = false,
                                               bool include_city_identity = false,
-                                              bool include_public_context = false) {
-  auto features = encode_features(state, player, 8, include_own_hand, include_city_identity, include_public_context);
-  features.resize(include_public_context ? kEntityV5StateFeatureSize : include_city_identity ? kEntityV4StateFeatureSize
+                                              bool include_public_context = false,
+                                              bool include_v6_features = false) {
+  auto features = encode_features(state, player, 8, include_own_hand, include_city_identity, include_public_context, include_v6_features);
+  features.resize(include_v6_features ? kEntityV6StateFeatureSize : include_public_context ? kEntityV5StateFeatureSize : include_city_identity ? kEntityV4StateFeatureSize
     : include_own_hand ? kEntityV3StateFeatureSize : kStateFeatureSize, 0.0f);
   return features;
 }
@@ -44,6 +45,17 @@ inline float uid_reference(const std::string& uid) {
 inline int role_number_for_action(const std::string& id) {
   const int numeric = id.empty() ? 0 : std::atoi(id.c_str());
   return numeric > 0 ? numeric : role_number(id);
+}
+
+inline std::array<float, 2> uid_bytes(const std::string& uid) {
+  size_t end = uid.size();
+  while (end > 0 && uid[end - 1] >= '0' && uid[end - 1] <= '9') --end;
+  if (end == uid.size()) return {};
+  uint32_t number = 0;
+    for (size_t i = end; i < uid.size(); ++i)
+      number = number > 6553 || (number == 6553 && uid[i] > '5')
+        ? 65535 : number * 10 + static_cast<uint32_t>(uid[i] - '0');
+  return {static_cast<float>(number & 255u) / 255.0f, static_cast<float>((number >> 8) & 255u) / 255.0f};
 }
 
 inline int action_type_feature_index(ActionType type) {
@@ -110,10 +122,20 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
   result[111] = action.uid.empty() ? 0.0f : 1.0f;
   result[112] = action.secondary_uid.empty() ? 0.0f : 1.0f;
   result[113] = std::min(1.0f, static_cast<float>(action.selected_uids.size()) / 8.0f);
-  result[114] = uid_reference(action.uid);
-  result[115] = uid_reference(action.secondary_uid);
-  for (size_t i = 0; i < action.selected_uids.size() && i < 8; ++i)
-    result[116 + i] = uid_reference(action.selected_uids[i]);
+  if (action_encoding_version >= 9) {
+    const auto primary = uid_bytes(action.uid), secondary = uid_bytes(action.secondary_uid);
+    result[162] = primary[0]; result[163] = primary[1];
+    result[164] = secondary[0]; result[165] = secondary[1];
+    for (size_t i = 0; i < action.selected_uids.size() && i < 8; ++i) {
+      const auto selected = uid_bytes(action.selected_uids[i]);
+      result[166 + i * 2] = selected[0]; result[167 + i * 2] = selected[1];
+    }
+  } else {
+    result[114] = uid_reference(action.uid);
+    result[115] = uid_reference(action.secondary_uid);
+    for (size_t i = 0; i < action.selected_uids.size() && i < 8; ++i)
+      result[116 + i] = uid_reference(action.selected_uids[i]);
+  }
   if (state && !action.uid.empty()) {
     const DistrictCard* card = nullptr;
     for (const auto& player : state->players) {
@@ -142,10 +164,11 @@ class NativeNeuralBatchedEvaluator final
                                int action_encoding_version = kActionEncodingVersion,
                                bool include_own_hand = false,
                                bool include_city_identity = false,
-                               bool include_public_context = false)
+                               bool include_public_context = false,
+                               bool include_v6_features = false)
       : backend_(backend), profile_(std::move(profile)), action_encoding_version_(action_encoding_version),
         include_own_hand_(include_own_hand), include_city_identity_(include_city_identity),
-        include_public_context_(include_public_context) {}
+        include_public_context_(include_public_context), include_v6_features_(include_v6_features) {}
 
   Evaluation evaluate(const NativeGameState& state, int player,
                       const std::vector<NativeSearchAction>& actions) override {
@@ -162,7 +185,7 @@ class NativeNeuralBatchedEvaluator final
     state_vectors.reserve(states.size()); action_vectors.reserve(actions.size());
     for (size_t i = 0; i < states.size(); ++i)
       state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1,
-                                                   include_own_hand_, include_city_identity_, include_public_context_));
+                                                   include_own_hand_, include_city_identity_, include_public_context_, include_v6_features_));
     for (const auto& group : actions) {
       action_vectors.emplace_back();
       for (const auto& action : group)
@@ -199,6 +222,7 @@ class NativeNeuralBatchedEvaluator final
   bool include_own_hand_;
   bool include_city_identity_;
   bool include_public_context_;
+  bool include_v6_features_;
 };
 
 class NativeNeuralEvaluator final : public Evaluator<NativeGameState, NativeSearchAction> {

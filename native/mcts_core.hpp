@@ -227,7 +227,9 @@ class Mcts {
           backed_up = true;
           break;
         }
-        const int player = game_.next_player(state);
+        // Terminal states have no next actor. Keep the mover as the value
+        // perspective so terminal rewards are not collapsed to an all-zero vector.
+        const int player = game_.terminal(state) ? node->player : game_.next_player(state);
         const InformationSetKey key = game_.information_set_hash(state, player);
         Node* child = find_child(*node, index, key);
         if (!child) {
@@ -248,7 +250,8 @@ class Mcts {
         node = child;
         path.push_back(node);
       }
-      if (!backed_up) backup(path, node->value_vector);
+      if (!backed_up) backup(path, game_.terminal(state)
+        ? game_.terminal_value_vector(state, node->player) : node->value_vector);
     }
 
     Result result;
@@ -455,7 +458,7 @@ class BatchedMcts {
             terminal.push_back(true); terminal_values.push_back(node->value_vector);
             paths.push_back(std::move(path)); collected = true; break;
           }
-          const int player = game_.next_player(state);
+          const int player = game_.terminal(state) ? node->player : game_.next_player(state);
           const InformationSetKey key = game_.information_set_hash(state, player);
           Node* child = find_child(*node, index, key);
           if (!child) {
@@ -476,7 +479,9 @@ class BatchedMcts {
           path.push_back(node);
         }
         if (!collected) {
-          terminal.push_back(true); terminal_values.push_back(node->value_vector);
+          terminal.push_back(true);
+          terminal_values.push_back(game_.terminal(state)
+            ? game_.terminal_value_vector(state, node->player) : node->value_vector);
           paths.push_back(std::move(path));
         }
         // 批量收集叶节点期间先加临时访问次数，让同一 batch 内的后续

@@ -251,7 +251,7 @@ class PolicyValueNet(nn.Module):
 def create_model(architecture, profile):
     if architecture in (None, "", "flat", "policy-value"):
         return PolicyValueNet(profile)
-    if architecture in ("entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5"):
+    if architecture in ("entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5", "entity-v6"):
         if EntityTransformerNet is None:
             detail = str(ENTITY_TRANSFORMER_IMPORT_ERROR)
             raise RuntimeError("无法加载 entity_transformer.py" + (f": {detail}" if detail else ""))

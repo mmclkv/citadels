@@ -9,7 +9,7 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 11;
+constexpr int kStateEncodingVersion = 12;
 constexpr int kLegacyStateEncodingVersion = 8;
 constexpr int kStateFeatureSize = 672;
 constexpr int kEntityV3StateFeatureSize = 702;
@@ -21,7 +21,14 @@ constexpr int kEntityV4PlayerEmbedFeatureSize = 56 + 8 * (3 + kCityCardEmbedding
 constexpr int kEntityV4StateFeatureSize = 32 + 8 * kEntityV4PlayerFeatureSize + kCityCardFeatureSize;
 constexpr int kPublicContextFeatureSize = 72;
 constexpr int kEntityV5StateFeatureSize = kEntityV4StateFeatureSize + kPublicContextFeatureSize;
-constexpr int kActionEncodingVersion = 8;
+constexpr int kEntityV6CitySlots = 16;
+constexpr int kEntityV6CitySlotSize = 8;
+constexpr int kEntityV6PlayerFeatureSize = 56 + kEntityV6CitySlots * kEntityV6CitySlotSize;
+constexpr int kEntityV6PlayerEmbedFeatureSize = 56 + kEntityV6CitySlots * (7 + kCityCardEmbeddingSize);
+constexpr int kEntityV6BaseFeatureSize = 32 + 8 * kEntityV6PlayerFeatureSize + kCityCardFeatureSize;
+constexpr int kEntityV6PublicContextSize = 256;
+constexpr int kEntityV6StateFeatureSize = kEntityV6BaseFeatureSize + kEntityV6PublicContextSize;
+constexpr int kActionEncodingVersion = 9;
 constexpr std::array<const char*, 27> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
   "king", "emperor", "noble", "bishop", "monk", "merchant", "alchemist", "businessman",
   "architect", "navigator", "scholar", "warlord", "diplomat", "marshal", "queen", "artist",
@@ -114,10 +121,11 @@ inline std::vector<float> encode_features(const NativeGameState& state,
                                           int max_players = 8,
                                           bool include_own_hand = false,
                                           bool include_city_identity = false,
-                                          bool include_public_context = false) {
+                                          bool include_public_context = false,
+                                          bool include_v6_features = false) {
   (void)max_players;
-  const int player_feature_size = include_city_identity ? kEntityV4PlayerFeatureSize : 80;
-  const int state_feature_size = include_public_context ? kEntityV5StateFeatureSize : include_city_identity ? kEntityV4StateFeatureSize
+  const int player_feature_size = include_v6_features ? kEntityV6PlayerFeatureSize : include_city_identity ? kEntityV4PlayerFeatureSize : 80;
+  const int state_feature_size = include_v6_features ? kEntityV6StateFeatureSize : include_public_context ? kEntityV5StateFeatureSize : include_city_identity ? kEntityV4StateFeatureSize
     : include_own_hand ? kEntityV3StateFeatureSize : kStateFeatureSize;
   std::vector<float> features(state_feature_size, 0.0f);
   const int player_count = static_cast<int>(state.players.size());
@@ -129,8 +137,8 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     return (absolute - me + player_count) % player_count;
   };
   const int active_rel = rel(active);
-  features[0] = static_cast<float>(include_public_context ? kStateEncodingVersion
-    : include_city_identity ? kStateEncodingVersion - 1 : include_own_hand ? 9 : kLegacyStateEncodingVersion);
+  features[0] = static_cast<float>(include_v6_features ? kStateEncodingVersion : include_public_context ? kStateEncodingVersion - 1
+    : include_city_identity ? kStateEncodingVersion - 2 : include_own_hand ? 9 : kLegacyStateEncodingVersion);
   features[1] = static_cast<float>(player_count) / 8.0f;
   features[2] = static_cast<float>(state_phase_code(state.phase)) / 6.0f;
   features[3] = static_cast<float>(state.round) / 100.0f;
@@ -225,9 +233,10 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     if (revealed >= 1 && revealed <= 9) features[base + 19 + static_cast<size_t>(revealed)] = 1.0f;
     for (size_t role = 0; role < kRoleIds.size(); ++role)
       if (revealed_id == kRoleIds[role]) { features[base + 29 + role] = 1.0f; break; }
-    for (size_t i = 0; i < p.city.size() && i < 8; ++i) {
+    const size_t max_city_slots = include_v6_features ? kEntityV6CitySlots : 8;
+    for (size_t i = 0; i < p.city.size() && i < max_city_slots; ++i) {
       const auto& card = p.city[i].card;
-      const size_t slot_width = include_city_identity ? kCityIdSlotSize : 3;
+      const size_t slot_width = include_v6_features ? kEntityV6CitySlotSize : include_city_identity ? kCityIdSlotSize : 3;
       const size_t slot = base + 56 + i * slot_width;
       features[slot] = std::min(1.0f, std::max(0.0f, static_cast<float>(card.cost) / 8.0f));
       int color = 0;
@@ -236,9 +245,15 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       features[slot + 1] = static_cast<float>(color) / 5.0f;
       const int score = card.score_value > 0 ? card.score_value : card.cost;
       features[slot + 2] = std::min(1.0f, std::max(0.0f, static_cast<float>(score) / 10.0f));
-      if (include_city_identity) {
+      if (include_city_identity || include_v6_features) {
         const int identity = district_identity_index(card);
         if (identity >= 0) features[slot + 3] = static_cast<float>(identity + 1);
+      }
+      if (include_v6_features) {
+        features[slot + 4] = p.city[i].beautified ? 1.0f : 0.0f;
+        features[slot + 5] = std::min(1.0f, static_cast<float>(p.city[i].museum_cards.size()) / 8.0f);
+        features[slot + 6] = std::min(1.0f, static_cast<float>(p.city[i].built_round) / 100.0f);
+        features[slot + 7] = p.city[i].fortress ? 1.0f : 0.0f;
       }
     }
   }
@@ -256,14 +271,14 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     for (const auto& card : state.players[me].hand) {
       for (size_t i = 0; i < hand_cards.size(); ++i) {
         if (card.en == hand_cards[i] || (card.en.empty() && card.name == hand_cards[i])) {
-          features[(include_city_identity ? 32 + 8 * kEntityV4PlayerFeatureSize : kStateFeatureSize) + i] += 1.0f / maximum_copies[i];
+          features[(include_v6_features ? kEntityV6BaseFeatureSize - kCityCardFeatureSize : include_city_identity ? 32 + 8 * kEntityV4PlayerFeatureSize : kStateFeatureSize) + i] += 1.0f / maximum_copies[i];
           break;
         }
       }
     }
   }
   if (include_public_context) {
-    const size_t start = kEntityV4StateFeatureSize;
+    const size_t start = include_v6_features ? kEntityV6BaseFeatureSize : kEntityV4StateFeatureSize;
     const auto mark_roles = [&](const std::vector<std::string>& roles, size_t offset) {
       for (const auto& id : roles) for (size_t i = 0; i < kRoleIds.size(); ++i)
         if (id == kRoleIds[i]) features[start + offset + i] = 1.0f;
@@ -298,6 +313,47 @@ inline std::vector<float> encode_features(const NativeGameState& state,
         }
       features[start + 66] = low / 32768.0f;
       features[start + 67] = high / 32768.0f;
+    }
+    if (include_v6_features) {
+      const auto mark_number = [&](int number, size_t offset) {
+        if (number >= 1 && number <= 9) features[start + offset + static_cast<size_t>(number - 1)] = 1.0f;
+      };
+      if (state.magistrate_player == me) mark_number(state.magistrate_signed, 72);
+      if (state.blackmailer_player == me) mark_number(state.blackmailer_signed, 81);
+      if (state.reaction_kind == "graveyard") features[start + 90] = 1.0f;
+      if (state.reaction_kind == "magistrate") features[start + 91] = 1.0f;
+      if (state.reaction_kind == "blackmailer") features[start + 92] = 1.0f;
+      features[start + 93] = state.reaction_build ? 1.0f : 0.0f;
+      const auto mark_card = [&](const std::string& uid, size_t offset) {
+        const auto mark = [&](const DistrictCard& card) {
+          const int identity = district_identity_index(card);
+          if (identity >= 0) features[start + offset + static_cast<size_t>(identity)] = 1.0f;
+        };
+        for (const auto& player : state.players) {
+          for (const auto& card : player.hand) if (card.uid == uid) { mark(card); return; }
+          for (const auto& district : player.city) if (district.card.uid == uid) { mark(district.card); return; }
+        }
+        for (const auto& card : state.pending_cards) if (card.uid == uid) { mark(card); return; }
+      };
+      mark_card(state.reaction_uid, 94);
+      mark_card(state.pending_uid, 124);
+      const auto add_identity_count = [&](const DistrictCard& card, size_t offset, float divisor) {
+        const int identity = district_identity_index(card);
+        if (identity >= 0) features[start + offset + static_cast<size_t>(identity)] += 1.0f / divisor;
+      };
+      if (me == state.active_player) {
+        for (const auto& uid : state.pending_selected) {
+          for (const auto& card : state.players[me].hand) if (card.uid == uid) { add_identity_count(card, 154, 5.0f); break; }
+        }
+        for (const auto& card : state.pending_cards) add_identity_count(card, 184, 5.0f);
+      }
+      features[start + 214] = std::min(1.0f, static_cast<float>(state.pending_cursor) / 32.0f);
+      features[start + 215] = std::min(1.0f, static_cast<float>(state.pending_selected.size()) / 16.0f);
+      features[start + 216] = std::min(1.0f, static_cast<float>(state.pending_amount) / 20.0f);
+      for (int number : state.pending_nums) mark_number(number, 217);
+      features[start + 226] = std::min(1.0f, static_cast<float>(state.pending_cards.size()) / 16.0f);
+      features[start + 227] = state.pending_kind == "wizard_choice" ? 1.0f : 0.0f;
+      features[start + 228] = state.magistrate_claimed ? 1.0f : 0.0f;
     }
   }
   return features;

@@ -51,7 +51,8 @@ inline void write_native_card(std::ostream& out, const DistrictCard& card,
   if (district) {
     out << ",\"purple\":{\"effect\":"; write_json_string(out, district->effect);
     out << ",\"scoreAs\":" << card.score_as << "},\"beautified\":"
-        << (district->beautified ? "true" : "false") << ",\"builtRound\":" << district->built_round
+        << (district->beautified ? "true" : "false") << ",\"fortress\":"
+        << (district->fortress ? "true" : "false") << ",\"builtRound\":" << district->built_round
         << ",\"museum\":[";
     for (size_t i = 0; i < district->museum_cards.size(); ++i) {
       if (i) out << ',';
@@ -106,6 +107,7 @@ inline void write_native_action(std::ostream& out, const NativeSearchAction& act
 inline void write_native_state(std::ostream& out, const NativeGameState& state) {
   out << "{\"phase\":\"" << native_phase_name(state.phase) << "\",\"round\":" << state.round
       << ",\"rngState\":" << state.rng.state() << ",\"firstToFinish\":" << state.first_to_finish
+      << ",\"config\":{\"endDistricts\":" << state.end_districts << '}'
       << ",\"pendingQueen\":";
   if (state.pending_queen < 0) out << "null";
   else out << "{\"playerIdx\":" << state.pending_queen << '}';
@@ -178,6 +180,11 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     }
     out << "]}";
   }
+  // Face-up removals remain public and affect later role-target choices
+  // (e.g. the Magistrate), even after the draft UI is no longer active.
+  out << ",\"draftPublic\":{\"faceUp\":";
+  write_json_strings(out, state.draft_face_up);
+  out << '}';
   out << ",\"turn\":";
   if (!state.has_turn || state.active_player < 0 || state.active_player >= static_cast<int>(state.players.size())) out << "null";
   else {
@@ -221,7 +228,13 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
         for (size_t i = 0; i < state.pending_queue.size(); ++i) { if (i) out << ','; out << state.pending_queue[i]; }
         out << ']';
       }
-      if (!state.pending_cards.empty()) {
+      if (state.pending_kind == "wizard_choice" && state.pending_target >= 0 &&
+          state.pending_target < static_cast<int>(state.players.size())) {
+        const auto& hand = state.players[state.pending_target].hand;
+        const auto chosen = std::find_if(hand.begin(), hand.end(),
+          [&](const DistrictCard& card) { return card.uid == state.pending_uid; });
+        if (chosen != hand.end()) { out << ",\"card\":"; write_native_card(out, *chosen); }
+      } else if (!state.pending_cards.empty()) {
         out << ",\"cards\":[";
         for (size_t i = 0; i < state.pending_cards.size(); ++i) { if (i) out << ','; write_native_card(out, state.pending_cards[i]); }
         out << ']';

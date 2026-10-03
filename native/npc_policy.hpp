@@ -142,7 +142,11 @@ class NativeNpcPolicy {
       return (type == ActionType::DraftPick ? value : -value) + noise(rng, noise_scale);
     }
     if (s.pending_kind == "blackmailer_threat") return type == (p.gold >= 4 ? ActionType::BlackmailerBribe : ActionType::BlackmailerRefuse) ? 100 : 0;
-    if (s.pending_kind == "wizard_choice") return type == (s.pending_cards.size() && p.gold >= s.pending_cards[0].cost ? ActionType::WizardBuild : ActionType::WizardTake) ? 100 : -10;
+    if (s.pending_kind == "wizard_choice") {
+      const auto selected = std::find_if(s.pending_cards.begin(), s.pending_cards.end(),
+        [&](const DistrictCard& card) { return card.uid == s.pending_uid; });
+      return type == (selected != s.pending_cards.end() && p.gold >= selected->cost ? ActionType::WizardBuild : ActionType::WizardTake) ? 100 : -10;
+    }
     if (s.pending_kind == "magician_choice") {
       int max_hand = 0; for (size_t i=0;i<s.players.size();++i) if (static_cast<int>(i)!=index) max_hand=std::max(max_hand, static_cast<int>(s.players[i].hand.size()));
       const bool swap = (p.hand.size() <= 1 && max_hand >= 2) || (p.hand.size() >= 3 && max_hand >= 4);

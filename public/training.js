@@ -11,10 +11,10 @@ let logPlaceholder = false;
 let logErrorEl = null;
 let logErrorText = '';
 let resumeCheckpointCompatible = null;
-const CURRENT_STATE_ENCODING_VERSION = 11;
-const CURRENT_ACTION_ENCODING_VERSION = 8;
+const CURRENT_STATE_ENCODING_VERSION = 12;
+const CURRENT_ACTION_ENCODING_VERSION = 9;
 
-function num(value, digits = 2) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
+function num(value, digits = 2) { return value == null || value === '' ? '—' : Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
 function integer(value) { return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('zh-CN') : '0'; }
 function duration(ms) {
   if (!Number.isFinite(Number(ms))) return '—';
@@ -307,7 +307,7 @@ function render(status) {
   })), { digits: 2, zeroBased: true });
   drawLines($('speed-chart'), history, [
     { key: 'avgGameMs', color: '#35dcff', label: '整局毫秒', scale: .001 },
-    { key: 'avgInferenceMs', color: '#ff4fc7', label: '单步毫秒' }
+    { key: 'avgInferenceMs', color: '#ff4fc7', label: '单次搜索毫秒' }
   ]);
   drawSeatGroups($('seat-chart'), seatGroups(point.winSeatsByPlayers));
   syncResumeUI();
@@ -333,8 +333,8 @@ function renderRuntime(status) {
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
-    ['状态 / 动作编码', 'v' + (c.networkArchitecture === 'entity-v5' ? CURRENT_STATE_ENCODING_VERSION : c.networkArchitecture === 'entity-v4' ? 10 : c.networkArchitecture === 'entity-v3' ? 9 : 8) +
-      ' / v' + CURRENT_ACTION_ENCODING_VERSION + '（跨引擎对齐）'],
+    ['状态 / 动作编码', 'v' + (c.networkArchitecture === 'entity-v6' ? 12 : c.networkArchitecture === 'entity-v5' ? 11 : c.networkArchitecture === 'entity-v4' ? 10 : c.networkArchitecture === 'entity-v3' ? 9 : 8) +
+      ' / v' + (c.networkArchitecture === 'entity-v6' ? 9 : 8) + '（跨引擎对齐）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['启发式难度', c.heuristicDifficulty || '—'],
     ['训练目标', '仅策略网络行动的 MCTS 访问分布'],
