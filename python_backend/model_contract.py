@@ -1,13 +1,7 @@
 """Shared checkpoint and feature-version contract for training and live play."""
 
 MODEL_CONTRACTS = {
-    "flat": {"state": 8, "action": 8, "stateSize": 672, "actionSize": 256},
-    "entity-v1": {"state": 8, "action": 8, "stateSize": 672, "actionSize": 256},
-    "entity-v2": {"state": 8, "action": 8, "stateSize": 672, "actionSize": 256},
-    "entity-v3": {"state": 9, "action": 8, "stateSize": 702, "actionSize": 256},
-    "entity-v4": {"state": 10, "action": 8, "stateSize": 766, "actionSize": 256},
-    "entity-v5": {"state": 11, "action": 8, "stateSize": 838, "actionSize": 256},
-    "entity-v6": {"state": 12, "action": 9, "stateSize": 1790, "actionSize": 256},
+    "entity-v6": {"state": 14, "action": 9, "stateSize": 1790, "actionSize": 256},
 }
 
 
@@ -28,13 +22,11 @@ def validate_checkpoint_contract(checkpoint: dict, architecture: str) -> dict:
     state_version = encoding.get("state")
     if state_version is None:
         state_version = model.get("encodingVersion")
-    # Early packaged checkpoints omitted explicit version fields. Their
-    # architecture and exact feature widths still identify the legacy schema.
     if state_version is None:
-        state_version = expected["state"]
+        raise ValueError("checkpoint 缺少明确的状态编码版本")
     action_version = encoding.get("action")
     if action_version is None:
-        action_version = expected["action"]
+        raise ValueError("checkpoint 缺少明确的动作编码版本")
     if (state_version, action_version) != (expected["state"], expected["action"]):
         raise ValueError(
             "checkpoint 状态/动作编码版本不兼容："

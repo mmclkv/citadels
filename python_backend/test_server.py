@@ -471,7 +471,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.app.training.data_dir = Path(directory)
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
-                      "profile": "fast", "networkArchitecture": "entity-v5", "device": "cpu",
+                      "profile": "fast", "networkArchitecture": "entity-v6", "device": "cpu",
                       "rulesEngine": "js", "mctsEngine": "cpp",
                       "neuralNetworkFramework": "libtorch", "backend": "native",
                       "nativeInferenceBackend": "libtorch", "mctsEvaluator": "native",

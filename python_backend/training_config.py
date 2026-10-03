@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 PROFILES = {"fast", "balanced", "large"}
-ARCHITECTURES = {"flat", "entity-v5", "entity-v6"}
+ARCHITECTURES = {"entity-v6"}
 
 
 def _number(value, fallback=0.0) -> float:
@@ -39,6 +39,9 @@ def _clamp_integer(value, low: int, high: int, fallback: int) -> int | float:
 
 def sanitize_config(raw: dict | None = None) -> dict:
     raw = raw if isinstance(raw, dict) else {}
+    requested_architecture = raw.get("networkArchitecture")
+    if requested_architecture not in (None, "", "entity-v6"):
+        raise ValueError(f"仅支持 entity-v6 网络架构，当前配置为：{requested_architecture}")
     min_players = _clamp_or(raw.get("minPlayers"), 2, 8, 4)
     max_players = max(min_players, _clamp_or(raw.get("maxPlayers"), min_players, 8, min_players))
     cpu_count = os.cpu_count() or 1
@@ -62,7 +65,7 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "charSet": raw.get("charSet") if raw.get("charSet") in ("base", "dark", "mixed", "random") else "random",
         "endDistricts": int(_number(raw.get("endDistricts"))) if _number(raw.get("endDistricts")) in (7, 8) else 8,
         "profile": raw.get("profile") if raw.get("profile") in PROFILES else "balanced",
-        "networkArchitecture": raw.get("networkArchitecture") if raw.get("networkArchitecture") in ARCHITECTURES else "entity-v6",
+        "networkArchitecture": "entity-v6",
         "rulesEngine": "cpp", "mctsEngine": "cpp",
         "neuralNetworkFramework": "libtorch", "backend": "python",
         "device": raw.get("device") if raw.get("device") in ("cuda", "cpu") else ("cpu" if raw.get("backend") == "cpu" else "cuda"),

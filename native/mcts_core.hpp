@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <random>
@@ -396,8 +397,9 @@ class BatchedMcts {
   using Result = typename Mcts<State, Action>::Result;
 
   BatchedMcts(const GameAdapter<State, Action>& game,
-              BatchedEvaluator<State, Action>& evaluator, Config config = {})
-      : game_(game), evaluator_(evaluator), config_(config) {}
+              BatchedEvaluator<State, Action>& evaluator, Config config = {},
+              std::function<int(const State&, int, int, const std::vector<Action>&)> npc_choice = {})
+      : game_(game), evaluator_(evaluator), config_(config), npc_choice_(std::move(npc_choice)) {}
 
   // 单世界搜索：退化成「粒子池只有一份」。
   Result search(const State& root_state, int root_player, int batch_size) {
@@ -419,6 +421,7 @@ class BatchedMcts {
     if (weights_->size() != root_states.size()) weight_total_ = 0.0f;
     const State& seed_state = root_states.front();
     player_count_ = state_player_count(seed_state, 0);
+    root_player_ = root_player;
     node_count_ = 1;
     expansions_ = 0;
     Node root;
@@ -435,6 +438,8 @@ class BatchedMcts {
       std::vector<std::vector<Node*>> paths;
       std::vector<std::array<float, kValueSlots>> terminal_values;
       std::vector<bool> terminal;
+      std::vector<size_t> path_evaluation_indices;
+      std::unordered_map<Node*, size_t> pending_evaluations;
       for (int i = 0; i < count; ++i) {
         // 每条模拟重新抽一个粒子：世界只在本次模拟内有效
         State state = root_states[pick_particle()];
@@ -444,19 +449,28 @@ class BatchedMcts {
         for (int depth = 0; depth < config_.max_depth; ++depth) {
           if (game_.terminal(state)) {
             terminal.push_back(true); terminal_values.push_back(game_.terminal_value_vector(state, node->player));
-            paths.push_back(std::move(path)); collected = true; break;
+            paths.push_back(std::move(path));
+            path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
+            collected = true; break;
           }
           if (!node->expanded) {
             terminal.push_back(false); terminal_values.push_back({});
-            states.push_back(std::move(state)); players.push_back(node->player);
-            actions.push_back(node->actions); paths.push_back(std::move(path));
+            paths.push_back(std::move(path));
+            const auto [pending, inserted] = pending_evaluations.emplace(node, states.size());
+            if (inserted) {
+              states.push_back(std::move(state)); players.push_back(node->player);
+              actions.push_back(node->actions);
+            }
+            path_evaluation_indices.push_back(pending->second);
             collected = true; break;
           }
           const size_t index = select(*node);
           if (index >= node->actions.size() ||
               !game_.apply(state, node->player, node->actions[index])) {
             terminal.push_back(true); terminal_values.push_back(node->value_vector);
-            paths.push_back(std::move(path)); collected = true; break;
+            paths.push_back(std::move(path));
+            path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
+            collected = true; break;
           }
           const int player = game_.terminal(state) ? node->player : game_.next_player(state);
           const InformationSetKey key = game_.information_set_hash(state, player);
@@ -464,7 +478,9 @@ class BatchedMcts {
           if (!child) {
             if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
               terminal.push_back(true); terminal_values.push_back(node->value_vector);
-              paths.push_back(std::move(path)); collected = true; break;
+              paths.push_back(std::move(path));
+              path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
+              collected = true; break;
             }
             auto fresh = std::make_unique<Node>();
             child = fresh.get();
@@ -472,7 +488,7 @@ class BatchedMcts {
             ++node_count_;
             child->player = player;
             child->information_set_key = key;
-            child->actions = game_.legal_actions(state, player);
+            child->actions = search_actions(state, player);
             node->child_by_key[index].emplace(key, child);
           }
           node = child;
@@ -483,6 +499,7 @@ class BatchedMcts {
           terminal_values.push_back(game_.terminal(state)
             ? game_.terminal_value_vector(state, node->player) : node->value_vector);
           paths.push_back(std::move(path));
+          path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
         }
         // 批量收集叶节点期间先加临时访问次数，让同一 batch 内的后续
         // simulation 能看到前面路径，避免所有叶节点都挤在同一条根分支。
@@ -491,17 +508,17 @@ class BatchedMcts {
       }
       for (const auto& path : paths)
         for (Node* visited : path) --visited->visits;
-      std::vector<Evaluation> evaluations;
-      if (!states.empty()) evaluations = evaluator_.evaluate_batch(states, players, actions);
-      size_t eval_index = 0;
+      const std::vector<Evaluation> evaluations = states.empty()
+          ? std::vector<Evaluation>{} : evaluator_.evaluate_batch(states, players, actions);
+      for (const auto& [node, eval_index] : pending_evaluations)
+        if (eval_index < evaluations.size()) expand(*node, states[eval_index], evaluations[eval_index]);
       for (size_t i = 0; i < paths.size(); ++i) {
         std::array<float, kValueSlots> value = terminal_values[i];
+        const size_t eval_index = path_evaluation_indices[i];
         if (!terminal[i] && eval_index < evaluations.size()) {
           value = evaluations[eval_index].has_value_vector
               ? evaluations[eval_index].value_vector : std::array<float, kValueSlots>{};
           if (!evaluations[eval_index].has_value_vector) value[0] = evaluations[eval_index].value;
-          expand(*paths[i].back(), states[eval_index], evaluations[eval_index]);
-          ++eval_index;
         }
         backup(paths[i], value);
       }
@@ -571,6 +588,15 @@ class BatchedMcts {
       ++node->visits;
     }
   }
+  std::vector<Action> search_actions(const State& state, int player) const {
+    auto actions = game_.legal_actions(state, player);
+    if (npc_choice_ && player != root_player_ && !actions.empty()) {
+      const int selected = npc_choice_(state, player, root_player_, actions);
+      if (selected >= 0 && static_cast<size_t>(selected) < actions.size())
+        return {actions[static_cast<size_t>(selected)]};
+    }
+    return actions;
+  }
   Result result(const Node& root) const {
     Result output; output.policy.resize(root.actions.size(), 0.0f);
     for (size_t i = 0; i < root.child_variants.size(); ++i)
@@ -614,8 +640,10 @@ class BatchedMcts {
   const std::vector<float>* weights_ = nullptr;
   float weight_total_ = 0.0f;
   size_t player_count_ = 0;
+  int root_player_ = 0;
   size_t node_count_ = 0;
   int expansions_ = 0;
+  std::function<int(const State&, int, int, const std::vector<Action>&)> npc_choice_;
 };
 
 }  // namespace citadels::native

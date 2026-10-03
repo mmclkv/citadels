@@ -15,15 +15,8 @@
 
 namespace citadels::native {
 
-inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1,
-                                              bool include_own_hand = false,
-                                              bool include_city_identity = false,
-                                              bool include_public_context = false,
-                                              bool include_v6_features = false) {
-  auto features = encode_features(state, player, 8, include_own_hand, include_city_identity, include_public_context, include_v6_features);
-  features.resize(include_v6_features ? kEntityV6StateFeatureSize : include_public_context ? kEntityV5StateFeatureSize : include_city_identity ? kEntityV4StateFeatureSize
-    : include_own_hand ? kEntityV3StateFeatureSize : kStateFeatureSize, 0.0f);
-  return features;
+inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1) {
+  return encode_features(state, player, 8);
 }
 
 inline void normalize_action_vector(std::vector<float>& vector) {
@@ -161,14 +154,8 @@ class NativeNeuralBatchedEvaluator final
     : public BatchedEvaluator<NativeGameState, NativeSearchAction> {
  public:
   NativeNeuralBatchedEvaluator(BatchEvaluator& backend, std::string profile,
-                               int action_encoding_version = kActionEncodingVersion,
-                               bool include_own_hand = false,
-                               bool include_city_identity = false,
-                               bool include_public_context = false,
-                               bool include_v6_features = false)
-      : backend_(backend), profile_(std::move(profile)), action_encoding_version_(action_encoding_version),
-        include_own_hand_(include_own_hand), include_city_identity_(include_city_identity),
-        include_public_context_(include_public_context), include_v6_features_(include_v6_features) {}
+                               int action_encoding_version = kActionEncodingVersion)
+      : backend_(backend), profile_(std::move(profile)), action_encoding_version_(action_encoding_version) {}
 
   Evaluation evaluate(const NativeGameState& state, int player,
                       const std::vector<NativeSearchAction>& actions) override {
@@ -184,8 +171,7 @@ class NativeNeuralBatchedEvaluator final
     std::vector<std::vector<std::vector<float>>> action_vectors;
     state_vectors.reserve(states.size()); action_vectors.reserve(actions.size());
     for (size_t i = 0; i < states.size(); ++i)
-      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1,
-                                                   include_own_hand_, include_city_identity_, include_public_context_, include_v6_features_));
+      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1));
     for (const auto& group : actions) {
       action_vectors.emplace_back();
       for (const auto& action : group)
@@ -219,10 +205,6 @@ class NativeNeuralBatchedEvaluator final
   BatchEvaluator& backend_;
   std::string profile_;
   int action_encoding_version_;
-  bool include_own_hand_;
-  bool include_city_identity_;
-  bool include_public_context_;
-  bool include_v6_features_;
 };
 
 class NativeNeuralEvaluator final : public Evaluator<NativeGameState, NativeSearchAction> {

@@ -64,9 +64,9 @@ native mcts_worker 的 GPU evaluator 有三种模式：
 不足 8 人的槽位为无效 mask。mcts_worker 返回 `valueVector`，同时保留
 `value = valueVector[0]` 供旧客户端兼容；GPU batch 协议也返回 8 个 float 的向量。
 
-## JS/C++ 输入编码协议：状态 v11 / 动作 v8
+## Entity Transformer v6 输入编码：状态 v14 / 动作 v9
 
-`training/train.js` 与 `native/state_features.hpp` 共用版本化状态编码。flat 与 v1/v2 使用 672 维，v3 使用 702 维，v4 使用 766 维；Entity Transformer v5 使用 838 维。v5 保留前 32 维全局、8 个各 88 维的相对玩家槽及 30 维本人手牌；新增尾部 72 维公开局面：本局角色牌与明置移除各 27 维，公开的刺杀/偷窃/魅惑和角色效果，以及本人第二角色与魔术师逐张重抽的进度。全局 token 读取原 32 维与新增 72 维，城市建筑 ID 仍经 31×8 embedding 表。对手手牌只用公开张数，不引入隐藏牌面。魔术师重抽采用逐张保留/重抽，可到达任意手牌子集而不枚举指数级候选。动作编码仍为 256 维。`state_features_probe` 和
+`native/state_features.hpp` 只实现 Entity Transformer v6：1790 维状态、256 维动作。状态包含 32 维全局信息、8 个各 184 维的相对玩家槽、30 维本人手牌及 256 维上下文；上下文包含当前可选角色池、建筑状态、反应及待处理效果。城市建筑 ID 经 31×8 embedding 表；对手手牌只用公开张数，不引入隐藏牌面。动作编码使用 UID 字节特征区分具体建筑。`state_features_probe` 和
 `action_features_probe` 用于逐元素跨语言回归检查。
 
 ## 搜索根的隐藏信息约定（确定化由调用方负责）

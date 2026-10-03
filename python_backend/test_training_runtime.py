@@ -9,17 +9,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from python_backend.training_runtime import TrainingManager  # noqa: E402
+from python_backend.training_runtime import (RecentNetworkMetrics, TrainingManager,
+                                            _checkpoint_due)  # noqa: E402
 
 
 class TrainingRuntimeTests(unittest.TestCase):
+    def test_network_strength_metrics_are_recent_per_player_count(self):
+        metrics = RecentNetworkMetrics(window=3)
+        metrics.add(4, 1.0, 1.0)
+        metrics.add(5, -1.0, 0.0)
+        metrics.add(4, 0.0, 0.0)
+        metrics.add(4, -1.0, 0.0)
+        metrics.add(4, -1.0, 0.0)
+        snapshot = metrics.snapshot()
+        self.assertEqual(snapshot["4"]["games"], 3)
+        self.assertAlmostEqual(snapshot["4"]["reward"], -2 / 3)
+        self.assertAlmostEqual(snapshot["4"]["winRate"], 0.0)
+        self.assertEqual(snapshot["5"]["games"], 1)
+        self.assertEqual(snapshot["5"]["reward"], -1.0)
+
+    def test_checkpoint_saves_when_batch_crosses_interval(self):
+        self.assertFalse(_checkpoint_due(1984, 1920, 2000, 200000, False))
+        self.assertTrue(_checkpoint_due(2048, 1984, 2000, 200000, False))
+        self.assertFalse(_checkpoint_due(2064, 2048, 2000, 200000, False))
+        self.assertTrue(_checkpoint_due(64, 0, 2000, 64, False))
+
     def test_mixed_selfplay_uses_native_state_engine(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = TrainingManager(directory)
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
                       "selfPlayMode": "network-vs-heuristic", "networkPlayerCount": 1,
                       "heuristicDifficulty": "random", "charSet": "base",
-                      "profile": "fast", "networkArchitecture": "entity-v5",
+                      "profile": "fast", "networkArchitecture": "entity-v6",
                       "device": "cpu", "backend": "cpu", "mctsSimulations": 1,
                       "mctsParticles": 1, "mctsMaxDepth": 12,
                       "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
@@ -35,7 +56,7 @@ class TrainingRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             manager = TrainingManager(directory)
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
-                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
+                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v6",
                       "device": "cpu", "backend": "cpu", "mctsSimulations": 1,
                       "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
                       "checkpointEvery": 1, "maxRounds": 1, "seed": 8127}
@@ -65,7 +86,7 @@ class TrainingRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             manager = TrainingManager(directory)
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
-                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
+                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v6",
                       "device": "cpu", "backend": "cpu", "mctsSimulations": 2,
                       "mctsParticles": 1, "mctsMaxDepth": 10,
                       "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
@@ -81,7 +102,7 @@ class TrainingRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             manager = TrainingManager(directory)
             config = {"targetGames": 4, "minPlayers": 2, "maxPlayers": 2,
-                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
+                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v6",
                       "device": "cpu", "backend": "cpu", "mctsSimulations": 1,
                       "workers": 2, "batchGames": 4, "trainingEpochs": 1, "miniBatch": 32,
                       "checkpointEvery": 4, "maxRounds": 1, "seed": 8131}
@@ -97,7 +118,7 @@ class TrainingRuntimeTests(unittest.TestCase):
     def test_saved_checkpoint_can_resume_in_python_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
-                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v5",
+                      "charSet": "base", "profile": "fast", "networkArchitecture": "entity-v6",
                       "device": "cpu", "mctsSimulations": 1, "batchGames": 1,
                       "trainingEpochs": 1, "miniBatch": 32, "checkpointEvery": 1,
                       "maxRounds": 1, "seed": 8128}

@@ -62,9 +62,16 @@ struct NativeCallEntry {
 struct NativeObservation {
   bool valid = false;
   int round = 0;
+  int turns_completed = 0;
   int gold = 0;
   int hand_size = 0;
   std::vector<std::string> free_colors;
+  std::string role_id;
+  bool witch_resume = false;
+  int builds = 0;
+  int build_limit = 1;
+  int quarry_count = 0;
+  std::vector<std::string> built_names;
 };
 
 struct NativeGameState {
@@ -212,9 +219,16 @@ struct NativeGameState {
     auto own_it = std::find_if(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) { return d.card.uid == pending_uid; });
     auto their_it = std::find_if(players[target].city.begin(), players[target].city.end(), [&](const NativeDistrict& d) { return d.card.uid == target_uid; });
     if (own_it == active()->city.end() || their_it == players[target].city.end() || own_it->fortress || their_it->fortress) return false;
-    if (std::any_of(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) {
-      return d.name == their_it->name && d.card.uid != pending_uid;
-    })) return false;
+    const int quarry_count = static_cast<int>(std::count_if(active()->city.begin(), active()->city.end(),
+      [](const NativeDistrict& district) { return district.effect == "quarry"; }));
+    const int same_name_count = static_cast<int>(std::count_if(active()->city.begin(), active()->city.end(),
+      [&](const NativeDistrict& district) {
+        return district.card.uid != pending_uid && district.name == their_it->name;
+      }));
+    // Match legal_actions/build rules: each Quarry permits one additional
+    // district with the same name. The selected own district is removed by
+    // the swap, so it must not count toward the post-swap duplicate limit.
+    if (same_name_count >= 1 + quarry_count) return false;
     const int difference = std::max(0, their_it->card.cost - own_it->card.cost);
     if (difference > active()->gold) return false;
     active()->gold -= difference; players[target].gold += difference;
@@ -936,10 +950,19 @@ struct NativeGameState {
         auto& observation = observations[static_cast<size_t>(active_player)];
         observation.valid = true;
         observation.round = round;
+        observation.turns_completed = turns_completed + 1;
         observation.gold = active()->gold;
         observation.hand_size = static_cast<int>(active()->hand.size());
         observation.free_colors = active()->role_id == "businessman"
           ? std::vector<std::string>{"green"} : std::vector<std::string>{};
+        observation.role_id = active()->role_id;
+        observation.witch_resume = turn_phase == "witch_resume";
+        observation.builds = builds;
+        observation.build_limit = build_limit;
+        for (const auto& district : active()->city) {
+          observation.built_names.push_back(district.name);
+          if (district.effect == "quarry") ++observation.quarry_count;
+        }
       }
     }
     active()->gold = turn.gold;

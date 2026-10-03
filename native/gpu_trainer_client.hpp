@@ -282,7 +282,7 @@ class GpuTrainerClient {
   void start(const std::string& profile, const std::string& model_path,
              float learning_rate, const std::string& device,
              const std::string& protocol = "json",
-             const std::string& architecture = "flat");
+             const std::string& architecture = "entity-v6");
   BatchEvaluationResult evaluate(const std::vector<std::vector<float>>& states,
                                  const std::vector<std::vector<std::vector<float>>>& actions,
                                  const std::string& profile);

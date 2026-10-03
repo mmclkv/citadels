@@ -954,7 +954,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     // whenever any supported policy version can distinguish own-hand cards,
     // public district identities, or public context; older policies may merely
     // leave some of these features unused.
-    const auto features = encode_features(state, player, 8, true, true, true, true);
+    const auto features = encode_features(state, player, 8);
     builder.u64(features.size());
     for (float value : features) builder.floating(value);
     const auto actions = legal_actions(state, player);

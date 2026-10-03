@@ -3,6 +3,7 @@
 #endif
 
 #include <iostream>
+#include <iomanip>
 #include <algorithm>
 #include <cstdint>
 #include <sstream>
@@ -10,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "game_adapter.hpp"
 #include "game_setup.hpp"
@@ -149,6 +151,8 @@ int main() {
         const int max_steps = std::max(1, int_field(request, "maxSteps", 60000));
         const uint32_t seed = static_cast<uint32_t>(int_field(request, "seed", 1));
         int steps = 0;
+        const bool include_training_features = bool_field(request, "includeTrainingFeatures");
+        std::vector<std::pair<std::string, std::vector<float>>> training_samples;
         while (steps < max_steps && state.phase != NativePhase::GameOver &&
                state.round <= int_field(request, "maxRounds", 1000)) {
           const int actor = rules.next_player(state);
@@ -167,6 +171,11 @@ int main() {
             throw std::runtime_error(detail.str());
           }
           const auto& action = actions[static_cast<size_t>(selected)];
+          if (include_training_features && state.players[actor].is_bot &&
+              state.players[actor].bot_type != "neural") {
+            training_samples.emplace_back(state.players[actor].id,
+                encode_features(state, actor, 8));
+          }
           if (!rules.apply(state, actor, action)) {
             std::ostringstream detail;
             detail << "游戏主进程无法应用 NPC 合法行动（player=" << state.players[actor].id
@@ -195,6 +204,20 @@ int main() {
                   << ",\"playerId\":";
         if (actor < 0 || actor >= static_cast<int>(state.players.size())) std::cout << "null";
         else write_json_string(std::cout, state.players[static_cast<size_t>(actor)].id);
+        if (include_training_features) {
+          std::cout << ",\"trainingSamples\":[";
+          for (size_t i = 0; i < training_samples.size(); ++i) {
+            if (i) std::cout << ',';
+            std::cout << "{\"playerId\":"; write_json_string(std::cout, training_samples[i].first);
+            std::cout << ",\"state\":[" << std::setprecision(9);
+            for (size_t j = 0; j < training_samples[i].second.size(); ++j) {
+              if (j) std::cout << ',';
+              std::cout << training_samples[i].second[j];
+            }
+            std::cout << "]}";
+          }
+          std::cout << ']';
+        }
         std::cout << ",\"state\":"; write_native_state(std::cout, state);
         std::cout << "}\n" << std::flush;
       } else if (mode == "actions" || mode == "npc") {

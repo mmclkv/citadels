@@ -8,7 +8,6 @@ import time
 
 import numpy as np
 import torch
-from torch import nn
 
 # When this file is launched by Node with an absolute path (and especially
 # when it is executed through runpy), Python does not always put the training
@@ -25,13 +24,6 @@ except ImportError as error:
     ENTITY_TRANSFORMER_IMPORT_ERROR = error
 
 
-PROFILES = {
-    "fast": (256, 128, 128, 64, 64),
-    "balanced": (384, 256, 256, 128, 128),
-    "large": (512, 384, 384, 192, 192),
-}
-VALUE_SLOTS = 8
-STATE_SIZE = 672
 ACTION_SIZE = 256
 
 BINARY_MAGIC = 0x31425443  # "CTB1" little-endian.
@@ -171,92 +163,13 @@ def run_binary_protocol(model, device):
         write_binary_frame(output, response)
 
 
-class PolicyValueNet(nn.Module):
-    def __init__(self, profile, state_size=672, action_size=256):
-        super().__init__()
-        sh, latent, ph, pm, vh = PROFILES[profile]
-        self.state1 = nn.Linear(state_size, sh)
-        self.state2 = nn.Linear(sh, latent)
-        self.policy1 = nn.Linear(latent + action_size, ph)
-        self.policy2 = nn.Linear(ph, pm)
-        self.policy_out = nn.Linear(pm, 1)
-        self.value1 = nn.Linear(latent, vh)
-        self.value_out = nn.Linear(vh, VALUE_SLOTS)
-        self.ordered = [self.state1, self.state2, self.policy1, self.policy2,
-                        self.policy_out, self.value1, self.value_out]
-
-    def forward(self, states, actions, mask, temperatures):
-        latent = torch.nn.functional.elu(self.state1(states))
-        latent = torch.nn.functional.elu(self.state2(latent))
-        value = self.value_out(torch.nn.functional.elu(self.value1(latent)))
-        expanded = latent.unsqueeze(1).expand(-1, actions.shape[1], -1)
-        policy = torch.cat((expanded, actions), dim=-1)
-        policy = torch.nn.functional.elu(self.policy1(policy))
-        policy = torch.nn.functional.elu(self.policy2(policy))
-        logits = self.policy_out(policy).squeeze(-1) / temperatures.unsqueeze(-1)
-        logits = logits.masked_fill(~mask, -1e9)
-        return logits, value
-
-    def load_flat(self, filename):
-        values = array.array("f")
-        with open(filename, "rb") as handle:
-            values.fromfile(handle, os.path.getsize(filename) // values.itemsize)
-        legacy_value_head_size = self.value_out.in_features * (VALUE_SLOTS - 1) + (VALUE_SLOTS - 1)
-        legacy = len(values) == sum(layer.weight.numel() + layer.bias.numel() for layer in self.ordered) - legacy_value_head_size
-        if not legacy and len(values) != sum(layer.weight.numel() + layer.bias.numel() for layer in self.ordered):
-            raise ValueError("模型二进制参数数量不匹配")
-        cursor = 0
-        with torch.no_grad():
-            for layer in self.ordered:
-                count = layer.weight.numel()
-                if legacy and layer is self.value_out:
-                    layer.weight.zero_(); layer.bias.zero_()
-                    old_weight_count = layer.in_features
-                    layer.weight[0].copy_(torch.tensor(values[cursor:cursor + old_weight_count]))
-                    cursor += old_weight_count
-                    layer.bias[0] = values[cursor]
-                    cursor += 1
-                else:
-                    layer.weight.copy_(torch.tensor(values[cursor:cursor + count]).reshape_as(layer.weight))
-                    cursor += count
-                    count = layer.bias.numel()
-                    layer.bias.copy_(torch.tensor(values[cursor:cursor + count]).reshape_as(layer.bias))
-                    cursor += count
-        if cursor != len(values):
-            raise ValueError("模型二进制参数数量不匹配")
-
-    def save_flat(self, filename):
-        values = array.array("f")
-        for layer in self.ordered:
-            values.extend(layer.weight.detach().cpu().reshape(-1).tolist())
-            values.extend(layer.bias.detach().cpu().reshape(-1).tolist())
-        temporary = filename + ".tmp"
-        with open(temporary, "wb") as handle:
-            values.tofile(handle)
-        # The shared inference daemon may briefly have the old model open while
-        # polling for a weight update. Windows refuses replacing an open file,
-        # so retry the atomic swap across that short read window.
-        last_error = None
-        for attempt in range(20):
-            try:
-                os.replace(temporary, filename)
-                break
-            except PermissionError as error:
-                last_error = error
-                if attempt == 19:
-                    raise
-                time.sleep(0.025 * (attempt + 1))
-
-
 def create_model(architecture, profile):
-    if architecture in (None, "", "flat", "policy-value"):
-        return PolicyValueNet(profile)
-    if architecture in ("entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5", "entity-v6"):
+    if architecture == "entity-v6":
         if EntityTransformerNet is None:
             detail = str(ENTITY_TRANSFORMER_IMPORT_ERROR)
             raise RuntimeError("无法加载 entity_transformer.py" + (f": {detail}" if detail else ""))
         return EntityTransformerNet(profile, architecture=architecture)
-    raise ValueError("不支持的网络架构：%s" % architecture)
+    raise ValueError("仅支持 entity-v6 网络架构")
 
 
 def build_minibatch(data, indices, device):
@@ -299,7 +212,7 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
     if data["pi_flat"] is None:
         raise ValueError("MCTS 训练样本缺少策略访问分布")
     total = {"policy": 0.0, "value": 0.0, "entropy": 0.0,
-             "kl": 0.0, "gradient": 0.0, "samples": 0}
+             "kl": 0.0, "gradient": 0.0, "samples": 0, "policySamples": 0}
     size = len(data["rewards"])
     for _ in range(epochs):
         for indices in torch.randperm(size).split(batch_size):
@@ -310,49 +223,52 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
             pi = batch["pi"].masked_fill(~batch["masks"], 0.0)
             pi_sum = pi.sum(dim=-1, keepdim=True)
             valid = pi_sum.squeeze(-1) > 1e-8
-            if not bool(valid.any()):
-                continue
             pi = pi / pi_sum.clamp_min(1e-12)
             masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
             norm_probs = masked_probs / masked_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
             per_sample_policy_loss = -(pi * norm_probs.clamp_min(1e-12).log()).sum(dim=-1)
-            valid_count = valid.sum().clamp_min(1)
-            policy_loss = (per_sample_policy_loss * valid).sum() / valid_count
+            valid_count = int(valid.sum().item())
+            policy_loss = ((per_sample_policy_loss * valid).sum() / max(1, valid_count)
+                           if valid_count else logits.sum() * 0.0)
             pi_safe = pi.clamp_min(1e-12)
             per_sample_kl = (pi_safe * (pi_safe.log() - norm_probs.clamp_min(1e-12).log())).sum(dim=-1)
-            approx_kl = (per_sample_kl * valid).sum() / valid_count
+            approx_kl = ((per_sample_kl * valid).sum() / max(1, valid_count)
+                         if valid_count else logits.sum() * 0.0)
             squared_value_error = (values - batch["rewards"]) ** 2
             value_mask = batch["value_masks"]
             value_loss = ((squared_value_error * value_mask).sum(dim=-1) /
                           value_mask.sum(dim=-1).clamp_min(1.0)).mean()
             masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
             per_sample_entropy = -(masked_probs * masked_probs.log()).sum(dim=-1)
-            entropy = (per_sample_entropy * valid).sum() / valid_count
+            entropy = ((per_sample_entropy * valid).sum() / max(1, valid_count)
+                       if valid_count else logits.sum() * 0.0)
             loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             gradient = torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
             count = len(indices)
-            total["policy"] += policy_loss.item() * count
+            total["policy"] += policy_loss.item() * valid_count
             total["value"] += value_loss.item() * count
-            total["entropy"] += entropy.item() * count
-            total["kl"] += approx_kl.item() * count
+            total["entropy"] += entropy.item() * valid_count
+            total["kl"] += approx_kl.item() * valid_count
             total["gradient"] += float(gradient) * count
             total["samples"] += count
-    denominator = max(1, total["samples"])
-    policy = total["policy"] / denominator
-    value = total["value"] / denominator
-    entropy = total["entropy"] / denominator
+            total["policySamples"] += valid_count
+    policy_denominator = max(1, total["policySamples"])
+    value_denominator = max(1, total["samples"])
+    policy = total["policy"] / policy_denominator
+    value = total["value"] / value_denominator
+    entropy = total["entropy"] / policy_denominator
     return {
         "policyLoss": policy,
         "valueLoss": value,
         "totalLoss": policy + 0.5 * value - 0.01 * entropy,
         "entropy": entropy,
-        "approxKl": total["kl"] / denominator,
-        "gradientNorm": total["gradient"] / denominator,
+        "approxKl": total["kl"] / policy_denominator,
+        "gradientNorm": total["gradient"] / value_denominator,
         "samples": size,
-        "policySamples": size * epochs,
+        "policySamples": total["policySamples"],
     }
 
 
@@ -372,7 +288,7 @@ def main():
                 if requested == "cuda" and not use_cuda:
                     raise RuntimeError("已要求 CUDA，但 PyTorch 无法访问 CUDA")
                 device = torch.device("cuda" if use_cuda else "cpu")
-                model = create_model(command.get("architecture", "flat"), command["profile"])
+                model = create_model(command.get("architecture", "entity-v6"), command["profile"])
                 model.load_flat(command["modelPath"])
                 model.to(device)
                 model.eval()

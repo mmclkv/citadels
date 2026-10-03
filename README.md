@@ -36,7 +36,7 @@ Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\pyth
 - 每次 Entity Transformer 训练启动时，Python 会把当前权重导出给 LibTorch worker，双方用相同输入比较策略 logits 与价值输出；超出容差会中止训练并报告最大误差。
 - Python 训练调度器按 `workers` 配置并行自对弈；每个采样进程让游戏引擎推进状态，并在网络行动时调用独立 MCTS worker 做 LibTorch 前向。主进程用 PyTorch 串行执行 MCTS 蒸馏更新。服务启动时分别检查并构建游戏引擎与搜索 worker，服务退出时清理两个进程。
 - 使用 MCTS 访问分布交叉熵、终局价值损失与熵正则；控制台把策略损失放在独立纵轴，并实时显示 MCTS 策略散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
-- flat 网络有 `fast`、`balanced`、`large` 三档；Entity Transformer v5 在 v4 基础上新增公开局面特征。建议先用 `fast` 做短跑验证，再按速度选择档位。
+- Entity Transformer 只支持 v6 架构；`fast`、`balanced`、`large` 三档控制网络规模。建议先用 `fast` 做短跑验证，再按速度选择档位。
 - 训练过程的模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
 
 也可以绕过网页控制台直接运行 Python 训练任务：
@@ -47,8 +47,8 @@ Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\pyth
 ```
 
 按 Ctrl+C 会请求优雅停止并保存 checkpoint。
-- 已训练 52419 局的 `fast` 档 `entity-transformer-v1` 默认推理权重发布在 `models/policy-default.json.gz`（配套元数据 `policy-default.meta.json`）。新拉取的仓库无需复制 checkpoint，创建房间时选择“策略神经网络（仓库自带权重）”即可使用。服务器优先加载这个版本化模型；仅当它缺失时，才回退到 `training-data` 中局数最高的本地 checkpoint。
-- 部署用的模型是从训练 checkpoint 精简而来的：删掉训练历史，只保留架构、profile 和权重；权重四舍五入到 6 位小数。已部署的默认模型仍是 `entity-v1`；新训练默认使用 `entity-v6`：在 v5 公开上下文基础上扩展城市容量并编码建筑特殊状态、反应与待处理选择，同时用无碰撞 UID 字节特征区分动作。旧架构与 v6 checkpoint 不能交叉续训；v5 checkpoint 仍以 v5 架构续训。同编号的 `.optimizer.pt` 是 GPU 续训用的 optimizer 状态，推理不读它，因此留在 `training-data/`（不入库）。
+- 默认模型文件是早期架构的归档权重，已不受支持，不能用于策略神经网络对局或续训。当前只接受带明确状态/动作编码元数据的 Entity Transformer v6 checkpoint；因此需要先训练或导入 v6 权重，才能启用神经网络玩家。部署权重只保留架构、profile 和模型参数；`.optimizer.pt` 是 GPU 续训状态，不用于推理。
+- Entity Transformer v6 使用 1790 维状态、256 维动作和 v14/v9 编码，扩展城市建筑槽位并编码建筑特殊状态、反应与待处理选择，同时用 UID 字节特征区分动作。旧版本架构不再加载或续训。
 - 开局面板把电脑类型选成「策略神经网络」时，会额外出现两项 MCTS 设置（模拟次数 / 最大搜索深度），默认都是 0 = 关闭。关闭时电脑按策略网络的 TTA 投票走子；打开后服务器先把隐藏信息（对手手牌、牌库与弃牌堆顺序、对手未打出的角色牌、真逮捕令）换成 4 份随机猜测，在每份猜测上做确定化 MCTS，再平均根节点访问分布选动作 —— 电脑不会因此偷看到真牌。模拟次数上限 2000、深度上限 200，超范围由服务器截断。
 - GPU optimizer 状态保存在同编号的 `.optimizer.pt` 文件中；旧 JavaScript checkpoint 可以直接迁移到 GPU 训练。
 

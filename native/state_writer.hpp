@@ -154,9 +154,15 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     if (i) out << ',';
     const auto& observation = state.observations[i];
     if (!observation.valid) { out << "null"; continue; }
-    out << "{\"round\":" << observation.round << ",\"gold\":" << observation.gold
-        << ",\"handSize\":" << observation.hand_size << ",\"freeColors\":";
-    write_json_strings(out, observation.free_colors); out << '}';
+    out << "{\"round\":" << observation.round << ",\"turnsCompleted\":" << observation.turns_completed
+        << ",\"gold\":" << observation.gold << ",\"handSize\":" << observation.hand_size
+        << ",\"freeColors\":";
+    write_json_strings(out, observation.free_colors);
+    out << ",\"roleId\":"; write_json_string(out, observation.role_id);
+    out << ",\"witchResume\":" << (observation.witch_resume ? "true" : "false")
+        << ",\"builds\":" << observation.builds << ",\"buildLimit\":" << observation.build_limit
+        << ",\"quarryCount\":" << observation.quarry_count << ",\"builtNames\":";
+    write_json_strings(out, observation.built_names); out << '}';
   }
   out << "],\"draft\":";
   if (state.phase != NativePhase::Draft) out << "null";

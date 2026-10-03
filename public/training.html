@@ -21,7 +21,7 @@
         <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
         <label><span>角色组</span><select id="char-set"><option value="random" selected>随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast" selected>快速</option><option value="balanced">均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
-        <label><span>网络架构</span><select id="network-architecture"><option value="flat">Entity Transformer v1（兼容旧权重）</option><option value="entity-v5">Entity Transformer v5（公开局面与建筑身份）</option><option value="entity-v6" selected>Entity Transformer v6（完整城市与待处理效果）</option></select><small>v6 扩展城市建筑槽位、建筑状态与待处理效果编码；v5 仍可加载旧 checkpoint</small></label>
+        <label><span>网络架构</span><strong class="fixed-setting">Entity Transformer v6</strong><small>当前唯一支持的策略网络架构</small><input id="network-architecture" type="hidden" value="entity-v6"></label>
         <label><span>规则引擎</span><strong class="fixed-setting">C++</strong><small>自对弈与实时对局由原生 C++ 游戏引擎推进</small></label>
         <label><span>MCTS 引擎</span><strong class="fixed-setting">C++ ISMCTS</strong><small>原生搜索 worker 生成访问分布作为策略训练目标</small></label>
         <label><span>神经网络框架</span><strong class="fixed-setting">LibTorch</strong><small id="neural-framework-hint">C++ worker 在所选设备上批量执行网络前向</small></label>

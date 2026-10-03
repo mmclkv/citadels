@@ -38,226 +38,15 @@ class DirectNeuralEvaluator : public BatchedEvaluator<NativeGameState, NativeSea
   virtual void reload_model(const std::string& model_path) = 0;
 };
 
-struct LibTorchPolicyValueNetImpl : torch::nn::Module {
-  LibTorchPolicyValueNetImpl(int state_size, int action_size,
-                             int state_hidden, int latent,
-                             int policy_hidden, int policy_mid, int value_hidden)
-      : state1(register_module("state1", torch::nn::Linear(state_size, state_hidden))),
-        state2(register_module("state2", torch::nn::Linear(state_hidden, latent))),
-        policy1(register_module("policy1", torch::nn::Linear(latent + action_size, policy_hidden))),
-        policy2(register_module("policy2", torch::nn::Linear(policy_hidden, policy_mid))),
-        policy_out(register_module("policy_out", torch::nn::Linear(policy_mid, 1))),
-        value1(register_module("value1", torch::nn::Linear(latent, value_hidden))),
-        value_out(register_module("value_out", torch::nn::Linear(value_hidden, kValueSlots))) {}
-
-  std::tuple<torch::Tensor, torch::Tensor> forward(
-      const torch::Tensor& states, const torch::Tensor& actions,
-      const torch::Tensor& mask) {
-    auto latent = torch::elu(state1->forward(states));
-    latent = torch::elu(state2->forward(latent));
-    auto values = value_out->forward(torch::elu(value1->forward(latent)));
-    auto expanded = latent.unsqueeze(1).expand({-1, actions.size(1), -1});
-    auto policy = torch::cat({expanded, actions}, -1);
-    policy = torch::elu(policy1->forward(policy));
-    policy = torch::elu(policy2->forward(policy));
-    auto logits = policy_out->forward(policy).squeeze(-1);
-    logits = logits.masked_fill(mask.logical_not(), -1e9);
-    return {logits, values};
-  }
-
-  torch::nn::Linear state1{nullptr}, state2{nullptr};
-  torch::nn::Linear policy1{nullptr}, policy2{nullptr}, policy_out{nullptr};
-  torch::nn::Linear value1{nullptr}, value_out{nullptr};
-};
-
-TORCH_MODULE(LibTorchPolicyValueNet);
-
-class LibTorchNeuralBatchedEvaluator final : public DirectNeuralEvaluator {
- public:
-  LibTorchNeuralBatchedEvaluator(std::string profile, std::string model_path,
-                                 std::string device, int action_encoding_version = kActionEncodingVersion)
-      : profile_(std::move(profile)), device_name_(std::move(device)),
-        action_encoding_version_(action_encoding_version) {
-    const auto dims = profile_dimensions(profile_);
-  model_ = LibTorchPolicyValueNet(672, 256, dims[0], dims[1], dims[2], dims[3], dims[4]);
-    if (device_name_ == "cuda") {
-      bool cuda_available = false;
-      // CUDA 是可选加速路径：没有 GPU、驱动或 CUDA 版 LibTorch 时，
-      // 仍然让同一个 C++ MCTS worker 使用 CPU 完成推理，而不是让房间直接失效。
-      try {
-#ifdef _WIN32
-        cuda_available = libtorch_cuda_runtime_loaded();
-#else
-        cuda_available = true;
-#endif
-        cuda_available = cuda_available && torch::cuda::is_available();
-      } catch (const std::exception&) {
-        cuda_available = false;
-      }
-      if (cuda_available) {
-        device_ = torch::Device(torch::kCUDA);
-      } else {
-        device_name_ = "cpu";
-        device_ = torch::Device(torch::kCPU);
-      }
-    } else {
-      device_name_ = "cpu";
-      device_ = torch::Device(torch::kCPU);
-    }
-    model_->to(device_);
-    reload_model(model_path);
-  }
-
-  const std::string& device_name() const { return device_name_; }
-
-  Evaluation evaluate(const NativeGameState& state, int player,
-                      const std::vector<NativeSearchAction>& actions) override {
-    auto result = evaluate_batch({state}, {player}, {actions});
-    return result.empty() ? Evaluation{} : result.front();
-  }
-
-  std::vector<Evaluation> evaluate_batch(
-      const std::vector<NativeGameState>& states, const std::vector<int>& players,
-      const std::vector<std::vector<NativeSearchAction>>& actions) override {
-    if (states.empty() || states.size() != actions.size()) return {};
-    constexpr size_t state_size = 672;
-    constexpr size_t action_size = 256;
-    const size_t batch = states.size();
-    size_t maximum = 1;
-    std::vector<std::vector<float>> state_vectors;
-    state_vectors.reserve(batch);
-    for (size_t i = 0; i < states.size(); ++i)
-      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1));
-    for (const auto& vector : state_vectors)
-      if (vector.size() != state_size) throw std::runtime_error("LibTorch 状态特征维度错误");
-    for (const auto& group : actions) maximum = std::max(maximum, group.size());
-
-    std::vector<float> flat_states(batch * state_size, 0.0f);
-    for (size_t i = 0; i < batch; ++i)
-      std::copy(state_vectors[i].begin(), state_vectors[i].end(), flat_states.begin() + i * state_size);
-    std::vector<float> flat_actions(batch * maximum * action_size, 0.0f);
-    std::vector<uint8_t> flat_mask(batch * maximum, 0);
-    for (size_t i = 0; i < batch; ++i) {
-      for (size_t j = 0; j < actions[i].size(); ++j) {
-        const auto encoded = encode_network_action(actions[i][j], nullptr, -1, action_encoding_version_);
-        std::copy(encoded.begin(), encoded.end(),
-                  flat_actions.begin() + (i * maximum + j) * action_size);
-        flat_mask[i * maximum + j] = 1;
-      }
-    }
-    auto float_options = torch::TensorOptions().dtype(torch::kFloat32);
-    auto bool_options = torch::TensorOptions().dtype(torch::kBool);
-    auto state_tensor = torch::from_blob(flat_states.data(),
-      {static_cast<int64_t>(batch), static_cast<int64_t>(state_size)}, float_options).clone().to(device_);
-    auto action_tensor = torch::from_blob(flat_actions.data(),
-      {static_cast<int64_t>(batch), static_cast<int64_t>(maximum), static_cast<int64_t>(action_size)},
-      float_options).clone().to(device_);
-    auto mask_tensor = torch::from_blob(flat_mask.data(),
-      {static_cast<int64_t>(batch), static_cast<int64_t>(maximum)}, bool_options).clone().to(device_);
-
-    torch::InferenceMode guard;
-    auto outputs = model_->forward(state_tensor, action_tensor, mask_tensor);
-    auto probabilities = torch::softmax(std::get<0>(outputs), -1).to(torch::kCPU).contiguous();
-    auto values = std::get<1>(outputs).to(torch::kCPU).contiguous();
-    const float* probability_data = probabilities.data_ptr<float>();
-    const float* value_data = values.data_ptr<float>();
-    std::vector<Evaluation> result;
-    result.reserve(batch);
-    for (size_t i = 0; i < batch; ++i) {
-      Evaluation evaluation;
-      evaluation.priors.assign(probability_data + i * maximum,
-                               probability_data + i * maximum + actions[i].size());
-      for (size_t slot = 0; slot < kValueSlots; ++slot)
-        evaluation.value_vector[slot] = value_data[i * kValueSlots + slot];
-      evaluation.value = evaluation.value_vector[0];
-      evaluation.has_value_vector = true;
-      result.push_back(std::move(evaluation));
-    }
-    return result;
-  }
-
-  void reload_model(const std::string& model_path) {
-    std::ifstream input(model_path, std::ios::binary);
-    if (!input) throw std::runtime_error("无法读取 LibTorch 模型: " + model_path);
-    input.seekg(0, std::ios::end);
-    const auto byte_count = input.tellg();
-    input.seekg(0, std::ios::beg);
-    if (byte_count <= 0 || byte_count % static_cast<std::streamoff>(sizeof(float)) != 0)
-      throw std::runtime_error("LibTorch 模型文件长度不是 float32 的整数倍");
-    std::vector<float> flat(static_cast<size_t>(byte_count) / sizeof(float));
-    input.read(reinterpret_cast<char*>(flat.data()), byte_count);
-    if (!input) throw std::runtime_error("读取 LibTorch 模型失败: " + model_path);
-    auto tensor = torch::from_blob(flat.data(), {static_cast<int64_t>(flat.size())},
-                                   torch::TensorOptions().dtype(torch::kFloat32));
-    torch::NoGradGuard guard;
-    size_t expected = 0;
-    for (const auto& layer : {model_->state1, model_->state2, model_->policy1,
-                              model_->policy2, model_->policy_out, model_->value1,
-                              model_->value_out})
-      expected += layer->weight.numel() + layer->bias.numel();
-    const size_t legacy_value_head_size = model_->value_out->options.in_features() * (kValueSlots - 1) +
-                                           (kValueSlots - 1);
-    const bool legacy = flat.size() == expected - legacy_value_head_size;
-    if (!legacy && flat.size() != expected)
-      throw std::runtime_error("LibTorch 模型参数数量不匹配");
-    size_t offset = 0;
-    auto copy_layer = [&](torch::nn::Linear& layer) {
-      const size_t weight_count = layer->weight.numel();
-      const size_t bias_count = layer->bias.numel();
-      if (offset + weight_count + bias_count > flat.size())
-        throw std::runtime_error("LibTorch 模型参数数量不足");
-      layer->weight.copy_(tensor.slice(0, static_cast<int64_t>(offset),
-                                       static_cast<int64_t>(offset + weight_count)).view_as(layer->weight));
-      offset += weight_count;
-      layer->bias.copy_(tensor.slice(0, static_cast<int64_t>(offset),
-                                     static_cast<int64_t>(offset + bias_count)).view_as(layer->bias));
-      offset += bias_count;
-    };
-    copy_layer(model_->state1); copy_layer(model_->state2);
-    copy_layer(model_->policy1); copy_layer(model_->policy2); copy_layer(model_->policy_out);
-    copy_layer(model_->value1);
-    if (legacy) {
-      model_->value_out->weight.zero_(); model_->value_out->bias.zero_();
-      const size_t old_weight_count = model_->value_out->options.in_features();
-      model_->value_out->weight[0].copy_(tensor.slice(0, static_cast<int64_t>(offset),
-          static_cast<int64_t>(offset + old_weight_count)));
-      offset += old_weight_count;
-      model_->value_out->bias[0].copy_(tensor[offset]);
-      offset += 1;
-    } else copy_layer(model_->value_out);
-    if (offset != flat.size()) throw std::runtime_error("LibTorch 模型参数数量不匹配");
-    model_->to(device_);
-    model_->eval();
-  }
-
- private:
-  static std::array<int, 5> profile_dimensions(const std::string& profile) {
-    if (profile == "fast") return {256, 128, 128, 64, 64};
-    if (profile == "large") return {512, 384, 384, 192, 192};
-    return {384, 256, 256, 128, 128};
-  }
-
-  std::string profile_, device_name_;
-  int action_encoding_version_;
-  torch::Device device_{torch::kCPU};
-  LibTorchPolicyValueNet model_{nullptr};
-};
-
 class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
  public:
   LibTorchEntityTransformerEvaluator(std::string profile, std::string model_path, std::string device,
                                      bool positional_encoding = true,
-                                     int action_encoding_version = kActionEncodingVersion,
-                                     bool own_hand_features = false,
-                                     bool city_identity_features = false,
-                                     bool public_context_features = false,
-                                     bool v6_features = false)
-      : device_name_(std::move(device)), action_encoding_version_(action_encoding_version),
-        own_hand_features_(own_hand_features), city_identity_features_(city_identity_features),
-        public_context_features_(public_context_features), v6_features_(v6_features) {
-    if (profile == "fast") model_ = EntityTransformerNet(128, 4, 2, 256, 128, positional_encoding, own_hand_features_, city_identity_features_, public_context_features_, v6_features_);
-    else if (profile == "large") model_ = EntityTransformerNet(256, 4, 3, 512, 256, positional_encoding, own_hand_features_, city_identity_features_, public_context_features_, v6_features_);
-    else model_ = EntityTransformerNet(192, 4, 3, 384, 192, positional_encoding, own_hand_features_, city_identity_features_, public_context_features_, v6_features_);
+                                     int action_encoding_version = kActionEncodingVersion)
+      : device_name_(std::move(device)), action_encoding_version_(action_encoding_version) {
+    if (profile == "fast") model_ = EntityTransformerNet(128, 4, 2, 256, 128, positional_encoding);
+    else if (profile == "large") model_ = EntityTransformerNet(256, 4, 3, 512, 256, positional_encoding);
+    else model_ = EntityTransformerNet(192, 4, 3, 384, 192, positional_encoding);
     if (device_name_ == "cuda") {
       bool available = false;
       try {
@@ -287,12 +76,10 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     for (const auto& group : actions) maximum = std::max(maximum, group.size());
     std::vector<float> flat_states, flat_actions;
     std::vector<uint8_t> flat_mask(states.size() * maximum, 0);
-    const size_t state_size = v6_features_ ? kEntityV6StateFeatureSize : public_context_features_ ? kEntityV5StateFeatureSize : city_identity_features_ ? kEntityV4StateFeatureSize
-      : own_hand_features_ ? kEntityV3StateFeatureSize : kStateFeatureSize;
+    constexpr size_t state_size = kEntityV6StateFeatureSize;
     flat_states.reserve(states.size() * state_size); flat_actions.assign(states.size() * maximum * 256, 0.0f);
     for (size_t i = 0; i < states.size(); ++i) {
-      auto encoded = encode_network_state(states[i], i < players.size() ? players[i] : -1,
-                                          own_hand_features_, city_identity_features_, public_context_features_, v6_features_);
+      auto encoded = encode_network_state(states[i], i < players.size() ? players[i] : -1);
       if (encoded.size() != state_size) throw std::runtime_error("Entity Transformer 状态特征维度错误");
       flat_states.insert(flat_states.end(), encoded.begin(), encoded.end());
       for (size_t j = 0; j < actions[i].size(); ++j) {
@@ -323,9 +110,7 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
   std::pair<std::vector<float>, std::vector<float>> forward_encoded(
       const std::vector<float>& state_features,
       const std::vector<std::vector<float>>& action_features) {
-    const size_t expected_state_size = v6_features_ ? kEntityV6StateFeatureSize
-      : public_context_features_ ? kEntityV5StateFeatureSize : city_identity_features_ ? kEntityV4StateFeatureSize
-      : own_hand_features_ ? kEntityV3StateFeatureSize : kStateFeatureSize;
+    constexpr size_t expected_state_size = kEntityV6StateFeatureSize;
     if (state_features.size() != expected_state_size || action_features.empty())
       throw std::runtime_error("forward_probe 输入的状态宽度或动作数量无效");
     for (const auto& action : action_features)
@@ -359,9 +144,9 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     auto count_linear = [&](const torch::nn::Linear& layer) { total += layer->weight.numel() + layer->bias.numel(); };
     auto count_norm = [&](const torch::nn::LayerNorm& layer) { total += layer->weight.numel() + layer->bias.numel(); };
     count_linear(model_->global_embed);
-    if (city_identity_features_) total += model_->city_embed->weight.numel();
+    total += model_->city_embed->weight.numel();
     count_linear(model_->player_embed);
-    if (own_hand_features_) count_linear(model_->self_embed);
+    count_linear(model_->self_embed);
     count_linear(model_->action_embed);
     for (const auto& block : model_->blocks) {
       count_linear(block->q); count_linear(block->k); count_linear(block->v); count_linear(block->attn_out);
@@ -378,9 +163,9 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     auto copy_linear = [&](const torch::nn::Linear& layer) { copy_parameter(layer->weight); copy_parameter(layer->bias); };
     auto copy_norm = [&](const torch::nn::LayerNorm& layer) { copy_parameter(layer->weight); copy_parameter(layer->bias); };
     copy_linear(model_->global_embed);
-    if (city_identity_features_) copy_parameter(model_->city_embed->weight);
+    copy_parameter(model_->city_embed->weight);
     copy_linear(model_->player_embed);
-    if (own_hand_features_) copy_linear(model_->self_embed);
+    copy_linear(model_->self_embed);
     copy_linear(model_->action_embed);
     for (const auto& block : model_->blocks) {
       copy_linear(block->q); copy_linear(block->k); copy_linear(block->v); copy_linear(block->attn_out);
@@ -392,7 +177,6 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
  private:
   std::string device_name_; torch::Device device_{torch::kCPU}; EntityTransformerNet model_{nullptr};
   int action_encoding_version_;
-  bool own_hand_features_, city_identity_features_, public_context_features_, v6_features_;
 };
 
 }  // namespace citadels::native

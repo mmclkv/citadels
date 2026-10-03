@@ -9,18 +9,9 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 12;
-constexpr int kLegacyStateEncodingVersion = 8;
-constexpr int kStateFeatureSize = 672;
-constexpr int kEntityV3StateFeatureSize = 702;
+constexpr int kStateEncodingVersion = 14;
 constexpr int kCityCardFeatureSize = 30;
 constexpr int kCityCardEmbeddingSize = 8;
-constexpr int kCityIdSlotSize = 4;
-constexpr int kEntityV4PlayerFeatureSize = 56 + 8 * kCityIdSlotSize;
-constexpr int kEntityV4PlayerEmbedFeatureSize = 56 + 8 * (3 + kCityCardEmbeddingSize);
-constexpr int kEntityV4StateFeatureSize = 32 + 8 * kEntityV4PlayerFeatureSize + kCityCardFeatureSize;
-constexpr int kPublicContextFeatureSize = 72;
-constexpr int kEntityV5StateFeatureSize = kEntityV4StateFeatureSize + kPublicContextFeatureSize;
 constexpr int kEntityV6CitySlots = 16;
 constexpr int kEntityV6CitySlotSize = 8;
 constexpr int kEntityV6PlayerFeatureSize = 56 + kEntityV6CitySlots * kEntityV6CitySlotSize;
@@ -118,15 +109,10 @@ inline int active_player_index(const NativeGameState& state) {
 
 inline std::vector<float> encode_features(const NativeGameState& state,
                                           int perspective_player = -1,
-                                          int max_players = 8,
-                                          bool include_own_hand = false,
-                                          bool include_city_identity = false,
-                                          bool include_public_context = false,
-                                          bool include_v6_features = false) {
+                                          int max_players = 8) {
   (void)max_players;
-  const int player_feature_size = include_v6_features ? kEntityV6PlayerFeatureSize : include_city_identity ? kEntityV4PlayerFeatureSize : 80;
-  const int state_feature_size = include_v6_features ? kEntityV6StateFeatureSize : include_public_context ? kEntityV5StateFeatureSize : include_city_identity ? kEntityV4StateFeatureSize
-    : include_own_hand ? kEntityV3StateFeatureSize : kStateFeatureSize;
+  constexpr int player_feature_size = kEntityV6PlayerFeatureSize;
+  constexpr int state_feature_size = kEntityV6StateFeatureSize;
   std::vector<float> features(state_feature_size, 0.0f);
   const int player_count = static_cast<int>(state.players.size());
   if (player_count <= 0) return features;
@@ -137,8 +123,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     return (absolute - me + player_count) % player_count;
   };
   const int active_rel = rel(active);
-  features[0] = static_cast<float>(include_v6_features ? kStateEncodingVersion : include_public_context ? kStateEncodingVersion - 1
-    : include_city_identity ? kStateEncodingVersion - 2 : include_own_hand ? 9 : kLegacyStateEncodingVersion);
+  features[0] = static_cast<float>(kStateEncodingVersion);
   features[1] = static_cast<float>(player_count) / 8.0f;
   features[2] = static_cast<float>(state_phase_code(state.phase)) / 6.0f;
   features[3] = static_cast<float>(state.round) / 100.0f;
@@ -156,7 +141,10 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[14] = state.reaction_player < 0 ? 0.0f : static_cast<float>(rel(state.reaction_player) + 1) / 9.0f;
   features[15] = static_cast<float>(state.round_confirm_count) / 8.0f;
   const int pending_target = state.pending_target;
-  features[16] = pending_target < 0 ? 0.0f : static_cast<float>(rel(pending_target) + 1) / 9.0f;
+  const bool private_bishop_payment = state.pending_kind == "bishop_payer" ||
+      state.pending_kind == "bishop_repay";
+  features[16] = pending_target < 0 || (private_bishop_payment && me != state.active_player)
+      ? 0.0f : static_cast<float>(rel(pending_target) + 1) / 9.0f;
   features[17] = state.pending_from_crown < 0 ? 0.0f : static_cast<float>(rel(state.pending_from_crown) + 1) / 9.0f;
   features[18] = static_cast<float>(pending_kind_code(state.pending_kind)) / 34.0f;
   features[19] = static_cast<float>(state.has_turn ? turn_phase_code(state.turn_phase) : 4) / 4.0f;
@@ -170,7 +158,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[27] = state.used_museum ? 1.0f : 0.0f;
   features[28] = state.bonus_done ? 1.0f : 0.0f;
   const int pending_count_or_amount = state.pending_kind == "bishop_repay" || state.pending_kind == "bishop_payer"
-      ? state.pending_amount
+      ? (me == state.active_player ? state.pending_amount : 0)
       : (state.pending_kind == "draw_keep" || state.pending_kind == "scholar_pick" ||
          state.pending_kind == "wizard_card" ? static_cast<int>(state.pending_cards.size()) : 0);
   features[29] = static_cast<float>(pending_count_or_amount) / 8.0f;
@@ -193,13 +181,13 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       museum += static_cast<int>(district.museum_cards.size());
       if (district.beautified) ++beautified;
     }
-    const int revealed = absolute == me && !p.role_ids.empty() ? role_number(p.role_ids.front())
-      : absolute == (state.has_turn ? state.active_player : -1) ? role_number(p.role_id)
-      : (!p.played.empty() ? role_number(p.played.front()) : 0);
-    const size_t visible_chars = absolute == me ? p.role_ids.size() : p.played.size();
-    const std::string revealed_id = absolute == me && !p.role_ids.empty() ? p.role_ids.front()
+    constexpr bool enhanced_context = true;
+    const std::string revealed_id = enhanced_context && absolute == me && absolute == active && !p.role_id.empty() ? p.role_id
+      : absolute == me && !p.role_ids.empty() ? p.role_ids.front()
       : state.has_turn && absolute == state.active_player && !p.role_id.empty() ? p.role_id
       : !p.played.empty() ? p.played.front() : std::string{};
+    const int revealed = role_number(revealed_id);
+    const size_t visible_chars = absolute == me ? p.role_ids.size() : p.played.size();
     // JS intentionally exposes only the boolean choice status, not opponent
     // role identities, so these two flags use raw chars while the length and
     // revealed-number slots remain perspective-masked.
@@ -222,7 +210,12 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     features[base + 14] = static_cast<float>(beautified) / 10.0f;
     features[base + 15] = static_cast<float>(visible_chars) / 3.0f;
     features[base + 16] = p.connected ? 1.0f : 0.0f;
-    features[base + 17] = p.is_bot ? 1.0f : 0.0f;
+    // Preserve the feature slot but distinguish policy populations. Self-play
+    // trains against neural and heuristic seats; value estimates need to know
+    // which behavior generated the current perspective.
+    features[base + 17] = enhanced_context
+      ? (!p.is_bot ? 0.0f : p.bot_type == "neural" ? 1.0f : p.bot_type == "agent" ? 0.66f : 0.33f)
+      : (p.is_bot ? 1.0f : 0.0f);
     // 与 JS 编码保持一致：绝对座位号会让固定座位训练产生位置捷径，
     // 这里保留槽位但不再写入绝对 seat。
     features[base + 18] = 0.0f;
@@ -233,10 +226,9 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     if (revealed >= 1 && revealed <= 9) features[base + 19 + static_cast<size_t>(revealed)] = 1.0f;
     for (size_t role = 0; role < kRoleIds.size(); ++role)
       if (revealed_id == kRoleIds[role]) { features[base + 29 + role] = 1.0f; break; }
-    const size_t max_city_slots = include_v6_features ? kEntityV6CitySlots : 8;
-    for (size_t i = 0; i < p.city.size() && i < max_city_slots; ++i) {
+    for (size_t i = 0; i < p.city.size() && i < kEntityV6CitySlots; ++i) {
       const auto& card = p.city[i].card;
-      const size_t slot_width = include_v6_features ? kEntityV6CitySlotSize : include_city_identity ? kCityIdSlotSize : 3;
+      constexpr size_t slot_width = kEntityV6CitySlotSize;
       const size_t slot = base + 56 + i * slot_width;
       features[slot] = std::min(1.0f, std::max(0.0f, static_cast<float>(card.cost) / 8.0f));
       int color = 0;
@@ -245,11 +237,9 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       features[slot + 1] = static_cast<float>(color) / 5.0f;
       const int score = card.score_value > 0 ? card.score_value : card.cost;
       features[slot + 2] = std::min(1.0f, std::max(0.0f, static_cast<float>(score) / 10.0f));
-      if (include_city_identity || include_v6_features) {
-        const int identity = district_identity_index(card);
-        if (identity >= 0) features[slot + 3] = static_cast<float>(identity + 1);
-      }
-      if (include_v6_features) {
+      const int identity = district_identity_index(card);
+      if (identity >= 0) features[slot + 3] = static_cast<float>(identity + 1);
+      {
         features[slot + 4] = p.city[i].beautified ? 1.0f : 0.0f;
         features[slot + 5] = std::min(1.0f, static_cast<float>(p.city[i].museum_cards.size()) / 8.0f);
         features[slot + 6] = std::min(1.0f, static_cast<float>(p.city[i].built_round) / 100.0f);
@@ -257,7 +247,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       }
     }
   }
-  if (include_own_hand) {
+  {
     static constexpr std::array<const char*, 30> hand_cards = {
       "Manor", "Castle", "Palace", "Temple", "Church", "Monastery", "Cathedral",
       "Tavern", "Market", "Trading Post", "Docks", "Harbor", "Town Hall",
@@ -271,20 +261,32 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     for (const auto& card : state.players[me].hand) {
       for (size_t i = 0; i < hand_cards.size(); ++i) {
         if (card.en == hand_cards[i] || (card.en.empty() && card.name == hand_cards[i])) {
-          features[(include_v6_features ? kEntityV6BaseFeatureSize - kCityCardFeatureSize : include_city_identity ? 32 + 8 * kEntityV4PlayerFeatureSize : kStateFeatureSize) + i] += 1.0f / maximum_copies[i];
+          features[kEntityV6BaseFeatureSize - kCityCardFeatureSize + i] += 1.0f / maximum_copies[i];
           break;
         }
       }
     }
   }
-  if (include_public_context) {
-    const size_t start = include_v6_features ? kEntityV6BaseFeatureSize : kEntityV4StateFeatureSize;
+  {
+    const size_t start = kEntityV6BaseFeatureSize;
     const auto mark_roles = [&](const std::vector<std::string>& roles, size_t offset) {
       for (const auto& id : roles) for (size_t i = 0; i < kRoleIds.size(); ++i)
         if (id == kRoleIds[i]) features[start + offset + i] = 1.0f;
     };
     mark_roles(state.char_deck, 0);
     mark_roles(state.draft_face_up, 27);
+    if (state.phase == NativePhase::Draft && me == state.draft_current_player &&
+        state.draft_step >= 0 && state.draft_step < static_cast<int>(state.draft_steps.size())) {
+      std::vector<std::string> selectable = state.draft_pool;
+      const auto& step = state.draft_steps[static_cast<size_t>(state.draft_step)];
+      if (step.from_face_down && state.draft_sub == "pick")
+        selectable.insert(selectable.end(), state.draft_face_down.begin(), state.draft_face_down.end());
+      if (state.draft_sub == "discard")
+        selectable.erase(std::remove_if(selectable.begin(), selectable.end(), [](const std::string& id) {
+          return role_number(id) == 4;
+        }), selectable.end());
+      mark_roles(selectable, 229);
+    }
     if (state.assassinated >= 1 && state.assassinated <= 9) features[start + 54] = state.assassinated / 9.0f;
     if (state.thief_target >= 1 && state.thief_target <= 9) features[start + 55] = state.thief_target / 9.0f;
     if (state.bewitched >= 1 && state.bewitched <= 9) features[start + 56] = state.bewitched / 9.0f;
@@ -314,7 +316,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       features[start + 66] = low / 32768.0f;
       features[start + 67] = high / 32768.0f;
     }
-    if (include_v6_features) {
+    {
       const auto mark_number = [&](int number, size_t offset) {
         if (number >= 1 && number <= 9) features[start + offset + static_cast<size_t>(number - 1)] = 1.0f;
       };
@@ -324,33 +326,58 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       if (state.reaction_kind == "magistrate") features[start + 91] = 1.0f;
       if (state.reaction_kind == "blackmailer") features[start + 92] = 1.0f;
       features[start + 93] = state.reaction_build ? 1.0f : 0.0f;
-      const auto mark_card = [&](const std::string& uid, size_t offset) {
+      const auto mark_card = [&](const std::string& uid, size_t offset,
+                                 bool active_player_knows_other_hands = false) {
         const auto mark = [&](const DistrictCard& card) {
           const int identity = district_identity_index(card);
           if (identity >= 0) features[start + offset + static_cast<size_t>(identity)] = 1.0f;
         };
-        for (const auto& player : state.players) {
-          for (const auto& card : player.hand) if (card.uid == uid) { mark(card); return; }
+        for (size_t owner = 0; owner < state.players.size(); ++owner) {
+          const auto& player = state.players[owner];
+          for (const auto& card : player.hand) if (card.uid == uid) {
+            if (static_cast<int>(owner) == me ||
+                (active_player_knows_other_hands && me == state.active_player)) mark(card);
+            return;
+          }
           for (const auto& district : player.city) if (district.card.uid == uid) { mark(district.card); return; }
         }
-        for (const auto& card : state.pending_cards) if (card.uid == uid) { mark(card); return; }
+        if (me == state.active_player)
+          for (const auto& card : state.pending_cards) if (card.uid == uid) { mark(card); return; }
       };
       mark_card(state.reaction_uid, 94);
-      mark_card(state.pending_uid, 124);
+      const bool wizard_knows_other_hands = state.pending_kind == "wizard_card" ||
+          state.pending_kind == "wizard_choice";
+      mark_card(state.pending_uid, 124, wizard_knows_other_hands);
       const auto add_identity_count = [&](const DistrictCard& card, size_t offset, float divisor) {
         const int identity = district_identity_index(card);
         if (identity >= 0) features[start + offset + static_cast<size_t>(identity)] += 1.0f / divisor;
       };
-      if (me == state.active_player) {
+      const bool sees_pending_selection = me == state.active_player || state.pending_kind == "artist";
+      if (sees_pending_selection) {
         for (const auto& uid : state.pending_selected) {
-          for (const auto& card : state.players[me].hand) if (card.uid == uid) { add_identity_count(card, 154, 5.0f); break; }
+          bool found = false;
+          if (me == state.active_player) {
+            for (const auto& card : state.players[me].hand) if (card.uid == uid) {
+              add_identity_count(card, 154, 5.0f); found = true; break;
+            }
+          }
+          if (!found && state.pending_kind == "artist") {
+            for (const auto& player : state.players) for (const auto& district : player.city) if (district.card.uid == uid) {
+              add_identity_count(district.card, 154, 5.0f); found = true; break;
+            }
+          }
         }
-        for (const auto& card : state.pending_cards) add_identity_count(card, 184, 5.0f);
+        if (me == state.active_player)
+          for (const auto& card : state.pending_cards) add_identity_count(card, 184, 5.0f);
       }
-      features[start + 214] = std::min(1.0f, static_cast<float>(state.pending_cursor) / 32.0f);
-      features[start + 215] = std::min(1.0f, static_cast<float>(state.pending_selected.size()) / 16.0f);
-      features[start + 216] = std::min(1.0f, static_cast<float>(state.pending_amount) / 20.0f);
-      for (int number : state.pending_nums) mark_number(number, 217);
+      if (me == state.active_player) {
+        features[start + 214] = std::min(1.0f, static_cast<float>(state.pending_cursor) / 32.0f);
+        features[start + 215] = std::min(1.0f, static_cast<float>(state.pending_selected.size()) / 16.0f);
+        features[start + 216] = std::min(1.0f, static_cast<float>(state.pending_amount) / 20.0f);
+        for (int number : state.pending_nums) mark_number(number, 217);
+      } else if (state.pending_kind == "artist") {
+        features[start + 215] = std::min(1.0f, static_cast<float>(state.pending_selected.size()) / 16.0f);
+      }
       features[start + 226] = std::min(1.0f, static_cast<float>(state.pending_cards.size()) / 16.0f);
       features[start + 227] = state.pending_kind == "wizard_choice" ? 1.0f : 0.0f;
       features[start + 228] = state.magistrate_claimed ? 1.0f : 0.0f;

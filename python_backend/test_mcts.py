@@ -51,8 +51,8 @@ class MctsTests(unittest.TestCase):
         policy.checkpoint = "test-model"
         policy.profile = "fast"
         policy.device_name = "cpu"
-        policy.architecture = "entity-v5"
-        policy.action_version = 8
+        policy.architecture = "entity-v6"
+        policy.action_version = 9
         policy.error = ""
         policy._last_mcts = {}
         action = policy.decide(state, player_id, available,
@@ -61,7 +61,7 @@ class MctsTests(unittest.TestCase):
         diagnostics = policy.status()["mcts"]
         self.assertEqual(diagnostics["determinizations"], 2)
         self.assertEqual(diagnostics["visits"], 3)
-        self.assertEqual(policy.worker.request["architecture"], "entity-v5")
+        self.assertEqual(policy.worker.request["architecture"], "entity-v6")
         self.assertEqual(len(policy.worker.request["particles"]), 1)
         self.assertEqual(policy.worker.determinize_request["count"], 2)
 

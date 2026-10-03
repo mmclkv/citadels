@@ -41,7 +41,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True)
     parser.add_argument("--profile", default="balanced")
-    parser.add_argument("--architecture", default="flat")
+    parser.add_argument("--architecture", default="entity-v6")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--model", required=True)
     parser.add_argument("--slots", type=int, default=8)

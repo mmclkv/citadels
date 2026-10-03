@@ -11,8 +11,8 @@
 
 namespace citadels::native {
 
-// Archived C++/LibTorch implementation corresponding to
-// training/entity_transformer.py. The parameter order is:
+// C++/LibTorch implementation corresponding to training/entity_transformer.py.
+// The parameter order is:
 // embeddings, each block's q/k/v/attnOut/ff1/ff2/norm1/norm2,
 // action1/actionOut/valueOut.
 struct EntityTransformerBlockImpl : torch::nn::Module {
@@ -53,23 +53,17 @@ TORCH_MODULE(EntityTransformerBlock);
 
 struct EntityTransformerNetImpl : torch::nn::Module {
   EntityTransformerNetImpl(int model_dim, int heads, int layers, int ff_dim, int action_hidden,
-                          bool positional_encoding = true, bool own_hand_features = false,
-                          bool city_identity_features = false, bool public_context_features = false,
-                          bool v6_features = false)
+                          bool positional_encoding = true)
       : model_dim_(model_dim), heads_(heads), positional_encoding_(positional_encoding),
-        own_hand_features_(own_hand_features),
-        city_identity_features_(city_identity_features), public_context_features_(public_context_features), v6_features_(v6_features),
-        global_embed(register_module("global_embed", torch::nn::Linear(v6_features ? 32 + kEntityV6PublicContextSize : public_context_features ? 32 + kPublicContextFeatureSize : 32, model_dim))),
-        player_embed(register_module("player_embed", torch::nn::Linear(v6_features ? kEntityV6PlayerEmbedFeatureSize : city_identity_features ? kEntityV4PlayerEmbedFeatureSize : 80, model_dim))),
-        self_embed(nullptr),
-        city_embed(nullptr),
+        global_embed(register_module("global_embed", torch::nn::Linear(32 + kEntityV6PublicContextSize, model_dim))),
+        player_embed(register_module("player_embed", torch::nn::Linear(kEntityV6PlayerEmbedFeatureSize, model_dim))),
+        self_embed(register_module("self_embed", torch::nn::Linear(kEntityV6PlayerEmbedFeatureSize + 30, model_dim))),
+        city_embed(register_module("city_embed", torch::nn::Embedding(
+          torch::nn::EmbeddingOptions(kCityCardFeatureSize + 1, kCityCardEmbeddingSize).padding_idx(0)))),
         action_embed(register_module("action_embed", torch::nn::Linear(256, model_dim))),
         action1(register_module("action1", torch::nn::Linear(model_dim * 2, action_hidden))),
         action_out(register_module("action_out", torch::nn::Linear(action_hidden, 1))),
         value_out(register_module("value_out", torch::nn::Linear(model_dim, 1))) {
-    if (own_hand_features_) self_embed = register_module("self_embed", torch::nn::Linear(v6_features_ ? kEntityV6PlayerEmbedFeatureSize + 30 : city_identity_features_ ? kEntityV4PlayerEmbedFeatureSize + 30 : 110, model_dim));
-    if (city_identity_features_) city_embed = register_module("city_embed",
-      torch::nn::Embedding(torch::nn::EmbeddingOptions(kCityCardFeatureSize + 1, kCityCardEmbeddingSize).padding_idx(0)));
     for (int i = 0; i < layers; ++i) {
       auto block = EntityTransformerBlock(model_dim, heads, ff_dim);
       blocks.push_back(block);
@@ -80,33 +74,24 @@ struct EntityTransformerNetImpl : torch::nn::Module {
   std::tuple<torch::Tensor, torch::Tensor> forward(
       const torch::Tensor& states, const torch::Tensor& actions,
       const torch::Tensor& mask) {
-    auto global_features = v6_features_
-      ? torch::cat({states.slice(-1, 0, 32), states.slice(-1, kEntityV6BaseFeatureSize, kEntityV6StateFeatureSize)}, -1)
-      : public_context_features_
-      ? torch::cat({states.slice(-1, 0, 32), states.slice(-1, kEntityV4StateFeatureSize, kEntityV5StateFeatureSize)}, -1)
-      : states.slice(-1, 0, 32);
+    auto global_features = torch::cat({states.slice(-1, 0, 32),
+      states.slice(-1, kEntityV6BaseFeatureSize, kEntityV6StateFeatureSize)}, -1);
     auto global = global_embed->forward(global_features).unsqueeze(1);
-    const int player_width = v6_features_ ? kEntityV6PlayerFeatureSize : city_identity_features_ ? kEntityV4PlayerFeatureSize : 80;
+    const int player_width = kEntityV6PlayerFeatureSize;
     auto players = states.slice(-1, 32, 32 + 8 * player_width).view({states.size(0), 8, player_width});
-    if (city_identity_features_ || v6_features_) {
-      const int slots = v6_features_ ? kEntityV6CitySlots : 8;
-      const int slot_width = v6_features_ ? kEntityV6CitySlotSize : kCityIdSlotSize;
-      auto city = players.slice(-1, 56, player_width).view({states.size(0), 8, slots, slot_width});
+    {
+      auto city = players.slice(-1, 56, player_width).view({states.size(0), 8, kEntityV6CitySlots, kEntityV6CitySlotSize});
       auto ids = city.select(-1, 3).to(torch::kLong).clamp(0, kCityCardFeatureSize);
       auto ids_embed = city_embed->forward(ids).flatten(-2, -1);
       auto city_props = city.slice(-1, 0, 3).flatten(-2, -1);
-      if (v6_features_) {
-        auto extra_props = city.slice(-1, 4, 8).flatten(-2, -1);
-        players = torch::cat({players.slice(-1, 0, 56), city_props, extra_props, ids_embed}, -1);
-      } else players = torch::cat({players.slice(-1, 0, 56), city_props, ids_embed}, -1);
+      auto extra_props = city.slice(-1, 4, 8).flatten(-2, -1);
+      players = torch::cat({players.slice(-1, 0, 56), city_props, extra_props, ids_embed}, -1);
     }
     auto player_tokens = player_embed->forward(players);
-    if (own_hand_features_) {
-      const int hand_start = 32 + 8 * player_width;
-      auto self_features = torch::cat({players.select(1, 0), states.slice(-1, hand_start, hand_start + 30)}, -1);
-      auto self_token = self_embed->forward(self_features).unsqueeze(1);
-      player_tokens = torch::cat({self_token, player_tokens.slice(1, 1, 8)}, 1);
-    }
+    const int hand_start = 32 + 8 * player_width;
+    auto self_features = torch::cat({players.select(1, 0), states.slice(-1, hand_start, hand_start + 30)}, -1);
+    auto self_token = self_embed->forward(self_features).unsqueeze(1);
+    player_tokens = torch::cat({self_token, player_tokens.slice(1, 1, 8)}, 1);
     auto tokens = torch::cat({global, player_tokens}, 1);
     if (positional_encoding_) {
       std::vector<float> positions(9 * model_dim_);
@@ -138,10 +123,7 @@ struct EntityTransformerNetImpl : torch::nn::Module {
   }
 
   int model_dim_, heads_;
-  bool positional_encoding_, own_hand_features_;
-  bool city_identity_features_;
-  bool public_context_features_;
-  bool v6_features_;
+  bool positional_encoding_;
   torch::nn::Linear global_embed{nullptr}, player_embed{nullptr}, self_embed{nullptr};
   torch::nn::Embedding city_embed{nullptr};
   torch::nn::Linear action_embed{nullptr}, action1{nullptr}, action_out{nullptr}, value_out{nullptr};

@@ -45,6 +45,35 @@ int main() {
             assassin_rank_nine.assassinated == 9,
       "assassin should be able to target an available rank-9 role");
 
+    // Quarry permits one duplicate district name. Diplomat action generation
+    // and execution must both honor that limit during a city swap.
+    NativeGameState diplomat_quarry;
+    diplomat_quarry.phase = NativePhase::Action;
+    diplomat_quarry.active_player = 0;
+    diplomat_quarry.pending_kind = "diplomat_theirs";
+    diplomat_quarry.pending_uid = "selected";
+    diplomat_quarry.players = {player("diplomat", "diplomat", 3),
+                               player("target", "king", 0)};
+    diplomat_quarry.players[0].city = {
+      {{"q", "purple", 4, "Quarry"}, "Quarry", "quarry"},
+      {{"existing-market", "green", 2, "Market"}, "Market"},
+      {{"selected", "blue", 2, "Chapel"}, "Chapel"},
+    };
+    diplomat_quarry.players[1].city = {
+      {{"target-market", "green", 3, "Market"}, "Market"},
+    };
+    const auto diplomat_targets = game.legal_actions(diplomat_quarry, 0);
+    const auto duplicate_market = std::find_if(diplomat_targets.begin(), diplomat_targets.end(),
+      [](const NativeSearchAction& action) {
+        return action.uid == "target-market" && action.target == "target";
+      });
+    require(duplicate_market != diplomat_targets.end(),
+      "diplomat should be offered the extra same-name district allowed by Quarry");
+    require(game.apply(diplomat_quarry, 0, *duplicate_market) &&
+            std::count_if(diplomat_quarry.players[0].city.begin(), diplomat_quarry.players[0].city.end(),
+              [](const NativeDistrict& district) { return district.name == "Market"; }) == 2,
+      "diplomat execution should allow a Quarry-permitted duplicate district");
+
     // Magistrate: declare one real + two false warrants; intercept and seize a build.
     NativeGameState s;
     s.phase = NativePhase::Action; s.active_player = 0; s.resources_taken = true;

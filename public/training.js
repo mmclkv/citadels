@@ -71,7 +71,6 @@ const CONFIG_FIELDS = [
   ['maxPlayers', 'max-players', 'select'],
   ['charSet', 'char-set', 'select'],
   ['profile', 'profile', 'select'],
-  ['networkArchitecture', 'network-architecture', 'select'],
   ['device', 'device', 'select'],
   ['endDistricts', 'end-districts', 'select'],
   ['maxSteps', 'max-steps', 'number'],
@@ -333,11 +332,10 @@ function renderRuntime(status) {
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
     ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
-    ['状态 / 动作编码', 'v' + (c.networkArchitecture === 'entity-v6' ? 12 : c.networkArchitecture === 'entity-v5' ? 11 : c.networkArchitecture === 'entity-v4' ? 10 : c.networkArchitecture === 'entity-v3' ? 9 : 8) +
-      ' / v' + (c.networkArchitecture === 'entity-v6' ? 9 : 8) + '（跨引擎对齐）'],
+    ['状态 / 动作编码', 'v14 / v9（entity-v6）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['启发式难度', c.heuristicDifficulty || '—'],
-    ['训练目标', '仅策略网络行动的 MCTS 访问分布'],
+    ['训练目标', 'MCTS 策略监督 + NPC 决策状态的终局价值监督'],
     ['MCTS', mctsLabel + ' · 深度 ' + (c.mctsMaxDepth || '—') +
       ' · 粒子 ' + (c.mctsParticles || '—') + ' · batch ' + (c.mctsBatchSize || '—')],
     ['日志文件', c.logFile || status.logFile || '—'],

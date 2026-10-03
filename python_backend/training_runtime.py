@@ -31,10 +31,6 @@ from .training_config import sanitize_config
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = ROOT / "training"
 ACTION_SIZE = 256
-FLAT_PROFILES = {"fast": (256, 128, 128, 64, 64),
-                 "balanced": (384, 256, 256, 128, 128),
-                 "large": (512, 384, 384, 192, 192)}
-
 _SAMPLER_CONFIG = None
 _SAMPLER_STOP = None
 _SAMPLER_NATIVE_WORKER = None
@@ -43,6 +39,39 @@ _SERVER_NATIVE_WORKER = None
 _SERVER_GAME_WORKER = None
 REPLAY_MAX_GAMES = 128
 REPLAY_MAX_BYTES = 256 * 1024 * 1024
+NETWORK_METRIC_WINDOW = 50
+
+
+class RecentNetworkMetrics:
+    """Per-player-count performance over the latest completed games."""
+
+    def __init__(self, window: int = NETWORK_METRIC_WINDOW):
+        self.window = max(1, int(window))
+        self._games: dict[int, deque[tuple[float, float]]] = {}
+
+    def add(self, player_count: int, reward: float, win_rate: float) -> None:
+        samples = self._games.setdefault(int(player_count), deque(maxlen=self.window))
+        samples.append((float(reward), float(win_rate)))
+
+    def snapshot(self) -> dict[str, dict]:
+        result = {}
+        for player_count, samples in self._games.items():
+            if not samples:
+                continue
+            result[str(player_count)] = {
+                "games": len(samples),
+                "reward": sum(item[0] for item in samples) / len(samples),
+                "winRate": sum(item[1] for item in samples) / len(samples),
+            }
+        return result
+
+
+def _checkpoint_due(games: int, saved_game: int, interval: int,
+                    target_games: int, stopping: bool) -> bool:
+    """Save on crossing a checkpoint boundary, not only on exact batch alignment."""
+    interval = max(1, int(interval))
+    crossed_boundary = games // interval > saved_game // interval
+    return bool(games and (crossed_boundary or games >= target_games or stopping))
 
 
 class RecentReplayBuffer:
@@ -97,19 +126,16 @@ class RecentReplayBuffer:
         return sampled
 
 
-def _entity_forward_probe_inputs(architecture: str) -> tuple[np.ndarray, np.ndarray]:
-    """Build deterministic, structured inputs that exercise every city ID."""
-    contract = MODEL_CONTRACTS[architecture]
+def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
+    """Build deterministic cases covering seat masks, card IDs and action counts."""
+    contract = MODEL_CONTRACTS["entity-v6"]
     state_size = contract["stateSize"]
     state = np.zeros(state_size, dtype=np.float32)
     state[0] = contract["state"]
     state[1] = 5.0 / 8.0  # five occupied seats; exercise padding and valid seats
     state[5] = 8.0 / 12.0
-    v6 = architecture == "entity-v6"
-    city_ids = architecture in ("entity-v4", "entity-v5", "entity-v6")
-    player_width = 184 if v6 else 88 if city_ids else 80
-    city_slots = 16 if v6 else 8
-    slot_width = 8 if v6 else 4
+    player_width = 184
+    slot_width = 8
     for player in range(5):
         base = 32 + player * player_width
         state[base] = (5 + player) / 20.0
@@ -118,19 +144,17 @@ def _entity_forward_probe_inputs(architecture: str) -> tuple[np.ndarray, np.ndar
         state[base + 3] = float(player == 0)
         state[base + 4] = float(player == 3)
         state[base + 9] = (10 + player) / 100.0
-        if city_ids:
-            for slot in range(6):
-                identity = (player * 6 + slot) % 30
-                offset = base + 56 + slot * slot_width
-                state[offset] = (2 + identity % 7) / 8.0
-                state[offset + 1] = (identity % 5 + 1) / 5.0
-                state[offset + 2] = (2 + identity % 8) / 10.0
-                state[offset + 3] = float(identity + 1)
-                if v6:
-                    state[offset + 4] = float(identity % 2)
-                    state[offset + 5] = (identity % 4) / 8.0
-                    state[offset + 6] = (player + 1) / 100.0
-                    state[offset + 7] = float(identity % 7 == 0)
+        for slot in range(6):
+            identity = (player * 6 + slot) % 30
+            offset = base + 56 + slot * slot_width
+            state[offset] = (2 + identity % 7) / 8.0
+            state[offset + 1] = (identity % 5 + 1) / 5.0
+            state[offset + 2] = (2 + identity % 8) / 10.0
+            state[offset + 3] = float(identity + 1)
+            state[offset + 4] = float(identity % 2)
+            state[offset + 5] = (identity % 4) / 8.0
+            state[offset + 6] = (player + 1) / 100.0
+            state[offset + 7] = float(identity % 7 == 0)
     hand_start = 32 + 8 * player_width
     if state_size >= hand_start + 30:
         state[hand_start:hand_start + 8] = np.asarray(
@@ -150,7 +174,34 @@ def _entity_forward_probe_inputs(architecture: str) -> tuple[np.ndarray, np.ndar
         norm = float(np.linalg.norm(actions[row]))
         if norm > 1.0:
             actions[row] /= norm
-    return state, actions
+    probes = [(state, actions)]
+
+    # A two-seat state forces the transformer to mask the remaining player
+    # tokens. Keep self and hand features, but clear all absent-seat records.
+    two_seat = state.copy()
+    two_seat[1] = 2.0 / 8.0
+    two_seat[32 + 2 * player_width:32 + 8 * player_width] = 0.0
+    probes.append((two_seat, actions[:1].copy()))
+
+    # Exercise the full eight-seat path and a wider, differently ordered set
+    # of candidate actions. Only touch numeric/categorical slots deliberately.
+    eight_seat = state.copy()
+    eight_seat[1] = 1.0
+    for player in range(5, 8):
+        base = 32 + player * player_width
+        eight_seat[base:base + player_width] = state[32 + (player - 5) * player_width:
+                                                       32 + (player - 4) * player_width]
+        eight_seat[base] += player / 100.0
+    many_actions = np.zeros((11, ACTION_SIZE), dtype=np.float32)
+    action_types = (20, 8, 12, 19, 8, 20, 12, 19, 8, 20, 12)
+    for row, action_type in enumerate(action_types):
+        many_actions[row, 0] = contract["action"]
+        many_actions[row, 1 + action_type] = 1.0
+        many_actions[row, 107] = (row + 1) / 12.0
+        many_actions[row, 108] = (row % 5) / 8.0
+        many_actions[row, 109] = (row % 7) / 10.0
+    probes.append((eight_seat, many_actions))
+    return probes
 
 
 def set_server_native_worker(worker, game_worker=None) -> None:
@@ -195,14 +246,6 @@ def _system_memory_gb() -> float | None:
     return None
 
 
-def _flat_parameter_count(profile: str) -> int:
-    state_hidden, latent, policy_hidden, policy_mid, value_hidden = FLAT_PROFILES[profile]
-    dense = lambda inputs, outputs: inputs * outputs + outputs
-    return (dense(672, state_hidden) + dense(state_hidden, latent) +
-            dense(latent + ACTION_SIZE, policy_hidden) + dense(policy_hidden, policy_mid) +
-            dense(policy_mid, 1) + dense(latent, value_hidden) + dense(value_hidden, 8))
-
-
 def _load_trainer():
     import sys
     if str(TRAINING_DIR) not in sys.path:
@@ -210,6 +253,24 @@ def _load_trainer():
     import torch
     import gpu_trainer
     return torch, gpu_trainer
+
+
+def _entity_parameter_count(profile: str) -> int:
+    model_dim, _heads, layers, ff_dim, action_hidden = {
+        "fast": (128, 4, 2, 256, 128),
+        "balanced": (192, 4, 3, 384, 192),
+        "large": (256, 4, 3, 512, 256),
+    }[profile]
+    dense = lambda inputs, outputs: inputs * outputs + outputs
+    player_input = 56 + 16 * (7 + 8)
+    global_input = 32 + 256
+    total = dense(global_input, model_dim) + dense(player_input, model_dim)
+    total += 31 * 8 + dense(player_input + 30, model_dim)
+    total += dense(ACTION_SIZE, model_dim)
+    total += layers * (4 * dense(model_dim, model_dim) + dense(model_dim, ff_dim) +
+                       dense(ff_dim, model_dim) + 4 * model_dim)
+    total += dense(model_dim * 2, action_hidden) + dense(action_hidden, 1) + dense(model_dim, 1)
+    return total
 
 
 def _network_count(config: dict, game_number: int, player_count: int) -> int:
@@ -332,6 +393,12 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                     game_id=game_id, network_player_ids=sorted(network_ids), seed=seed + steps,
                     max_steps=int(config["maxSteps"]) - steps,
                     max_rounds=int(config["maxRounds"]))
+                for sample in advanced.get("trainingSamples") or []:
+                    rows.append({"playerId": sample["playerId"],
+                                 "state": np.asarray(sample["state"], dtype=np.float32),
+                                 "actions": np.zeros((0, ACTION_SIZE), dtype=np.float32),
+                                 "pi": np.zeros(0, dtype=np.float32),
+                                 "reward": None, "valueMask": None})
                 advanced_state = advanced.get("state") or {}
                 if (int(advanced.get("steps", 0)) == 0 and not advanced.get("gameOver") and
                         int(advanced_state.get("round", 1)) <= int(config["maxRounds"])):
@@ -346,42 +413,40 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
             actions = decision.get("actions") or []
             if not actions:
                 raise RuntimeError(f"游戏主进程返回空合法动作：phase={state.get('phase')} player={actor_id}")
-            if len(actions) > 1:
-                particle_result = worker.determinize(
-                    state=state, player_id=actor_id, count=config["mctsParticles"],
-                    seed=int(rng.integers(1, 2**32)), belief=config.get("mctsBelief", True))
-                particles = particle_result["particles"]
-                particle_weights = particle_result["weights"]
-                if not particles or len(particles) != len(particle_weights):
-                    raise RuntimeError("C++ 确定化返回的局面与信念权重数量不一致")
-                search_started = time.perf_counter()
-                search_result = worker.search(
-                    state=particles[0], particles=particles[1:], root_player_id=actor_id,
-                    legal_actions=actions, particle_weights=particle_weights,
-                    model_path=model_path, model_version=model_version, profile=config["profile"],
-                    architecture=config["networkArchitecture"], device=config["device"],
-                    simulations=config["mctsSimulations"], max_depth=config["mctsMaxDepth"],
-                    c_puct=config["mctsC_puct"], dirichlet_alpha=config["mctsDirichletAlpha"],
-                    dirichlet_epsilon=config["mctsDirichletEpsilon"], seed=seed + steps,
-                    batch_size=config.get("mctsBatchSize", 32),
-                    action_encoding_version=9 if config["networkArchitecture"] == "entity-v6" else 8,
-                    include_training_features=True)
-                policy = np.asarray(search_result["policy"], dtype=np.float32)
-                inference_ms += float(search_result.get("inferenceMs") or
-                                      (time.perf_counter() - search_started) * 1000)
-                inference_searches += 1
-                state_features = search_result.get("stateFeatures")
-                action_features = search_result.get("actionFeatures")
-                if state_features is None or action_features is None:
-                    raise RuntimeError("MCTS 未返回训练所需的状态/动作特征")
-                rows.append({"playerId": actor_id,
-                             "state": np.asarray(state_features, dtype=np.float32),
-                             "actions": np.asarray(action_features, dtype=np.float32),
-                             "pi": policy, "reward": None, "valueMask": None})
-                probs = _temperature_policy(policy, training_temperature)
-                action = actions[int(rng.choice(len(actions), p=probs))]
-            else:
-                action = actions[0]
+            particle_result = worker.determinize(
+                state=state, player_id=actor_id, count=config["mctsParticles"],
+                seed=int(rng.integers(1, 2**32)), belief=config.get("mctsBelief", True))
+            particles = particle_result["particles"]
+            particle_weights = particle_result["weights"]
+            if not particles or len(particles) != len(particle_weights):
+                raise RuntimeError("C++ 确定化返回的局面与信念权重数量不一致")
+            search_started = time.perf_counter()
+            search_result = worker.search(
+                state=particles[0], particles=particles[1:], root_player_id=actor_id,
+                legal_actions=actions, particle_weights=particle_weights,
+                model_path=model_path, model_version=model_version, profile=config["profile"],
+                architecture=config["networkArchitecture"], device=config["device"],
+                simulations=(1 if len(actions) == 1 else config["mctsSimulations"]),
+                max_depth=config["mctsMaxDepth"],
+                c_puct=config["mctsC_puct"], dirichlet_alpha=config["mctsDirichletAlpha"],
+                dirichlet_epsilon=config["mctsDirichletEpsilon"], seed=seed + steps,
+                batch_size=config.get("mctsBatchSize", 32),
+                action_encoding_version=9,
+                include_training_features=True)
+            policy = np.asarray(search_result["policy"], dtype=np.float32)
+            inference_ms += float(search_result.get("inferenceMs") or
+                                  (time.perf_counter() - search_started) * 1000)
+            inference_searches += 1
+            state_features = search_result.get("stateFeatures")
+            action_features = search_result.get("actionFeatures")
+            if state_features is None or action_features is None:
+                raise RuntimeError("MCTS 未返回训练所需的状态/动作特征")
+            rows.append({"playerId": actor_id,
+                         "state": np.asarray(state_features, dtype=np.float32),
+                         "actions": np.asarray(action_features, dtype=np.float32),
+                         "pi": policy, "reward": None, "valueMask": None})
+            probs = _temperature_policy(policy, training_temperature)
+            action = actions[int(rng.choice(len(actions), p=probs))]
             game_worker.apply(game_id=game_id, player_id=actor_id, action=action,
                               return_state=False)
             steps += 1
@@ -504,7 +569,8 @@ class TrainingManager:
                         "preparing": False, "completedGames": 0, "finishedGames": 0, "targetGames": 0,
                         "startedAt": None, "endedAt": None, "point": None,
                         "history": [], "checkpoint": "", "error": "", "logs": [],
-                        "profiles": {name: _flat_parameter_count(name) for name in FLAT_PROFILES},
+                        "profiles": {name: _entity_parameter_count(name)
+                                     for name in ("fast", "balanced", "large")},
                         "hardware": {"cpu": os.environ.get("PROCESSOR_IDENTIFIER", ""),
                                      "logicalCores": os.cpu_count() or 1,
                                      "runtime": "Python"}, "config": None,
@@ -521,53 +587,75 @@ class TrainingManager:
     def _check_entity_forward_parity(self, torch, architecture: str, profile: str,
                                      device, model_path: str, action_version: int,
                                      worker_path: str) -> None:
-        if not architecture.startswith("entity-"):
-            self._log("前向一致性检查：非 Entity Transformer 架构，跳过。")
-            return
+        if architecture != "entity-v6":
+            raise ValueError("训练只支持 entity-v6，拒绝运行未经校验的架构")
         model = self._model
-        state, actions = _entity_forward_probe_inputs(architecture)
-        state_size = int(state.size)
+        cases = _entity_forward_probe_inputs()
+        state_size = int(cases[0][0].size)
         device_name = "cuda" if getattr(device, "type", "cpu") == "cuda" else "cpu"
         worker = self.native_worker
         owns_worker = worker is None
         if owns_worker:
             worker = NativeMctsWorker(worker_path)
-        self._log(f"前向一致性检查：架构={architecture}，输入维度 state={state_size} / actions=4×{ACTION_SIZE}…")
+        self._log(f"前向一致性检查：架构={architecture}，state={state_size}，"
+                  f"多场景={len(cases)}组（动作数={','.join(str(len(actions)) for _, actions in cases)}）…")
         was_training = model.training
         model.eval()
         try:
+            python_outputs = []
             with torch.inference_mode():
-                state_tensor = torch.from_numpy(state).unsqueeze(0).to(device)
-                action_tensor = torch.from_numpy(actions).unsqueeze(0).to(device)
-                mask = torch.ones((1, actions.shape[0]), dtype=torch.bool, device=device)
-                py_logits, py_values = model(state_tensor, action_tensor, mask)
-                py_logits = py_logits[0].detach().float().cpu().numpy()
-                py_values = py_values[0].detach().float().cpu().numpy()
+                for state, actions in cases:
+                    state_tensor = torch.from_numpy(state).unsqueeze(0).to(device)
+                    action_tensor = torch.from_numpy(actions).unsqueeze(0).to(device)
+                    mask = torch.ones((1, actions.shape[0]), dtype=torch.bool, device=device)
+                    py_logits, py_values = model(state_tensor, action_tensor, mask)
+                    python_outputs.append((
+                        py_logits[0].detach().float().cpu().numpy(),
+                        py_values[0].detach().float().cpu().numpy()))
             cpp = worker.forward_probe(
-                state_features=state.tolist(), action_features=actions.tolist(),
+                probes=[{"stateFeatures": state.tolist(), "actionFeatures": actions.tolist()}
+                        for state, actions in cases],
                 model_path=model_path, profile=profile, architecture=architecture,
                 device=device_name, action_encoding_version=action_version)
-            cpp_logits = np.asarray(cpp.get("logits"), dtype=np.float32)
-            cpp_values = np.asarray(cpp.get("values"), dtype=np.float32)
-            if cpp_logits.shape != py_logits.shape or cpp_values.shape != py_values.shape:
-                raise RuntimeError(
-                    "前向输出形状不一致："
-                    f"policy Python={py_logits.shape}/C++={cpp_logits.shape}，"
-                    f"value Python={py_values.shape}/C++={cpp_values.shape}")
-            logits_diff = np.abs(py_logits - cpp_logits)
-            values_diff = np.abs(py_values - cpp_values)
-            max_abs = float(max(logits_diff.max(initial=0.0), values_diff.max(initial=0.0)))
-            scale = np.maximum(np.abs(py_logits), np.abs(cpp_logits))
-            logits_ok = np.all(logits_diff <= 5e-4 + 5e-4 * scale)
-            scale = np.maximum(np.abs(py_values), np.abs(cpp_values))
-            values_ok = np.all(values_diff <= 5e-4 + 5e-4 * scale)
-            if not logits_ok or not values_ok:
-                raise RuntimeError(
-                    "Python 与 LibTorch 前向结果不一致："
-                    f"policy maxAbs={float(logits_diff.max(initial=0.0)):.7g}，"
-                    f"value maxAbs={float(values_diff.max(initial=0.0)):.7g}，"
-                    "容差=5e-4+5e-4×|output|；已中止训练")
-            self._log(f"前向一致性检查通过：policy/value 最大绝对差={max_abs:.7g}（容差 5e-4+5e-4×|output|）。")
+            cpp_outputs = cpp.get("results")
+            if not isinstance(cpp_outputs, list) or len(cpp_outputs) != len(cases):
+                raise RuntimeError("C++ 前向检查样本数不匹配："
+                                   f"Python={len(cases)} / C++={len(cpp_outputs) if isinstance(cpp_outputs, list) else 'invalid'}")
+            max_abs = 0.0
+            max_prob_diff = 0.0
+            for case_index, ((py_logits, py_values), native_output) in enumerate(zip(python_outputs, cpp_outputs), 1):
+                cpp_logits = np.asarray(native_output.get("logits"), dtype=np.float32)
+                cpp_values = np.asarray(native_output.get("values"), dtype=np.float32)
+                if cpp_logits.shape != py_logits.shape or cpp_values.shape != py_values.shape:
+                    raise RuntimeError(
+                        f"前向输出形状不一致（样本{case_index}）："
+                        f"policy Python={py_logits.shape}/C++={cpp_logits.shape}，"
+                        f"value Python={py_values.shape}/C++={cpp_values.shape}")
+                if not all(np.isfinite(array).all() for array in (py_logits, py_values, cpp_logits, cpp_values)):
+                    raise RuntimeError(f"前向输出包含 NaN/Inf（样本{case_index}），已中止训练")
+                logits_diff = np.abs(py_logits - cpp_logits)
+                values_diff = np.abs(py_values - cpp_values)
+                logits_scale = np.maximum(np.abs(py_logits), np.abs(cpp_logits))
+                values_scale = np.maximum(np.abs(py_values), np.abs(cpp_values))
+                logits_ok = np.all(logits_diff <= 5e-4 + 5e-4 * logits_scale)
+                values_ok = np.all(values_diff <= 5e-4 + 5e-4 * values_scale)
+                py_probs = torch.softmax(torch.from_numpy(py_logits), dim=-1).numpy()
+                cpp_probs = torch.softmax(torch.from_numpy(cpp_logits), dim=-1).numpy()
+                probability_diff = np.abs(py_probs - cpp_probs)
+                max_abs = max(max_abs, float(logits_diff.max(initial=0.0)),
+                              float(values_diff.max(initial=0.0)))
+                max_prob_diff = max(max_prob_diff, float(probability_diff.max(initial=0.0)))
+                if not logits_ok or not values_ok or float(probability_diff.max(initial=0.0)) > 5e-5:
+                    logit_at = int(np.argmax(logits_diff)) if logits_diff.size else -1
+                    value_at = int(np.argmax(values_diff)) if values_diff.size else -1
+                    raise RuntimeError(
+                        f"Python 与 LibTorch 前向不一致（样本{case_index}，动作数={len(py_logits)}）："
+                        f"policy maxAbs={float(logits_diff.max(initial=0.0)):.7g}@{logit_at}，"
+                        f"value maxAbs={float(values_diff.max(initial=0.0)):.7g}@{value_at}，"
+                        f"policyProb maxAbs={float(probability_diff.max(initial=0.0)):.7g}；"
+                        "容差 logits/value=5e-4+5e-4×|output|、probability=5e-5；已中止训练")
+            self._log(f"前向一致性检查通过：{len(cases)}组输入，logits/value 最大绝对差={max_abs:.7g}，"
+                      f"策略概率最大差={max_prob_diff:.7g}。")
         finally:
             model.train(was_training)
             if owns_worker:
@@ -577,8 +665,12 @@ class TrainingManager:
         with self._lock:
             result = copy.deepcopy(self._status)
             result["pid"] = os.getpid() if result["running"] else None
-            profile = (result.get("config") or {}).get("profile", "balanced")
-            result["parameterCount"] = result["profiles"].get(profile, result["profiles"]["balanced"])
+            config = result.get("config") or {}
+            profile = config.get("profile", "balanced")
+            result["profiles"] = {name: _entity_parameter_count(name)
+                                  for name in ("fast", "balanced", "large")}
+            result["parameterCount"] = int(result.get("parameterCount") or
+                                           result["profiles"].get(profile, 0))
             result["checkpoints"] = self._checkpoint_list()
             return result
 
@@ -637,6 +729,8 @@ class TrainingManager:
             architecture = config["networkArchitecture"]
             self._log(f"正在创建网络：架构={architecture}，profile={config['profile']}…")
             self._model = trainer.create_model(architecture, config["profile"]).to(self._device)
+            with self._lock:
+                self._status["parameterCount"] = sum(parameter.numel() for parameter in self._model.parameters())
             resume_path = None
             if config["resumeCheckpoint"]:
                 resume_path = self.data_dir / config["resumeCheckpoint"]
@@ -664,6 +758,7 @@ class TrainingManager:
                 finally:
                     model_path.unlink(missing_ok=True)
                 games = int(checkpoint.get("game") or 0)
+                saved_game = games
                 with self._lock:
                     self._status["completedGames"] = games
                 self._log(f"从 checkpoint 续训：{resume_path.name}（{games} 局）")
@@ -695,7 +790,7 @@ class TrainingManager:
             config["gameEnginePath"] = str(getattr(self.game_worker, "executable", "") or default_game)
             config["nativeModelPath"] = str(Path(native_model_dir.name) / "model.bin")
             self._model.save_flat(config["nativeModelPath"])
-            action_version = 9 if architecture == "entity-v6" else 8
+            action_version = 9
             self._check_entity_forward_parity(
                 torch, architecture, config["profile"], self._device,
                 config["nativeModelPath"], action_version, worker_path)
@@ -731,7 +826,8 @@ class TrainingManager:
             totals = {"steps": 0, "gameMs": 0.0, "inferenceMs": 0.0,
                       "inferenceSearches": 0, "rounds": 0, "fallbacks": 0,
                       "incompleteGames": 0, "finishedGames": 0,
-                      "networkByPlayers": {}, "winSeatsByPlayers": {}}
+                      "winSeatsByPlayers": {}}
+            recent_network_metrics = RecentNetworkMetrics()
             while games < config["targetGames"] and not self._stop.is_set():
                 if self._device.type == "cuda":
                     torch.cuda.reset_peak_memory_stats(self._device)
@@ -779,11 +875,8 @@ class TrainingManager:
                         for winning_seat in result["winners"]:
                             if 0 <= winning_seat < seat_count:
                                 seat_bucket["wins"][winning_seat] += 1
-                        bucket = totals["networkByPlayers"].setdefault(str(seat_count),
-                            {"games": 0, "reward": 0.0, "winRate": 0.0})
-                        bucket["games"] += 1
-                        bucket["reward"] += (result["networkReward"] - bucket["reward"]) / bucket["games"]
-                        bucket["winRate"] += (result["networkWin"] - bucket["winRate"]) / bucket["games"]
+                        recent_network_metrics.add(seat_count, result["networkReward"],
+                                                   result["networkWin"])
                     else:
                         totals["incompleteGames"] += 1
                         self._log(f"第 {result['gameNumber']} 局触及步数/回合上限，未产生终局标签；已丢弃该局样本。")
@@ -793,7 +886,7 @@ class TrainingManager:
                         elapsed_minutes = max(1e-9, (time.time() - datetime.fromisoformat(self._status["startedAt"]).timestamp()) / 60)
                         self._status["point"] = {"game": games, "networkReward": result["networkReward"],
                             "networkWinRate": result["networkWin"], "networkScore": result["networkScore"],
-                            "networkByPlayers": copy.deepcopy(totals["networkByPlayers"]),
+                            "networkByPlayers": recent_network_metrics.snapshot(),
                             "networkPlayers": result["networkPlayerCount"],
                             "temperature": result["temperature"],
                             "steps": totals["steps"], "avgGameMs": totals["gameMs"] / games,
@@ -842,7 +935,8 @@ class TrainingManager:
                         self._status["point"] = {**(self._status.get("point") or {}), **batch_metrics}
                         self._status["history"].append(copy.deepcopy(self._status["point"]))
                         self._status["history"] = self._status["history"][-400:]
-                if games and (games % config["checkpointEvery"] == 0 or games >= config["targetGames"] or self._stop.is_set()):
+                if _checkpoint_due(games, saved_game, config["checkpointEvery"],
+                                   config["targetGames"], self._stop.is_set()):
                     self._log(f"正在保存 checkpoint（{games} 局）…")
                     self._save_checkpoint(config, games)
                     saved_game = games

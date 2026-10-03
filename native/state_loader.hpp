@@ -128,9 +128,16 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       if (value.is_object()) {
         observation.valid = true;
         observation.round = int_field(value, "round");
+        observation.turns_completed = int_field(value, "turnsCompleted");
         observation.gold = int_field(value, "gold");
         observation.hand_size = int_field(value, "handSize");
         observation.free_colors = string_array_field(value, "freeColors");
+        observation.role_id = string_field(value, "roleId");
+        observation.witch_resume = bool_field(value, "witchResume");
+        observation.builds = int_field(value, "builds");
+        observation.build_limit = int_field(value, "buildLimit", 1);
+        observation.quarry_count = int_field(value, "quarryCount");
+        observation.built_names = string_array_field(value, "builtNames");
       }
       state.observations.push_back(std::move(observation));
     }

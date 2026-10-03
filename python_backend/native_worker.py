@@ -26,17 +26,16 @@ class NativeMctsWorker:
         self._lock = threading.Lock()
         self._request_id = 0
 
-    def forward_probe(self, *, state_features: list[float], action_features: list[list[float]],
+    def forward_probe(self, *, probes: list[dict],
                       model_path: str, profile: str, architecture: str, device: str,
                       action_encoding_version: int) -> dict:
-        """Run one raw-feature forward pass through the worker's LibTorch model."""
+        """Run deterministic raw-feature probes through one LibTorch model instance."""
         with self._lock:
             if self.process.poll() is not None:
                 raise RuntimeError(f"C++ MCTS worker 已退出（exit={self.process.returncode}）")
             self._request_id += 1
             request_id = str(self._request_id)
-            request = {"id": request_id, "mode": "forward_probe",
-                       "stateFeatures": state_features, "actionFeatures": action_features,
+            request = {"id": request_id, "mode": "forward_probe", "probes": probes,
                        "modelPath": model_path, "profile": profile,
                        "architecture": architecture, "device": device,
                        "actionEncodingVersion": int(action_encoding_version)}
@@ -63,7 +62,7 @@ class NativeMctsWorker:
                model_path: str, model_version: int, profile: str, architecture: str,
                device: str, simulations: int, max_depth: int, c_puct: float,
                dirichlet_alpha: float, dirichlet_epsilon: float, seed: int,
-               batch_size: int = 32, action_encoding_version: int = 8,
+               batch_size: int = 32, action_encoding_version: int = 9,
                include_training_features: bool = False) -> dict:
         with self._lock:
             if self.process.poll() is not None:

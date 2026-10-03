@@ -17,6 +17,7 @@
 #include "json_value.hpp"
 #include "gpu_trainer_client.hpp"
 #include "neural_evaluator.hpp"
+#include "npc_policy.hpp"
 #include "shared_memory_inference.hpp"
 #include "state_loader.hpp"
 #include "state_writer.hpp"
@@ -187,46 +188,48 @@ int main() {
       if (string_field(request, "mode") == "forward_probe") {
 #ifdef CITADELS_LIBTORCH
         const auto architecture = string_field(request, "architecture", "entity-v6");
-        if (architecture != "entity-v1" && architecture != "entity-v2" && architecture != "entity-v3" &&
-            architecture != "entity-v4" && architecture != "entity-v5" && architecture != "entity-v6")
-          throw std::runtime_error("forward_probe 只支持 Entity Transformer 架构");
-        const bool v6 = architecture == "entity-v6";
-        const bool city_ids = architecture == "entity-v4" || architecture == "entity-v5" || v6;
-        const bool public_context = architecture == "entity-v5" || v6;
-        const bool own_hand = architecture == "entity-v3" || city_ids;
-        const auto* state_value = request.get("stateFeatures");
-        const auto* actions_value = request.get("actionFeatures");
-        if (!state_value || !state_value->is_array() || !actions_value || !actions_value->is_array())
-          throw std::runtime_error("forward_probe 缺少数值状态/动作特征");
-        std::vector<float> state_features;
-        for (const auto& value : state_value->as_array()) {
-          if (!value.is_number()) throw std::runtime_error("forward_probe 状态特征必须为数字");
-          state_features.push_back(static_cast<float>(value.as_number()));
-        }
-        std::vector<std::vector<float>> action_features;
-        for (const auto& row : actions_value->as_array()) {
-          if (!row.is_array()) throw std::runtime_error("forward_probe 动作特征必须是二维数组");
-          action_features.emplace_back();
-          for (const auto& value : row.as_array()) {
-            if (!value.is_number()) throw std::runtime_error("forward_probe 动作特征必须为数字");
-            action_features.back().push_back(static_cast<float>(value.as_number()));
-          }
-        }
+        if (architecture != "entity-v6") throw std::runtime_error("C++ MCTS 只支持 entity-v6");
+        const auto* probes_value = request.get("probes");
+        if (!probes_value || !probes_value->is_array() || probes_value->as_array().empty())
+          throw std::runtime_error("forward_probe 缺少输入样本");
         LibTorchEntityTransformerEvaluator probe(
           string_field(request, "profile", "balanced"), string_field(request, "modelPath"),
-          string_field(request, "device", "cpu"), architecture != "entity-v1",
-          int_field(request, "actionEncodingVersion", kActionEncodingVersion),
-          own_hand, city_ids, public_context, v6);
-        const auto outputs = probe.forward_encoded(state_features, action_features);
-        std::cout << "{\"v\":1,\"t\":\"forward_probe_result\",\"id\":\"" << escape(id) << "\",\"logits\":[";
-        for (size_t i = 0; i < outputs.first.size(); ++i) {
-          if (i) std::cout << ',';
-          std::cout << std::setprecision(9) << outputs.first[i];
-        }
-        std::cout << "],\"values\":[";
-        for (size_t i = 0; i < outputs.second.size(); ++i) {
-          if (i) std::cout << ',';
-          std::cout << std::setprecision(9) << outputs.second[i];
+          string_field(request, "device", "cpu"), true,
+          int_field(request, "actionEncodingVersion", kActionEncodingVersion));
+        std::cout << "{\"v\":1,\"t\":\"forward_probe_result\",\"id\":\"" << escape(id) << "\",\"results\":[";
+        for (size_t probe_index = 0; probe_index < probes_value->as_array().size(); ++probe_index) {
+          if (probe_index) std::cout << ',';
+          const auto& input = probes_value->as_array()[probe_index];
+          const auto* state_value = input.get("stateFeatures");
+          const auto* actions_value = input.get("actionFeatures");
+          if (!state_value || !state_value->is_array() || !actions_value || !actions_value->is_array())
+            throw std::runtime_error("forward_probe 输入样本缺少数值状态/动作特征");
+          std::vector<float> state_features;
+          for (const auto& value : state_value->as_array()) {
+            if (!value.is_number()) throw std::runtime_error("forward_probe 状态特征必须为数字");
+            state_features.push_back(static_cast<float>(value.as_number()));
+          }
+          std::vector<std::vector<float>> action_features;
+          for (const auto& row : actions_value->as_array()) {
+            if (!row.is_array()) throw std::runtime_error("forward_probe 动作特征必须是二维数组");
+            action_features.emplace_back();
+            for (const auto& value : row.as_array()) {
+              if (!value.is_number()) throw std::runtime_error("forward_probe 动作特征必须为数字");
+              action_features.back().push_back(static_cast<float>(value.as_number()));
+            }
+          }
+          const auto outputs = probe.forward_encoded(state_features, action_features);
+          std::cout << "{\"logits\":[";
+          for (size_t i = 0; i < outputs.first.size(); ++i) {
+            if (i) std::cout << ',';
+            std::cout << std::setprecision(9) << outputs.first[i];
+          }
+          std::cout << "],\"values\":[";
+          for (size_t i = 0; i < outputs.second.size(); ++i) {
+            if (i) std::cout << ',';
+            std::cout << std::setprecision(9) << outputs.second[i];
+          }
+          std::cout << "]}";
         }
         std::cout << "]}\n" << std::flush;
         continue;
@@ -296,14 +299,11 @@ int main() {
 
       UniformNativeEvaluator evaluator;
       const auto inference_backend = string_field(request, "inferenceBackend", "python-binary");
-      const auto architecture = string_field(request, "architecture", "flat");
+      const auto architecture = string_field(request, "architecture", "entity-v6");
+      if (architecture != "entity-v6") throw std::runtime_error("C++ MCTS 只支持 entity-v6");
       const auto profile = string_field(request, "profile", "balanced");
       const auto device = string_field(request, "device", "cuda");
       const int action_encoding_version = int_field(request, "actionEncodingVersion", kActionEncodingVersion);
-      const bool include_v6_features = architecture == "entity-v6";
-      const bool include_own_hand = architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5" || include_v6_features;
-      const bool include_city_identity = architecture == "entity-v4" || architecture == "entity-v5" || include_v6_features;
-      const bool include_public_context = architecture == "entity-v5" || include_v6_features;
       const bool include_training_features = bool_field(request, "includeTrainingFeatures");
       const auto config_key = inference_backend + "|" + architecture + "|" + profile + "|" + device + "|" +
         std::to_string(action_encoding_version) + "|" + string_field(request, "sharedMemoryName");
@@ -322,15 +322,8 @@ int main() {
         if (inference_backend == "libtorch") {
 #ifdef CITADELS_LIBTORCH
           if (!direct_neural) {
-            if (architecture == "entity-v1" || architecture == "entity-v2" || architecture == "entity-v3" || architecture == "entity-v4" || architecture == "entity-v5" || architecture == "entity-v6") {
-              direct_neural = std::make_unique<LibTorchEntityTransformerEvaluator>(
-                profile, model_path, device, architecture != "entity-v1", action_encoding_version,
-                include_own_hand || include_v6_features, include_city_identity || include_v6_features,
-                include_public_context || include_v6_features, include_v6_features);
-            } else if (architecture == "flat") {
-              direct_neural = std::make_unique<LibTorchNeuralBatchedEvaluator>(
-                profile, model_path, device, action_encoding_version);
-            } else throw std::runtime_error("未知网络架构：" + architecture);
+            direct_neural = std::make_unique<LibTorchEntityTransformerEvaluator>(
+              profile, model_path, device, true, action_encoding_version);
             context += " · 设备=" + direct_neural->device_name();
           } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
             direct_neural->reload_model(model_path);
@@ -346,19 +339,17 @@ int main() {
               static_cast<uint32_t>(std::max(1024, int_field(request, "sharedMemorySlotBytes", 8 * 1024 * 1024))));
             shared_batch = std::make_unique<BatchEvaluator>(make_shared_memory_batch_backend(*shared_inference));
             shared_neural = std::make_unique<NativeNeuralBatchedEvaluator>(*shared_batch,
-              profile, action_encoding_version, include_own_hand || include_v6_features,
-              include_city_identity || include_v6_features, include_public_context || include_v6_features, include_v6_features);
+              profile, action_encoding_version);
           }
         } else if (!gpu) {
           gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));
           gpu->start(string_field(request, "profile", "balanced"), model_path, 0.0003f,
                      string_field(request, "device", "cuda"), "binary",
-                     string_field(request, "architecture", "flat"));
+                     string_field(request, "architecture", "entity-v6"));
           batch = std::make_unique<BatchEvaluator>(make_gpu_batch_backend(gpu,
             profile));
         neural = std::make_unique<NativeNeuralBatchedEvaluator>(*batch,
-          profile, action_encoding_version, include_own_hand || include_v6_features,
-          include_city_identity || include_v6_features, include_public_context || include_v6_features, include_v6_features);
+          profile, action_encoding_version);
         } else if (model_path != gpu_model_path || model_version != gpu_model_version) {
           gpu->reload_model(model_path);
         }
@@ -380,16 +371,28 @@ int main() {
         " · 后端=" + inference_backend;
       auto run_search = [&](const std::vector<NativeGameState>& states, int perspective,
                             int batch, const std::vector<float>& weights) {
+        auto npc_choice = [seed = config.seed](const NativeGameState& game_state, int actor,
+                                               int root_actor,
+                                               const std::vector<NativeSearchAction>& legal) {
+          if (actor < 0 || actor >= static_cast<int>(game_state.players.size()) ||
+              actor == root_actor || !game_state.players[actor].is_bot ||
+              game_state.players[actor].bot_type != "npc") return -1;
+          const uint32_t policy_seed = seed ^
+            (static_cast<uint32_t>(game_state.round) * 0x9e3779b9u) ^
+            (static_cast<uint32_t>(actor) * 0x85ebca6bu) ^
+            (static_cast<uint32_t>(game_state.turns_completed) * 0xc2b2ae35u);
+          return NativeNpcPolicy::choose(game_state, actor, legal, policy_seed);
+        };
 #ifdef CITADELS_LIBTORCH
         if (direct_neural)
-          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config)
+          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config, npc_choice)
             .search(states, perspective, batch, weights);
 #endif
         if (shared_neural)
-          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config)
+          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config, npc_choice)
             .search(states, perspective, batch, weights);
         if (neural)
-          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config)
+          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config, npc_choice)
             .search(states, perspective, batch, weights);
         return Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
           .search(states, perspective, weights);
@@ -497,8 +500,7 @@ int main() {
         std::cout << ']';
       }
       if (include_training_features && actions_match && !pool.empty()) {
-        const auto state_features = encode_network_state(pool.front(), root, include_own_hand,
-                                                         include_city_identity, include_public_context, include_v6_features);
+        const auto state_features = encode_network_state(pool.front(), root);
         std::cout << ",\"stateFeatures\":[" << std::setprecision(9);
         for (size_t i = 0; i < state_features.size(); ++i) {
           if (i) std::cout << ',';

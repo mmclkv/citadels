@@ -61,7 +61,8 @@ class GameEngineWorker:
                      seed: int, max_steps: int, max_rounds: int) -> dict:
         return self._request("advance_npcs", gameId=game_id,
                              networkPlayerIds=network_player_ids, seed=int(seed),
-                             maxSteps=int(max_steps), maxRounds=int(max_rounds))
+                             maxSteps=int(max_steps), maxRounds=int(max_rounds),
+                             includeTrainingFeatures=True)
 
     def legal_actions(self, *, game_id: str, player_id: str) -> dict:
         return self._request("actions", gameId=game_id, playerId=player_id)

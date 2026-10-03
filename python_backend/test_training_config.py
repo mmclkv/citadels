@@ -32,7 +32,7 @@ class PythonTrainingConfigTests(unittest.TestCase):
     def test_numeric_and_curriculum_options_are_still_sanitized(self):
         result = sanitize_config({"targetGames": -4, "minPlayers": 99, "maxPlayers": 2,
             "profile": "unknown", "batchGames": 500, "miniBatch": 12, "seed": -7,
-            "networkArchitecture": "entity-v5", "mctsSimulations": 2500,
+            "networkArchitecture": "entity-v6", "mctsSimulations": 2500,
             "mctsParticles": 2.5, "mctsDirichletAlpha": 0,
             "mctsDirichletEpsilon": 1, "selfPlayMode": "curriculum",
             "curriculumStartPlayers": 2.5, "curriculumEndPlayers": 5.5,
@@ -44,7 +44,7 @@ class PythonTrainingConfigTests(unittest.TestCase):
         self.assertEqual(result["batchGames"], 256)
         self.assertEqual(result["miniBatch"], 32)
         self.assertEqual(result["seed"], -7)
-        self.assertEqual(result["networkArchitecture"], "entity-v5")
+        self.assertEqual(result["networkArchitecture"], "entity-v6")
         self.assertEqual(result["mctsSimulations"], 2500)
         self.assertEqual(result["mctsParticles"], 3)
         self.assertEqual(result["mctsDirichletAlpha"], 0)

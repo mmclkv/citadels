@@ -28,13 +28,13 @@ class NeuralPolicy:
         self.device_name = device or os.environ.get("CITADELS_NEURAL_DEVICE", "auto")
         if self.device_name == "auto":
             self.device_name = "cuda"
-        self.architecture = os.environ.get("CITADELS_NEURAL_ARCHITECTURE", "entity-v6")
-        self.action_version = 9 if self.architecture == "entity-v6" else 8
+        self.architecture = "entity-v6"
+        self.action_version = 9
         self.worker = worker
         self.model_path = ""
         self._model_dir = None
         self.error = ""
-        self._last_mcts = {"determinizations": 0, "beliefDecay": 0.15,
+        self._last_mcts = {"determinizations": 0, "beliefDecay": 0.5,
                            "defaultSimulations": 500, "defaultMaxDepth": 700,
                            "maxSimulations": 2000, "maxDepthCap": 700,
                            "visits": 0, "expansions": 0}
@@ -57,9 +57,9 @@ class NeuralPolicy:
                 with gzip.open(path, "rt", encoding="utf-8") as handle:
                     checkpoint = json.load(handle)
                 metadata = checkpoint.get("model") or {}
-                self.architecture = metadata.get("architecture") or "flat"
-                if self.architecture not in ("flat", "entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5", "entity-v6"):
-                    raise ValueError(f"不支持的 checkpoint 网络架构：{self.architecture}")
+                self.architecture = metadata.get("architecture") or ""
+                if self.architecture != "entity-v6":
+                    raise ValueError(f"仅支持 entity-v6 checkpoint，当前权重架构为：{self.architecture or '未声明'}")
                 contract = validate_checkpoint_contract(checkpoint, self.architecture)
                 checkpoint_profile = metadata.get("profile") or (checkpoint.get("config") or {}).get("profile") or "balanced"
                 if checkpoint_profile not in ("fast", "balanced", "large"):
@@ -80,8 +80,7 @@ class NeuralPolicy:
                 with open(self.model_path, "wb") as output:
                     values.tofile(output)
             else:
-                self.profile = profile or "large"
-                self.model_path = str(path)
+                raise ValueError("仅支持包含架构与编码元数据的 entity-v6 JSON checkpoint")
             self.checkpoint = str(path)
             self.error = ""
         except Exception as exc:  # model/config errors are surfaced by status, not server startup
@@ -117,7 +116,7 @@ class NeuralPolicy:
         max_depth = max(1, min(700, int(options.get("maxDepth", 700))))
         particle_count = max(1, min(8, int(options.get("particles", 4))))
         belief = options.get("belief", True) is not False
-        decay = 0.15 if belief else 1.0
+        decay = 0.5 if belief else 1.0
         rng = random.Random()
         sampled = self._root_particles(state, player_id, particle_count,
                                        rng.randrange(0, 2**32), belief)

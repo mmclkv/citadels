@@ -1,10 +1,4 @@
-"""Entity Transformer models.
-
-Entity-v4 stores a
-compact integer for each city building and maps it through a learned embedding
-before player-token projection. The explicit ``ordered`` list is used by the
-flat-weight bridge and must stay in the same order as the JS implementation.
-"""
+"""Entity Transformer v6 model and flat-weight bridge."""
 
 import array
 import math
@@ -21,16 +15,8 @@ ENTITY_PROFILES = {
     "large": (256, 4, 3, 512, 256),
 }
 VALUE_SLOTS = 8
-STATE_SIZE = 672
-ENTITY_V3_STATE_SIZE = 702
 CITY_CARD_FEATURES = 30
 CITY_EMBEDDING_DIM = 8
-CITY_ID_SLOT_SIZE = 4
-PLAYER_FEATURE_SIZE = 56 + 8 * CITY_ID_SLOT_SIZE
-PLAYER_EMBED_FEATURE_SIZE = 56 + 8 * (3 + CITY_EMBEDDING_DIM)
-ENTITY_V4_STATE_SIZE = 32 + 8 * PLAYER_FEATURE_SIZE + CITY_CARD_FEATURES
-PUBLIC_CONTEXT_FEATURES = 72
-ENTITY_V5_STATE_SIZE = ENTITY_V4_STATE_SIZE + PUBLIC_CONTEXT_FEATURES
 ENTITY_V6_CITY_SLOTS = 16
 ENTITY_V6_CITY_SLOT_SIZE = 8
 ENTITY_V6_PLAYER_FEATURE_SIZE = 56 + ENTITY_V6_CITY_SLOTS * ENTITY_V6_CITY_SLOT_SIZE
@@ -75,16 +61,12 @@ class EntityTransformerBlock(nn.Module):
 
 class EntityTransformerNet(nn.Module):
     def __init__(self, profile="balanced", state_size=None, action_size=ACTION_SIZE,
-                 architecture="entity-v5"):
+                 architecture="entity-v6"):
         super().__init__()
-        if architecture not in ("entity-v1", "entity-v2", "entity-v3", "entity-v4", "entity-v5", "entity-v6"):
-            raise ValueError("unsupported entity transformer architecture: " + architecture)
-        expects_hands = architecture in ("entity-v3", "entity-v4", "entity-v5", "entity-v6")
-        expects_city_ids = architecture in ("entity-v4", "entity-v5", "entity-v6")
-        expects_public_context = architecture in ("entity-v5", "entity-v6")
-        expects_v6 = architecture == "entity-v6"
-        self.player_feature_size = ENTITY_V6_PLAYER_FEATURE_SIZE if expects_v6 else PLAYER_FEATURE_SIZE if expects_city_ids else 80
-        self.state_size = ENTITY_V6_STATE_SIZE if expects_v6 else ENTITY_V5_STATE_SIZE if expects_public_context else ENTITY_V4_STATE_SIZE if expects_city_ids else ENTITY_V3_STATE_SIZE if expects_hands else STATE_SIZE
+        if architecture != "entity-v6":
+            raise ValueError("only entity-v6 is supported")
+        self.player_feature_size = ENTITY_V6_PLAYER_FEATURE_SIZE
+        self.state_size = ENTITY_V6_STATE_SIZE
         if state_size is not None and state_size != self.state_size or action_size != ACTION_SIZE:
             raise ValueError("entity transformer state/action width mismatch")
         self.architecture = architecture
@@ -92,11 +74,11 @@ class EntityTransformerNet(nn.Module):
         self.profile = profile
         self.action_size = action_size
         self.model_dim = model_dim
-        self.global_embed = nn.Linear(32 + (ENTITY_V6_CONTEXT_FEATURES if expects_v6 else PUBLIC_CONTEXT_FEATURES) if expects_public_context else 32, model_dim)
-        self.city_embed = nn.Embedding(CITY_CARD_FEATURES + 1, CITY_EMBEDDING_DIM, padding_idx=0) if expects_city_ids else None
-        player_embed_size = ENTITY_V6_PLAYER_EMBED_FEATURE_SIZE if expects_v6 else PLAYER_EMBED_FEATURE_SIZE if expects_city_ids else self.player_feature_size
+        self.global_embed = nn.Linear(32 + ENTITY_V6_CONTEXT_FEATURES, model_dim)
+        self.city_embed = nn.Embedding(CITY_CARD_FEATURES + 1, CITY_EMBEDDING_DIM, padding_idx=0)
+        player_embed_size = ENTITY_V6_PLAYER_EMBED_FEATURE_SIZE
         self.player_embed = nn.Linear(player_embed_size, model_dim)
-        self.self_embed = nn.Linear(player_embed_size + 30, model_dim) if expects_hands else None
+        self.self_embed = nn.Linear(player_embed_size + 30, model_dim)
         self.action_embed = nn.Linear(action_size, model_dim)
         self.blocks = nn.ModuleList([
             EntityTransformerBlock(model_dim, heads, ff_dim) for _ in range(layers)
@@ -105,20 +87,17 @@ class EntityTransformerNet(nn.Module):
         self.action_out = nn.Linear(action_hidden, 1)
         self.value_out = nn.Linear(model_dim, 1)
         positional = torch.zeros(9, model_dim, dtype=torch.float32)
-        if architecture in ("entity-v2", "entity-v3", "entity-v4", "entity-v5", "entity-v6"):
-            for position in range(9):
-                for index in range(model_dim):
-                    pair = index // 2
-                    angle = position / (10000 ** ((2 * pair) / model_dim))
-                    positional[position, index] = math.sin(angle) if index % 2 == 0 else math.cos(angle)
+        for position in range(9):
+            for index in range(model_dim):
+                pair = index // 2
+                angle = position / (10000 ** ((2 * pair) / model_dim))
+                positional[position, index] = math.sin(angle) if index % 2 == 0 else math.cos(angle)
         self.register_buffer("position_encoding", positional)
-        # Keep this list in exact parity with the JS flatten order.
+        # Keep this list in exact parity with the C++ flat-weight bridge.
         self.ordered = [self.global_embed]
-        if self.city_embed is not None:
-            self.ordered.append(self.city_embed)
+        self.ordered.append(self.city_embed)
         self.ordered.append(self.player_embed)
-        if self.self_embed is not None:
-            self.ordered.append(self.self_embed)
+        self.ordered.append(self.self_embed)
         self.ordered.append(self.action_embed)
         for block in self.blocks:
             self.ordered.extend([
@@ -131,36 +110,21 @@ class EntityTransformerNet(nn.Module):
     def tokenize(self, states):
         if states.shape[-1] != self.state_size:
             raise ValueError("entity transformer state width mismatch")
-        if self.architecture == "entity-v6":
-            global_features = torch.cat((states[..., :32], states[..., ENTITY_V6_BASE_SIZE:]), dim=-1)
-        elif self.architecture == "entity-v5":
-            global_features = torch.cat((states[..., :32], states[..., ENTITY_V4_STATE_SIZE:]), dim=-1)
-        else:
-            global_features = states[..., :32]
+        global_features = torch.cat((states[..., :32], states[..., ENTITY_V6_BASE_SIZE:]), dim=-1)
         global_token = self.global_embed(global_features).unsqueeze(1)
         player_end = 32 + 8 * self.player_feature_size
         players = states[..., 32:player_end].reshape(*states.shape[:-1], 8, self.player_feature_size)
-        if self.city_embed is not None:
-            slots = ENTITY_V6_CITY_SLOTS if self.architecture == "entity-v6" else 8
-            slot_size = ENTITY_V6_CITY_SLOT_SIZE if self.architecture == "entity-v6" else CITY_ID_SLOT_SIZE
-            city = players[..., 56:].reshape(*states.shape[:-1], 8, slots, slot_size)
-            city_ids = city[..., 3].to(torch.long).clamp(0, CITY_CARD_FEATURES)
-            city_embeddings = self.city_embed(city_ids).flatten(start_dim=-2)
-            city_props = city[..., :3].flatten(start_dim=-2)
-            if self.architecture == "entity-v6":
-                extra_props = city[..., 4:8].flatten(start_dim=-2)
-                players = torch.cat((players[..., :56], city_props, extra_props, city_embeddings), dim=-1)
-            else:
-                players = torch.cat((players[..., :56], city_props, city_embeddings), dim=-1)
+        city = players[..., 56:].reshape(*states.shape[:-1], 8, ENTITY_V6_CITY_SLOTS, ENTITY_V6_CITY_SLOT_SIZE)
+        city_ids = city[..., 3].to(torch.long).clamp(0, CITY_CARD_FEATURES)
+        city_embeddings = self.city_embed(city_ids).flatten(start_dim=-2)
+        city_props = city[..., :3].flatten(start_dim=-2)
+        extra_props = city[..., 4:8].flatten(start_dim=-2)
+        players = torch.cat((players[..., :56], city_props, extra_props, city_embeddings), dim=-1)
         player_tokens = self.player_embed(players)
-        if self.self_embed is not None:
-            hand_end = ENTITY_V6_BASE_SIZE if self.architecture == "entity-v6" else ENTITY_V4_STATE_SIZE if self.architecture == "entity-v5" else self.state_size
-            self_token_input = torch.cat((players[..., 0, :], states[..., player_end:hand_end]), dim=-1)
-            self_token = self.self_embed(self_token_input).unsqueeze(-2)
-            player_tokens = torch.cat((self_token, player_tokens[..., 1:, :]), dim=-2)
+        self_token_input = torch.cat((players[..., 0, :], states[..., player_end:ENTITY_V6_BASE_SIZE]), dim=-1)
+        self_token = self.self_embed(self_token_input).unsqueeze(-2)
+        player_tokens = torch.cat((self_token, player_tokens[..., 1:, :]), dim=-2)
         tokens = torch.cat((global_token, player_tokens), dim=1)
-        if self.architecture == "entity-v1":
-            return tokens
         return tokens + self.position_encoding.unsqueeze(0)
 
     def forward(self, states, actions, mask=None, temperatures=None):
