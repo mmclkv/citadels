@@ -476,6 +476,16 @@
     const byMe = !!(n.byId && n.byId === App.myId);
 
     switch (n.kind) {
+      case 'role_effect':
+        queueEvent({
+          tone: 'magic', icon: '✦', title: '角色能力发动：' + escapeHtml(n.roleName || '角色'),
+          hold: 5200,
+          text: '<b>' + escapeHtml(n.playerName || '玩家') + '</b> 发动了【' +
+                escapeHtml(n.roleName || '角色') + '】的能力。<br>' +
+                escapeHtml(n.description || '效果正在结算中，具体目标与资源变化会记录在战报里。')
+        });
+        return;
+
       case 'assassin_declare':
         if (holdsIt) {
           App.deathWarned = n.round;
@@ -3837,7 +3847,8 @@
       const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
       syncCards(city, me.city, c => {
         const act = districtActionFor(me, c);
-        return { clickable: !!act, pickable: !!act, selected: App.sel && App.sel.items.indexOf(c.uid) >= 0 };
+        return { clickable: !!act, pickable: !!act,
+          selected: !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0) };
       }, (node, c) => {
         const act = districtActionFor(me, c);
         if (act) bindCardAction(node, () => pickDistrict(me.id, c.uid, act), true);
@@ -3852,19 +3863,25 @@
     } else {
       const eh = hand.querySelector('.empty-hint'); if (eh) eh.remove();
       syncCards(hand, me.hand, c => {
-        const inSel = App.sel && App.sel.items.indexOf(c.uid) >= 0;
+        const inSel = !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0);
         let clickable = false, disabled = false, pickable = false;
-        if (App.sel && App.sel.kind === 'handpick') { clickable = true; pickable = true; }
+        if (App.sel && App.sel.kind === 'labpick') {
+          clickable = App.sel.actions.some(a => a.discardUid === c.uid);
+          pickable = clickable;
+          disabled = !clickable;
+        }
+        else if (App.sel && App.sel.kind === 'handpick') { clickable = true; pickable = true; }
         else if (App.sel && App.sel.kind === 'multi') { clickable = true; }
         else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) { clickable = c.canBuild; disabled = !c.canBuild; }
         return { clickable: clickable, disabled: disabled, selected: inSel, pickable: pickable };
       }, (node, c) => {
-        const inSel = App.sel && App.sel.items.indexOf(c.uid) >= 0;
+        const inSel = !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0);
         let clickable = false;
-        if (App.sel && App.sel.kind === 'handpick') clickable = true;
+        if (App.sel && App.sel.kind === 'labpick') clickable = App.sel.actions.some(a => a.discardUid === c.uid);
+        else if (App.sel && App.sel.kind === 'handpick') clickable = true;
         else if (App.sel && App.sel.kind === 'multi') clickable = true;
         else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) clickable = c.canBuild;
-        if (clickable) bindCardAction(node, () => onHandClick(c), !(App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
+        if (clickable) bindCardAction(node, () => onHandClick(c), !(App.sel && (App.sel.kind === 'labpick' || App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
         else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
       });
     }
@@ -4099,6 +4116,29 @@
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     const representedActions = new Set();
+    // Keep the native action schema unchanged: group its existing lab choices
+    // into a front-end-only activation step followed by card selection.
+    const labGroups = new Map();
+    av.actions.filter(a => a.type === 'lab').forEach(a => {
+      representedActions.add(a);
+      if (!labGroups.has(a.uid)) labGroups.set(a.uid, []);
+      labGroups.get(a.uid).push(a);
+    });
+    labGroups.forEach((actions, buildingUid) => {
+      const me = s.players.find(p => p.id === App.myId);
+      const building = me && (me.city || []).find(c => c.uid === buildingUid);
+      const label = building ? '发动实验室效果（' + building.name + '）' : '发动实验室效果';
+      const selecting = App.sel && App.sel.kind === 'labpick';
+      const button = el('button', 'act main', selecting && App.sel.buildingUid === buildingUid
+        ? '选择要弃置的手牌…' : label);
+      button.disabled = !!selecting;
+      if (!selecting) onTap(button, () => {
+        App.sel = { kind: 'labpick', buildingUid: buildingUid, actions: actions,
+          label: label + '：点击一张手牌弃掉，换取 1 金' };
+        render();
+      });
+      actionsEl.appendChild(button);
+    });
     const playerActions = av.actions.filter(a =>
       ['choose_player', 'spy_target', 'wizard_target', 'emperor_crown'].includes(a.type));
     if (playerActions.length) {
@@ -4165,7 +4205,7 @@
       actionsEl.appendChild(c);
     }
     // 从手牌选一张（实验室 / 博物馆）
-    if (App.sel && App.sel.kind === 'handpick') {
+    if (App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'labpick')) {
       promptEl.innerHTML = escapeHtml(App.sel.label);
       const c = el('button', 'act', '取消');
       onTap(c, () => { App.sel = null; render(); });
@@ -4219,9 +4259,9 @@
     if (App.buildingAnimPaused) return;
     switch (a.type) {
       case 'lab':
-        if (a.discardUid) { send(a); return; }
-        App.sel = { kind: 'handpick', items: [], label: '【实验室】点击一张手牌弃掉，换取 1 金',
-          commit(uids) { App.sel = null; send({ type: 'lab', uid: a.uid, discardUid: uids[0] }); } };
+        App.sel = { kind: 'labpick', buildingUid: a.uid,
+          actions: (App.state.available.actions || []).filter(item => item.type === 'lab' && item.uid === a.uid),
+          label: '【实验室】点击一张手牌弃掉，换取 1 金' };
         render(); return;
       case 'museum':
         if (a.cardUid) { send(a); return; }
@@ -4253,6 +4293,13 @@
   function onHandClick(c) {
     if (App.buildingAnimPaused) return;
     const s = App.state;
+    if (App.sel && App.sel.kind === 'labpick') {
+      const action = App.sel.actions.find(item => item.discardUid === c.uid);
+      if (!action) return;
+      App.sel = null;
+      send(action);
+      return;
+    }
     if (App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')) {
       if (App.sel.kind === 'handpick') { App.sel.commit([c.uid]); return; }
       if (App.sel.excludeUid && App.sel.excludeUid === c.uid) return;

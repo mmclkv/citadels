@@ -492,12 +492,17 @@ class PythonServer:
                         player[key] = old[key]
             merged = {**retained, **native_state}
             self._append_gain_notices(current, merged, action)
+            self._append_role_ability_notice(current, merged, player_id, action)
             state_log = merged.setdefault("log", [])
             actor = old_players.get(player_id, {})
             action_text = self._game_action_log_text(current, action)
             state_log.append({"i": len(state_log),
                               "text": f"{actor.get('name') or player_id}：{action_text}",
                               "type": "info", "round": merged.get("round", 0)})
+            for effect_player, effect_text in self._turn_effect_log_entries(current, merged):
+                state_log.append({"i": len(state_log),
+                                  "text": f"{effect_player}：{effect_text}",
+                                  "type": "info", "round": merged.get("round", 0)})
             if len(state_log) > 400:
                 del state_log[:-400]
             current.clear()
@@ -727,6 +732,73 @@ class PythonServer:
         updated["notices"] = notices[-12:]
 
     @staticmethod
+    def _append_role_ability_notice(previous: dict, updated: dict,
+                                    player_id: str, action: dict) -> None:
+        """Recreate the public ability popup omitted by the native engine protocol."""
+        if action.get("type") != "ability":
+            return
+        turn = previous.get("turn") or {}
+        role_id = turn.get("charId")
+        role = cards.CHAR_MAP.get(role_id or {}, {})
+        if not role:
+            return
+        players = previous.get("players") or []
+        player_idx = next((i for i, player in enumerate(players)
+                           if player.get("id") == player_id), None)
+        if player_idx is None:
+            return
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = max(int(updated.get("noticeSeq") or 0), int(previous.get("noticeSeq") or 0)) + 1
+        notices.append({"seq": seq, "kind": "role_effect", "playerIdx": player_idx,
+                        "playerName": players[player_idx].get("name") or "玩家",
+                        "roleName": role.get("name") or "角色",
+                        "description": role.get("desc") or "发动了角色能力。"})
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
+    def _turn_effect_log_entries(previous: dict, updated: dict) -> list[tuple[str, str]]:
+        """Describe assassination skips and the thief transfer as called roles resolve."""
+        old_idx = previous.get("callIdx")
+        new_idx = updated.get("callIdx")
+        queue = previous.get("callQueue") or []
+        players = previous.get("players") or []
+        if (not isinstance(old_idx, int) or not isinstance(new_idx, int) or
+                new_idx <= old_idx or not isinstance(queue, list)):
+            return []
+        effects = previous.get("effects") or {}
+        assassinated = effects.get("assassinated")
+        thief_target = effects.get("thief")
+        thief_idx = effects.get("thiefBy")
+        entries: list[tuple[str, str]] = []
+        for queue_idx in range(max(0, old_idx + 1), min(new_idx + 1, len(queue))):
+            entry = queue[queue_idx]
+            number = entry.get("num")
+            player_idx = entry.get("playerIdx")
+            if not isinstance(player_idx, int) or not 0 <= player_idx < len(players):
+                continue
+            player_name = players[player_idx].get("name") or "玩家"
+            role = cards.CHAR_MAP.get(entry.get("charId") or {}, {})
+            role_name = role.get("name") or f"{number}号角色"
+            if number == assassinated:
+                entries.append((player_name,
+                                f"被刺杀效果生效：{number}号【{role_name}】被叫到，跳过本轮（未领取资源、建造或发动能力）。"))
+                continue
+            if number == thief_target and isinstance(thief_idx, int) and 0 <= thief_idx < len(players):
+                old_gold = int((previous.get("players") or [])[player_idx].get("gold") or 0)
+                new_players = updated.get("players") or []
+                new_gold = int(new_players[player_idx].get("gold") or 0) if player_idx < len(new_players) else old_gold
+                amount = max(0, old_gold - new_gold)
+                thief_name = players[thief_idx].get("name") or "盗贼"
+                if amount:
+                    entries.append((player_name,
+                                    f"盗贼效果结算：你被叫到时交出全部 {amount} 枚金币，转给{thief_name}。"))
+                else:
+                    entries.append((player_name,
+                                    f"盗贼效果结算：你被叫到时身上没有金币，因此未发生转移；盗贼是{thief_name}。"))
+        return entries
+
+    @staticmethod
     def _game_action_log_text(state: dict, action: dict) -> str:
         """Readable public log text; never expose hidden cards or secret role marks."""
         kind = action.get("type", "")
@@ -734,6 +806,22 @@ class PythonServer:
         pending = turn.get("pending") or {}
         if kind in ("draft_pick", "draft_discard"):
             return "选取了一个角色" if kind == "draft_pick" else "弃置了一个角色"
+        if kind in ("assassin_declare", "thief_declare", "witch_declare"):
+            role_names = {"assassin_declare": "刺客", "thief_declare": "盗贼",
+                          "witch_declare": "女巫"}
+            try:
+                number = int(action.get("num", action.get("name")))
+            except (TypeError, ValueError):
+                number = 0
+            character = next((item for item in cards.CHAR_MAP.values()
+                              if item.get("num") == number), {})
+            target = f"{number}号·{character.get('name', '角色')}" if number else "目标角色"
+            verb = {"assassin_declare": "宣布刺杀", "thief_declare": "宣布偷窃",
+                    "witch_declare": "施咒"}[kind]
+            outcome = {"assassin_declare": "该角色本轮被叫到时将跳过整个回合",
+                       "thief_declare": "该角色本轮被叫到并公开时将把全部金币交给盗贼",
+                       "witch_declare": "该角色本轮被叫到时只能领取资源，随后由女巫接管剩余行动"}[kind]
+            return f"【{role_names[kind]}】{verb}{target}；{outcome}。"
         if kind in ("magistrate_signed", "magistrate_char"):
             return "布置了行政官逮捕令"
         if kind in ("blackmailer_signed", "blackmailer_char"):
@@ -758,8 +846,10 @@ class PythonServer:
                 return f"弃掉了{count}张手牌并重抽"
             return f"选择了{count}张手牌"
         if kind == "ability":
-            role_name = turn.get("charName") or "角色"
-            return f"发动了【{role_name}】能力"
+            role = cards.CHAR_MAP.get(turn.get("charId") or {}, {})
+            role_name = role.get("name") or turn.get("charName") or "角色"
+            description = role.get("desc")
+            return f"发动了【{role_name}】能力：{description}" if description else f"发动了【{role_name}】能力"
         if kind == "spy_target":
             return "选择了调查对象"
         if kind == "lab":
@@ -1516,7 +1606,11 @@ class PythonServer:
             writer.close()
             try:
                 await writer.wait_closed()
-            except (ConnectionError, OSError):
+            except Exception:
+                # Clients commonly disconnect immediately after receiving a
+                # response (health probes, browsers, reverse proxies). Some
+                # asyncio transports surface that race from wait_closed() as
+                # BrokenPipeError; it must not escape the connection callback.
                 pass
 
 

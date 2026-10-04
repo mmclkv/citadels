@@ -173,8 +173,47 @@ class ServerArgumentTests(unittest.TestCase):
                          "选择查看一名玩家的手牌")
         self.assertEqual(PythonServer._game_action_log_text(state, {
             "type": "magistrate_signed", "num": 8}), "布置了行政官逮捕令")
+        ability_state = {"turn": {"charId": "wizard", "charName": "法师"}}
+        self.assertIn("发动了【法师】能力：查看一位玩家的手牌",
+                      PythonServer._game_action_log_text(ability_state, {"type": "ability"}))
+        assassin_log = PythonServer._game_action_log_text(
+            {"turn": {}}, {"type": "assassin_declare", "num": 7})
+        self.assertIn("宣布刺杀7号·建筑师", assassin_log)
+        self.assertIn("跳过整个回合", assassin_log)
         self.assertNotIn("秘密建筑", PythonServer._game_action_log_text(state, {
             "type": "wizard_card", "uid": "secret"}))
+
+    def test_role_ability_notice_restores_public_popup_payload(self) -> None:
+        previous = {"noticeSeq": 2, "notices": [], "turn": {"charId": "wizard"},
+                    "players": [{"id": "p1", "name": "甲"}]}
+        updated = {"noticeSeq": 2, "notices": [], "players": [{"id": "p1", "name": "甲"}]}
+        PythonServer._append_role_ability_notice(previous, updated, "p1", {"type": "ability"})
+        self.assertEqual(updated["noticeSeq"], 3)
+        notice = updated["notices"][-1]
+        self.assertEqual((notice["kind"], notice["roleName"], notice["playerName"]),
+                         ("role_effect", "法师", "甲"))
+        self.assertIn("查看一位玩家的手牌", notice["description"])
+
+    def test_called_assassinated_and_stolen_roles_are_reported_when_resolved(self) -> None:
+        previous = {
+            "callIdx": 0,
+            "callQueue": [
+                {"num": 2, "charId": "thief", "playerIdx": 0},
+                {"num": 4, "charId": "king", "playerIdx": 1},
+                {"num": 7, "charId": "architect", "playerIdx": 2},
+            ],
+            "effects": {"assassinated": 7, "thief": 4, "thiefBy": 0},
+            "players": [{"name": "甲", "gold": 2}, {"name": "乙", "gold": 5},
+                        {"name": "丙", "gold": 4}],
+        }
+        updated = {"callIdx": 3, "players": [{"name": "甲", "gold": 7},
+                                             {"name": "乙", "gold": 0},
+                                             {"name": "丙", "gold": 4}]}
+        entries = PythonServer._turn_effect_log_entries(previous, updated)
+        self.assertEqual(len(entries), 2)
+        self.assertIn("交出全部 5 枚金币，转给甲", entries[0][1])
+        self.assertEqual(entries[1][0], "丙")
+        self.assertIn("7号【建筑师】被叫到，跳过本轮", entries[1][1])
 
     def test_gain_notices_restore_coin_and_hand_animations(self) -> None:
         previous = {"noticeSeq": 4, "notices": [], "players": [
