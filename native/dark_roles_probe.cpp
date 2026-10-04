@@ -107,6 +107,25 @@ int main() {
       "spy resource resolution");
 
     // Wizard: inspect an opponent hand and immediately build the chosen card.
+    NativeGameState empty_wizard;
+    empty_wizard.phase = NativePhase::Action; empty_wizard.active_player = 0;
+    empty_wizard.resources_taken = true;
+    empty_wizard.players = {player("wizard", "wizard", 5), player("empty", "king", 2)};
+    empty_wizard.players[0].hand = {{"own", "green", 1, "Tavern"}};
+    require(empty_wizard.start_ability() && empty_wizard.pending_kind.empty() && empty_wizard.ability_used,
+      "wizard with only own-hand cards should complete an effect with no eligible targets");
+    const auto empty_wizard_main = game.legal_actions(empty_wizard, 0);
+    find_action(empty_wizard_main, ActionType::EndTurn);
+    // Existing snapshots may already be stuck at target selection.
+    empty_wizard.pending_kind = "wizard_target"; empty_wizard.ability_used = false;
+    auto empty_wizard_targets = game.legal_actions(empty_wizard, 0);
+    require(empty_wizard_targets.size() == 1 && empty_wizard_targets[0].type == ActionType::AbilitySkip,
+      "wizard empty target list should expose skip instead of zero legal actions");
+    NativeSearchAction empty_target; empty_target.type = ActionType::WizardTarget; empty_target.target = "empty";
+    require(!game.apply(empty_wizard, 0, empty_target) && empty_wizard.pending_kind == "wizard_target",
+      "wizard must reject an empty-hand target without changing phase");
+    require(game.apply(empty_wizard, 0, empty_wizard_targets[0]) && empty_wizard.pending_kind.empty() && empty_wizard.ability_used,
+      "wizard skip should release a pending selection with no target");
     NativeGameState wizard;
     wizard.phase = NativePhase::Action; wizard.active_player = 0; wizard.pending_kind = "wizard_target";
     wizard.players = {player("wizard", "wizard", 5), player("source", "king", 2)};

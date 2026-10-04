@@ -703,7 +703,13 @@ struct NativeGameState {
       pending_kind = "blackmailer_declare"; return true;
     }
     if (p->role_id == "spy") { pending_kind = "spy_target"; return true; }
-    if (p->role_id == "wizard") { pending_kind = "wizard_target"; return true; }
+    if (p->role_id == "wizard") {
+      bool has_target = false;
+      for (size_t i = 0; i < players.size(); ++i)
+        if (static_cast<int>(i) != active_player && !players[i].hand.empty()) has_target = true;
+      if (!has_target) { ability_used = true; return true; }
+      pending_kind = "wizard_target"; return true;
+    }
     if (p->role_id == "tax_collector") { pending_kind = "tax_collect"; return true; }
     if (p->role_id == "magician") { pending_kind = "magician_choice"; return true; }
     if (p->role_id == "emperor") { pending_kind = "emperor_crown"; return true; }

@@ -248,11 +248,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (player != state.active_player) return {};
       std::vector<NativeSearchAction> actions;
       for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player) {
-        // 法师只列有手牌的玩家：选中空手玩家下一步无牌可选，会和 JS 引擎卡住的分支不一致。
+        // An empty hand cannot supply a card for the Wizard to select.
         if (state.pending_kind == "wizard_target" && state.players[i].hand.empty()) continue;
         NativeSearchAction action; action.type = state.pending_kind == "spy_target" ? ActionType::SpyTarget : ActionType::WizardTarget;
         action.target = state.players[i].id; actions.push_back(std::move(action));
       }
+      // Also recover an already-pending selection with no eligible targets.
+      if (state.pending_kind == "wizard_target" && actions.empty())
+        actions.push_back({ActionType::AbilitySkip});
       return actions;
     }
     if (state.pending_kind == "spy_color") {
@@ -647,7 +650,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       return state.spy_collect(state.players[state.pending_target].id, action.color);
     if (action.type == ActionType::WizardTarget && player == state.active_player && state.pending_kind == "wizard_target") {
       const int target = state.find_player(action.target);
-      if (target < 0 || target == player) return false;
+      if (target < 0 || target == player || state.players[target].hand.empty()) return false;
       state.pending_target = target; state.pending_uid.clear();
       state.pending_cards = state.players[target].hand; state.pending_kind = "wizard_card"; return true;
     }
