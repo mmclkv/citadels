@@ -144,6 +144,21 @@ def _notice_for_viewer(notice: dict, viewer_index: int) -> dict:
             if key not in ("cardNames", "matching", "cards")}
 
 
+def _removed_view(state: dict) -> dict:
+    """Keep public draft removals visible after the active draft object is cleared."""
+    draft = state.get("draft")
+    if draft:
+        face_up = draft.get("faceUp") or []
+        face_down_count = len(draft.get("faceDown") or [])
+    else:
+        public_draft = state.get("draftPublic") or {}
+        face_up = public_draft.get("faceUp") or []
+        face_down_count = int(public_draft.get("faceDownCount") or 0)
+    return {"faceUp": [{key: _role(character_id)[key] for key in ("id", "num", "name")}
+                        for character_id in face_up],
+            "faceDownCount": face_down_count}
+
+
 def sanitize(state: dict, player_id: str | None,
              legal_actions: list[dict] | None = None) -> dict:
     viewer_index = next((index for index, player in enumerate(state["players"])
@@ -204,9 +219,7 @@ def sanitize(state: dict, player_id: str | None,
         "firstToFinish": state["firstToFinish"], "log": state["log"][-120:],
         "notices": [_notice_for_viewer(notice, viewer_index) for notice in state["notices"][-12:]],
         "scores": scores, "winner": state["winner"],
-        "removed": {"faceUp": [{key: _role(character_id)[key] for key in ("id", "num", "name")}
-                               for character_id in draft["faceUp"]] if draft else [],
-                    "faceDownCount": len(draft["faceDown"]) if draft else 0},
+        "removed": _removed_view(state),
         "roundConfirm": {"round": state["roundConfirm"]["round"],
                          "confirmed": list(state["roundConfirm"]["confirmed"])}
         if state.get("roundConfirm") else None,

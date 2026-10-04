@@ -720,7 +720,7 @@ class TrainingManager:
         saved_game = 0
         sampler_pool = None
         native_model_dir = None
-        replay_buffer = RecentReplayBuffer()
+        replay_buffer = RecentReplayBuffer(max_games=config["replayBufferGames"])
         try:
             self._log("正在初始化 PyTorch 训练环境…")
             torch, trainer = _load_trainer()

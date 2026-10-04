@@ -643,6 +643,7 @@
         return;
 
       case 'seized':
+        buildingTransferAnim(n.playerIdx, n.byIdx, n.cardUid);
         if (isMe) {
           queueEvent({
             tone: 'warn', icon: '!', title: '你的建筑被抢走', hold: 4800,
@@ -2259,6 +2260,54 @@
         flight.card.classList.add('is-flying');
         setTimeout(() => { if (flight.card.parentNode) flight.card.parentNode.removeChild(flight.card); }, 1150 + i * 90);
       });
+    });
+  }
+
+  // 元帅抢夺建筑：克隆目标城市里的原牌，飞向元帅城市中的新位置。
+  function buildingTransferAnim(fromSeat, toSeat, uid) {
+    if (fromSeat == null || toSeat == null || !uid ||
+        typeof document === 'undefined' || !document.body) return;
+    const findCard = cardUid => Array.prototype.find.call(
+      document.querySelectorAll('.card[data-uid]'), node =>
+        node.dataset && node.dataset.uid === String(cardUid));
+    const source = findCard(uid);
+    const start = rectOf(source);
+    if (!source || !start) return;
+    const flight = source.cloneNode(true);
+    flight.classList.remove('clickable', 'pickable', 'selected');
+    flight.classList.add('building-swap-flight');
+    flight.style.left = start.left + 'px';
+    flight.style.top = start.top + 'px';
+    flight.style.width = start.width + 'px';
+    flight.style.height = start.height + 'px';
+    flight.style.setProperty('--swap-rotate', '-5deg');
+    document.body.appendChild(flight);
+
+    const nextFrame = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame : fn => setTimeout(fn, 0);
+    nextFrame(() => {
+      const destination = findCard(uid);
+      const end = rectOf(destination) || rectOf(playerCityBox(toSeat));
+      if (!end) {
+        if (flight.parentNode) flight.parentNode.removeChild(flight);
+        return;
+      }
+      if (destination) {
+        destination.style.visibility = 'hidden';
+        destination.dataset.buildArrivalHidden = 'true';
+      }
+      flight.style.setProperty('--swap-dx', (end.left - start.left) + 'px');
+      flight.style.setProperty('--swap-dy', (end.top - start.top) + 'px');
+      flight.style.setProperty('--swap-scale-x', (end.width / start.width).toFixed(4));
+      flight.style.setProperty('--swap-scale-y', (end.height / start.height).toFixed(4));
+      flight.classList.add('is-flying');
+      setTimeout(() => {
+        if (destination && destination.dataset.buildArrivalHidden === 'true') {
+          destination.style.visibility = '';
+          delete destination.dataset.buildArrivalHidden;
+        }
+        if (flight.parentNode) flight.parentNode.removeChild(flight);
+      }, 1150);
     });
   }
 
@@ -4162,9 +4211,7 @@
       const prompt = s.turn && s.turn.pending && s.turn.pending.kind === 'emperor_crown'
         ? '选择接收皇冠的玩家'
         : '选择目标玩家';
-      const confirm = s.turn && s.turn.pending && s.turn.pending.kind === 'emperor_crown'
-        ? '移交皇冠' : '确认玩家';
-      appendActionChoiceSelect(actionsEl, promptEl, playerActions, prompt, '请选择玩家', confirm);
+      appendTargetActionButtons(actionsEl, promptEl, playerActions, prompt);
     }
     const roleActions = av.actions.filter(a =>
       ['choose_char', 'magistrate_signed', 'magistrate_char',
@@ -4235,30 +4282,13 @@
     }
   }
 
-  function appendActionChoiceSelect(actionsEl, promptEl, choices, prompt, placeholder, confirmLabel) {
+  function appendTargetActionButtons(actionsEl, promptEl, choices, prompt) {
     promptEl.textContent = prompt;
-    const select = document.createElement('select');
-    select.className = 'act crown-target-select';
-    select.setAttribute('aria-label', prompt);
-    const first = document.createElement('option');
-    first.value = '';
-    first.textContent = placeholder;
-    select.appendChild(first);
-    choices.forEach((action, index) => {
-      const option = document.createElement('option');
-      option.value = String(index);
-      option.textContent = action.label || action.type;
-      select.appendChild(option);
-    });
-    const confirm = el('button', 'act main', confirmLabel);
-    confirm.disabled = true;
-    select.addEventListener('change', () => { confirm.disabled = select.value === ''; });
-    onTap(confirm, () => {
-      const index = Number(select.value);
-      if (select.value !== '' && choices[index]) runAction(choices[index]);
-    });
-    actionsEl.appendChild(select);
-    actionsEl.appendChild(confirm);
+    const group = el('div', 'role-action-choices target-action-choices');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', prompt);
+    choices.forEach(action => group.appendChild(actionBtn(action)));
+    actionsEl.appendChild(group);
   }
 
   function appendRoleActionButtons(actionsEl, promptEl, choices, prompt) {

@@ -746,7 +746,6 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   width:100%;max-height:min(30vh,220px);overflow-y:auto;overscroll-behavior:contain;align-content:start;padding:2px}
 .role-action-choices .act{width:100%;min-width:0;min-height:36px;padding:6px 8px;font-size:12px;line-height:1.25;
   overflow-wrap:anywhere}
-.act.crown-target-select{min-width:min(250px,70vw);max-width:100%;font:inherit;line-height:1.4}
 .act:hover{background:#fdf3dd;border-color:var(--gold);transform:translateY(-1px)}
 .act.main{background:linear-gradient(180deg,#d9a836,#c0881f);color:#fff;border-color:#a97c15}
 .act.main:hover{filter:brightness(1.07)}

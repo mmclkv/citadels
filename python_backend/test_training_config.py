@@ -24,6 +24,7 @@ class PythonTrainingConfigTests(unittest.TestCase):
         self.assertEqual(sanitize_config({})["mctsSimulations"], 500)
         self.assertEqual(sanitize_config({})["mctsMaxDepth"], 700)
         self.assertEqual(sanitize_config({})["mctsBatchSize"], 32)
+        self.assertEqual(sanitize_config({})["replayBufferGames"], 128)
         for obsolete in ("nativeInferenceBackend", "nativeSearchWorker", "mctsEvaluator",
                          "mctsMaxWaitMs", "mctsCacheSize",
                          "ppoEpochs", "policyLossMode", "trainNetworkOnly"):
@@ -60,6 +61,7 @@ class PythonTrainingConfigTests(unittest.TestCase):
             "batchGames": 512,
             "trainingEpochs": 12,
             "miniBatch": 4096,
+            "replayBufferGames": 4096,
             "workers": 12,
             "checkpointEvery": 20_000,
             "maxSteps": 200_000,
@@ -79,6 +81,7 @@ class PythonTrainingConfigTests(unittest.TestCase):
             "batchGames": 512,
             "trainingEpochs": 12,
             "miniBatch": 4096,
+            "replayBufferGames": 4096,
             "workers": 12,
             "checkpointEvery": 20_000,
             "maxSteps": 200_000,
@@ -95,6 +98,9 @@ class PythonTrainingConfigTests(unittest.TestCase):
         }
         for key, value in expected.items():
             self.assertEqual(result[key], value, key)
+
+    def test_replay_buffer_can_be_disabled(self):
+        self.assertEqual(sanitize_config({"replayBufferGames": 0})["replayBufferGames"], 0)
 
     def test_cpp_rules_engine_is_canonical(self):
         self.assertEqual(sanitize_config({"rulesEngine": "cpp"})["rulesEngine"], "cpp")

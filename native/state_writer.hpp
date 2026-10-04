@@ -190,7 +190,7 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
   // (e.g. the Magistrate), even after the draft UI is no longer active.
   out << ",\"draftPublic\":{\"faceUp\":";
   write_json_strings(out, state.draft_face_up);
-  out << '}';
+  out << ",\"faceDownCount\":" << state.draft_face_down.size() << '}';
   out << ",\"turn\":";
   if (!state.has_turn || state.active_player < 0 || state.active_player >= static_cast<int>(state.players.size())) out << "null";
   else {

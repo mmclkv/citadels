@@ -34,6 +34,7 @@
         <label><span>每批对局</span><input id="batch-games" type="number" min="1" value="64" title="攒够多少局做一次策略更新。较大的批次会增加内存占用。"></label>
         <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" value="1"><small>每个采样进程会启动独立 C++ worker；GPU 推理建议先从 1 开始</small></label>
         <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" step="32" value="64"></label>
+        <label><span>Replay buffer 长度</span><input id="replay-buffer-games" type="number" min="0" step="16" value="128"><small>最多保留最近完成的对局数；设为 0 可关闭旧样本回放</small></label>
         <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" value="2000"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"></select><small id="resume-checkpoint-file-name">可选择服务器存档，或导入本机权重</small></label>

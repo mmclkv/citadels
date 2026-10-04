@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 from python_backend.server import (Client, PythonServer, _encoding_compatible, _static_path,
                                    parse_server_args)  # noqa: E402
+from python_backend.views import _removed_view  # noqa: E402
 from python_backend.rooms import RoomRegistry  # noqa: E402
 from test.python_game_reference import (apply_action, create_game, get_available_actions,
                                         start_game)  # noqa: E402
@@ -104,6 +105,15 @@ def _start_reference_room(rooms: RoomRegistry, room_id: str, game_worker=None) -
 
 
 class ServerArgumentTests(unittest.TestCase):
+    def test_removed_roles_remain_visible_after_draft_phase(self):
+        state = {"draft": None,
+                 "draftPublic": {"faceUp": ["assassin", "thief"], "faceDownCount": 1}}
+        self.assertEqual(_removed_view(state), {
+            "faceUp": [{"id": "assassin", "num": 1, "name": "刺客"},
+                       {"id": "thief", "num": 2, "name": "盗贼"}],
+            "faceDownCount": 1,
+        })
+
     def test_checkpoint_encoding_compatibility_matches_entity_v6_contract(self) -> None:
         self.assertTrue(_encoding_compatible(14, 9))
         self.assertFalse(_encoding_compatible(12, 9))
@@ -189,6 +199,12 @@ class ServerArgumentTests(unittest.TestCase):
         self.assertIn("跳过整个回合", assassin_log)
         self.assertNotIn("秘密建筑", PythonServer._game_action_log_text(state, {
             "type": "wizard_card", "uid": "secret"}))
+
+    def test_tax_collector_report_shows_exact_collected_building_tax(self) -> None:
+        state = {"effects": {"taxCollectorGold": 7},
+                 "turn": {"charId": "tax_collector", "pending": {"kind": "tax_collect"}}}
+        self.assertEqual(PythonServer._game_action_log_text(state, {"type": "tax_collect"}),
+                         "税务官收取了7枚建筑税")
 
     def test_role_ability_notice_restores_public_popup_payload(self) -> None:
         previous = {"noticeSeq": 2, "notices": [], "turn": {"charId": "merchant"},
@@ -285,6 +301,21 @@ class ServerArgumentTests(unittest.TestCase):
             take_state, {"type": "emperor_take", "mode": "gold"}),
             "皇帝从新皇冠持有者座位2·电脑1处取得1枚金币")
 
+    def test_emperor_crown_action_emits_transfer_animation_notice(self) -> None:
+        previous = {
+            "noticeSeq": 3, "notices": [],
+            "turn": {"charId": "emperor", "playerIdx": 0},
+            "players": [{"id": "emperor", "hasCrown": True},
+                        {"id": "target", "hasCrown": False}],
+        }
+        updated = {"noticeSeq": 3, "notices": [],
+                   "players": [{"id": "emperor", "hasCrown": False},
+                               {"id": "target", "hasCrown": True}]}
+        PythonServer._append_crown_transfer_notice(
+            previous, updated, {"type": "emperor_crown", "target": "target"})
+        self.assertEqual(updated["notices"], [{"seq": 4, "kind": "crown_transfer",
+                                                 "fromIdx": 0, "toIdx": 1}])
+
     def test_targeted_building_effect_logs_player_and_building(self) -> None:
         state = {"turn": {"charId": "warlord", "playerIdx": 0,
                           "pending": {"kind": "warlord_destroy"}},
@@ -294,6 +325,32 @@ class ServerArgumentTests(unittest.TestCase):
         action = {"type": "choose_district", "target": "p2", "uid": "c1"}
         self.assertEqual(PythonServer._game_action_log_text(state, action),
                          "领主摧毁了座位2·乙的建筑『战场』")
+
+    def test_marshal_seize_emits_building_transfer_notice(self) -> None:
+        previous = {
+            "noticeSeq": 6, "notices": [],
+            "turn": {"charId": "marshal", "playerIdx": 0,
+                     "pending": {"kind": "marshal_seize"}},
+            "players": [
+                {"id": "marshal", "name": "元帅玩家", "city": []},
+                {"id": "victim", "name": "目标玩家", "city": [
+                    {"uid": "district-1", "name": "战场", "cost": 3}]}],
+        }
+        updated = {
+            "noticeSeq": 6, "notices": [],
+            "players": [
+                {"id": "marshal", "name": "元帅玩家", "city": [
+                    {"uid": "district-1", "name": "战场", "cost": 3}]},
+                {"id": "victim", "name": "目标玩家", "city": []}],
+        }
+        PythonServer._append_marshal_seize_notice(
+            previous, updated, {"type": "choose_district", "target": "victim", "uid": "district-1"})
+        self.assertEqual(updated["notices"], [{
+            "seq": 7, "kind": "seized", "playerIdx": 1, "byIdx": 0,
+            "playerId": "victim", "byId": "marshal",
+            "playerName": "目标玩家", "byName": "元帅玩家",
+            "cardUid": "district-1", "cardName": "战场", "cost": 3,
+        }])
 
     def test_assassin_thief_and_witch_character_choices_emit_target_popups(self) -> None:
         cases = [

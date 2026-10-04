@@ -73,6 +73,7 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "batchGames": _clamp_or(raw.get("batchGames"), 1, math.inf, 4),
         "trainingEpochs": _clamp_or(raw.get("trainingEpochs"), 1, math.inf, 2),
         "miniBatch": _clamp_or(raw.get("miniBatch"), 32, math.inf, 256),
+        "replayBufferGames": finite_integer("replayBufferGames", 0, math.inf, 128),
         "workers": _clamp_or(raw.get("workers"), 1, math.inf, default_workers),
         "checkpointEvery": _clamp_or(raw.get("checkpointEvery"), 1, math.inf, 100),
         "seed": seed,

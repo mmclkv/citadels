@@ -494,6 +494,8 @@ class PythonServer:
                         player[key] = old[key]
             merged = {**retained, **native_state}
             self._append_gain_notices(current, merged, action)
+            self._append_crown_transfer_notice(current, merged, action)
+            self._append_marshal_seize_notice(current, merged, action)
             self._append_role_ability_notice(current, merged, player_id, action)
             self._append_magistrate_declare_notice(current, merged, player_id, action)
             self._append_role_effect_detail_notice(current, merged, player_id, action)
@@ -732,6 +734,64 @@ class PythonServer:
             if amount and (player_idx >= size or hand_delta[player_idx] <= 0):
                 append("hand_gain", player_idx, amount)
 
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
+    def _append_crown_transfer_notice(previous: dict, updated: dict,
+                                     action: dict) -> None:
+        """Emit the public animation event when the Emperor hands off the crown."""
+        if action.get("type") != "emperor_crown":
+            return
+        old_turn = previous.get("turn") or {}
+        from_idx = old_turn.get("playerIdx")
+        target_id = action.get("target")
+        to_idx = PythonServer._player_index(previous, target_id)
+        players = updated.get("players") or []
+        if (not isinstance(from_idx, int) or to_idx is None or
+                not (0 <= from_idx < len(players)) or not (0 <= to_idx < len(players)) or
+                not players[to_idx].get("hasCrown")):
+            return
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = max(int(updated.get("noticeSeq") or 0),
+                  int(previous.get("noticeSeq") or 0)) + 1
+        notices.append({"seq": seq, "kind": "crown_transfer",
+                        "fromIdx": from_idx, "toIdx": to_idx})
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
+    def _append_marshal_seize_notice(previous: dict, updated: dict,
+                                     action: dict) -> None:
+        """Emit a public event for the Marshal's building-transfer animation."""
+        pending = ((previous.get("turn") or {}).get("pending") or {})
+        if action.get("type") != "choose_district" or pending.get("kind") != "marshal_seize":
+            return
+        old_players = previous.get("players") or []
+        new_players = updated.get("players") or []
+        from_idx = PythonServer._player_index(previous, action.get("target"))
+        to_idx = (previous.get("turn") or {}).get("playerIdx")
+        if (from_idx is None or not isinstance(to_idx, int) or
+                not (0 <= from_idx < len(old_players)) or not (0 <= to_idx < len(new_players))):
+            return
+        card = next((item for item in old_players[from_idx].get("city") or []
+                     if item.get("uid") == action.get("uid")), None)
+        arrived = any(item.get("uid") == action.get("uid")
+                      for item in new_players[to_idx].get("city") or [])
+        if not card or not arrived:
+            return
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = max(int(updated.get("noticeSeq") or 0),
+                  int(previous.get("noticeSeq") or 0)) + 1
+        notices.append({
+            "seq": seq, "kind": "seized", "playerIdx": from_idx, "byIdx": to_idx,
+            "playerId": old_players[from_idx].get("id"),
+            "byId": old_players[to_idx].get("id"),
+            "playerName": old_players[from_idx].get("name") or "玩家",
+            "byName": old_players[to_idx].get("name") or "元帅",
+            "cardUid": card.get("uid"), "cardName": card.get("name") or "建筑",
+            "cost": card.get("cost", 0),
+        })
         updated["noticeSeq"] = seq
         updated["notices"] = notices[-12:]
 
@@ -1006,6 +1066,9 @@ class PythonServer:
         kind = action.get("type", "")
         turn = state.get("turn") or {}
         pending = turn.get("pending") or {}
+        if kind == "tax_collect":
+            amount = max(0, int((state.get("effects") or {}).get("taxCollectorGold") or 0))
+            return f"税务官收取了{amount}枚建筑税"
         if kind in ("draft_pick", "draft_discard"):
             return "选取了一个角色" if kind == "draft_pick" else "弃置了一个角色"
         if kind in ("assassin_declare", "thief_declare", "witch_declare"):
