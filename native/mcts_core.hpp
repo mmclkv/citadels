@@ -243,8 +243,15 @@ class Mcts {
         node = child;
         path.push_back(node);
       }
-      if (!backed_up) backup(path, game_.terminal(state)
-        ? game_.terminal_value_vector(state, node->player) : node->value_vector);
+      if (!backed_up) {
+        if (game_.terminal(state)) backup(path, game_.terminal_value_vector(state, node->player));
+        else {
+          // A final move can create a leaf exactly at the depth boundary.
+          // Its default zero vector is not a network evaluation.
+          if (!node->expanded) expand(*node, state);
+          backup(path, node->value_vector);
+        }
+      }
     }
 
     Result result;
@@ -489,11 +496,23 @@ class BatchedMcts {
         }
         if (pending_collision) break;
         if (!collected) {
-          terminal.push_back(true);
-          terminal_values.push_back(game_.terminal(state)
-            ? game_.terminal_value_vector(state, node->player) : node->value_vector);
+          if (!game_.terminal(state) && !node->expanded) {
+            if (pending_evaluations.find(node) != pending_evaluations.end()) break;
+            const size_t eval_index = states.size();
+            pending_evaluations.emplace(node, eval_index);
+            states.push_back(std::move(state)); players.push_back(node->player);
+            actions.push_back(node->actions);
+            terminal.push_back(false); terminal_values.push_back({});
+            path_evaluation_indices.push_back(eval_index);
+          } else {
+            // Known network values and terminal outcomes can be backed up
+            // immediately; a fresh truncated leaf must join the GPU batch.
+            terminal.push_back(true);
+            terminal_values.push_back(game_.terminal(state)
+              ? game_.terminal_value_vector(state, node->player) : node->value_vector);
+            path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
+          }
           paths.push_back(std::move(path));
-          path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
         }
         // Completed results need no GPU evaluation: expose them immediately
         // to subsequent selections, even within this batch.

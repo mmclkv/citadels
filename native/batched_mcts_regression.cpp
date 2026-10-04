@@ -41,10 +41,12 @@ struct ToyGame : GameAdapter<ToyState, int> {
 struct ToyEvaluator : BatchedEvaluator<ToyState, int> {
   const ToyGame& game;
   int batch_calls = 0;
+  int evaluations = 0;
   int leaf_evaluations = 0;
   size_t largest_batch = 0;
   explicit ToyEvaluator(const ToyGame& g) : game(g) {}
   Evaluation evaluate(const ToyState& state, int, const std::vector<int>& actions) override {
+    ++evaluations;
     Evaluation result;
     result.priors.assign(actions.size(), 1.0f / std::max<size_t>(1, actions.size()));
     result.has_value_vector = true;
@@ -186,10 +188,45 @@ void test_pending_collisions() {
   }
 }
 
+void test_depth_cutoff() {
+  Mcts<ToyState, int>::Config config;
+  config.simulations = 500;
+  config.max_depth = 1;
+  config.dirichlet_epsilon = 0;
+  const auto check = [](const auto& result) {
+    const float expected = result.policy[0] * -0.2f + result.policy[1] * -0.8f;
+    if (result.visits != 500 || result.expansions != 3 || result.policy[0] < 0.8f ||
+        std::abs(result.value_vector[0] - expected) > 1e-5f ||
+        std::abs(result.value_vector[0] + result.value_vector[1]) > 1e-5f)
+      throw std::runtime_error("Depth cutoff backed up an unevaluated zero vector");
+  };
+  for (int batch : {1, 8, 32, 128}) {
+    ToyGame game(0, 2);
+    ToyEvaluator evaluator(game);
+    const auto result = BatchedMcts<ToyState, int>(game, evaluator, config).search(ToyState{}, 0, batch);
+    check(result);
+    if (evaluator.leaf_evaluations != 2 || evaluator.evaluations != 3)
+      throw std::runtime_error("Truncated leaves must be evaluated once, not zero or repeatedly");
+  }
+  ToyGame game(0, 2);
+  ToyEvaluator evaluator(game);
+  struct SerialEvaluator : Evaluator<ToyState, int> {
+    ToyEvaluator& evaluator;
+    explicit SerialEvaluator(ToyEvaluator& e) : evaluator(e) {}
+    Evaluation evaluate(const ToyState& s, int p, const std::vector<int>& a) override {
+      return evaluator.evaluate(s, p, a);
+    }
+  } serial(evaluator);
+  check(Mcts<ToyState, int>(game, serial, config).search(ToyState{}, 0));
+  if (evaluator.evaluations != 3)
+    throw std::runtime_error("Serial cutoff did not evaluate its new leaf");
+}
+
 int main() {
   test_fpu();
   test_opponent_fpu();
   test_pending_collisions();
+  test_depth_cutoff();
   const auto serial = run(0, 1, 1);
   for (int batch : {8, 32, 128}) {
     const auto terminal = run(0, 1, batch);
