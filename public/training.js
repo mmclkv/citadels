@@ -12,7 +12,7 @@ let logErrorEl = null;
 let logErrorText = '';
 let resumeCheckpointCompatible = null;
 let resumeCheckpointCheckedName = '';
-const CURRENT_STATE_ENCODING_VERSION = 12;
+const CURRENT_STATE_ENCODING_VERSION = 14;
 const CURRENT_ACTION_ENCODING_VERSION = 9;
 
 function num(value, digits = 2) { return value == null || value === '' ? '—' : Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }

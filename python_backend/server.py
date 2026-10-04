@@ -31,6 +31,7 @@ from .agent import AgentClient, AgentError, config_from_env
 from .voice import VoiceService
 from .neural import NeuralPolicy
 from .training_runtime import TrainingManager
+from .model_contract import MODEL_CONTRACTS
 from .frp import FrpManager
 from .codex_gateway import CodexGateway, detect_codex
 from .native_worker_manager import NativeWorkerManager
@@ -40,12 +41,13 @@ GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_HEADER_BYTES = 16384
 MAX_FRAME_BYTES = 1_048_576
 MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
-STATE_ENCODING_VERSION = 12
-ACTION_ENCODING_VERSION = 9
+_ENTITY_V6_CONTRACT = MODEL_CONTRACTS["entity-v6"]
+STATE_ENCODING_VERSION = _ENTITY_V6_CONTRACT["state"]
+ACTION_ENCODING_VERSION = _ENTITY_V6_CONTRACT["action"]
 
 
 def _encoding_compatible(state_version: int | None, action_version: int | None) -> bool:
-    return (state_version, action_version) in ((12, 9), (11, 8), (8, 8))
+    return (state_version, action_version) == (STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION)
 
 
 def _append_game_log(state: dict, message: str, kind: str = "info") -> None:

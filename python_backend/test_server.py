@@ -18,7 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from python_backend.server import Client, PythonServer, _static_path, parse_server_args  # noqa: E402
+from python_backend.server import (Client, PythonServer, _encoding_compatible, _static_path,
+                                   parse_server_args)  # noqa: E402
 from python_backend.rooms import RoomRegistry  # noqa: E402
 from test.python_game_reference import (apply_action, create_game, get_available_actions,
                                         start_game)  # noqa: E402
@@ -103,6 +104,12 @@ def _start_reference_room(rooms: RoomRegistry, room_id: str, game_worker=None) -
 
 
 class ServerArgumentTests(unittest.TestCase):
+    def test_checkpoint_encoding_compatibility_matches_entity_v6_contract(self) -> None:
+        self.assertTrue(_encoding_compatible(14, 9))
+        self.assertFalse(_encoding_compatible(12, 9))
+        self.assertFalse(_encoding_compatible(11, 8))
+        self.assertFalse(_encoding_compatible(14, 8))
+
     def test_native_action_labels_distinguish_character_choices(self) -> None:
         state = {"players": [
             {"id": "p1", "name": "甲", "seat": 0, "hand": [], "city": []},
@@ -461,8 +468,8 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             self.app.training.data_dir = Path(temp)
             payload = {"game": 1234, "createdAt": "2026-10-01T00:00:00Z",
                        "config": {"profile": "large", "learningRate": 0.0003},
-                       "model": {"encodingVersion": 11},
-                       "encoding": {"state": 11, "action": 8}}
+                       "model": {"encodingVersion": 14},
+                       "encoding": {"state": 14, "action": 9}}
             blob = gzip.compress(json.dumps(payload).encode("utf-8"))
             code, body = await _request(self.port, "/api/training/checkpoint/upload?name=checkpoint-test.json.gz",
                                         "POST", blob)
