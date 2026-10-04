@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -420,8 +421,9 @@ class BatchedMcts {
     if (root.actions.empty()) return {};
     expand(root, seed_state);
     add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
-    for (int offset = 0; offset < config_.simulations; offset += batch_size) {
-      const int count = std::min(batch_size, config_.simulations - offset);
+    int completed = 0;
+    while (completed < config_.simulations) {
+      const int count = std::min(batch_size, config_.simulations - completed);
       std::vector<State> states;
       std::vector<int> players;
       std::vector<std::vector<Action>> actions;
@@ -436,6 +438,7 @@ class BatchedMcts {
         Node* node = &root;
         std::vector<Node*> path{&root};
         bool collected = false;
+        bool pending_collision = false;
         for (int depth = 0; depth < config_.max_depth; ++depth) {
           if (game_.terminal(state)) {
             terminal.push_back(true); terminal_values.push_back(game_.terminal_value_vector(state, node->player));
@@ -444,6 +447,13 @@ class BatchedMcts {
             collected = true; break;
           }
           if (!node->expanded) {
+            if (pending_evaluations.find(node) != pending_evaluations.end()) {
+              // This attempt has no new evidence. Flush the existing batch
+              // so the next selection can descend through the expanded leaf.
+              // It receives neither a reservation nor a simulation credit.
+              pending_collision = true;
+              break;
+            }
             terminal.push_back(false); terminal_values.push_back({});
             paths.push_back(std::move(path));
             const auto [pending, inserted] = pending_evaluations.emplace(node, states.size());
@@ -477,6 +487,7 @@ class BatchedMcts {
           node = child;
           path.push_back(node);
         }
+        if (pending_collision) break;
         if (!collected) {
           terminal.push_back(true);
           terminal_values.push_back(game_.terminal(state)
@@ -494,6 +505,8 @@ class BatchedMcts {
           for (Node* visited : paths[i]) --visited->pending_visits;
       const std::vector<Evaluation> evaluations = states.empty()
           ? std::vector<Evaluation>{} : evaluator_.evaluate_batch(states, players, actions);
+      if (evaluations.size() != states.size())
+        throw std::runtime_error("MCTS evaluator returned an incomplete leaf batch");
       for (const auto& [node, eval_index] : pending_evaluations)
         if (eval_index < evaluations.size()) expand(*node, states[eval_index], evaluations[eval_index]);
       for (size_t i = 0; i < paths.size(); ++i) {
@@ -507,6 +520,7 @@ class BatchedMcts {
         }
         backup(paths[i], value);
       }
+      completed += static_cast<int>(paths.size());
     }
     return result(root);
   }

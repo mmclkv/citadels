@@ -41,6 +41,8 @@ struct ToyGame : GameAdapter<ToyState, int> {
 struct ToyEvaluator : BatchedEvaluator<ToyState, int> {
   const ToyGame& game;
   int batch_calls = 0;
+  int leaf_evaluations = 0;
+  size_t largest_batch = 0;
   explicit ToyEvaluator(const ToyGame& g) : game(g) {}
   Evaluation evaluate(const ToyState& state, int, const std::vector<int>& actions) override {
     Evaluation result;
@@ -56,6 +58,8 @@ struct ToyEvaluator : BatchedEvaluator<ToyState, int> {
   std::vector<Evaluation> evaluate_batch(const std::vector<ToyState>& states,
       const std::vector<int>& players, const std::vector<std::vector<int>>& actions) override {
     ++batch_calls;
+    leaf_evaluations += static_cast<int>(states.size());
+    largest_batch = std::max(largest_batch, states.size());
     return BatchedEvaluator::evaluate_batch(states, players, actions);
   }
 };
@@ -164,9 +168,28 @@ void test_opponent_fpu() {
     throw std::runtime_error("Opponent FPU or multi-player value rotation used root perspective");
 }
 
+void test_pending_collisions() {
+  for (int batch : {1, 8, 32, 128}) {
+    ToyGame game(0, 1000);
+    ToyEvaluator evaluator(game);
+    Mcts<ToyState, int>::Config config;
+    config.simulations = 500;
+    config.max_depth = 700;
+    config.dirichlet_epsilon = 0;
+    const auto result = BatchedMcts<ToyState, int>(game, evaluator, config).search(ToyState{}, 0, batch);
+    if (result.visits != 500 || evaluator.leaf_evaluations != 500 || result.expansions != 501)
+      throw std::runtime_error("Repeated pending leaves consumed simulation budget");
+    if (evaluator.largest_batch > static_cast<size_t>(batch) || result.policy[0] < 0.8f)
+      throw std::runtime_error("Early flush exceeded batch size or lost search quality");
+    if (batch > 1 && evaluator.batch_calls <= (500 + batch - 1) / batch)
+      throw std::runtime_error("Pending collisions must flush undersized batches");
+  }
+}
+
 int main() {
   test_fpu();
   test_opponent_fpu();
+  test_pending_collisions();
   const auto serial = run(0, 1, 1);
   for (int batch : {8, 32, 128}) {
     const auto terminal = run(0, 1, batch);
