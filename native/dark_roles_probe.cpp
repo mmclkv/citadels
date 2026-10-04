@@ -248,6 +248,21 @@ int main() {
     require(black.players[0].gold == 8 && black.players[1].gold == 0 && black.pending_kind.empty(),
       "real threat takes all gold and unfreezes target");
 
+    // Calling the King transfers the crown immediately, even when Blackmailer
+    // pauses that role before it can take resources.
+    NativeGameState blackmailed_king;
+    blackmailed_king.phase = NativePhase::Action; blackmailed_king.active_player = 0;
+    blackmailed_king.players = {player("previous", "assassin", 2), player("king", "assassin", 2),
+                                player("blackmailer", "blackmailer", 2)};
+    blackmailed_king.players[0].has_crown = true;
+    blackmailed_king.blackmailer_nums = {4}; blackmailed_king.blackmailer_signed = 4;
+    blackmailed_king.blackmailer_player = 2;
+    blackmailed_king.call_queue = {{"king", 4, 1}}; blackmailed_king.call_index = -1;
+    require(blackmailed_king.end_turn() && blackmailed_king.pending_kind == "blackmailer_threat",
+      "Blackmailer should pause the called King before resources");
+    require(!blackmailed_king.players[0].has_crown && blackmailed_king.players[1].has_crown,
+      "King should receive the crown before Blackmailer interruption");
+
     std::cout << "dark-role-native-rules-ok\n";
     return 0;
   } catch (const std::exception& error) {

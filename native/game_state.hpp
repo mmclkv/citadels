@@ -1015,6 +1015,12 @@ struct NativeGameState {
         resources_taken = false; income_taken = false; monk_extra_taken = false;
         ability_used = false; bonus_done = false;
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
+        // The crown changes hands as soon as role 4 is called. Resolve it
+        // before interrupting the turn for a Blackmailer threat; that
+        // response pauses the role but must not postpone its crown effect.
+        if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
+          for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
+        }
         if (blackmailer_player >= 0 &&
             bewitched != entry.number &&
             std::find(blackmailer_nums.begin(), blackmailer_nums.end(), entry.number) != blackmailer_nums.end() &&
@@ -1028,9 +1034,6 @@ struct NativeGameState {
           pending_kind = "blackmailer_threat"; pending_target = entry.player;
           pending_first = entry.number; pending_signed = blackmailer_signed == entry.number;
           return true;
-        }
-        if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
-          for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
         }
         if (entry.char_id == "noble") {
           const int count = static_cast<int>(std::count_if(players[entry.player].city.begin(), players[entry.player].city.end(),
