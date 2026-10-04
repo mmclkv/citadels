@@ -631,6 +631,12 @@
         else flyCardsToHand(n.playerIdx, n.amount);
         return;
 
+      case 'prophet_collect':
+        // 预言家从每位有手牌的对手处各取一张；全程只飞牌背，避免泄露牌面。
+        (n.fromIdxs || []).forEach(fromIdx =>
+          handTransferAnim(fromIdx, n.toIdx, 1, ''));
+        return;
+
       case 'destroyed':
         destroyAnim(n.playerIdx, n.uid, n.cardName);
         if (isMe) {
@@ -654,6 +660,7 @@
         return;
 
       case 'magistrate_confiscate':
+        buildingTransferAnim(n.playerIdx, n.byIdx, n.cardUid);
         if (isMe) {
           queueEvent({
             tone: 'danger', icon: '§', title: '你的建筑被行政官没收', hold: 5200,
@@ -2596,13 +2603,15 @@
       document.body.appendChild(card);
       setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 1150 + i * 65);
     }
-    const badge = document.createElement('div');
-    badge.className = 'hand-swap-badge';
-    badge.textContent = badgeText;
-    badge.style.left = ((sx + ex) / 2 - 34) + 'px';
-    badge.style.top = ((sy + ey) / 2 - 12) + 'px';
-    document.body.appendChild(badge);
-    setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1250);
+    if (badgeText) {
+      const badge = document.createElement('div');
+      badge.className = 'hand-swap-badge';
+      badge.textContent = badgeText;
+      badge.style.left = ((sx + ex) / 2 - 34) + 'px';
+      badge.style.top = ((sy + ey) / 2 - 12) + 'px';
+      document.body.appendChild(badge);
+      setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1250);
+    }
   }
 
   // 建造动画期间锁住所有行动，避免下一步操作与建筑入场效果重叠。

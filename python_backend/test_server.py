@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 from python_backend.server import (Client, PythonServer, _encoding_compatible, _static_path,
                                    parse_server_args)  # noqa: E402
+from python_backend import cards  # noqa: E402
 from python_backend.views import _removed_view  # noqa: E402
 from python_backend.rooms import RoomRegistry  # noqa: E402
 from test.python_game_reference import (apply_action, create_game, get_available_actions,
@@ -220,14 +221,16 @@ class ServerArgumentTests(unittest.TestCase):
     def test_magistrate_declaration_announces_public_targets_but_hides_real_mark(self) -> None:
         previous = {
             "noticeSeq": 4, "notices": [],
+            "charDeck": ["witch", "prophet", "monk"],
             "players": [{"id": "p1", "name": "甲"}],
             "turn": {"charId": "magistrate"},
             "effects": {"magistrate": None},
         }
         updated = {
             "noticeSeq": 4, "notices": [],
+            "charDeck": ["witch", "prophet", "monk"],
             "players": [{"id": "p1", "name": "甲"}],
-            "effects": {"magistrate": {"nums": [1, 3, 5], "signed": 3,
+            "effects": {"magistrate": {"nums": [5, 1, 3], "signed": 3,
                                         "playerIdx": 0, "claimed": False}},
         }
         action = {"type": "magistrate_char", "num": 5}
@@ -241,8 +244,27 @@ class ServerArgumentTests(unittest.TestCase):
         log = PythonServer._game_action_log_text(previous, action, updated)
         self.assertIn("布置了逮捕令", log)
         self.assertIn("真逮捕令的目标暂不公开", log)
+        self.assertLess(log.index("1号·"), log.index("3号·"))
+        self.assertLess(log.index("3号·"), log.index("5号·"))
+        self.assertEqual([target["name"] for target in notice["targets"]],
+                         [cards.CHAR_MAP[role_id]["name"]
+                          for role_id in ("witch", "prophet", "monk")])
         for target in notice["targets"]:
             self.assertIn(target["name"], log)
+
+    def test_role_names_follow_the_current_games_character_deck(self) -> None:
+        state = {"charDeck": ["alchemist"], "players": [], "turn": {}}
+        expected = cards.CHAR_MAP["alchemist"]["name"]
+
+        self.assertEqual(PythonServer._character_for_number(state, 6)["name"], expected)
+        action_view = PythonServer._native_action_view(
+            state, {"type": "choose_char", "num": 6})
+        self.assertIn(expected, action_view["label"])
+        self.assertNotIn(cards.CHAR_MAP["merchant"]["name"], action_view["label"])
+        self.assertEqual(PythonServer._magistrate_targets([6], state)[0]["name"], expected)
+        log = PythonServer._game_action_log_text(
+            state, {"type": "assassin_declare", "num": 6})
+        self.assertIn(f"6号·{expected}", log)
 
     def test_magistrate_notice_waits_until_all_three_targets_are_committed(self) -> None:
         previous = {"noticeSeq": 0, "notices": [], "players": [{"id": "p1"}],
@@ -352,6 +374,39 @@ class ServerArgumentTests(unittest.TestCase):
             "cardUid": "district-1", "cardName": "战场", "cost": 3,
         }])
 
+    def test_magistrate_confiscation_emits_transfer_notice_and_detailed_log(self) -> None:
+        card = {"uid": "district-2", "name": "钟楼", "cost": 4, "color": "purple"}
+        previous = {
+            "noticeSeq": 9, "notices": [],
+            "reaction": {"kind": "magistrate", "playerIdx": 0},
+            "players": [
+                {"id": "magistrate", "name": "行政官甲", "seat": 0, "city": []},
+                {"id": "builder", "name": "建造者乙", "seat": 1, "city": [card]},
+            ],
+        }
+        updated = {
+            "noticeSeq": 9, "notices": [],
+            "reaction": None,
+            "players": [
+                {"id": "magistrate", "name": "行政官甲", "seat": 0, "city": [card]},
+                {"id": "builder", "name": "建造者乙", "seat": 1, "city": []},
+            ],
+        }
+        action = {"type": "reaction", "name": "use"}
+
+        PythonServer._append_magistrate_confiscate_notice(previous, updated, action)
+        log = PythonServer._game_action_log_text(previous, action, updated)
+
+        self.assertEqual(updated["notices"], [{
+            "seq": 10, "kind": "magistrate_confiscate", "playerIdx": 1, "byIdx": 0,
+            "playerId": "builder", "byId": "magistrate",
+            "playerName": "建造者乙", "byName": "行政官甲",
+            "cardUid": "district-2", "card": card,
+        }])
+        self.assertIn("建造者乙", log)
+        self.assertIn("钟楼", log)
+        self.assertIn("4枚建造金币已退还", log)
+
     def test_assassin_thief_and_witch_character_choices_emit_target_popups(self) -> None:
         cases = [
             ("assassin", "刺客", "宣布刺杀", "跳过整个回合"),
@@ -427,6 +482,25 @@ class ServerArgumentTests(unittest.TestCase):
                                           {"type": "choose_cards", "mode": "use"})
         self.assertEqual(updated["notices"][0]["kind"], "hand_gain")
         self.assertEqual(updated["notices"][0]["amount"], 2)
+
+    def test_prophet_collect_notice_tracks_each_opponent_as_card_source(self) -> None:
+        previous = {
+            "noticeSeq": 3, "notices": [],
+            "turn": {"charId": "prophet", "playerIdx": 0, "pending": None},
+            "players": [
+                {"hand": []}, {"hand": [{"uid": "a"}]},
+                {"hand": [{"uid": "b"}, {"uid": "c"}]},
+            ],
+        }
+        updated = {"players": [
+            {"hand": [{"uid": "a", "from": 1}, {"uid": "b", "from": 2}]},
+            {"hand": []}, {"hand": [{"uid": "c"}]},
+        ]}
+
+        PythonServer._append_gain_notices(previous, updated, {"type": "ability"})
+
+        self.assertEqual(updated["notices"], [{"seq": 4, "kind": "prophet_collect",
+                                                "fromIdxs": [1, 2], "toIdx": 0}])
 
     def test_deployment_environment_defaults_and_cli_precedence(self) -> None:
         with mock.patch.dict(os.environ, {"PORT": "9123", "HOST": "0.0.0.0",

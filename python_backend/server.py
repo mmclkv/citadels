@@ -496,6 +496,7 @@ class PythonServer:
             self._append_gain_notices(current, merged, action)
             self._append_crown_transfer_notice(current, merged, action)
             self._append_marshal_seize_notice(current, merged, action)
+            self._append_magistrate_confiscate_notice(current, merged, action)
             self._append_role_ability_notice(current, merged, player_id, action)
             self._append_magistrate_declare_notice(current, merged, player_id, action)
             self._append_role_effect_detail_notice(current, merged, player_id, action)
@@ -562,6 +563,18 @@ class PythonServer:
         actions = [self._native_action_view(state, action) for action in native["actions"]]
         prompt = self._native_prompt(state, player_id, actions)
         return {"phase": native["phase"], "actions": actions, "prompt": prompt}
+
+    @staticmethod
+    def _character_for_number(state: dict, number: int) -> dict:
+        """Resolve a role number against this game's actual character deck."""
+        for entry in state.get("charDeck") or []:
+            character_id = entry.get("id") if isinstance(entry, dict) else entry
+            character = cards.CHAR_MAP.get(character_id) if isinstance(character_id, str) else None
+            if character and character.get("num") == number:
+                return character
+        # Older snapshots/tests may not include charDeck; retain a safe fallback.
+        return next((item for item in cards.CHAR_MAP.values()
+                     if item.get("num") == number), {})
 
     @staticmethod
     def _native_action_view(state: dict, action: dict) -> dict:
@@ -648,7 +661,7 @@ class PythonServer:
                 number = int(action.get("num", action.get("name")))
             except (TypeError, ValueError):
                 number = 0
-            role = next((item for item in cards.CHAR_MAP.values() if item.get("num") == number), {})
+            role = PythonServer._character_for_number(state, number)
             label = f"{number}号 · {role.get('name', '角色')}" if number else labels.get(kind, kind)
             if kind == "magistrate_signed":
                 label = "真逮捕令 · " + label
@@ -717,14 +730,28 @@ class PythonServer:
         for i, amount in enumerate(gold_delta):
             if amount > 0:
                 append("got_gold", i, amount, source_for(gold_delta, i))
+        old_turn = previous.get("turn") or {}
+        pending = old_turn.get("pending") or {}
+        prophet_idx = old_turn.get("playerIdx")
+        prophet_sources = [i for i, delta in enumerate(hand_delta)
+                           if delta < 0 and i != prophet_idx]
+        prophet_collect = (old_turn.get("charId") == "prophet" and
+                           pending.get("kind") != "prophet_give" and
+                           isinstance(prophet_idx, int) and 0 <= prophet_idx < size and
+                           hand_delta[prophet_idx] == len(prophet_sources) and
+                           len(prophet_sources) >= 1)
         for i, amount in enumerate(hand_delta):
             if amount > 0:
-                append("hand_gain", i, amount, source_for(hand_delta, i))
+                if not (prophet_collect and i == prophet_idx):
+                    append("hand_gain", i, amount, source_for(hand_delta, i))
+
+        if prophet_collect:
+            seq += 1
+            notices.append({"seq": seq, "kind": "prophet_collect",
+                            "fromIdxs": prophet_sources, "toIdx": prophet_idx})
 
         # The Magician redraw replaces cards one-for-one, so a player can gain
         # new cards with no net hand-size change. Emit the final redraw animation.
-        old_turn = previous.get("turn") or {}
-        pending = old_turn.get("pending") or {}
         mode = action.get("mode") or action.get("name")
         new_pending = ((updated.get("turn") or {}).get("pending") or {}).get("kind")
         if (action.get("type") == "choose_cards" and pending.get("kind") == "magician_redraw" and
@@ -796,6 +823,59 @@ class PythonServer:
         updated["notices"] = notices[-12:]
 
     @staticmethod
+    def _magistrate_confiscated_card(previous: dict, updated: dict) -> tuple[int, int, dict] | None:
+        """Return the builder, Magistrate, and card moved by a resolved warrant."""
+        reaction = previous.get("reaction") or {}
+        if reaction.get("kind") != "magistrate":
+            return None
+        magistrate_idx = reaction.get("playerIdx")
+        old_players = previous.get("players") or []
+        new_players = updated.get("players") or []
+        if (not isinstance(magistrate_idx, int) or
+                not (0 <= magistrate_idx < len(old_players)) or
+                not (0 <= magistrate_idx < len(new_players))):
+            return None
+        old_magistrate_uids = {card.get("uid") for card in old_players[magistrate_idx].get("city") or []}
+        new_magistrate_city = new_players[magistrate_idx].get("city") or []
+        for builder_idx, old_player in enumerate(old_players):
+            if builder_idx == magistrate_idx or builder_idx >= len(new_players):
+                continue
+            new_builder_uids = {card.get("uid") for card in new_players[builder_idx].get("city") or []}
+            for card in old_player.get("city") or []:
+                uid = card.get("uid")
+                if (uid and uid not in old_magistrate_uids and uid not in new_builder_uids and
+                        any(moved.get("uid") == uid for moved in new_magistrate_city)):
+                    return builder_idx, magistrate_idx, card
+        return None
+
+    @staticmethod
+    def _append_magistrate_confiscate_notice(previous: dict, updated: dict,
+                                             action: dict) -> None:
+        """Emit the transfer animation event after a Magistrate accepts confiscation."""
+        if action.get("type") != "reaction" or action.get("name") != "use":
+            return
+        moved = PythonServer._magistrate_confiscated_card(previous, updated)
+        if not moved:
+            return
+        builder_idx, magistrate_idx, card = moved
+        old_players = previous.get("players") or []
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = max(int(updated.get("noticeSeq") or 0),
+                  int(previous.get("noticeSeq") or 0)) + 1
+        builder = old_players[builder_idx]
+        magistrate = old_players[magistrate_idx]
+        notices.append({
+            "seq": seq, "kind": "magistrate_confiscate",
+            "playerIdx": builder_idx, "byIdx": magistrate_idx,
+            "playerId": builder.get("id"), "byId": magistrate.get("id"),
+            "playerName": builder.get("name") or "玩家",
+            "byName": magistrate.get("name") or "行政官",
+            "cardUid": card.get("uid"), "card": card,
+        })
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
     def _append_role_ability_notice(previous: dict, updated: dict,
                                     player_id: str, action: dict) -> None:
         """Recreate the public ability popup omitted by the native engine protocol."""
@@ -860,8 +940,7 @@ class PythonServer:
                 number = int(action.get("num", action.get("name")))
             except (TypeError, ValueError):
                 number = 0
-            target = next((item for item in cards.CHAR_MAP.values()
-                           if item.get("num") == number), {})
+            target = cls._character_for_number(previous, number)
             target_name = f"{number}号【{target.get('name') or '角色'}】"
             effects = {
                 "assassin_declare": f"刺杀目标为{target_name}，该角色本轮被叫到时跳过整个回合。",
@@ -938,8 +1017,7 @@ class PythonServer:
                 number = int(action.get("num", action.get("name")))
             except (TypeError, ValueError):
                 number = 0
-            target = next((item for item in cards.CHAR_MAP.values()
-                           if item.get("num") == number), {})
+            target = cls._character_for_number(previous, number)
             target_name = f"{number}号【{target.get('name') or '角色'}】"
             pending_role = pending.get("kind")
             if pending_role == "assassin":
@@ -953,7 +1031,7 @@ class PythonServer:
                 description = f"女巫宣告施咒目标：{target_name}；该角色本轮只能领取资源，随后由女巫接管剩余行动。"
             role = cards.CHAR_MAP[role_id]
         elif kind == "blackmailer_signed" and role_id == "blackmailer":
-            targets = PythonServer._magistrate_targets(pending.get("nums") or [])
+            targets = PythonServer._magistrate_targets(pending.get("nums") or [], previous)
             if len(targets) == 2:
                 names = "、".join(f"{item['num']}号【{item['name']}】" for item in targets)
                 description = f"勒索者把两个威胁标记分配给{names}；真威胁标记对应的目标暂不公开。"
@@ -975,18 +1053,19 @@ class PythonServer:
         updated["notices"] = notices[-12:]
 
     @staticmethod
-    def _magistrate_targets(nums: list) -> list[dict]:
+    def _magistrate_targets(nums: list, state: dict | None = None) -> list[dict]:
         targets = []
         for value in nums:
             try:
                 number = int(value)
             except (TypeError, ValueError):
                 continue
-            character = next((item for item in cards.CHAR_MAP.values()
-                              if item.get("num") == number), {})
+            character = PythonServer._character_for_number(state or {}, number)
             targets.append({"num": number,
                             "name": character.get("name") or f"{number}号角色"})
-        return targets
+        # Public order must not preserve declaration order: the true warrant
+        # target is selected first, so retaining source order leaks its identity.
+        return sorted(targets, key=lambda target: target["num"])
 
     @classmethod
     def _append_magistrate_declare_notice(cls, previous: dict, updated: dict,
@@ -999,7 +1078,7 @@ class PythonServer:
         if not warrant or warrant == old_effect:
             return
         nums = warrant.get("nums") or []
-        targets = cls._magistrate_targets(nums)
+        targets = cls._magistrate_targets(nums, previous)
         if len(targets) != 3:
             return
         players = previous.get("players") or []
@@ -1066,6 +1145,16 @@ class PythonServer:
         kind = action.get("type", "")
         turn = state.get("turn") or {}
         pending = turn.get("pending") or {}
+        if (kind == "reaction" and action.get("name") == "use" and updated is not None):
+            confiscated = PythonServer._magistrate_confiscated_card(state, updated)
+            if confiscated:
+                builder_idx, magistrate_idx, card = confiscated
+                builder = PythonServer._player_label(state, builder_idx)
+                magistrate = PythonServer._player_label(state, magistrate_idx)
+                name = card.get("name") or "建筑"
+                cost = max(0, int(card.get("cost") or 0))
+                return (f"【行政官】执行逮捕令，从{builder}处没收刚建造的『{name}』，"
+                        f"免费建入{magistrate}的城市；建造者支付的{cost}枚建造金币已退还。")
         if kind == "tax_collect":
             amount = max(0, int((state.get("effects") or {}).get("taxCollectorGold") or 0))
             return f"税务官收取了{amount}枚建筑税"
@@ -1078,8 +1167,7 @@ class PythonServer:
                 number = int(action.get("num", action.get("name")))
             except (TypeError, ValueError):
                 number = 0
-            character = next((item for item in cards.CHAR_MAP.values()
-                              if item.get("num") == number), {})
+            character = PythonServer._character_for_number(state, number)
             target = f"{number}号·{character.get('name', '角色')}" if number else "目标角色"
             verb = {"assassin_declare": "宣布刺杀", "thief_declare": "宣布偷窃",
                     "witch_declare": "施咒"}[kind]
@@ -1093,8 +1181,7 @@ class PythonServer:
                 number = int(action.get("num", action.get("name")))
             except (TypeError, ValueError):
                 number = 0
-            character = next((item for item in cards.CHAR_MAP.values()
-                              if item.get("num") == number), {})
+            character = PythonServer._character_for_number(state, number)
             target = f"{number}号·{character.get('name') or '角色'}"
             if pending["kind"] == "assassin":
                 return f"【刺客】宣布刺杀{target}；该角色本轮被叫到时跳过整个回合。"
@@ -1105,7 +1192,7 @@ class PythonServer:
             warrant = ((updated or {}).get("effects") or {}).get("magistrate")
             if (kind == "magistrate_char" and warrant and
                     warrant != (state.get("effects") or {}).get("magistrate")):
-                targets = PythonServer._magistrate_targets(warrant.get("nums") or [])
+                targets = PythonServer._magistrate_targets(warrant.get("nums") or [], updated or state)
                 if len(targets) == 3:
                     names = "、".join(f"{item['num']}号·{item['name']}" for item in targets)
                     return f"为{names}布置了逮捕令（真逮捕令的目标暂不公开）。"
