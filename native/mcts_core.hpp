@@ -483,18 +483,20 @@ class BatchedMcts {
           paths.push_back(std::move(path));
           path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
         }
-        // 批量收集叶节点期间先加临时访问次数，让同一 batch 内的后续
-        // simulation 能看到前面路径，避免所有叶节点都挤在同一条根分支。
-        // 真正 backup 前会撤销这些 virtual visits，再写入真实统计量。
-        for (Node* visited : paths.back()) ++visited->visits;
+        // Completed results need no GPU evaluation: expose them immediately
+        // to subsequent selections, even within this batch.
+        if (terminal.back()) backup(paths.back(), terminal_values.back());
+        else for (Node* visited : paths.back()) ++visited->pending_visits;
       }
-      for (const auto& path : paths)
-        for (Node* visited : path) --visited->visits;
+      for (size_t i = 0; i < paths.size(); ++i)
+        if (!terminal[i])
+          for (Node* visited : paths[i]) --visited->pending_visits;
       const std::vector<Evaluation> evaluations = states.empty()
           ? std::vector<Evaluation>{} : evaluator_.evaluate_batch(states, players, actions);
       for (const auto& [node, eval_index] : pending_evaluations)
         if (eval_index < evaluations.size()) expand(*node, states[eval_index], evaluations[eval_index]);
       for (size_t i = 0; i < paths.size(); ++i) {
+        if (terminal[i]) continue;  // Already backed up during collection.
         std::array<float, kValueSlots> value = terminal_values[i];
         const size_t eval_index = path_evaluation_indices[i];
         if (!terminal[i] && eval_index < evaluations.size()) {
@@ -517,7 +519,9 @@ class BatchedMcts {
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
     float value = 0;
-    int visits = 0; bool expanded = false;
+    int visits = 0;
+    int pending_visits = 0;
+    bool expanded = false;
   };
   void expand(Node& node, const State& state) {
     auto evaluation = evaluator_.evaluate(state, node.player, node.actions);
@@ -537,18 +541,21 @@ class BatchedMcts {
   }
   size_t select(const Node& node) const {
     size_t best = 0; float score_best = -std::numeric_limits<float>::infinity();
-    const float parent = static_cast<float>(std::max(1, node.visits));
+    const float parent = static_cast<float>(std::max(1, node.visits + node.pending_visits));
     for (size_t i = 0; i < node.actions.size(); ++i) {
       const auto& variants = node.child_variants[i];
-      float visits = 0.0f, total = 0.0f;
+      float visits = 0.0f, pending = 0.0f, total = 0.0f;
       for (const auto& child : variants) {
         visits += static_cast<float>(child->visits);
+        pending += static_cast<float>(child->pending_visits);
         const size_t slot = player_count_ ? relative_slot(child->player, node.player) : 0;
         total += child->visits ? child->total[slot] : 0.0f;
       }
       const float q = visits > 0.0f ? total / visits : 0.0f;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
-      const float score = q + config_.c_puct * p * std::sqrt(parent) / (1.0f + visits);
+      // Reservations spread work through U only. W/N remains the observed
+      // mean, so negative values cannot improve merely by reserving a path.
+      const float score = q + config_.c_puct * p * std::sqrt(parent) / (1.0f + visits + pending);
       if (score > score_best) { score_best = score; best = i; }
     }
     return best;
