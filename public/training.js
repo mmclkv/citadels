@@ -11,6 +11,7 @@ let logPlaceholder = false;
 let logErrorEl = null;
 let logErrorText = '';
 let resumeCheckpointCompatible = null;
+let resumeCheckpointCheckedName = '';
 const CURRENT_STATE_ENCODING_VERSION = 12;
 const CURRENT_ACTION_ENCODING_VERSION = 9;
 
@@ -43,8 +44,6 @@ function formConfig() {
     batchGames: +$('batch-games').value, workers: +$('workers').value,
     miniBatch: +$('mini-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
-    // 「继续已有训练」只有两种模式：从头训练，或加载一个外部权重文件。
-    // 后者选完文件后由 uploadCheckpointFile() 把服务器侧落地的存档名写进隐藏域。
     resumeCheckpoint: resumeCheckpointName(),
     mctsSimulations: Math.max(1, +$('mcts-simulations').value || 500),
     mctsC_puct: +$('mcts-cpuct').value,
@@ -126,24 +125,36 @@ function applyCheckpointConfig(config) {
   return { applied, skipped };
 }
 
-/* ------------------------- 继续已有训练（权重） ------------------------- *
- * 面板上只有两个选项：从头训练 / 加载权重继续训练。选后者会弹出系统文件管理器
- * （Windows 上就是资源管理器），选中后立刻上传给服务器，由它落成 training-data
- * 下的合法存档名，再把这个名字当作 resumeCheckpoint 提交。
- *
- * 为什么不直接列服务器上的存档：存档名里那串后缀（局数/档位/种子）对人不友好，
- * 而权重文件常常来自别的机器或备份目录 —— 统一走「选文件」既直观又能跨目录。
- */
-const RESUME_MODES = '<option value="">从头训练</option>' +
-  '<option value="file">加载权重继续训练…</option>';
-
+/* ------------------------- 继续已有训练（权重） ------------------------- */
 function resumeCheckpointName() {
-  return $('resume-checkpoint').value === 'file' ? $('resume-checkpoint-name').value : '';
+  const value = $('resume-checkpoint').value;
+  if (value.startsWith('server:')) return value.slice('server:'.length);
+  return value === 'upload' ? $('resume-checkpoint-name').value : '';
 }
 
-// 选项写入一次即可：render() 每秒都会跑，反复重建下拉框会打断用户的选择。
-function initResumeOptions() {
-  $('resume-checkpoint').innerHTML = RESUME_MODES;
+// 状态轮询会带回服务器上的训练存档；保留当前选择，避免每秒刷新时打断操作。
+function updateResumeOptions(checkpoints) {
+  const select = $('resume-checkpoint');
+  if (!select) return;
+  const previous = select.value;
+  select.replaceChildren();
+  const addOption = (parent, value, label, disabled = false) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    option.disabled = disabled;
+    parent.appendChild(option);
+  };
+  addOption(select, '', '从头训练');
+  const group = document.createElement('optgroup');
+  group.label = '服务器存档（training-data，最近 40 个）';
+  if (checkpoints.length) {
+    checkpoints.forEach(item => addOption(group, 'server:' + item.name,
+      item.name + ' · ' + num(item.bytes / 1024 / 1024, 1) + ' MB'));
+  } else addOption(group, '', '服务器上暂无 checkpoint 存档', true);
+  select.appendChild(group);
+  addOption(select, 'upload', '从本机上传权重文件…');
+  if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
 }
 
 // 每帧只同步「选了哪个文件」的展示与按钮可用状态，不动下拉框本身。
@@ -154,8 +165,9 @@ function syncResumeUI() {
   const name = $('resume-checkpoint-name').value;
   const label = $('resume-checkpoint-file-name');
   if (label) {
-    label.textContent = !select || select.value !== 'file' ? '未选择权重文件'
-      : (name ? '已选：' + name : '尚未选择权重文件，再点一次上面的下拉框即可重选');
+    if (!select || !select.value) label.textContent = '未选择权重文件';
+    else if (select.value.startsWith('server:')) label.textContent = '服务器文件：' + select.value.slice(7);
+    else label.textContent = name ? '本机上传后已存入服务器：' + name : '请选择本机权重文件';
   }
   syncCheckpointLoadButton();
 }
@@ -166,8 +178,28 @@ function syncCheckpointLoadButton() {
   if (button) button.disabled = !!(latest && latest.running) || !resumeCheckpointName();
 }
 
-// 选「加载权重继续训练」→ 弹出文件管理器。取消选择要退回原状态，
-// 否则会留下「选了模式但没有文件」的半吊子配置，点开始训练会被服务端拒绝。
+async function inspectResumeCheckpoint(name) {
+  resumeCheckpointCompatible = null;
+  resumeCheckpointCheckedName = '';
+  $('checkpoint-load-message').textContent = '正在检查服务器存档 ' + name + '…';
+  try {
+    const data = await api('./api/training/checkpoint?name=' + encodeURIComponent(name));
+    if (resumeCheckpointName() !== name) return;
+    resumeCheckpointCompatible = data.encodingCompatible === true;
+    resumeCheckpointCheckedName = name;
+    $('checkpoint-load-message').textContent = '已选择服务器存档 ' + data.name + '（已训练 ' +
+      integer(data.game) + ' 局）；' + (resumeCheckpointCompatible ? '状态编码兼容。' :
+        '状态编码 v' + (data.encodingVersion || '未知') + ' 与当前版本不兼容，不能续训。') +
+      '可点击“从权重读取参数”导入该存档配置。';
+  } catch (error) {
+    if (resumeCheckpointName() !== name) return;
+    resumeCheckpointCompatible = false;
+    resumeCheckpointCheckedName = name;
+    $('checkpoint-load-message').textContent = '无法读取服务器存档：' + error.message;
+  }
+}
+
+// 仅显式选择“从本机上传”时打开浏览器文件选择器；服务器存档直接从列表选择。
 function requestCheckpointFile() {
   const picker = $('resume-checkpoint-file');
   if (!picker) return;
@@ -189,6 +221,7 @@ async function uploadCheckpointFile(file) {
     });
     $('resume-checkpoint-name').value = data.name;
     resumeCheckpointCompatible = data.encodingCompatible === true;
+    resumeCheckpointCheckedName = data.name;
     out.textContent = '已加载 ' + data.name + '（该文件已训练 ' + integer(data.game) + ' 局）；' +
       (data.renamed ? '原文件名不符合存档命名，已改名为上述名称。' : '') +
       (resumeCheckpointCompatible ? '状态编码 v' + data.encodingVersion + ' 兼容。' :
@@ -199,6 +232,7 @@ async function uploadCheckpointFile(file) {
     $('resume-checkpoint').value = '';
     $('resume-checkpoint-name').value = '';
     resumeCheckpointCompatible = null;
+    resumeCheckpointCheckedName = '';
     out.textContent = '加载失败：' + error.message;
   }
   syncResumeUI();
@@ -240,6 +274,7 @@ function stateLabel(state) {
 
 function render(status) {
   latest = status;
+  updateResumeOptions(status.checkpoints || []);
   const point = status.point || {};
   const badge = $('status-badge');
   badge.textContent = stateLabel(status.state);
@@ -639,6 +674,11 @@ async function refresh() {
 }
 
 $('start-training').onclick = async () => {
+  const selectedCheckpoint = resumeCheckpointName();
+  if (selectedCheckpoint && resumeCheckpointCheckedName !== selectedCheckpoint) {
+    $('control-message').textContent = '正在检查所选服务器权重，请稍候后再开始训练';
+    return;
+  }
   if (resumeCheckpointName() && resumeCheckpointCompatible === false) {
     $('control-message').textContent = '当前权重的状态编码与 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，请从头训练或选择新权重';
     return;
@@ -657,7 +697,7 @@ $('stop-training').onclick = async () => {
 $('load-checkpoint-config').onclick = async () => {
   const name = resumeCheckpointName();
   const out = $('checkpoint-load-message');
-  if (!name) { out.textContent = '请先在上方「继续已有训练」里选择「加载权重继续训练」并选中一个权重文件'; return; }
+  if (!name) { out.textContent = '请先选择一个服务器存档，或从本机上传权重文件'; return; }
   out.textContent = '正在读取 ' + name + ' …';
   try {
     const data = await api('./api/training/checkpoint?name=' + encodeURIComponent(name));
@@ -672,20 +712,27 @@ $('load-checkpoint-config').onclick = async () => {
   }
 };
 $('resume-checkpoint').onchange = syncCheckpointLoadButton;
-// 换到「加载权重继续训练」就弹文件管理器；换回「从头训练」要清掉已登记的文件名。
 $('resume-checkpoint').addEventListener('change', () => {
-  if ($('resume-checkpoint').value === 'file') {
-    if (!$('resume-checkpoint-name').value) requestCheckpointFile();
-  } else {
-    $('resume-checkpoint-name').value = '';
-    resumeCheckpointCompatible = null;
-  }
+  const value = $('resume-checkpoint').value;
+  $('resume-checkpoint-name').value = '';
+  resumeCheckpointCompatible = null;
+  resumeCheckpointCheckedName = '';
+  if (value.startsWith('server:')) inspectResumeCheckpoint(value.slice(7));
+  else if (value === 'upload') requestCheckpointFile();
+  else $('checkpoint-load-message').textContent = '读取所选权重里保存的超参数，填回本页所有选项';
   syncResumeUI();
 });
 $('resume-checkpoint-file').onchange = () => {
   const file = $('resume-checkpoint-file').files && $('resume-checkpoint-file').files[0];
   if (file) uploadCheckpointFile(file);
-  else { $('resume-checkpoint').value = ''; $('resume-checkpoint-name').value = ''; resumeCheckpointCompatible = null; syncResumeUI(); }
+  else { $('resume-checkpoint').value = ''; $('resume-checkpoint-name').value = ''; resumeCheckpointCompatible = null; resumeCheckpointCheckedName = ''; syncResumeUI(); }
+};
+$('resume-checkpoint-file').oncancel = () => {
+  $('resume-checkpoint').value = '';
+  $('resume-checkpoint-name').value = '';
+  resumeCheckpointCompatible = null;
+  resumeCheckpointCheckedName = '';
+  syncResumeUI();
 };
 $('profile').onchange = () => { if (latest) render(latest); };
 $('char-set').onchange = updateMctsHint;
@@ -702,7 +749,7 @@ $('self-play-mode').onchange = updateCompositionUI;
 estimateMCTS();
 updateMctsHint();
 updateCompositionUI();
-initResumeOptions();
+updateResumeOptions([]);
 syncCheckpointLoadButton();
 window.addEventListener('resize', () => { if (latest) render(latest); });
 refresh(); setInterval(refresh, 1000);
