@@ -21,6 +21,9 @@ training-data/
 
 # C++ 原生 worker 编译产物（源码在 native/，产物由本机构建，不入库）
 native/*.exe
+native/game_engine-*
+native/mcts_worker_libtorch-*
+native/*_tmp-*
 native/*.lib
 native/*.obj
 native/*.pdb

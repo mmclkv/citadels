@@ -307,7 +307,10 @@ def _native_worker(config: dict):
     global _SAMPLER_NATIVE_WORKER
     worker_path = config.get("nativeWorkerPath") or os.environ.get("CITADELS_NATIVE_MCTS_WORKER")
     if not worker_path:
-        worker_path = ROOT / "native" / "mcts_worker_libtorch.exe"
+        suffix = ".exe" if os.name == "nt" else ""
+        candidates = list((ROOT / "native").glob(f"mcts_worker_libtorch-*{suffix}"))
+        worker_path = (max(candidates, key=lambda item: item.stat().st_mtime_ns)
+                       if candidates else ROOT / "native" / f"mcts_worker_libtorch{suffix}")
     worker = _SAMPLER_NATIVE_WORKER or _SERVER_NATIVE_WORKER
     if worker is not None:
         process = getattr(worker, "process", None)
@@ -337,8 +340,9 @@ def _game_worker(config: dict):
             worker.close()
         finally:
             _SAMPLER_GAME_WORKER = None
-    candidates = list((ROOT / "native").glob("game_engine-*.exe"))
-    fallback = max(candidates, key=lambda item: item.stat().st_mtime_ns) if candidates else ROOT / "native" / "game_engine.exe"
+    suffix = ".exe" if os.name == "nt" else ""
+    candidates = list((ROOT / "native").glob(f"game_engine-*{suffix}"))
+    fallback = max(candidates, key=lambda item: item.stat().st_mtime_ns) if candidates else ROOT / "native" / f"game_engine{suffix}"
     path = config.get("gameEnginePath") or fallback
     _SAMPLER_GAME_WORKER = GameEngineWorker(path)
     atexit.register(_close_sampler_worker)
@@ -773,9 +777,10 @@ class TrainingManager:
                     # learning rate explicitly selected for this resumed run.
                     for group in self._optimizer.param_groups:
                         group["lr"] = float(config["learningRate"])
-            candidates = list((ROOT / "native").glob("mcts_worker_libtorch-*.exe"))
+            suffix = ".exe" if os.name == "nt" else ""
+            candidates = list((ROOT / "native").glob(f"mcts_worker_libtorch-*{suffix}"))
             default_worker = (max(candidates, key=lambda item: item.stat().st_mtime_ns)
-                              if candidates else ROOT / "native" / "mcts_worker_libtorch.exe")
+                              if candidates else ROOT / "native" / f"mcts_worker_libtorch{suffix}")
             worker_path = (config.get("nativeWorkerPath") or
                            str(getattr(self.native_worker, "executable", "")) or
                            os.environ.get("CITADELS_NATIVE_MCTS_WORKER") or
@@ -784,9 +789,9 @@ class TrainingManager:
                 raise FileNotFoundError(f"找不到 C++ LibTorch MCTS worker：{worker_path}")
             native_model_dir = tempfile.TemporaryDirectory(prefix="citadels-native-model-")
             config["nativeWorkerPath"] = str(worker_path)
-            game_candidates = list((ROOT / "native").glob("game_engine-*.exe"))
+            game_candidates = list((ROOT / "native").glob(f"game_engine-*{suffix}"))
             default_game = (max(game_candidates, key=lambda item: item.stat().st_mtime_ns)
-                            if game_candidates else ROOT / "native" / "game_engine.exe")
+                            if game_candidates else ROOT / "native" / f"game_engine{suffix}")
             config["gameEnginePath"] = str(getattr(self.game_worker, "executable", "") or default_game)
             config["nativeModelPath"] = str(Path(native_model_dir.name) / "model.bin")
             self._model.save_flat(config["nativeModelPath"])

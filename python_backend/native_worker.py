@@ -19,6 +19,9 @@ class NativeMctsWorker:
         environment = os.environ.copy()
         torch_lib = str(Path(torch.__file__).resolve().parent / "lib")
         environment["PATH"] = torch_lib + os.pathsep + environment.get("PATH", "")
+        if os.name != "nt":
+            environment["LD_LIBRARY_PATH"] = (
+                torch_lib + os.pathsep + environment.get("LD_LIBRARY_PATH", ""))
         self.process = subprocess.Popen(
             [str(self.executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",

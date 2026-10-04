@@ -1,6 +1,6 @@
 # Python 服务与训练编排
 
-Python 提供 HTTP/WebSocket、房间协议、Agent/语音/FRP 集成及训练调度。`native/game_engine-<源码指纹>.exe` 是独立、有状态的 C++ 游戏主进程，按 gameId 持有权威局面并负责创建对局、合法行动、NPC 选择及动作推进；`native/mcts_worker_libtorch-<源码指纹>.exe` 只接收策略搜索/隐藏信息确定化请求并返回策略，不维护实时房间状态，也不再运行整局自对弈。浏览器 UI 使用 JavaScript，服务端无需 Node.js。
+Python 提供 HTTP/WebSocket、房间协议、Agent/语音/FRP 集成及训练调度。`native/game_engine-<源码指纹>`（Windows 为 `.exe`）是独立、有状态的 C++ 游戏主进程，按 gameId 持有权威局面并负责创建对局、合法行动、NPC 选择及动作推进；`native/mcts_worker_libtorch-<源码指纹>`（Windows 为 `.exe`）只接收策略搜索/隐藏信息确定化请求并返回策略，不维护实时房间状态，也不再运行整局自对弈。浏览器 UI 使用 JavaScript，服务端无需 Node.js。
 
 当前已迁移：
 
@@ -13,7 +13,7 @@ Python 提供 HTTP/WebSocket、房间协议、Agent/语音/FRP 集成及训练�
 - 可选 FRP 隧道生命周期：默认关闭；显式启用后支持 TOML 生成/外部配置、HTTP(S)/TCP 校验、frpc 子进程日志、状态查询及退出时清理仅由本进程生成的临时配置。
 - 训练存档只读/导入 API：列出现有 checkpoint、读取训练配置与编码兼容性、从 loopback 上传并验证 `.json.gz` checkpoint。
 - 训练控制台 start/stop/status 由 Python 调度，PyTorch 在 Python 中执行梯度更新。采样进程逐步请求 game_engine 推进局面；网络行动另行请求 MCTS worker，NPC、合法行动和动作执行留在游戏引擎进程。神经网络决策状态提供策略与价值监督，启发式 NPC 决策状态补充终局价值监督。训练只支持 Entity Transformer v6；checkpoint 使用压缩权重与 optimizer sidecar，可续训。PPO 裁剪目标与优势估计已删除。`workers` 使用 Windows spawn 多进程并行采样，每个采样进程持有自己的游戏引擎和搜索进程。
-- Python 服务端启动时分别检查并构建带源码指纹的游戏引擎与搜索 worker。游戏引擎仅依赖 C++/clang++；搜索 worker 另外依赖 LibTorch。新版本使用并行的新文件名，运行中的旧进程不会阻止更新；服务退出时关闭本次启动的两个进程。需安装 clang++、Visual Studio C++ Build Tools（提供 `VsDevCmd.bat`/`link.exe`）以及项目虚拟环境内的 PyTorch LibTorch。
+- Python 服务端启动时分别检查并构建带源码指纹的游戏引擎与搜索 worker。Linux 直接使用 clang++ 和当前 Python PyTorch 安装附带的 LibTorch 头文件/动态库，并自动匹配 PyTorch 的 C++ ABI；Windows 使用 clang++ 与 Visual Studio C++ Build Tools（`VsDevCmd.bat`/`link.exe`）。新版本使用并行的新文件名，运行中的旧进程不会阻止更新；服务退出时关闭本次启动的两个进程。两平台均需安装 clang++ 和 PyTorch；CUDA 版 Linux PyTorch wheel 可用于 LibTorch GPU 推理，CPU wheel 则使用 CPU。
 - 独立 CLI `python_backend/train.py [config.json]` 直接运行相同的 Python 训练管理器，流式显示日志并在 Ctrl+C/SIGTERM 时请求优雅停止；默认配置仍读取 `training/gpu-train-config.json`。
 - 纯 Python 标准库 HTTP/WebSocket 服务：静态页面、训练/权重管理、房间与模型/Agent/语音状态接口，管理员 Basic Auth 控制台，以及浏览器大厅、建房、加入/恢复、配置、座位、开局、操作、重开、聊天和托管控制消息。
 
