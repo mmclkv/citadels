@@ -9,20 +9,20 @@ import time
 ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
-def _clamp_int(value, default: int, low: int, high: int) -> int:
+def _int_at_least(value, default: int, low: int) -> int:
     try:
         number = int(float(value))
     except (TypeError, ValueError, OverflowError):
         number = default
-    return max(low, min(high, number))
+    return max(low, number)
 
 
 def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
     value = value or {}
     fallback = fallback or {}
-    return {"simulations": _clamp_int(value.get("simulations", fallback.get("mctsSimulations")), 500, 0, 2000),
-            "maxDepth": _clamp_int(value.get("maxDepth", fallback.get("mctsMaxDepth")), 700, 0, 700),
-            "particles": _clamp_int(value.get("particles", fallback.get("mctsParticles")), 4, 1, 8)}
+    return {"simulations": _int_at_least(value.get("simulations", fallback.get("mctsSimulations")), 500, 0),
+            "maxDepth": _int_at_least(value.get("maxDepth", fallback.get("mctsMaxDepth")), 700, 0),
+            "particles": _int_at_least(value.get("particles", fallback.get("mctsParticles")), 4, 1)}
 
 
 def _identity(prefix: str) -> str:
@@ -102,9 +102,9 @@ class RoomRegistry:
                        "charSetMode": config.get("charSetMode") or "base",
                        "botLevel": seat_config["botLevel"], "botType": seat_config["botType"],
                        "botPace": config.get("botPace") or 430,
-                       "mctsSimulations": _clamp_int(config.get("mctsSimulations"), 500, 0, 2000),
-                       "mctsMaxDepth": _clamp_int(config.get("mctsMaxDepth"), 700, 0, 700),
-                       "mctsParticles": _clamp_int(config.get("mctsParticles"), 4, 1, 8),
+                       "mctsSimulations": _int_at_least(config.get("mctsSimulations"), 500, 0),
+                       "mctsMaxDepth": _int_at_least(config.get("mctsMaxDepth"), 700, 0),
+                       "mctsParticles": _int_at_least(config.get("mctsParticles"), 4, 1),
                        "mctsBelief": config.get("mctsBelief") is not False,
                        "voice": config.get("voice") is not False},
             "state": None, "createdAt": int(time.time() * 1000),

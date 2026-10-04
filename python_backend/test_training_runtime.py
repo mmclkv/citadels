@@ -69,7 +69,14 @@ class TrainingRuntimeTests(unittest.TestCase):
             self.assertEqual(status["state"], "completed", status)
             self.assertEqual(status["completedGames"], 1)
             point = status["point"]
-            self.assertGreaterEqual(point["avgRounds"], 1)
+            self.assertEqual(point["finishedGames"] + point["incompleteGames"], 1)
+            if point["finishedGames"]:
+                self.assertGreaterEqual(point["avgRounds"], 1)
+                self.assertGreater(point["avgGameMs"], 0)
+            else:
+                self.assertIsNone(point["avgRounds"])
+                self.assertIsNone(point["avgGameMs"])
+            self.assertGreaterEqual(point["attemptsPerMinute"], point["finishedGamesPerMinute"])
             self.assertGreaterEqual(point["avgInferenceMs"], 0)
             self.assertEqual(point["fallbacks"], 0)
             self.assertIn("2", point["winSeatsByPlayers"])

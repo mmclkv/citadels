@@ -62,8 +62,7 @@ function formConfig() {
   };
 }
 
-// 存档里保存的 config → 面板控件。新增配置项时同步这张表，否则
-// 「从存档读取参数」会静默漏填该字段（test/training-checkpoint-ui.test.js 会盯着）。
+// 存档里保存的 config → 面板控件。新增配置项时同步这张表。
 const CONFIG_FIELDS = [
   ['targetGames', 'target-games', 'number'],
   ['minPlayers', 'min-players', 'select'],
@@ -97,12 +96,17 @@ const CONFIG_FIELDS = [
   ['curriculumStepGames', 'curriculum-step-games', 'number']
 ];
 
-// 把存档里的 config 填回面板。返回实际写入项数与跳过项，
-// 便于在按钮下方如实告知「哪些没读到」而不是假装全部成功。
+// Checkpoint weights require a matching network size; runtime hyperparameters
+// (workers, GPU mini-batch, MCTS, learning rate, etc.) remain user-controlled.
+const CHECKPOINT_ARCHITECTURE_FIELDS = new Set(['profile']);
+
+// 仅把架构相关参数写回表单；其他运行参数继续使用页面当前值。
 function applyCheckpointConfig(config) {
   let applied = 0;
+  let preserved = 0;
   const skipped = [];
   CONFIG_FIELDS.forEach(([key, id, kind]) => {
+    if (!CHECKPOINT_ARCHITECTURE_FIELDS.has(key)) { preserved += 1; return; }
     const el = $(id);
     const value = config[key];
     if (!el || value == null) { skipped.push(key); return; }
@@ -122,7 +126,7 @@ function applyCheckpointConfig(config) {
   updateMctsHint();
   updateCompositionUI();
   estimateMCTS();
-  return { applied, skipped };
+  return { applied, preserved, skipped };
 }
 
 /* ------------------------- 继续已有训练（权重） ------------------------- */
@@ -285,11 +289,14 @@ function render(status) {
   $('progress-bar').style.width = progress + '%';
   const progressLabel = integer(done) + ' / ' + integer(target) + ' 局（' + num(progress, 1) + '%）';
   $('progress-text').textContent = status.prepareMessage ? status.prepareMessage + ' · ' + progressLabel : progressLabel;
-  const remainingMs = point.gamesPerMinute > 0 ? (target - done) / point.gamesPerMinute * 60000 : NaN;
+  const attemptRate = point.attemptsPerMinute || point.gamesPerMinute || 0;
+  const remainingMs = attemptRate > 0 ? (target - done) / attemptRate * 60000 : NaN;
+  const avgGameSeconds = point.avgGameMs == null ? null : Number(point.avgGameMs) / 1000;
   $('eta').textContent = '预计剩余：' + duration(remainingMs);
   $('m-games').textContent = integer(done);
-  $('m-speed').textContent = num(point.gamesPerMinute, 2);
-  $('m-game-ms').textContent = num(point.avgGameMs / 1000, 2);
+  $('m-speed').textContent = num(point.finishedGamesPerMinute != null
+    ? point.finishedGamesPerMinute : point.gamesPerMinute, 2);
+  $('m-game-ms').textContent = num(avgGameSeconds, 2);
   $('m-inference').textContent = num(point.avgInferenceMs, 2);
   $('m-steps').textContent = integer(point.steps);
   $('m-rounds').textContent = num(point.avgRounds, 1);
@@ -308,7 +315,7 @@ function render(status) {
   $('policy-now').textContent = (Number.isFinite(policy) ? policy.toExponential(3) : '—') +
     ' · 梯度 ' + num(point.gradientNorm, 3) + ' · 熵 ' + num(point.entropy, 3);
   $('approx-kl-now').textContent = 'KL ' + num(point.approxKl, 5);
-  $('speed-now').textContent = num(point.avgGameMs / 1000, 2) + ' 秒/局';
+  $('speed-now').textContent = num(avgGameSeconds, 2) + ' 秒/局';
   $('control-message').textContent = status.error || (status.checkpoint ? '最近存档：' + status.checkpoint : '');
   const profiles = status.profiles || {};
   $('parameter-preview').textContent = profiles[$('profile').value] ? integer(profiles[$('profile').value]) + ' 个参数' : '—';
@@ -501,7 +508,9 @@ function prepareCanvas(canvas) {
 // 两种情况都要再乘 scale。
 function seriesValue(row, series) {
   const raw = series.pick ? series.pick(row) : row[series.key];
-  return Number(raw) * (series.scale || 1);
+  if (raw == null || raw === '') return NaN;
+  const value = Number(raw) * (series.scale || 1);
+  return Number.isFinite(value) ? value : NaN;
 }
 
 function movingAverage(rows, series, windowSize) {
@@ -692,8 +701,8 @@ $('stop-training').onclick = async () => {
   try { render(await api('./api/training/stop', { method: 'POST' })); }
   catch (error) { $('control-message').textContent = error.message; }
 };
-// 「从权重读取参数」：读取所选权重里保存的那份 config，一键填回面板所有选项。
-// 不改动「继续已有训练」的选择，用户读完可以直接点开始训练从该权重续训。
+// 从 checkpoint 读取网络规模等架构参数，不覆盖当前页面的运行参数。
+// 不改动「继续已有训练」的选择，用户读完可调整运行参数后直接续训。
 $('load-checkpoint-config').onclick = async () => {
   const name = resumeCheckpointName();
   const out = $('checkpoint-load-message');
@@ -704,9 +713,10 @@ $('load-checkpoint-config').onclick = async () => {
     resumeCheckpointCompatible = data.encodingCompatible === true;
     const result = applyCheckpointConfig(data.config || {});
     if (latest) render(latest);
-    out.textContent = (resumeCheckpointCompatible ? '已从 ' : '警告：已从 ') + data.name + '（已训 ' + integer(data.game) + ' 局）读入 ' + result.applied + ' 项参数；' +
+    out.textContent = (resumeCheckpointCompatible ? '已从 ' : '警告：已从 ') + data.name + '（已训 ' + integer(data.game) + ' 局）读入 ' + result.applied + ' 项网络架构参数；' +
       (resumeCheckpointCompatible ? '状态编码兼容。' : '状态编码 v' + (data.encodingVersion || '未知') + ' 与当前 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，不能续训。') +
-      (result.skipped.length ? '；' + result.skipped.length + ' 项该存档未记录或面板无此选项，保持当前值' : '');
+      '；' + result.preserved + ' 项运行参数保留页面当前值，可继续修改。' +
+      (result.skipped.length ? '另有 ' + result.skipped.length + ' 项网络参数未记录或面板无此选项。' : '');
   } catch (error) {
     out.textContent = error.message;
   }
@@ -719,7 +729,7 @@ $('resume-checkpoint').addEventListener('change', () => {
   resumeCheckpointCheckedName = '';
   if (value.startsWith('server:')) inspectResumeCheckpoint(value.slice(7));
   else if (value === 'upload') requestCheckpointFile();
-  else $('checkpoint-load-message').textContent = '读取所选权重里保存的超参数，填回本页所有选项';
+  else $('checkpoint-load-message').textContent = '读取权重兼容所需的网络规模；并行进程数、GPU 小批量、MCTS 等参数以本页设置为准';
   syncResumeUI();
 });
 $('resume-checkpoint-file').onchange = () => {

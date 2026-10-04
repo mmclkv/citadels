@@ -177,7 +177,7 @@ class ServerArgumentTests(unittest.TestCase):
         self.assertEqual(PythonServer._game_action_log_text(state, {"type": "take_gold"}),
                          "拿取金币（2 枚）")
         self.assertEqual(PythonServer._game_action_log_text(state, {"type": "wizard_target", "target": "p1"}),
-                         "选择查看一名玩家的手牌")
+                         "法师选择查看座位1·甲的手牌（牌面不公开）")
         self.assertEqual(PythonServer._game_action_log_text(state, {
             "type": "magistrate_signed", "num": 8}), "布置了行政官逮捕令")
         ability_state = {"turn": {"charId": "wizard", "charName": "法师"}}
@@ -191,15 +191,136 @@ class ServerArgumentTests(unittest.TestCase):
             "type": "wizard_card", "uid": "secret"}))
 
     def test_role_ability_notice_restores_public_popup_payload(self) -> None:
-        previous = {"noticeSeq": 2, "notices": [], "turn": {"charId": "wizard"},
+        previous = {"noticeSeq": 2, "notices": [], "turn": {"charId": "merchant"},
                     "players": [{"id": "p1", "name": "甲"}]}
         updated = {"noticeSeq": 2, "notices": [], "players": [{"id": "p1", "name": "甲"}]}
         PythonServer._append_role_ability_notice(previous, updated, "p1", {"type": "ability"})
         self.assertEqual(updated["noticeSeq"], 3)
         notice = updated["notices"][-1]
         self.assertEqual((notice["kind"], notice["roleName"], notice["playerName"]),
-                         ("role_effect", "法师", "甲"))
-        self.assertIn("查看一位玩家的手牌", notice["description"])
+                         ("role_effect", "商人", "甲"))
+        self.assertTrue(notice["description"])
+
+    def test_magistrate_declaration_announces_public_targets_but_hides_real_mark(self) -> None:
+        previous = {
+            "noticeSeq": 4, "notices": [],
+            "players": [{"id": "p1", "name": "甲"}],
+            "turn": {"charId": "magistrate"},
+            "effects": {"magistrate": None},
+        }
+        updated = {
+            "noticeSeq": 4, "notices": [],
+            "players": [{"id": "p1", "name": "甲"}],
+            "effects": {"magistrate": {"nums": [1, 3, 5], "signed": 3,
+                                        "playerIdx": 0, "claimed": False}},
+        }
+        action = {"type": "magistrate_char", "num": 5}
+        PythonServer._append_magistrate_declare_notice(previous, updated, "p1", action)
+
+        self.assertEqual(updated["noticeSeq"], 5)
+        notice = updated["notices"][-1]
+        self.assertEqual(notice["kind"], "magistrate_declare")
+        self.assertEqual([target["num"] for target in notice["targets"]], [1, 3, 5])
+        self.assertNotIn("signed", notice)
+        log = PythonServer._game_action_log_text(previous, action, updated)
+        self.assertIn("布置了逮捕令", log)
+        self.assertIn("真逮捕令的目标暂不公开", log)
+        for target in notice["targets"]:
+            self.assertIn(target["name"], log)
+
+    def test_magistrate_notice_waits_until_all_three_targets_are_committed(self) -> None:
+        previous = {"noticeSeq": 0, "notices": [], "players": [{"id": "p1"}],
+                    "effects": {"magistrate": None}}
+        updated = {"noticeSeq": 0, "notices": [], "players": [{"id": "p1"}],
+                   "effects": {"magistrate": None}}
+        PythonServer._append_magistrate_declare_notice(
+            previous, updated, "p1", {"type": "magistrate_char", "num": 5})
+        self.assertEqual(updated["notices"], [])
+
+    def test_spy_report_and_popup_include_target_type_and_actual_gains(self) -> None:
+        previous = {
+            "noticeSeq": 0, "notices": [],
+            "turn": {"charId": "spy", "playerIdx": 1,
+                     "pending": {"kind": "spy_color", "targetIdx": 0}},
+            "players": [
+                {"id": "p1", "name": "甲", "seat": 0, "gold": 3, "hand": []},
+                {"id": "p2", "name": "乙", "seat": 1, "gold": 1, "hand": []},
+            ],
+        }
+        updated = {
+            "noticeSeq": 0, "notices": [],
+            "players": [
+                {"id": "p1", "name": "甲", "seat": 0, "gold": 1, "hand": []},
+                {"id": "p2", "name": "乙", "seat": 1, "gold": 3,
+                 "hand": [{"uid": "hidden", "name": "秘密建筑"}]},
+            ],
+        }
+        action = {"type": "spy_color", "color": "green"}
+        log = PythonServer._game_action_log_text(previous, action, updated)
+        self.assertIn("间谍调查座位1·甲的商业（绿色）建筑牌", log)
+        self.assertIn("实际获得2枚金币、1张建筑牌", log)
+        self.assertNotIn("秘密建筑", log)
+        PythonServer._append_role_effect_detail_notice(previous, updated, "p2", action)
+        notice = updated["notices"][-1]
+        self.assertEqual(notice["kind"], "role_effect_detail")
+        self.assertIn("调查对象：座位1·甲", notice["description"])
+        self.assertIn("商业（绿色）", notice["description"])
+        self.assertIn("2 枚金币和 1 张建筑牌", notice["description"])
+        self.assertNotIn("秘密建筑", notice["description"])
+
+    def test_emperor_report_and_popup_name_crown_recipient_and_taken_resource(self) -> None:
+        state = {"turn": {"charId": "emperor", "playerIdx": 0},
+                 "players": [{"id": "p1", "name": "皇帝玩家", "seat": 0},
+                             {"id": "p2", "name": "电脑1", "seat": 1}]}
+        action = {"type": "emperor_crown", "target": "p2"}
+        self.assertEqual(PythonServer._game_action_log_text(state, action),
+                         "皇帝将皇冠交给座位2·电脑1")
+        updated = {"noticeSeq": 0, "notices": [], "players": state["players"]}
+        PythonServer._append_role_effect_detail_notice(state, updated, "p1", action)
+        self.assertIn("皇冠移交对象：座位2·电脑1", updated["notices"][-1]["description"])
+
+        take_state = {**state, "turn": {"charId": "emperor", "playerIdx": 0,
+                                         "pending": {"kind": "emperor_take", "targetIdx": 1}}}
+        self.assertEqual(PythonServer._game_action_log_text(
+            take_state, {"type": "emperor_take", "mode": "gold"}),
+            "皇帝从新皇冠持有者座位2·电脑1处取得1枚金币")
+
+    def test_targeted_building_effect_logs_player_and_building(self) -> None:
+        state = {"turn": {"charId": "warlord", "playerIdx": 0,
+                          "pending": {"kind": "warlord_destroy"}},
+                 "players": [{"id": "p1", "name": "甲", "seat": 0, "city": []},
+                             {"id": "p2", "name": "乙", "seat": 1, "city": [
+                                 {"uid": "c1", "name": "战场", "cost": 3}]}]}
+        action = {"type": "choose_district", "target": "p2", "uid": "c1"}
+        self.assertEqual(PythonServer._game_action_log_text(state, action),
+                         "领主摧毁了座位2·乙的建筑『战场』")
+
+    def test_assassin_thief_and_witch_character_choices_emit_target_popups(self) -> None:
+        cases = [
+            ("assassin", "刺客", "宣布刺杀", "跳过整个回合"),
+            ("thief", "盗贼", "宣布偷窃", "交出全部金币"),
+            ("witch_target", "女巫", "施咒", "接管剩余行动"),
+        ]
+        for pending_kind, role_name, target_phrase, effect_phrase in cases:
+            with self.subTest(pending=pending_kind):
+                previous = {
+                    "noticeSeq": 0, "notices": [],
+                    "turn": {"charId": role_name, "playerIdx": 0,
+                             "pending": {"kind": pending_kind}},
+                    "players": [{"id": "p1", "name": "甲", "seat": 0}],
+                }
+                updated = {"noticeSeq": 0, "notices": [],
+                           "players": [{"id": "p1", "name": "甲", "seat": 0}]}
+                action = {"type": "choose_char", "num": 7}
+                PythonServer._append_role_effect_detail_notice(previous, updated, "p1", action)
+                notice = updated["notices"][-1]
+                self.assertEqual(notice["kind"], "role_effect_detail")
+                self.assertEqual(notice["roleName"], role_name)
+                self.assertIn("7号", notice["description"])
+                self.assertIn(effect_phrase, notice["description"])
+                log = PythonServer._game_action_log_text(previous, action)
+                self.assertIn(target_phrase, log)
+                self.assertIn("7号", log)
 
     def test_called_assassinated_and_stolen_roles_are_reported_when_resolved(self) -> None:
         previous = {
@@ -640,16 +761,20 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             await self.app._handle_message(host, {"t": "startGame"})
         self.assertIsNone(room["state"])
 
-    async def test_room_preserves_clamped_mcts_defaults_and_zero_override(self) -> None:
+    async def test_room_preserves_unbounded_mcts_values_and_zero_override(self) -> None:
         rooms = RoomRegistry()
         room = rooms.create_room("Host", {"playerCount": 3, "bots": 1,
-                                           "mctsSimulations": 2500, "mctsMaxDepth": -2,
-                                           "mctsParticles": 0})
-        self.assertEqual(room["config"]["mctsSimulations"], 2000)
-        self.assertEqual(room["config"]["mctsMaxDepth"], 0)
-        self.assertEqual(room["config"]["mctsParticles"], 1)
+                                           "mctsSimulations": 25000, "mctsMaxDepth": 4000,
+                                           "mctsParticles": 32})
+        self.assertEqual(room["config"]["mctsSimulations"], 25000)
+        self.assertEqual(room["config"]["mctsMaxDepth"], 4000)
+        self.assertEqual(room["config"]["mctsParticles"], 32)
         self.assertEqual(room["seats"][1]["mcts"],
-                         {"simulations": 2000, "maxDepth": 0, "particles": 1})
+                         {"simulations": 25000, "maxDepth": 4000, "particles": 32})
+        negative = rooms.create_room("Negative", {"playerCount": 2, "mctsMaxDepth": -2,
+                                                    "mctsParticles": 0})
+        self.assertEqual(negative["config"]["mctsMaxDepth"], 0)
+        self.assertEqual(negative["config"]["mctsParticles"], 1)
         zero = rooms.create_room("Zero", {"playerCount": 2, "mctsSimulations": 0})
         self.assertEqual(zero["config"]["mctsSimulations"], 0)
 

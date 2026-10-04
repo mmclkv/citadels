@@ -16,7 +16,7 @@
     <section class="panel controls">
       <div class="section-title"><div><h2>训练任务</h2><p>所有座位共享同一神经网络，仅使用各自可见状态进行自对弈。</p></div></div>
       <form id="train-form">
-        <label><span>目标对局数</span><input id="target-games" type="number" min="1" max="1000000" value="200000"></label>
+        <label><span>目标对局数</span><input id="target-games" type="number" min="1" value="200000"></label>
         <label><span>最少玩家</span><select id="min-players"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
         <label><span>最多玩家</span><select id="max-players"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
         <label><span>角色组</span><select id="char-set"><option value="random" selected>随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
@@ -27,14 +27,14 @@
         <label><span>神经网络框架</span><strong class="fixed-setting">LibTorch</strong><small id="neural-framework-hint">C++ worker 在所选设备上批量执行网络前向</small></label>
         <label><span>计算设备</span><select id="device"><option value="cuda" selected>GPU</option><option value="cpu">CPU</option></select></label>
         <label><span>结束建筑数</span><select id="end-districts"><option value="7">7 栋</option><option value="8" selected>8 栋</option></select></label>
-        <label><span>单局最大步数</span><input id="max-steps" type="number" min="1000" max="100000" step="1000" value="60000"></label>
-        <label><span>起始温度</span><input id="temperature-start" type="number" min="0.2" max="2" step="0.05" value="1.1"></label>
-        <label><span>结束温度</span><input id="temperature-end" type="number" min="0.15" max="1.5" step="0.05" value="0.65"></label>
-        <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" max="0.01" step="0.00001" value="0.0003"></label>
-        <label><span>每批对局</span><input id="batch-games" type="number" min="1" max="256" value="64" title="攒够多少局做一次策略更新。上限 256：越大单次更新的样本越多、训练进程内存峰值越高（256 局约合 12 万条样本）。"></label>
-        <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" max="6" value="1"><small>每个采样进程会启动独立 C++ worker；GPU 推理建议先从 1 开始</small></label>
-        <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" max="2048" step="32" value="64"></label>
-        <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" max="10000" value="2000"></label>
+        <label><span>单局最大步数</span><input id="max-steps" type="number" min="1000" step="1000" value="60000"></label>
+        <label><span>起始温度</span><input id="temperature-start" type="number" min="0.2" step="0.05" value="1.1"></label>
+        <label><span>结束温度</span><input id="temperature-end" type="number" min="0.15" step="0.05" value="0.65"></label>
+        <label><span>学习率</span><input id="learning-rate" type="number" min="0.000001" step="0.00001" value="0.0003"></label>
+        <label><span>每批对局</span><input id="batch-games" type="number" min="1" value="64" title="攒够多少局做一次策略更新。较大的批次会增加内存占用。"></label>
+        <label><span>并行自对弈进程</span><input id="workers" type="number" min="1" value="1"><small>每个采样进程会启动独立 C++ worker；GPU 推理建议先从 1 开始</small></label>
+        <label><span>GPU 小批量</span><input id="mini-batch" type="number" min="32" step="32" value="64"></label>
+        <label><span>每隔多少局存档</span><input id="checkpoint-every" type="number" min="1" value="2000"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"></select><small id="resume-checkpoint-file-name">可选择服务器存档，或导入本机权重</small></label>
         <!-- 仅显式选择“从本机上传权重文件”时使用；服务器存档直接从上方列表选择。 -->
@@ -42,7 +42,7 @@
         <input type="hidden" id="resume-checkpoint-name" value="">
         <div class="checkpoint-load">
           <button type="button" id="load-checkpoint-config">从权重读取参数</button>
-          <small id="checkpoint-load-message">读取所选权重里保存的超参数，填回本页所有选项（不改动上方所选权重）</small>
+          <small id="checkpoint-load-message">读取权重兼容所需的网络规模；并行进程数、GPU 小批量、MCTS 等参数以本页设置为准（不改动上方所选权重）</small>
         </div>
       </form>
       <section class="composition-section">
@@ -60,21 +60,21 @@
           </select></label>
           <label><span>课程起始网络玩家数</span><input id="curriculum-start-players" type="number" min="1" max="8" value="1"></label>
           <label><span>课程目标网络玩家数</span><input id="curriculum-end-players" type="number" min="0" max="8" value="0"><small>0 = 随当前局人数达到全员</small></label>
-          <label><span>课程每阶段局数</span><input id="curriculum-step-games" type="number" min="1" max="1000000" value="20000"><small>每经过此数量的对局增加 1 名策略网络玩家</small></label>
+          <label><span>课程每阶段局数</span><input id="curriculum-step-games" type="number" min="1" value="20000"><small>每经过此数量的对局增加 1 名策略网络玩家</small></label>
         </form>
       </section>
       <section class="mcts-section">
         <h2>MCTS 配置（必选）</h2>
         <form id="mcts-form" class="mcts-form">
           <p class="mcts-hint">每步走子前展开若干模拟，使用访问分布 π 作为策略训练目标。MCTS 已强制启用。</p>
-          <label><span>MCTS 模拟次数 / 步</span><input id="mcts-simulations" type="number" min="1" max="10000" step="50" value="500"><small id="mcts-time-estimate"></small></label>
-          <label><span>探索常数 c_puct</span><input id="mcts-cpuct" type="number" min="0" max="10" step="0.1" value="1.0"></label>
+          <label><span>MCTS 模拟次数 / 步</span><input id="mcts-simulations" type="number" min="1" step="50" value="500"><small id="mcts-time-estimate"></small></label>
+          <label><span>探索常数 c_puct</span><input id="mcts-cpuct" type="number" min="0" step="0.1" value="1.0"></label>
           <label><span>根节点 Dirichlet 混合 α</span><input id="mcts-dirichlet" type="number" min="0" max="1" step="0.05" value="0.3"><small id="mcts-dirichlet-hint">0 = 关闭噪声</small></label>
           <label><span>Dirichlet 浓度 ε</span><input id="mcts-diri-eps" type="number" min="0" max="1" step="0.01" value="0.03"><small>0 = 关闭根节点噪声</small></label>
-          <label><span>MCTS 最大搜索深度</span><input id="mcts-max-depth" type="number" min="10" max="2000" step="10" value="700"></label>
-          <label><span>叶节点评估批量</span><input id="mcts-batch-size" type="number" min="1" max="256" step="8" value="32"><small>每批送入 LibTorch 的候选局面数；增大可能提高 GPU 利用率，也会增加显存占用</small></label>
+          <label><span>MCTS 最大搜索深度</span><input id="mcts-max-depth" type="number" min="10" step="10" value="700"></label>
+          <label><span>叶节点评估批量</span><input id="mcts-batch-size" type="number" min="1" step="8" value="32"><small>每批送入 LibTorch 的候选局面数；增大可能提高 GPU 利用率，也会增加显存占用</small></label>
           <p class="mcts-hint">C++ worker 执行 ISMCTS，并在 LibTorch 中批量评估叶节点。显存不足时 worker 会将评估批量临时缩小后重试。</p>
-          <label><span>隐藏信息粒子数</span><input id="mcts-particles" type="number" min="1" max="16" step="1" value="4"><small>对未知手牌的猜测份数。整池共用一棵搜索树、每条模拟抽一份（1 = 猜一次钉死整棵树）</small></label>
+          <label><span>隐藏信息粒子数</span><input id="mcts-particles" type="number" min="1" step="1" value="4"><small>对未知手牌的猜测份数。整池共用一棵搜索树、每条模拟抽一份（1 = 猜一次钉死整棵树）</small></label>
           <label class="checkbox"><span>按公开事实加权粒子</span><input id="mcts-belief" type="checkbox" checked><small>「他有钱、还能建，却没建」⇒ 他手里没有买得起的牌。与这事实矛盾的世界少抽到。关掉 = 均匀瞎猜</small></label>
         </form>
       </section>
@@ -89,11 +89,11 @@
 
     <section class="metrics" aria-label="关键训练指标">
       <article><span>已完成</span><strong id="m-games">0</strong><small>局</small></article>
-      <article><span>训练速度</span><strong id="m-speed">—</strong><small>局/分钟</small></article>
-      <article><span>平均整局</span><strong id="m-game-ms">—</strong><small>秒</small></article>
+      <article><span>训练速度</span><strong id="m-speed">—</strong><small>完成局/分钟</small></article>
+      <article><span>完整局平均耗时</span><strong id="m-game-ms">—</strong><small>秒 · 仅统计打完的局</small></article>
       <article><span>单次 MCTS 搜索</span><strong id="m-inference">—</strong><small>毫秒</small></article>
       <article><span>总决策步</span><strong id="m-steps">0</strong><small>步</small></article>
-      <article><span>平均轮数</span><strong id="m-rounds">—</strong><small>轮</small></article>
+      <article><span>平均轮数</span><strong id="m-rounds">—</strong><small>轮 · 仅统计打完的局</small></article>
       <article><span>平均分数</span><strong id="m-score">—</strong><small>分</small></article>
       <article><span>网络名次分</span><strong id="m-nn-reward">—</strong><small>-1~1</small></article>
       <article><span>网络玩家座位第一率</span><strong id="m-nn-win">—</strong><small>近 50 局·同网络人数</small></article>
@@ -117,6 +117,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=27"></script>
+  <script src="./training.js?v=28"></script>
 </body>
 </html>

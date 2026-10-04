@@ -307,7 +307,6 @@
     } finally { clearTimeout(timer); }
   }
   // 「策略神经网络」电脑专属的 MCTS 配置：0 = 关闭搜索（按网络策略直接走子）。
-  // 上限与服务器的 clamp 一致，客户端只是提前拦住明显越界的输入。
   const DEFAULT_MCTS_CONFIG = { simulations: 500, maxDepth: 700, particles: 4 };
   function readMctsConfig(simsId, depthId, particlesId) {
     const valueOrDefault = (id, fallback) => {
@@ -315,11 +314,13 @@
       const raw = node ? String(node.value).trim() : '';
       return raw === '' ? fallback : Number(raw);
     };
-    const clamp = (id, max, fallback) => Math.max(0, Math.min(max,
-      Math.floor(Number.isFinite(valueOrDefault(id, fallback)) ? valueOrDefault(id, fallback) : fallback)));
-    const particles = Math.max(1, Math.min(8, Math.floor(valueOrDefault(particlesId, DEFAULT_MCTS_CONFIG.particles) || DEFAULT_MCTS_CONFIG.particles)));
-    return { mctsSimulations: clamp(simsId, 2000, DEFAULT_MCTS_CONFIG.simulations),
-      mctsMaxDepth: clamp(depthId, 700, DEFAULT_MCTS_CONFIG.maxDepth), mctsParticles: particles };
+    const readInteger = (id, fallback, minimum) => {
+      const value = valueOrDefault(id, fallback);
+      return Math.max(minimum, Math.floor(Number.isFinite(value) ? value : fallback));
+    };
+    return { mctsSimulations: readInteger(simsId, DEFAULT_MCTS_CONFIG.simulations, 0),
+      mctsMaxDepth: readInteger(depthId, DEFAULT_MCTS_CONFIG.maxDepth, 0),
+      mctsParticles: readInteger(particlesId, DEFAULT_MCTS_CONFIG.particles, 1) };
   }
   function syncNeuralOnlyFields() {
     [['#screen-setup', '#cfg-bot-type']].forEach(pair => {
@@ -483,6 +484,15 @@
           text: '<b>' + escapeHtml(n.playerName || '玩家') + '</b> 发动了【' +
                 escapeHtml(n.roleName || '角色') + '】的能力。<br>' +
                 escapeHtml(n.description || '效果正在结算中，具体目标与资源变化会记录在战报里。')
+        });
+        return;
+
+      case 'role_effect_detail':
+        queueEvent({
+          tone: 'magic', icon: '✦', title: '角色效果：' + escapeHtml(n.roleName || '角色'),
+          hold: 5600,
+          text: '<b>' + escapeHtml(n.playerName || '玩家') + '</b>：' +
+                escapeHtml(n.description || '效果已结算。')
         });
         return;
 
@@ -4028,8 +4038,11 @@
     if (!corner) return;
     const fu = $('#rs-faceup-corner');
     const fd = $('#rs-facedown-corner');
+    const faceUpGroup = $('#removed-faceup-group');
+    const faceDownGroup = $('#removed-facedown-group');
+    const empty = $('#removed-widget-empty');
     const faceUp = rem.faceUp || [];
-    const faceDownCount = rem.faceDownCount || 0;
+    const faceDownCount = Number(rem.faceDownCount) || 0;
     if (fu) {
       // 按角色 id 复用节点，避免每步行动整盘重建导致霓虹角色立绘在移动端闪烁
       const existing = {};
@@ -4053,6 +4066,9 @@
       fd.innerHTML = '';
       for (let i = 0; i < faceDownCount; i++) fd.appendChild(el('div', 'facedown sm', '？'));
     }
+    if (faceUpGroup) faceUpGroup.hidden = faceUp.length === 0;
+    if (faceDownGroup) faceDownGroup.hidden = faceDownCount === 0;
+    if (empty) empty.hidden = faceUp.length + faceDownCount > 0;
     const count = $('#removed-widget-count');
     if (count) count.textContent = String(faceUp.length + faceDownCount);
     // Keep the corner control visible throughout an active game, including
@@ -4155,8 +4171,7 @@
        'blackmailer_signed', 'blackmailer_char'].includes(a.type));
     if (roleActions.length) {
       roleActions.forEach(a => representedActions.add(a));
-      appendActionChoiceSelect(actionsEl, promptEl, roleActions,
-        av.prompt || '选择角色', '请选择角色', '确认角色');
+      appendRoleActionButtons(actionsEl, promptEl, roleActions, av.prompt || '选择角色');
     }
     if (districtSelectMode()) {
       av.actions.filter(a => a.type === 'choose_district').forEach(a => representedActions.add(a));
@@ -4244,6 +4259,15 @@
     });
     actionsEl.appendChild(select);
     actionsEl.appendChild(confirm);
+  }
+
+  function appendRoleActionButtons(actionsEl, promptEl, choices, prompt) {
+    promptEl.textContent = prompt;
+    const group = el('div', 'role-action-choices');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', prompt);
+    choices.forEach(action => group.appendChild(actionBtn(action)));
+    actionsEl.appendChild(group);
   }
 
   function actionBtn(a, cls) {
@@ -4713,15 +4737,15 @@
             const box = el('div', 'seat-mcts');
             box.innerHTML = '<span class="seat-mcts-title">MCTS 参数</span>';
             const fields = [
-              ['模拟次数', 'simulations', 500, 0, 2000, 50],
-              ['最大深度', 'maxDepth', 700, 0, 700, 10],
-              ['粒子数', 'particles', 4, 1, 8, 1]
+              ['模拟次数', 'simulations', 500, 0, 50],
+              ['最大深度', 'maxDepth', 700, 0, 10],
+              ['粒子数', 'particles', 4, 1, 1]
             ];
-            fields.forEach(([label, key, fallback, min, max, step]) => {
+            fields.forEach(([label, key, fallback, min, step]) => {
               const field = el('label', 'seat-mcts-field');
               field.innerHTML = '<span>' + label + '</span>';
               const input = document.createElement('input');
-              input.type = 'number'; input.min = String(min); input.max = String(max); input.step = String(step);
+              input.type = 'number'; input.min = String(min); input.step = String(step);
               const roomValue = st.config && st.config['mcts' + key[0].toUpperCase() + key.slice(1)];
               input.value = String(mcts[key] == null ? (roomValue == null ? fallback : roomValue) : mcts[key]);
               input.onchange = () => {
@@ -4824,6 +4848,7 @@
       removedToggle.onclick = () => {
         const collapsed = removedWidget.classList.toggle('collapsed');
         removedToggle.setAttribute('aria-expanded', String(!collapsed));
+        removedToggle.title = collapsed ? '展开查看本轮被移除的角色' : '收起本轮出局角色';
       };
       removedWidget.classList.add('collapsed');
     }

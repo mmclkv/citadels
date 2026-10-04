@@ -36,7 +36,6 @@ class NeuralPolicy:
         self.error = ""
         self._last_mcts = {"determinizations": 0, "beliefDecay": 0.5,
                            "defaultSimulations": 500, "defaultMaxDepth": 700,
-                           "maxSimulations": 2000, "maxDepthCap": 700,
                            "visits": 0, "expansions": 0}
         self._load()
 
@@ -112,9 +111,9 @@ class NeuralPolicy:
         if not candidates:
             raise RuntimeError("当前局面没有可评估的合法行动")
         options = mcts or {}
-        simulations = max(1, min(2000, int(options.get("simulations", 500))))
-        max_depth = max(1, min(700, int(options.get("maxDepth", 700))))
-        particle_count = max(1, min(8, int(options.get("particles", 4))))
+        simulations = max(1, int(options.get("simulations", 500)))
+        max_depth = max(1, int(options.get("maxDepth", 700)))
+        particle_count = max(1, int(options.get("particles", 4)))
         belief = options.get("belief", True) is not False
         decay = 0.5 if belief else 1.0
         rng = random.Random()

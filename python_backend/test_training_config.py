@@ -41,7 +41,7 @@ class PythonTrainingConfigTests(unittest.TestCase):
         self.assertEqual(result["minPlayers"], 8)
         self.assertEqual(result["maxPlayers"], 8)
         self.assertEqual(result["profile"], "balanced")
-        self.assertEqual(result["batchGames"], 256)
+        self.assertEqual(result["batchGames"], 500)
         self.assertEqual(result["miniBatch"], 32)
         self.assertEqual(result["seed"], -7)
         self.assertEqual(result["networkArchitecture"], "entity-v6")
@@ -53,6 +53,48 @@ class PythonTrainingConfigTests(unittest.TestCase):
         self.assertEqual(result["curriculumStartPlayers"], 3)
         self.assertEqual(result["curriculumEndPlayers"], 6)
         self.assertEqual(result["curriculumStepGames"], 1)
+
+    def test_operational_parameters_are_not_silently_capped(self):
+        result = sanitize_config({
+            "targetGames": 2_000_000,
+            "batchGames": 512,
+            "trainingEpochs": 12,
+            "miniBatch": 4096,
+            "workers": 12,
+            "checkpointEvery": 20_000,
+            "maxSteps": 200_000,
+            "maxRounds": 20_000,
+            "temperatureStart": 3,
+            "temperatureEnd": 2,
+            "learningRate": 0.02,
+            "mctsSimulations": 20_000,
+            "mctsC_puct": 20,
+            "mctsMaxDepth": 4000,
+            "mctsBatchSize": 512,
+            "mctsParticles": 32,
+            "curriculumStepGames": 2_000_000,
+        })
+        expected = {
+            "targetGames": 2_000_000,
+            "batchGames": 512,
+            "trainingEpochs": 12,
+            "miniBatch": 4096,
+            "workers": 12,
+            "checkpointEvery": 20_000,
+            "maxSteps": 200_000,
+            "maxRounds": 20_000,
+            "temperatureStart": 3,
+            "temperatureEnd": 2,
+            "learningRate": 0.02,
+            "mctsSimulations": 20_000,
+            "mctsC_puct": 20,
+            "mctsMaxDepth": 4000,
+            "mctsBatchSize": 512,
+            "mctsParticles": 32,
+            "curriculumStepGames": 2_000_000,
+        }
+        for key, value in expected.items():
+            self.assertEqual(result[key], value, key)
 
     def test_cpp_rules_engine_is_canonical(self):
         self.assertEqual(sanitize_config({"rulesEngine": "cpp"})["rulesEngine"], "cpp")

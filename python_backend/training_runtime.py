@@ -458,6 +458,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
         current = game_worker.current(game_id, include_rewards=True)
         state = game_worker.snapshot(game_id)
         completed = bool(current.get("gameOver"))
+        rounds = max(rounds, int(current.get("round") or 0), int(state.get("round") or 0))
         if not completed:
             # Policy targets are still useful, but an unfinished game has no
             # terminal outcome. Drop its rows rather than inventing value labels.
@@ -812,7 +813,7 @@ class TrainingManager:
                     hardware.update({"gpu": "", "memoryGB": None})
                 self._status.update({"state": "running", "preparing": False,
                                      "hardware": hardware})
-            sampler_count = min(int(config["workers"]), int(config["batchGames"]))
+            sampler_count = int(config["workers"])
             if sampler_count > 1:
                 self._log(f"正在启动 {sampler_count} 个自对弈采样进程…")
                 process_context = multiprocessing.get_context("spawn")
@@ -833,6 +834,7 @@ class TrainingManager:
                       "incompleteGames": 0, "finishedGames": 0,
                       "winSeatsByPlayers": {}}
             recent_network_metrics = RecentNetworkMetrics()
+            metrics_started = time.perf_counter()
             while games < config["targetGames"] and not self._stop.is_set():
                 if self._device.type == "cuda":
                     torch.cuda.reset_peak_memory_stats(self._device)
@@ -866,14 +868,14 @@ class TrainingManager:
                         completed_game_rows.append(result["rows"])
                     batch_results.append(result)
                     totals["steps"] += result["steps"]
-                    totals["gameMs"] += result["gameMs"]
                     totals["inferenceMs"] += result["inferenceMs"]
                     totals["inferenceSearches"] += result["inferenceSearches"]
-                    totals["rounds"] += result["rounds"]
                     totals["fallbacks"] += result["fallbacks"]
                     seat_count = result["playerCount"]
                     if result["completed"]:
                         totals["finishedGames"] += 1
+                        totals["gameMs"] += result["gameMs"]
+                        totals["rounds"] += result["rounds"]
                         seat_bucket = totals["winSeatsByPlayers"].setdefault(
                             str(seat_count), {"games": 0, "wins": [0] * seat_count})
                         seat_bucket["games"] += 1
@@ -888,19 +890,25 @@ class TrainingManager:
                     with self._lock:
                         self._status["completedGames"] = games
                         self._status["finishedGames"] = totals["finishedGames"]
-                        elapsed_minutes = max(1e-9, (time.time() - datetime.fromisoformat(self._status["startedAt"]).timestamp()) / 60)
+                        elapsed_minutes = max(1e-9, (time.perf_counter() - metrics_started) / 60)
+                        finished_games = totals["finishedGames"]
                         self._status["point"] = {"game": games, "networkReward": result["networkReward"],
                             "networkWinRate": result["networkWin"], "networkScore": result["networkScore"],
                             "networkByPlayers": recent_network_metrics.snapshot(),
                             "networkPlayers": result["networkPlayerCount"],
                             "temperature": result["temperature"],
-                            "steps": totals["steps"], "avgGameMs": totals["gameMs"] / games,
+                            "steps": totals["steps"],
+                            "avgGameMs": totals["gameMs"] / finished_games if finished_games else None,
                             "avgInferenceMs": totals["inferenceMs"] / max(1, totals["inferenceSearches"]),
                             "inferenceSearches": totals["inferenceSearches"],
                             "incompleteGames": totals["incompleteGames"],
                             "finishedGames": totals["finishedGames"],
-                            "avgRounds": totals["rounds"] / games, "avgScore": result["networkScore"],
-                            "gamesPerMinute": games / elapsed_minutes, "fallbacks": totals["fallbacks"],
+                            "avgRounds": totals["rounds"] / finished_games if finished_games else None,
+                            "avgScore": result["networkScore"],
+                            "gamesPerMinute": games / elapsed_minutes,
+                            "attemptsPerMinute": games / elapsed_minutes,
+                            "finishedGamesPerMinute": finished_games / elapsed_minutes,
+                            "fallbacks": totals["fallbacks"],
                             "samplerPids": sorted(sampler_pids),
                             # CUDA allocations are in this Python trainer, not the separate
                             # LibTorch MCTS worker; do not present them as total GPU memory.

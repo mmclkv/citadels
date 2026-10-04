@@ -495,9 +495,11 @@ class PythonServer:
             merged = {**retained, **native_state}
             self._append_gain_notices(current, merged, action)
             self._append_role_ability_notice(current, merged, player_id, action)
+            self._append_magistrate_declare_notice(current, merged, player_id, action)
+            self._append_role_effect_detail_notice(current, merged, player_id, action)
             state_log = merged.setdefault("log", [])
             actor = old_players.get(player_id, {})
-            action_text = self._game_action_log_text(current, action)
+            action_text = self._game_action_log_text(current, action, merged)
             state_log.append({"i": len(state_log),
                               "text": f"{actor.get('name') or player_id}：{action_text}",
                               "type": "info", "round": merged.get("round", 0)})
@@ -741,8 +743,16 @@ class PythonServer:
             return
         turn = previous.get("turn") or {}
         role_id = turn.get("charId")
-        role = cards.CHAR_MAP.get(role_id or {}, {})
+        if not isinstance(role_id, str):
+            return
+        role = cards.CHAR_MAP.get(role_id or "", {})
         if not role:
+            return
+        # These abilities resolve through a later target/choice action. Their
+        # informative popup is emitted at that point, once the object is known.
+        if role_id in {"assassin", "witch", "magistrate", "thief", "spy",
+                       "blackmailer", "magician", "wizard", "emperor", "bishop",
+                       "diplomat", "warlord", "marshal"}:
             return
         players = previous.get("players") or []
         player_idx = next((i for i, player in enumerate(players)
@@ -755,6 +765,195 @@ class PythonServer:
                         "playerName": players[player_idx].get("name") or "玩家",
                         "roleName": role.get("name") or "角色",
                         "description": role.get("desc") or "发动了角色能力。"})
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
+    def _player_label(state: dict, index: int | None) -> str:
+        players = state.get("players") or []
+        if not isinstance(index, int) or not 0 <= index < len(players):
+            return "其他玩家"
+        player = players[index]
+        seat = player.get("seat", index)
+        seat_label = f"座位{seat + 1}·" if isinstance(seat, int) else ""
+        return f"{seat_label}{player.get('name') or '玩家'}"
+
+    @staticmethod
+    def _player_index(state: dict, player_id: str | None) -> int | None:
+        return next((i for i, player in enumerate(state.get("players") or [])
+                     if player.get("id") == player_id), None)
+
+    @classmethod
+    def _append_role_effect_detail_notice(cls, previous: dict, updated: dict,
+                                          player_id: str, action: dict) -> None:
+        """Announce targeted role effects after their public target is committed."""
+        kind = action.get("type")
+        turn = previous.get("turn") or {}
+        pending = turn.get("pending") or {}
+        role_id = turn.get("charId")
+        if not isinstance(role_id, str):
+            role_id = None
+        role = cards.CHAR_MAP.get(role_id or "", {})
+        description = None
+        if kind in ("assassin_declare", "thief_declare", "witch_declare"):
+            try:
+                number = int(action.get("num", action.get("name")))
+            except (TypeError, ValueError):
+                number = 0
+            target = next((item for item in cards.CHAR_MAP.values()
+                           if item.get("num") == number), {})
+            target_name = f"{number}号【{target.get('name') or '角色'}】"
+            effects = {
+                "assassin_declare": f"刺杀目标为{target_name}，该角色本轮被叫到时跳过整个回合。",
+                "thief_declare": f"偷窃目标为{target_name}，该角色本轮被叫到并公开时交出全部金币。",
+                "witch_declare": f"施咒目标为{target_name}，该角色本轮只能领取资源，随后由女巫接管剩余行动。",
+            }
+            description = effects[kind]
+            role_id = {"assassin_declare": "assassin", "thief_declare": "thief",
+                       "witch_declare": "witch"}[kind]
+            role = cards.CHAR_MAP[role_id]
+        elif kind == "spy_color" and role_id == "spy":
+            target_idx = pending.get("targetIdx")
+            color = action.get("color")
+            color_names = {"yellow": "皇家（黄色）", "blue": "宗教（蓝色）",
+                           "green": "商业（绿色）", "red": "军事（红色）",
+                           "purple": "独特（紫色）"}
+            actor_idx = cls._player_index(previous, player_id)
+            old_players, new_players = previous.get("players") or [], updated.get("players") or []
+            gold = cards_gained = 0
+            if actor_idx is not None and actor_idx < len(new_players) and actor_idx < len(old_players):
+                gold = max(0, int(new_players[actor_idx].get("gold") or 0) -
+                           int(old_players[actor_idx].get("gold") or 0))
+                cards_gained = max(0, len(new_players[actor_idx].get("hand") or []) -
+                                   len(old_players[actor_idx].get("hand") or []))
+            target_label = cls._player_label(previous, target_idx)
+            description = (f"调查对象：{target_label}；建筑类型：{color_names.get(color, '指定类型')}。"
+                           f"间谍实际获得 {gold} 枚金币和 {cards_gained} 张建筑牌（不公开牌面）。")
+        elif kind == "emperor_crown" and role_id == "emperor":
+            target_idx = cls._player_index(previous, action.get("target"))
+            description = f"皇冠移交对象：{cls._player_label(previous, target_idx)}。随后皇帝从新皇冠持有者处取得1枚金币或1张建筑牌。"
+        elif kind == "emperor_take" and role_id == "emperor":
+            target_idx = pending.get("targetIdx")
+            mode = action.get("mode") or action.get("name")
+            resource = "1枚金币" if mode == "gold" else "1张建筑牌"
+            description = f"皇帝从新皇冠持有者{cls._player_label(previous, target_idx)}处取得了{resource}。"
+        elif kind == "wizard_target" and role_id == "wizard":
+            target_idx = cls._player_index(previous, action.get("target"))
+            description = f"法师选择查看{cls._player_label(previous, target_idx)}的手牌；具体牌面仅对法师可见。"
+        elif kind == "choose_player" and pending.get("kind") in ("magician_swap", "bishop_payer"):
+            target_idx = cls._player_index(previous, action.get("target"))
+            target_label = cls._player_label(previous, target_idx)
+            if pending.get("kind") == "magician_swap":
+                description = f"魔术师选择与{target_label}交换全部手牌。"
+                role_id = "magician"
+            else:
+                description = f"主教指定{target_label}为建筑费用差额的代付者。"
+                role_id = "bishop"
+            role = cards.CHAR_MAP[role_id]
+        elif kind == "choose_district" and pending.get("kind") in (
+                "diplomat_mine", "diplomat_theirs", "warlord_destroy", "marshal_seize"):
+            target_idx = cls._player_index(previous, action.get("target"))
+            target_label = cls._player_label(previous, target_idx)
+            district = next((card for player in previous.get("players", [])
+                             for card in [*(player.get("hand") or []), *(player.get("city") or [])]
+                             if card.get("uid") == action.get("uid")), {})
+            district_name = district.get("name") or "所选建筑"
+            mode = pending.get("kind")
+            if mode == "diplomat_theirs":
+                description = f"外交官选择从{target_label}处交换『{district_name}』。"
+                role_id = "diplomat"
+            elif mode == "diplomat_mine":
+                description = f"外交官选择自己的建筑『{district_name}』作为交换筹码。"
+                role_id = "diplomat"
+            elif mode == "warlord_destroy":
+                description = f"领主选择摧毁{target_label}的建筑『{district_name}』。"
+                role_id = "warlord"
+            else:
+                description = f"元帅选择从{target_label}处抢夺建筑『{district_name}』。"
+                role_id = "marshal"
+            role = cards.CHAR_MAP[role_id]
+        elif kind == "choose_char" and pending.get("kind") in (
+                "assassin", "thief", "witch_target"):
+            try:
+                number = int(action.get("num", action.get("name")))
+            except (TypeError, ValueError):
+                number = 0
+            target = next((item for item in cards.CHAR_MAP.values()
+                           if item.get("num") == number), {})
+            target_name = f"{number}号【{target.get('name') or '角色'}】"
+            pending_role = pending.get("kind")
+            if pending_role == "assassin":
+                role_id = "assassin"
+                description = f"刺客宣告刺杀目标：{target_name}；该角色本轮被叫到时跳过整个回合。"
+            elif pending_role == "thief":
+                role_id = "thief"
+                description = f"盗贼宣告偷窃目标：{target_name}；该角色本轮被叫到并公开时交出全部金币。"
+            else:
+                role_id = "witch"
+                description = f"女巫宣告施咒目标：{target_name}；该角色本轮只能领取资源，随后由女巫接管剩余行动。"
+            role = cards.CHAR_MAP[role_id]
+        elif kind == "blackmailer_signed" and role_id == "blackmailer":
+            targets = PythonServer._magistrate_targets(pending.get("nums") or [])
+            if len(targets) == 2:
+                names = "、".join(f"{item['num']}号【{item['name']}】" for item in targets)
+                description = f"勒索者把两个威胁标记分配给{names}；真威胁标记对应的目标暂不公开。"
+        if not description:
+            return
+        actor_idx = cls._player_index(previous, player_id)
+        if actor_idx is None:
+            return
+        players = previous.get("players") or []
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = max(int(updated.get("noticeSeq") or 0),
+                  int(previous.get("noticeSeq") or 0)) + 1
+        notices.append({"seq": seq, "kind": "role_effect_detail",
+                        "playerIdx": actor_idx,
+                        "playerName": players[actor_idx].get("name") or "玩家",
+                        "roleName": role.get("name") or "角色",
+                        "description": description})
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
+    def _magistrate_targets(nums: list) -> list[dict]:
+        targets = []
+        for value in nums:
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            character = next((item for item in cards.CHAR_MAP.values()
+                              if item.get("num") == number), {})
+            targets.append({"num": number,
+                            "name": character.get("name") or f"{number}号角色"})
+        return targets
+
+    @classmethod
+    def _append_magistrate_declare_notice(cls, previous: dict, updated: dict,
+                                          player_id: str, action: dict) -> None:
+        """Announce all public warrant targets only after the third choice is committed."""
+        if action.get("type") != "magistrate_char":
+            return
+        old_effect = (previous.get("effects") or {}).get("magistrate")
+        warrant = (updated.get("effects") or {}).get("magistrate")
+        if not warrant or warrant == old_effect:
+            return
+        nums = warrant.get("nums") or []
+        targets = cls._magistrate_targets(nums)
+        if len(targets) != 3:
+            return
+        players = previous.get("players") or []
+        player_idx = next((i for i, player in enumerate(players)
+                           if player.get("id") == player_id), None)
+        if player_idx is None:
+            return
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = max(int(updated.get("noticeSeq") or 0),
+                  int(previous.get("noticeSeq") or 0)) + 1
+        notices.append({"seq": seq, "kind": "magistrate_declare",
+                        "byId": player_id, "byIdx": player_idx,
+                        "byName": players[player_idx].get("name") or "行政官",
+                        "targets": targets, "nums": [target["num"] for target in targets]})
         updated["noticeSeq"] = seq
         updated["notices"] = notices[-12:]
 
@@ -801,7 +1000,8 @@ class PythonServer:
         return entries
 
     @staticmethod
-    def _game_action_log_text(state: dict, action: dict) -> str:
+    def _game_action_log_text(state: dict, action: dict,
+                              updated: dict | None = None) -> str:
         """Readable public log text; never expose hidden cards or secret role marks."""
         kind = action.get("type", "")
         turn = state.get("turn") or {}
@@ -824,14 +1024,87 @@ class PythonServer:
                        "thief_declare": "该角色本轮被叫到并公开时将把全部金币交给盗贼",
                        "witch_declare": "该角色本轮被叫到时只能领取资源，随后由女巫接管剩余行动"}[kind]
             return f"【{role_names[kind]}】{verb}{target}；{outcome}。"
+        if kind == "choose_char" and pending.get("kind") in (
+                "assassin", "thief", "witch_target"):
+            try:
+                number = int(action.get("num", action.get("name")))
+            except (TypeError, ValueError):
+                number = 0
+            character = next((item for item in cards.CHAR_MAP.values()
+                              if item.get("num") == number), {})
+            target = f"{number}号·{character.get('name') or '角色'}"
+            if pending["kind"] == "assassin":
+                return f"【刺客】宣布刺杀{target}；该角色本轮被叫到时跳过整个回合。"
+            if pending["kind"] == "thief":
+                return f"【盗贼】宣布偷窃{target}；该角色本轮被叫到并公开时交出全部金币。"
+            return f"【女巫】对{target}施咒；该角色本轮只能领取资源，随后由女巫接管剩余行动。"
         if kind in ("magistrate_signed", "magistrate_char"):
+            warrant = ((updated or {}).get("effects") or {}).get("magistrate")
+            if (kind == "magistrate_char" and warrant and
+                    warrant != (state.get("effects") or {}).get("magistrate")):
+                targets = PythonServer._magistrate_targets(warrant.get("nums") or [])
+                if len(targets) == 3:
+                    names = "、".join(f"{item['num']}号·{item['name']}" for item in targets)
+                    return f"为{names}布置了逮捕令（真逮捕令的目标暂不公开）。"
             return "布置了行政官逮捕令"
         if kind in ("blackmailer_signed", "blackmailer_char"):
             return "布置了勒索威胁标记"
         if kind in ("wizard_target", "wizard_card", "wizard_take"):
-            return {"wizard_target": "选择查看一名玩家的手牌",
-                    "wizard_card": "选择取得一张建筑牌",
-                    "wizard_take": "取得了1张手牌"}[kind]
+            if kind == "wizard_target":
+                target_idx = PythonServer._player_index(state, action.get("target"))
+                return f"法师选择查看{PythonServer._player_label(state, target_idx)}的手牌（牌面不公开）"
+            if kind == "wizard_card":
+                return "法师从查看的手牌中选定一张建筑牌"
+            return "法师取得了1张建筑牌"
+        if kind == "spy_target":
+            target_idx = PythonServer._player_index(state, action.get("target"))
+            return f"间谍选择调查对象：{PythonServer._player_label(state, target_idx)}"
+        if kind == "spy_color":
+            pending_target = pending.get("targetIdx")
+            target_name = PythonServer._player_label(state, pending_target)
+            color_names = {"yellow": "皇家（黄色）", "blue": "宗教（蓝色）",
+                           "green": "商业（绿色）", "red": "军事（红色）",
+                           "purple": "独特（紫色）"}
+            actor_idx = (state.get("turn") or {}).get("playerIdx")
+            old_players = state.get("players") or []
+            new_players = (updated or {}).get("players") or []
+            gold = cards_gained = 0
+            if actor_idx is not None and actor_idx < len(old_players) and actor_idx < len(new_players):
+                gold = max(0, int(new_players[actor_idx].get("gold") or 0) -
+                           int(old_players[actor_idx].get("gold") or 0))
+                cards_gained = max(0, len(new_players[actor_idx].get("hand") or []) -
+                                   len(old_players[actor_idx].get("hand") or []))
+            return (f"间谍调查{target_name}的{color_names.get(action.get('color'), '指定类型')}建筑牌；"
+                    f"实际获得{gold}枚金币、{cards_gained}张建筑牌（牌面不公开）")
+        if kind == "emperor_crown":
+            target_idx = PythonServer._player_index(state, action.get("target"))
+            return f"皇帝将皇冠交给{PythonServer._player_label(state, target_idx)}"
+        if kind == "emperor_take":
+            target_idx = pending.get("targetIdx")
+            resource = "1枚金币" if action.get("mode") == "gold" else "1张建筑牌"
+            return f"皇帝从新皇冠持有者{PythonServer._player_label(state, target_idx)}处取得{resource}"
+        if kind == "choose_player" and pending.get("kind") in ("magician_swap", "bishop_payer"):
+            target_idx = PythonServer._player_index(state, action.get("target"))
+            target = PythonServer._player_label(state, target_idx)
+            if pending.get("kind") == "magician_swap":
+                return f"魔术师选择与{target}交换全部手牌"
+            amount = int(pending.get("amount") or 0)
+            return f"主教指定{target}代付建筑费用差额（{amount}金币）"
+        if kind == "choose_district" and pending.get("kind") in (
+                "diplomat_mine", "diplomat_theirs", "warlord_destroy", "marshal_seize"):
+            target_idx = PythonServer._player_index(state, action.get("target"))
+            target = PythonServer._player_label(state, target_idx)
+            district = next((card for player in state.get("players", [])
+                             for card in [*(player.get("hand") or []), *(player.get("city") or [])]
+                             if card.get("uid") == action.get("uid")), {})
+            name = district.get("name") or "所选建筑"
+            mode = pending.get("kind")
+            return {
+                "diplomat_mine": f"外交官选择自己的建筑『{name}』作为交换筹码",
+                "diplomat_theirs": f"外交官从{target}处交换建筑『{name}』",
+                "warlord_destroy": f"领主摧毁了{target}的建筑『{name}』",
+                "marshal_seize": f"元帅从{target}处抢得建筑『{name}』",
+            }[mode]
         if kind in ("draw_keep", "scholar_pick"):
             return "保留了1张建筑牌" if kind == "draw_keep" else "选取了1张建筑牌"
         if kind == "prophet_give":
@@ -1121,12 +1394,11 @@ class PythonServer:
                 room["config"]["botPace"] = int(updates["botPace"])
             for key in ("mctsSimulations", "mctsMaxDepth", "mctsParticles"):
                 if key in updates and updates[key] is not None:
-                    bounds = (0, 2000) if key == "mctsSimulations" else (0, 700) if key == "mctsMaxDepth" else (1, 8)
                     try:
                         value = int(float(updates[key]))
                     except (TypeError, ValueError, OverflowError):
                         raise ValueError("MCTS 配置必须是数字")
-                    room["config"][key] = max(bounds[0], min(bounds[1], value))
+                    room["config"][key] = max(1 if key == "mctsParticles" else 0, value)
             if "mctsBelief" in updates:
                 room["config"]["mctsBelief"] = updates["mctsBelief"] is not False
             if "voice" in updates:

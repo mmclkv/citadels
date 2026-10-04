@@ -103,15 +103,15 @@
       </label>
       <label class="field neural-only" hidden>
         <span>MCTS 模拟次数（0 = 关闭）</span>
-        <input id="cfg-mcts-sims" type="number" min="0" max="2000" step="50" value="500" inputmode="numeric">
+        <input id="cfg-mcts-sims" type="number" min="0" step="50" value="500" inputmode="numeric">
       </label>
       <label class="field neural-only" hidden>
         <span>MCTS 最大搜索深度（0 = 自动 700）</span>
-        <input id="cfg-mcts-depth" type="number" min="0" max="700" step="10" value="700" inputmode="numeric">
+        <input id="cfg-mcts-depth" type="number" min="0" step="10" value="700" inputmode="numeric">
       </label>
       <label class="field neural-only" hidden>
         <span>MCTS 隐藏信息粒子数</span>
-        <input id="cfg-mcts-particles" type="number" min="1" max="8" step="1" value="4" inputmode="numeric">
+        <input id="cfg-mcts-particles" type="number" min="1" step="1" value="4" inputmode="numeric">
       </label>
       <p class="dim small neural-only mcts-hint" hidden>策略神经网络电脑默认只按网络策略走子。填大于 0 的模拟次数后，服务器会在指定份数的隐藏信息猜测上做蒙特卡洛树搜索，粒子越多越稳但每步越慢。</p>
       <label class="field">
@@ -273,9 +273,15 @@
               <span>本轮出局角色</span><span class="removed-widget-count" id="removed-widget-count">0</span>
             </button>
             <div class="removed-widget-content">
-              <span class="removed-corner-label">本轮出局</span>
-              <div class="rs-cards" id="rs-faceup-corner"></div>
-              <div class="rs-cards" id="rs-facedown-corner"></div>
+              <span class="removed-widget-empty" id="removed-widget-empty">本轮暂无出局角色</span>
+              <div class="removed-widget-group" id="removed-faceup-group" hidden>
+                <span class="removed-widget-group-label">明置</span>
+                <div class="rs-cards" id="rs-faceup-corner"></div>
+              </div>
+              <div class="removed-widget-group" id="removed-facedown-group" hidden>
+                <span class="removed-widget-group-label">暗置</span>
+                <div class="rs-cards" id="rs-facedown-corner"></div>
+              </div>
             </div>
           </div>
           <div class="opponents" id="opponents"></div>

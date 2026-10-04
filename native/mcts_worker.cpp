@@ -250,7 +250,7 @@ int main() {
       if (determinize_mode) {
         const int viewer = player_index(state, string_field(request, "playerId"));
         if (viewer < 0) throw std::runtime_error("determinize 请求的 playerId 不存在");
-        const int count = std::max(1, std::min(8, int_field(request, "count", 4)));
+        const int count = std::max(1, int_field(request, "count", 4));
         const uint32_t seed = static_cast<uint32_t>(int_field(request, "seed", 1));
         std::vector<NativeGameState> samples;
         samples.reserve(static_cast<size_t>(count));
@@ -366,7 +366,6 @@ int main() {
       const int batch_size = std::max(1, int_field(request, "batchSize", 32));
       context += " · 模拟=" + std::to_string(config.simulations) +
         " · maxDepth=" + std::to_string(config.max_depth) +
-        " · maxNodes=" + std::to_string(config.max_nodes) +
         " · batch=" + std::to_string(batch_size) +
         " · 后端=" + inference_backend;
       auto run_search = [&](const std::vector<NativeGameState>& states, int perspective,

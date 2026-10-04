@@ -148,8 +148,6 @@ class Mcts {
   struct Config {
     int simulations = 50;
     int max_depth = 400;
-    // 防止高深度/高并发配置造成搜索树耗尽进程内存。
-    int max_nodes = 20000;
     float c_puct = 1.0f;
     float dirichlet_alpha = 0.3f;
     float dirichlet_epsilon = 0.0f;
@@ -193,7 +191,6 @@ class Mcts {
     for (float weight : particle_weights) if (weight > 0.0f) weight_total_ += weight;
     if (weights_->size() != root_states.size()) weight_total_ = 0.0f;
     expansions_ = 0;
-    node_count_ = 1;
     const State& seed_state = root_states.front();
     player_count_ = state_player_count(seed_state, 0);
     Node root;
@@ -234,15 +231,9 @@ class Mcts {
         const InformationSetKey key = game_.information_set_hash(state, player);
         Node* child = find_child(*node, index, key);
         if (!child) {
-          if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
-            backup(path, node->value_vector);
-            backed_up = true;
-            break;
-          }
           auto fresh = std::make_unique<Node>();
           child = fresh.get();
           node->child_variants[index].push_back(std::move(fresh));
-          ++node_count_;
           child->player = player;
           child->information_set_key = key;
           child->actions = game_.legal_actions(state, player);
@@ -384,7 +375,6 @@ class Mcts {
   const std::vector<float>* weights_ = nullptr;
   float weight_total_ = 0.0f;
   int expansions_ = 0;
-  size_t node_count_ = 0;
   size_t player_count_ = 0;
 };
 
@@ -422,7 +412,6 @@ class BatchedMcts {
     const State& seed_state = root_states.front();
     player_count_ = state_player_count(seed_state, 0);
     root_player_ = root_player;
-    node_count_ = 1;
     expansions_ = 0;
     Node root;
     root.player = root_player;
@@ -476,16 +465,9 @@ class BatchedMcts {
           const InformationSetKey key = game_.information_set_hash(state, player);
           Node* child = find_child(*node, index, key);
           if (!child) {
-            if (node_count_ >= static_cast<size_t>(std::max(1, config_.max_nodes))) {
-              terminal.push_back(true); terminal_values.push_back(node->value_vector);
-              paths.push_back(std::move(path));
-              path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
-              collected = true; break;
-            }
             auto fresh = std::make_unique<Node>();
             child = fresh.get();
             node->child_variants[index].push_back(std::move(fresh));
-            ++node_count_;
             child->player = player;
             child->information_set_key = key;
             child->actions = search_actions(state, player);
@@ -641,7 +623,6 @@ class BatchedMcts {
   float weight_total_ = 0.0f;
   size_t player_count_ = 0;
   int root_player_ = 0;
-  size_t node_count_ = 0;
   int expansions_ = 0;
   std::function<int(const State&, int, int, const std::vector<Action>&)> npc_choice_;
 };
