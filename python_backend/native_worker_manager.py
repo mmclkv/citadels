@@ -114,11 +114,29 @@ class NativeWorkerManager:
             args += ["-ltorch", "-ltorch_cpu", "-lc10", "-ldbghelp", "-o", str(output)]
         else:
             args += ["-ltorch", "-ltorch_cpu"]
-            if (libraries / "libtorch_cuda.so").is_file():
+            torch_cuda = libraries / "libtorch_cuda.so"
+            nccl_candidates = [*libraries.glob("libnccl.so*"),
+                               *(torch_root.parent / "nvidia" / "nccl" / "lib").glob("libnccl.so*")]
+            nccl_library = next((path for path in nccl_candidates if path.is_file()), None)
+            if torch_cuda.is_file():
                 args += ["-ltorch_cuda"]
+                if nccl_library is None:
+                    raise RuntimeError(
+                        "检测到 CUDA 版 LibTorch，但当前 Python 环境没有 NCCL 动态库；"
+                        "请在该虚拟环境中重新安装与 PyTorch 匹配的 CUDA 依赖，"
+                        "或改装 CPU 版 PyTorch。")
+                # The pip CUDA wheel places NCCL under site-packages/nvidia/nccl/lib,
+                # not torch/lib. Pass its full path so GNU ld resolves the NCCL
+                # references exported by libtorch_cuda.so at executable link time.
+                args += [str(nccl_library)]
             if (libraries / "libc10_cuda.so").is_file():
                 args += ["-lc10_cuda"]
             args += ["-lc10", "-o", str(output)]
+            runtime_library_paths = [str(libraries)]
+            if nccl_library is not None:
+                runtime_library_paths.append(str(nccl_library.parent))
+            args[args.index(f"-Wl,-rpath,{libraries}")] = (
+                "-Wl,-rpath," + ":".join(runtime_library_paths))
         self.log("[native] C++ worker 源码或 LibTorch 版本已更新，使用 clang++ 重新编译…")
         try:
             # Run clang from cmd.exe under the initialized MSVC environment. On
