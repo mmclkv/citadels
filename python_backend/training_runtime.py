@@ -38,7 +38,6 @@ _SAMPLER_GAME_WORKER = None
 _SERVER_NATIVE_WORKER = None
 _SERVER_GAME_WORKER = None
 REPLAY_MAX_GAMES = 128
-REPLAY_MAX_BYTES = 256 * 1024 * 1024
 NETWORK_METRIC_WINDOW = 50
 
 
@@ -75,12 +74,10 @@ def _checkpoint_due(games: int, saved_game: int, interval: int,
 
 
 class RecentReplayBuffer:
-    """Recent completed self-play games, bounded by game count and raw bytes."""
+    """Recent completed self-play games, bounded by the configured game count."""
 
-    def __init__(self, max_games: int = REPLAY_MAX_GAMES,
-                 max_bytes: int = REPLAY_MAX_BYTES):
+    def __init__(self, max_games: int = REPLAY_MAX_GAMES):
         self.max_games = max(0, int(max_games))
-        self.max_bytes = max(0, int(max_bytes))
         self._games: deque[tuple[list[dict], int]] = deque()
         self.bytes = 0
         self.samples = 0
@@ -96,15 +93,13 @@ class RecentReplayBuffer:
         return len(self._games)
 
     def add_game(self, rows: list[dict]) -> bool:
-        if not rows or self.max_games == 0 or self.max_bytes == 0:
+        if not rows or self.max_games == 0:
             return False
         size = self._game_bytes(rows)
-        if size > self.max_bytes:
-            return False
         self._games.append((rows, size))
         self.bytes += size
         self.samples += len(rows)
-        while (len(self._games) > self.max_games or self.bytes > self.max_bytes):
+        while len(self._games) > self.max_games:
             evicted_rows, evicted_bytes = self._games.popleft()
             self.bytes -= evicted_bytes
             self.samples -= len(evicted_rows)
@@ -827,8 +822,8 @@ class TrainingManager:
                       f"训练温度={config['temperatureStart']}→{config['temperatureEnd']}，" +
                       f"c_puct={config['mctsC_puct']}，Dirichlet α={config['mctsDirichletAlpha']} " +
                       f"ε={config['mctsDirichletEpsilon']}；LibTorch 前向推理")
-            self._log(f"Replay buffer：最近最多 {replay_buffer.max_games} 局 / "
-                      f"{replay_buffer.max_bytes // (1024 * 1024)} MiB；每批最多按新样本数等量抽取旧样本")
+            self._log(f"Replay buffer：最近最多 {replay_buffer.max_games} 局；无固定字节上限，"
+                      "内存用量随样本大小增长；每批最多按新样本数等量抽取旧样本")
             totals = {"steps": 0, "gameMs": 0.0, "inferenceMs": 0.0,
                       "inferenceSearches": 0, "rounds": 0, "fallbacks": 0,
                       "incompleteGames": 0, "finishedGames": 0,
