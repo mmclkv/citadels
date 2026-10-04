@@ -302,6 +302,7 @@ class Mcts {
     size_t best = 0;
     float best_score = -std::numeric_limits<float>::infinity();
     const float parent = static_cast<float>(std::max(1, node.visits));
+    const float fpu = node.visits ? node.total[0] / node.visits : node.value_vector[0];
     for (size_t i = 0; i < node.actions.size(); ++i) {
       const auto& variants = node.child_variants[i];
       float visits = 0.0f, total = 0.0f;
@@ -310,7 +311,7 @@ class Mcts {
         const size_t slot = player_count_ ? relative_slot(child->player, node.player) : 0;
         total += child->visits ? child->total[slot] : 0.0f;
       }
-      const float q = visits > 0.0f ? total / visits : 0.0f;
+      const float q = visits > 0.0f ? total / visits : fpu;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       const float u = config_.c_puct * p * std::sqrt(parent) / (1.0f + visits);
       const float score = q + u + (visits == 0 ? 1e-5f * random_unit() : 0.0f);
@@ -542,6 +543,9 @@ class BatchedMcts {
   size_t select(const Node& node) const {
     size_t best = 0; float score_best = -std::numeric_limits<float>::infinity();
     const float parent = static_cast<float>(std::max(1, node.visits + node.pending_visits));
+    // Slot zero always belongs to this node's actor, not the root actor.
+    // Reservations are not evidence and must not enter this mean.
+    const float fpu = node.visits ? node.total[0] / node.visits : node.value_vector[0];
     for (size_t i = 0; i < node.actions.size(); ++i) {
       const auto& variants = node.child_variants[i];
       float visits = 0.0f, pending = 0.0f, total = 0.0f;
@@ -551,7 +555,7 @@ class BatchedMcts {
         const size_t slot = player_count_ ? relative_slot(child->player, node.player) : 0;
         total += child->visits ? child->total[slot] : 0.0f;
       }
-      const float q = visits > 0.0f ? total / visits : 0.0f;
+      const float q = visits > 0.0f ? total / visits : fpu;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       // Reservations spread work through U only. W/N remains the observed
       // mean, so negative values cannot improve merely by reserving a path.

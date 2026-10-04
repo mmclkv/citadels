@@ -47,6 +47,10 @@ struct ToyEvaluator : BatchedEvaluator<ToyState, int> {
     result.priors.assign(actions.size(), 1.0f / std::max<size_t>(1, actions.size()));
     result.has_value_vector = true;
     if (state.depth) result.value_vector = game.terminal_value_vector(state, 0);
+    else {
+      result.value_vector[0] = -0.5f + game.shift;
+      result.value_vector[1] = -result.value_vector[0];
+    }
     return result;
   }
   std::vector<Evaluation> evaluate_batch(const std::vector<ToyState>& states,
@@ -70,7 +74,99 @@ auto run(float shift, int depth, int batch, int simulations = 500) {
   return result;
 }
 
+struct WideGame : ToyGame {
+  explicit WideGame(float shift) : ToyGame(shift, 1) {}
+  std::vector<int> legal_actions(const ToyState& state, int) const override {
+    std::vector<int> actions;
+    if (!terminal(state)) for (int i = 0; i < 500; ++i) actions.push_back(i);
+    return actions;
+  }
+};
+
+struct WideEvaluator : ToyEvaluator {
+  explicit WideEvaluator(const ToyGame& game) : ToyEvaluator(game) {}
+  Evaluation evaluate(const ToyState& state, int player, const std::vector<int>& actions) override {
+    auto result = ToyEvaluator::evaluate(state, player, actions);
+    if (actions.size() > 1) {
+      result.priors.assign(actions.size(), 0.1f / (actions.size() - 1));
+      result.priors[0] = 0.9f;
+    }
+    return result;
+  }
+};
+
+void test_fpu() {
+  Mcts<ToyState, int>::Config config;
+  config.simulations = 500;
+  config.dirichlet_epsilon = 0;
+  WideGame negative(0), positive(1);
+  WideEvaluator negative_eval(negative), positive_eval(positive);
+  const auto a = BatchedMcts<ToyState, int>(negative, negative_eval, config).search(ToyState{}, 0, 32);
+  const auto b = BatchedMcts<ToyState, int>(positive, positive_eval, config).search(ToyState{}, 0, 32);
+  if (a.policy != b.policy || a.policy[0] < 0.9f || a.visits != 500)
+    throw std::runtime_error("FPU must use actor value, not optimistic zero");
+  struct SerialEvaluator : Evaluator<ToyState, int> {
+    WideEvaluator& evaluator;
+    explicit SerialEvaluator(WideEvaluator& e) : evaluator(e) {}
+    Evaluation evaluate(const ToyState& s, int p, const std::vector<int>& actions) override {
+      return evaluator.evaluate(s, p, actions);
+    }
+  } serial_negative(negative_eval), serial_positive(positive_eval);
+  const auto sa = Mcts<ToyState, int>(negative, serial_negative, config).search(ToyState{}, 0);
+  const auto sb = Mcts<ToyState, int>(positive, serial_positive, config).search(ToyState{}, 0);
+  if (sa.policy != sb.policy || sa.policy[0] < 0.9f)
+    throw std::runtime_error("Serial search FPU must also be translation invariant");
+}
+
+void test_opponent_fpu() {
+  struct OpponentGame : ToyGame {
+    mutable int best = 0, other = 0;
+    OpponentGame() : ToyGame(0, 2) {}
+    int next_player(const ToyState&) const override { return 1; }
+    std::vector<int> legal_actions(const ToyState& state, int) const override {
+      if (terminal(state)) return {};
+      if (state.depth == 0) return {0};
+      std::vector<int> actions;
+      for (int i = 0; i < 500; ++i) actions.push_back(i);
+      return actions;
+    }
+    bool apply(ToyState& state, int player, const int& action) const override {
+      if (state.depth == 1) {
+        state.action = action;
+        action == 0 ? ++best : ++other;
+      }
+      ++state.depth;
+      return true;
+    }
+    std::array<float, kValueSlots> terminal_value_vector(const ToyState& state, int player) const override {
+      auto result = ToyGame::terminal_value_vector(state, 0);
+      if (player == 0) std::swap(result[0], result[1]);
+      return result;
+    }
+  } game;
+  struct OpponentEvaluator : BatchedEvaluator<ToyState, int> {
+    Evaluation evaluate(const ToyState&, int player, const std::vector<int>& actions) override {
+      Evaluation result;
+      result.has_value_vector = true;
+      result.value_vector[0] = player == 0 ? 0.5f : -0.5f;
+      result.value_vector[1] = -result.value_vector[0];
+      result.priors.assign(actions.size(), actions.size() > 1 ? 0.1f / (actions.size() - 1) : 1.0f);
+      if (actions.size() > 1) result.priors[0] = 0.9f;
+      return result;
+    }
+  } evaluator;
+  Mcts<ToyState, int>::Config config;
+  config.simulations = 500; config.dirichlet_epsilon = 0;
+  const auto result = BatchedMcts<ToyState, int>(game, evaluator, config).search(ToyState{}, 0, 32);
+  if (result.visits != 500 || game.best < 0.9f * (game.best + game.other) ||
+      result.value_vector[0] < 0.19f || result.value_vector[0] > 0.3f ||
+      std::abs(result.value_vector[0] + result.value_vector[1]) > 1e-5f)
+    throw std::runtime_error("Opponent FPU or multi-player value rotation used root perspective");
+}
+
 int main() {
+  test_fpu();
+  test_opponent_fpu();
   const auto serial = run(0, 1, 1);
   for (int batch : {8, 32, 128}) {
     const auto terminal = run(0, 1, batch);
