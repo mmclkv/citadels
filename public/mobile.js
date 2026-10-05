@@ -124,7 +124,9 @@
     keep('assassinated',e.assassinated,(n,spent)=>({tone:'danger',icon:'!',text:`${label(n)} 被刺杀${spent?'（已生效）':''}`}));
     keep('bewitched',e.bewitched,(n,spent)=>({tone:'magic',icon:'✦',text:`${label(n)} 被施咒${spent?'（已生效）':''}`}));
     keep('thief',e.thief,(n,spent)=>({tone:'warn',icon:'$',text:`${label(n)} 被盗贼盯上${spent?'（已生效）':''}`}));
-    const mg=(e.magistrate||{}).nums; if(mg&&mg.length)memo.mag=mg.filter(n=>n!=null);
+    // The first declared target is the real warrant. Never display declaration order,
+    // including when reconnecting to a server that still sends the original order.
+    const mg=(e.magistrate||{}).nums; if(mg&&mg.length)memo.mag=mg.filter(n=>n!=null).sort((a,b)=>Number(a)-Number(b));
     if((memo.mag||[]).length)out.push({tone:'magic',icon:'§',text:`逮捕令 ${memo.mag.map(label).join('、')}`});
     const bl=(e.blackmailer||{}).nums; if(bl&&bl.length)memo.blk=bl.filter(n=>n!=null);
     if((memo.blk||[]).length)out.push({tone:'warn',icon:'†',text:`威胁标记 ${memo.blk.map(label).join('、')}`});
@@ -166,7 +168,7 @@
       return {actor,victim:targeted?M.id:null,full,tone:full?'magic':'info',icon:full?'✦':'·',
         title:targeted?`${n.roleName||'角色'}效果 · 目标是你`:`${n.roleName||'角色'}效果`,
         text:`${n.playerName||seatName(s,n.playerIdx)}：${desc}`};}
-    case 'magistrate_declare':{const list=n.targets&&n.targets.length?n.targets:(n.nums||[]).map(num=>({num,name:`${num} 号角色`}));
+    case 'magistrate_declare':{const list=(n.targets&&n.targets.length?n.targets:(n.nums||[]).map(num=>({num,name:`${num} 号角色`}))).slice().sort((a,b)=>Number(a.num)-Number(b.num));
       const mine=list.some(t=>myHeldNums(s).includes(Number(t.num)));
       return {actor:n.byId,victim:mine?M.id:null,full:true,tone:'magic',icon:'§',title:mine?'你收到了逮捕令':'行政官发出逮捕令',
         text:`${n.byName||''} 把 3 张逮捕令发给了 ${list.map(t=>`${t.num} 号·${t.name}`).join('、')}`,

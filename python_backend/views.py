@@ -214,7 +214,8 @@ def sanitize(state: dict, player_id: str | None,
                                     "revealed": [{"num": item["num"], "isReal": bool(item["isReal"])}
                                                  for item in threat.get("revealed") or []],
                                     "done": list(threat.get("done") or [])} if threat else None,
-                    "magistrate": {"nums": list(warrant.get("nums") or []),
+                    # Declaration order is private: the real warrant is chosen first.
+                    "magistrate": {"nums": sorted(warrant.get("nums") or [], key=int),
                                    "playerIdx": warrant["playerIdx"]} if warrant else None},
         "firstToFinish": state["firstToFinish"], "log": state["log"][-120:],
         "notices": [_notice_for_viewer(notice, viewer_index) for notice in state["notices"][-12:]],
