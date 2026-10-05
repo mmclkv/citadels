@@ -183,3 +183,5 @@
 .actions .btn{height:auto;min-height:44px;padding:6px 4px;display:flex;align-items:center;justify-content:center;
   white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;text-align:center;word-break:break-word}
 .actions.count-5 .btn,.actions.count-6 .btn{font-size:10px}
+/* 轮到自己时，自己的城区同样套金色边框（保留加亮底色） */
+.player-row.self.active-turn{border-color:#f2bd4b;box-shadow:0 0 0 1px #f2bd4b80,0 0 14px #f2bd4b55,inset 0 0 26px #35b7ff38}
