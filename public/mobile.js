@@ -239,7 +239,8 @@
       const bub=bubbleFor(p.id);
       return `<article class="player-row ${p.id===M.id?'self ':''}${p.id===active?'active-turn ':''}${p.threat?'threat ':''}${M.targetType||stagePlayers?(isTarget?'target-selectable':'target-ineligible'):''}" data-player="${attr(p.id)}">
         <div class="player-meta"><div class="player-headline"><div class="pname">${esc(p.name)}</div>${p.id===M.id?'<span class="you-chip">你</span>':''}${p.hasCrown?'<i class="crown-icon">♛</i>':''}
-        ${ch?`<span class="public-role-inline"><button class="public-role-btn" type="button" data-kind="role" data-key="${attr(ch.id)}"><span class="role-no">${esc(ch.num)}</span><span>${esc(ch.name)}</span></button></span>`:''}
+        ${ch?`<span class="public-role-inline"><button class="public-role-btn" type="button" data-kind="role" data-key="${attr(ch.id)}"><span class="role-no">${esc(ch.num)}</span><span>${esc(ch.name)}</span></button></span>`
+          :(s.phase==='draft'&&p.hasChosen)?'<span class="draft-chosen">已选择</span>':''}
         <div class="p-stats">${coin(p.gold)}${points(score(p).total)}${hand(p.handCount)}</div></div></div>
         <div class="city-compact">${(p.city||[]).map(mini).join('')}</div>
         ${bub?`<div class="row-bubble tone-${attr(bub.tone)}${bub.fresh?' enter':''}${bub.fading?' fading':''}">${esc(bub.text)}</div>`:''}</article>`;
