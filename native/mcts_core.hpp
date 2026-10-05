@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -153,6 +154,9 @@ class Mcts {
     float dirichlet_alpha = 0.3f;
     float dirichlet_epsilon = 0.0f;
     uint32_t seed = 1;
+    // Zero preserves fixed-budget training. Checked between simulations;
+    // an individual evaluation/application is not forcibly interrupted.
+    int time_budget_ms = 0;
   };
 
   struct Result {
@@ -195,6 +199,8 @@ class Mcts {
     const State& seed_state = root_states.front();
     player_count_ = state_player_count(seed_state, 0);
     Node root;
+    const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::milliseconds(std::max(0,config_.time_budget_ms));
     root.player = root_player;
     root.actions = game_.legal_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
@@ -202,6 +208,7 @@ class Mcts {
     add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
 
     for (int i = 0; i < config_.simulations; ++i) {
+      if (i > 0 && config_.time_budget_ms > 0 && std::chrono::steady_clock::now() >= deadline) break;
       // 每条模拟重新抽一个粒子：世界只在本次模拟内有效，不是被钉死在树上
       State state = root_states[pick_particle()];
       std::vector<Node*> path{&root};

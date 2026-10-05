@@ -36,6 +36,56 @@ class NativeNpcPolicy {
     return best;
   }
 
+  // Search utilities have no arbitrary "do this before ending" priority offsets.
+  // Evaluation is always from the simulated actor's own information set.
+  static double search_utility(const NativeGameState& state,int player,const NativeSearchAction& a) {
+    auto projected=state;
+    for(size_t i=0;i<projected.players.size();++i) if(static_cast<int>(i)!=player) {
+      auto& p=projected.players[i];p.hand_count=static_cast<int>(p.hand.size());p.hand.clear();
+      p.role_id.clear();p.role_ids.clear();
+    }
+    projected.magistrate_signed=-1;projected.blackmailer_signed=-1;
+    const double baseline=position_value(projected,player);
+    double expected=0;
+    if(state.pending_kind.empty() && state.reaction_kind.empty() &&
+        planned_step(projected,player,a,expected))return position_value(projected,player)+expected-baseline;
+    uint32_t rng=1;
+    const double score=score_action(state,player,a,rng);
+    if(a.type==ActionType::Ability) return score>=100?2+(score-100)*0.05:-2;
+    if(a.type==ActionType::Lab || a.type==ActionType::Museum || a.type==ActionType::Smithy)
+      return score>=100?score-100:-2;
+    if(a.type==ActionType::Reaction)return score*0.04;
+    if(a.type==ActionType::AbilitySkip || a.type==ActionType::ArtistDone || a.type==ActionType::PendingBack)return 0;
+    return score;
+  }
+
+  static double search_strength(const NativeGameState& s,int player,int viewer) {
+    const auto& p=s.players[player];
+    double strength=native_player_score(s,player)+p.city.size()*1.8+std::min(p.gold,12)*0.6;
+    const bool wizard_seen=s.active_player==viewer && s.pending_target==player &&
+      (s.pending_kind=="wizard_card" || s.pending_kind=="wizard_choice");
+    // Comparable material estimates across seats; surplus cards are not an
+    // unlimited substitute for constructing districts. Known card quality is
+    // a bounded correction to the same public hand-count baseline.
+    const size_t useful_cards=std::min<size_t>(p.hand.size(),6);
+    strength+=useful_cards*1.1;
+    if(player==viewer || wizard_seen) {
+      std::vector<double> quality;
+      for(const auto& c:p.hand)quality.push_back(hand_value(s,p,c));
+      std::sort(quality.begin(),quality.end(),std::greater<double>());
+      double correction=0;
+      for(size_t i=0;i<useful_cards;++i)correction+=(quality[i]-2.75)*0.1;
+      strength+=std::clamp(correction,-1.2,1.2);
+    }
+    if(p.has_crown)strength+=0.8;
+    for(const auto& d:p.city) {
+      if(d.effect=="keepBoth")strength+=1.8;
+      else if(d.effect=="draw3keep1" || d.effect=="extraBuild")strength+=1.0;
+      else if(d.effect=="anyColorIncome")strength+=1.2;
+    }
+    return strength;
+  }
+
  private:
   static uint32_t next_random(uint32_t& state) {
     state ^= state << 13; state ^= state >> 17; state ^= state << 5; return state;

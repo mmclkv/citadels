@@ -16,7 +16,8 @@ namespace citadels::native {
 // redistributed without changing pile sizes.
 inline NativeGameState determinize_native_state(const NativeGameState& source,
                                                 int viewer,
-                                                uint32_t seed) {
+                                                uint32_t seed,
+                                                bool canonical_hidden_pool = false) {
   NativeGameState result = source;
   if (viewer < 0 || viewer >= static_cast<int>(result.players.size())) return result;
   std::mt19937 rng(seed);
@@ -33,7 +34,14 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
     // Wizard sees the target's complete hand before choosing one card. Keep
     // those identities pinned in every particle; wizard_take resolves by UID.
     if (viewer_has_seen_wizard_hand && static_cast<int>(player) == result.pending_target) continue;
-    for (auto& card : result.players[player].hand) hidden_cards.push_back(&card);
+    for (auto& card : result.players[player].hand) {
+      // An announced construction waiting for a Magistrate reaction is public,
+      // even though the engine temporarily keeps its card in the builder's hand.
+      // Re-sampling that UID makes both confiscate/decline impossible to resolve.
+      if(result.reaction_kind=="magistrate" && result.reaction_build &&
+          static_cast<int>(player)==result.active_player && card.uid==result.reaction_uid)continue;
+      hidden_cards.push_back(&card);
+    }
     for (auto& district : result.players[player].city)
       for (auto& card : district.museum_cards) hidden_cards.push_back(&card);
   }
@@ -45,6 +53,10 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
   std::vector<DistrictCard> shuffled_cards;
   shuffled_cards.reserve(hidden_cards.size());
   for (const auto* card : hidden_cards) shuffled_cards.push_back(*card);
+  // Optional reproducible sampling from an information set: authoritative
+  // hidden-zone ordering must not affect a fixed-seed heuristic search.
+  if (canonical_hidden_pool) std::sort(shuffled_cards.begin(),shuffled_cards.end(),
+    [](const auto& a,const auto& b){return a.uid<b.uid;});
   std::shuffle(shuffled_cards.begin(), shuffled_cards.end(), rng);
   for (size_t i = 0; i < hidden_cards.size(); ++i) *hidden_cards[i] = std::move(shuffled_cards[i]);
 
@@ -75,6 +87,7 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
   std::vector<std::string> shuffled_roles;
   shuffled_roles.reserve(hidden_roles.size());
   for (const auto* role : hidden_roles) shuffled_roles.push_back(*role);
+  if (canonical_hidden_pool) std::sort(shuffled_roles.begin(),shuffled_roles.end());
   std::shuffle(shuffled_roles.begin(), shuffled_roles.end(), rng);
   for (size_t i = 0; i < hidden_roles.size(); ++i) *hidden_roles[i] = std::move(shuffled_roles[i]);
 

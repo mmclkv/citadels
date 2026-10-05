@@ -16,7 +16,7 @@
 #include "game_adapter.hpp"
 #include "game_setup.hpp"
 #include "json_value.hpp"
-#include "npc_policy.hpp"
+#include "heuristic_search.hpp"
 #include "state_loader.hpp"
 #include "state_writer.hpp"
 
@@ -151,6 +151,9 @@ int main() {
         const int max_steps = std::max(1, int_field(request, "maxSteps", 60000));
         const uint32_t seed = static_cast<uint32_t>(int_field(request, "seed", 1));
         int steps = 0;
+        int heuristic_searches=0,heuristic_fallbacks=0,heuristic_visits=0;
+        double heuristic_ms=0;
+        std::string heuristic_failure;
         const bool include_training_features = bool_field(request, "includeTrainingFeatures");
         std::vector<std::pair<std::string, std::vector<float>>> training_samples;
         while (steps < max_steps && state.phase != NativePhase::GameOver &&
@@ -159,8 +162,12 @@ int main() {
           if (actor < 0 || actor >= static_cast<int>(state.players.size())) break;
           if (network_players.count(state.players[actor].id)) break;
           const auto actions = rules.legal_actions(state, actor);
-          const int selected = NativeNpcPolicy::choose(state, actor, actions,
+          const auto heuristic_decision = choose_native_npc(state, actor, actions,
               seed + static_cast<uint32_t>(steps) * 0x9E3779B1u);
+          const int selected=heuristic_decision.selected;
+          heuristic_searches+=heuristic_decision.searched;heuristic_fallbacks+=heuristic_decision.fallback;
+          heuristic_visits+=heuristic_decision.visits;heuristic_ms+=heuristic_decision.elapsed_ms;
+          if(heuristic_decision.fallback && heuristic_failure.empty())heuristic_failure=heuristic_decision.fallback_reason;
           if (selected < 0 || selected >= static_cast<int>(actions.size())) {
             std::ostringstream detail;
             detail << "NPC 策略未选出有效行动（player=" << state.players[actor].id
@@ -200,6 +207,10 @@ int main() {
         std::cout << "{\"v\":1,\"t\":\"advance_result\",\"id\":";
         write_json_string(std::cout, id);
         std::cout << ",\"steps\":" << steps << ",\"round\":" << state.round
+                  << ",\"heuristicSearch\":{\"searches\":" << heuristic_searches << ",\"fallbacks\":" << heuristic_fallbacks
+                  << ",\"visits\":" << heuristic_visits << ",\"elapsedMs\":" << heuristic_ms << ",\"fallbackReason\":";
+        write_json_string(std::cout,heuristic_failure);
+        std::cout << "}"
                   << ",\"gameOver\":" << (state.phase == NativePhase::GameOver ? "true" : "false")
                   << ",\"playerId\":";
         if (actor < 0 || actor >= static_cast<int>(state.players.size())) std::cout << "null";
@@ -224,14 +235,20 @@ int main() {
         const int actor = player_index(state, string_field(request, "playerId"));
         const auto actions = actor < 0 ? std::vector<NativeSearchAction>{} : rules.legal_actions(state, actor);
         if (mode == "npc") {
-          const int selected = NativeNpcPolicy::choose(state, actor, actions,
+          const auto decision = choose_native_npc(state, actor, actions,
               static_cast<uint32_t>(int_field(request, "seed", 1)));
+          const int selected=decision.selected;
           std::cout << "{\"v\":1,\"t\":\"npc_result\",\"id\":";
           write_json_string(std::cout, id);
           std::cout << ",\"action\":";
           if (selected < 0 || selected >= static_cast<int>(actions.size())) std::cout << "null";
           else write_native_action(std::cout, actions[static_cast<size_t>(selected)]);
-          std::cout << "}\n" << std::flush;
+          std::cout << ",\"heuristicSearch\":{\"searched\":" << (decision.searched?"true":"false")
+                    << ",\"fallback\":" << (decision.fallback?"true":"false")
+                    << ",\"visits\":" << decision.visits << ",\"expansions\":" << decision.expansions
+                    << ",\"particles\":" << decision.particles << ",\"elapsedMs\":" << decision.elapsed_ms << ",\"fallbackReason\":";
+          write_json_string(std::cout,decision.fallback_reason);
+          std::cout << "}}\n" << std::flush;
         } else {
           std::cout << "{\"v\":1,\"t\":\"legal_actions_result\",\"id\":";
           write_json_string(std::cout, id);
