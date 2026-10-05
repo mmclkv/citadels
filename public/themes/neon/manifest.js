@@ -26,7 +26,7 @@
     // 魔术师恢复为原卡图；
     // 单独版本化，让已安装 PWA 绕过旧图片的 HTTP / Service Worker 缓存。
     const versioned = (folder === 'districts' && key === 'graveyard') ||
-      (folder === 'roles' && (key === 'blackmailer' || key === 'magician' || key === 'wizard' || key === 'bishop' || key === 'spy' || key === 'businessman' || key === 'diplomat' || key === 'king' || key === 'alchemist' || key === 'architect'));
+      (folder === 'roles' && (key === 'blackmailer' || key === 'magician' || key === 'wizard' || key === 'bishop' || key === 'spy' || key === 'businessman' || key === 'diplomat' || key === 'king' || key === 'alchemist' || key === 'architect' || key === 'thief'));
     const version = folder === 'roles' && key === 'magician'
       ? '?v=3'
       : (folder === 'roles' && key === 'bishop'
@@ -37,7 +37,9 @@
             ? '?v=4'
             : (folder === 'roles' && key === 'wizard'
               ? '?v=3'
-              : (versioned ? '?v=2' : '')))));
+              : (folder === 'roles' && key === 'businessman'
+                ? '?v=3'
+                : (versioned ? '?v=2' : ''))))));
     return {
       thumb: base + folder + '/thumb/' + key + '.webp' + version,
       full: base + folder + '/full/' + key + '.webp' + version
