@@ -145,14 +145,30 @@
   // 只有宣告类效果、以及被效果选中的对象本人才弹全屏提示，其余效果在玩家行上弹气泡。
   const DECLARE_ROLES=new Set(['刺客','盗贼','女巫','行政官','勒索者']);
   const idxId=(s,i)=>((s.players||[])[i]||{}).id;
-  function noticeView(n,s){switch(n.kind){
-    case 'role_effect':return {actor:idxId(s,n.playerIdx),full:false,tone:'magic',icon:'✦',title:`角色能力发动 · ${n.roleName||'角色'}`,
-      text:`${n.playerName||seatName(s,n.playerIdx)} 发动了【${n.roleName||'角色'}】能力`,detail:n.description};
-    case 'role_effect_detail':{const full=DECLARE_ROLES.has(n.roleName);
-      return {actor:idxId(s,n.playerIdx),full,tone:full?'magic':'info',icon:full?'✦':'·',title:`${n.roleName||'角色'}效果`,
-        text:`${n.playerName||seatName(s,n.playerIdx)}：${n.description||'效果已结算'}`};}
+  // notice 只带发动者，对象名字是按 _player_label（server.py:912）的「座位N·名字」写进描述的，
+  // 所以要靠文本反推出被选中的玩家。
+  const myHeldNums=s=>{const me=(s.players||[]).find(p=>p.id===M.id);return ((me&&me.chars)||[]).map(c=>Number(c.num));};
+  function mentionedIds(text,s,exclude){const out=[];if(!text)return out;
+    // 只认「座位N·名字」这一种标签，避免像「我」这种短名字在别的文案里被误判成对象。
+    (s.players||[]).forEach(p=>{if(p.id===exclude||p.seat==null)return;
+      if(text.includes(`座位${p.seat+1}·`)||(p.name&&text.includes(`·${p.name}`)))out.push(p.id);});
+    return out;}
+  const hitsMe=(...ids)=>ids.some(id=>id&&id.includes(M.id));
+  function noticeView(n,s){const ev=noticeData(n,s);if(ev&&ev.victim===M.id)ev.full=true;return ev;}
+  function noticeData(n,s){switch(n.kind){
+    case 'role_effect':{const actor=idxId(s,n.playerIdx),victims=mentionedIds(n.description,s,actor);
+      return {actor,victim:hitsMe(victims)?M.id:null,full:false,tone:'magic',icon:'✦',title:`角色能力发动 · ${n.roleName||'角色'}`,
+        text:`${n.playerName||seatName(s,n.playerIdx)} 发动了【${n.roleName||'角色'}】能力`,detail:n.description};}
+    case 'role_effect_detail':{const full=DECLARE_ROLES.has(n.roleName),actor=idxId(s,n.playerIdx),desc=n.description||'效果已结算';
+      const victims=mentionedIds(desc,s,actor);
+      const nums=[...String(desc).matchAll(/(\d+)\s*号/g)].map(m=>Number(m[1]));
+      const targeted=hitsMe(victims,nums.length&&myHeldNums(s).some(x=>nums.includes(x))?[M.id]:[]);
+      return {actor,victim:targeted?M.id:null,full,tone:full?'magic':'info',icon:full?'✦':'·',
+        title:targeted?`${n.roleName||'角色'}效果 · 目标是你`:`${n.roleName||'角色'}效果`,
+        text:`${n.playerName||seatName(s,n.playerIdx)}：${desc}`};}
     case 'magistrate_declare':{const list=n.targets&&n.targets.length?n.targets:(n.nums||[]).map(num=>({num,name:`${num} 号角色`}));
-      return {actor:n.byId,full:true,tone:'magic',icon:'§',title:'行政官发出逮捕令',
+      const mine=list.some(t=>myHeldNums(s).includes(Number(t.num)));
+      return {actor:n.byId,victim:mine?M.id:null,full:true,tone:'magic',icon:'§',title:mine?'你收到了逮捕令':'行政官发出逮捕令',
         text:`${n.byName||''} 把 3 张逮捕令发给了 ${list.map(t=>`${t.num} 号·${t.name}`).join('、')}`,
         detail:'其中只有一张是真的，被真逮捕令命中的玩家建造时建筑会被没收。'};}
     case 'magistrate_confiscate':return {actor:n.byId,victim:n.playerId,full:n.playerId===M.id,tone:'danger',icon:'§',title:'建筑被没收',
@@ -161,12 +177,13 @@
       text:`【元帅】${n.byName||''} 从 ${n.playerName||''} 处抢走了『${n.cardName||'建筑'}』`};
     case 'crown_transfer':return {actor:idxId(s,n.fromIdx),victim:idxId(s,n.toIdx),full:idxId(s,n.toIdx)===M.id,tone:'warn',icon:'♛',title:'皇冠已转移',
       text:`皇冠交给了 ${seatName(s,n.toIdx)}`};
-    case 'prophet_collect':return {actor:idxId(s,n.toIdx),full:false,tone:'info',icon:'☉',title:'预言家收集手牌',
-      text:`${seatName(s,n.toIdx)} 从其他玩家处各取走 1 张手牌`};
+    case 'prophet_collect':{const from=(n.fromIdxs||[]).map(i=>idxId(s,i));
+      return {actor:idxId(s,n.toIdx),victim:hitsMe(from)?M.id:null,full:false,tone:'info',icon:'☉',title:'预言家收集手牌',
+        text:`${seatName(s,n.toIdx)} 从其他玩家处各取走 1 张手牌`};}
     default:return null;}}
   function noticeEvent(n,s){const ev=noticeView(n,s);if(!ev)return;
     if(n.kind==='role_effect'||n.kind==='role_effect_detail')M.effectFallback=null;
-    if(ev.full||ev.victim===M.id)queueEvent(ev);else bubbleOn(ev);}
+    if(ev.full)queueEvent(ev);else bubbleOn(ev);}
   // 引擎对「没有对象」的效果（魔术师弃牌重抽、航海家奖励等）既不发 role_effect 也不发 detail，
   // 本地提交后短时间没等到提示就自己补一个气泡，保证每个效果都有反馈。
   function expectEffect(text){clearTimeout(M.effectTimer);M.effectFallback=text;
