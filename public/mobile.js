@@ -118,6 +118,8 @@
   function effectItems(){const s=M.state,e=s&&s.effects||{},deck=s&&s.charDeck||[];
     if(!M.fxMemo||M.fxMemo.round!==s.round)M.fxMemo={round:s.round};
     const memo=M.fxMemo,out=[];
+    // Tax is a live bank balance, not a remembered declaration: collection resets it.
+    if(deck.some(c=>c.id==='tax_collector'))out.push({tone:'warn',icon:'$',text:`累计建筑税：${e.taxCollectorGold||0} 枚金币`});
     const label=n=>{const c=deck.find(x=>Number(x.num)===Number(n));return `${n} 号${c?'·'+c.name:''}`;};
     const keep=(key,val,make)=>{const live=val!=null;if(live)memo[key]=val;const num=live?val:memo[key];
       if(num!=null)out.push(make(num,!live));};
