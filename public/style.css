@@ -42,8 +42,14 @@ a{color:var(--gold-d, #a97c15)}
 .mobile-fit-root{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;transform-origin:top left}
 .mobile-menu-toggle{display:none}
 #screen-home.active,#screen-setup.active,#screen-lobby.active,#screen-over.active{
-  align-items:center;justify-content:center;overflow:auto;padding:24px;
+  align-items:center;overflow:auto;
+  /* 首页/设置/大厅在移动端铺满到刘海下方，用安全区内边距把内容推回可见区（桌面端 env 为 0） */
+  padding:calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+          calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
 }
+/* 内容比屏幕高时 justify-content:center 会把顶部推到可视区之外且滚不回来；
+   margin:auto 在有余量时居中、溢出时退回顶部对齐（同 .pick-grid 的处理） */
+#screen-home.active>*,#screen-setup.active>*,#screen-lobby.active>*,#screen-over.active>*{margin:auto}
 
 /* ------------------------------ 主菜单 ------------------------------ */
 .home-wrap{max-width:820px;text-align:center}

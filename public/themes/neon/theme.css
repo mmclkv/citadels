@@ -104,10 +104,13 @@ html:not([data-theme="neon"]) .theme-control .theme-option { background:rgba(255
 /* 主菜单：安静的城市 HUD 远景，卡片负责视觉爆发 */
 html[data-theme="neon"] #screen-home {
   align-items:center;
-  justify-content:center;
   overflow:auto;
-  padding:48px 24px 30px;
+  /* 不再 justify-content:center：内容超出屏幕时它会把顶部推到可视区外且滚不回来，
+     居中交给 .home-wrap 的 margin:auto（溢出时自动退回顶部对齐） */
+  padding:calc(48px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+          calc(30px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
 }
+html[data-theme="neon"] #screen-home.active > * { margin:auto; }
 html[data-theme="neon"] .home-wrap { max-width:980px; text-align:left; }
 html[data-theme="neon"] .home-wrap::before {
   content:"";
