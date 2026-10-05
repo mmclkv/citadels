@@ -14,6 +14,27 @@
 
 namespace citadels::native {
 
+// Shared authoritative score used by terminal rewards and heuristic planning.
+inline float native_player_score(const NativeGameState& state, int index) {
+  const auto& player = state.players.at(static_cast<size_t>(index));
+  constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
+  float total = 0;
+  int ghosts = 0;
+  std::array<bool, 5> have{};
+  for (const auto& d : player.city) {
+    total += d.card.score_as > 0 ? d.card.score_as
+      : d.card.score_value > 0 ? d.card.score_value : d.card.cost;
+    total += static_cast<int>(d.museum_cards.size()) + int(d.beautified);
+    for (size_t c = 0; c < colors.size(); ++c) if (d.card.color == colors[c]) have[c] = true;
+    if (d.effect == "anyColorScore" && d.built_round != state.round) ++ghosts;
+  }
+  const int missing = static_cast<int>(std::count(have.begin(), have.end(), false));
+  if (missing == 0 || missing <= ghosts) total += 3;
+  if (state.first_to_finish == index) total += 4;
+  else if (player.city.size() >= static_cast<size_t>(state.end_districts)) total += 2;
+  return total;
+}
+
 // Historical terminal reward implementation: scoreValue/cost
 // building points, museum and beautification points, five-color bonus (with
 // last-round ghost-town exclusion), and completion bonuses.
@@ -24,29 +45,8 @@ inline std::array<float, kValueSlots> native_terminal_reward_vector(
   struct Score { int player = -1; float total = 0.0f; };
   std::vector<Score> scores;
   scores.reserve(state.players.size());
-  constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
   for (size_t i = 0; i < state.players.size(); ++i) {
-    const auto& player = state.players[i];
-    float base = 0.0f;
-    int museum = 0, beautified = 0, usable_ghosts = 0;
-    std::array<bool, 5> have{};
-    for (const auto& district : player.city) {
-      base += district.card.score_as > 0 ? district.card.score_as
-        : district.card.score_value > 0 ? district.card.score_value : district.card.cost;
-      for (size_t color = 0; color < colors.size(); ++color)
-        if (district.card.color == colors[color]) have[color] = true;
-      museum += static_cast<int>(district.museum_cards.size());
-      if (district.beautified) ++beautified;
-      if (district.effect == "anyColorScore" && district.built_round != state.round)
-        ++usable_ghosts;
-    }
-    int missing = 0;
-    for (bool present : have) if (!present) ++missing;
-    int bonus = museum + beautified;
-    if (missing == 0 || missing <= usable_ghosts) bonus += 3;
-    if (state.first_to_finish == static_cast<int>(i)) bonus += 4;
-    else if (player.city.size() >= static_cast<size_t>(state.end_districts)) bonus += 2;
-    scores.push_back({static_cast<int>(i), base + bonus});
+    scores.push_back({static_cast<int>(i), native_player_score(state, static_cast<int>(i))});
   }
   for (size_t rel = 0; rel < scores.size() && rel < kValueSlots; ++rel) {
     const int player = (perspective_player + static_cast<int>(rel)) % static_cast<int>(state.players.size());
