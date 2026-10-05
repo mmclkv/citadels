@@ -25,6 +25,22 @@ def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
             "particles": _int_at_least(value.get("particles", fallback.get("mctsParticles")), 4, 1)}
 
 
+def _seat_heuristic_mcts(value: dict | None = None) -> dict:
+    value = value or {}
+    defaults = {"simulations": (128, 1), "particles": (8, 1), "maxDepth": (32, 1),
+                "timeBudgetMs": (200, 0), "criticalTimeBudgetMs": (400, 0),
+                "cPuct": (1.4, 0), "rolloutSteps": (8, 0), "rollouts": (1, 1),
+                "maxTreeNodes": (4096, 1)}
+    result = {key: _int_at_least(value.get(key), default, minimum)
+              for key, (default, minimum) in defaults.items() if key != "cPuct"}
+    try:
+        result["cPuct"] = max(0.0, float(value.get("cPuct", 1.4)))
+    except (TypeError, ValueError, OverflowError):
+        result["cPuct"] = 1.4
+    result["reuseTree"] = value.get("reuseTree") is not False
+    return result
+
+
 def _identity(prefix: str) -> str:
     return prefix + "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
 
@@ -51,6 +67,7 @@ def _bot_seat(index: int, config: dict) -> dict:
     return {"id": _identity("b"), "name": f"电脑 {index}", "isBot": True,
             "botType": bot_type, "botLevel": bot_level,
             "mcts": _seat_mcts(config.get("mcts"), config),
+            "heuristicMcts": _seat_heuristic_mcts(config.get("heuristicMcts")),
             "taken": True, "disconnected": False, "left": False}
 
 
@@ -60,6 +77,7 @@ def lobby_view(room: dict) -> dict:
                 {"index": index, "id": seat["id"], "name": seat["name"],
                  "isBot": bool(seat["isBot"]), "botType": seat.get("botType") or "npc",
                  "botLevel": seat.get("botLevel") or "normal", "mcts": seat.get("mcts"),
+                 "heuristicMcts": seat.get("heuristicMcts"),
                  "taken": bool(seat["taken"]),
                  "connected": bool(seat["isBot"] or not seat.get("disconnected") and not seat.get("left")),
                  "disconnected": bool(seat.get("disconnected")), "left": bool(seat.get("left"))}
@@ -72,7 +90,7 @@ def public_room(room: dict) -> dict:
             "phase": room["state"]["phase"] if room["state"] else "lobby",
             "seats": [{"name": seat["name"], "isBot": bool(seat["isBot"]),
                        "botType": seat.get("botType") or "npc", "botLevel": seat.get("botLevel"),
-                       "mcts": seat.get("mcts"),
+                       "mcts": seat.get("mcts"), "heuristicMcts": seat.get("heuristicMcts"),
                        "taken": bool(seat["taken"]), "id": seat["id"],
                        "connected": bool(seat["isBot"] or not seat.get("disconnected") and not seat.get("left")),
                        "disconnected": bool(seat.get("disconnected")), "left": bool(seat.get("left"))}

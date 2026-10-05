@@ -170,7 +170,10 @@ class HeuristicSearchSession {
     if(player_!=player || round_!=s.round || phase_!=s.phase || owner_!=s.players[player].id ||
        role_!=s.players[player].role_id || options_.rollout_steps!=c.rollout_steps ||
        options_.rollouts!=c.rollouts || options_.particles!=c.particles ||
-       options_.max_depth!=c.max_depth || options_.c_puct!=c.c_puct ||
+       options_.simulations!=c.simulations || options_.max_depth!=c.max_depth ||
+       options_.c_puct!=c.c_puct || options_.time_budget_ms!=c.time_budget_ms ||
+       options_.critical_time_budget_ms!=c.critical_time_budget_ms ||
+       options_.reuse_tree!=c.reuse_tree || options_.max_tree_nodes!=c.max_tree_nodes ||
        tree.nodes()>static_cast<size_t>(c.max_tree_nodes))tree.clear();
     player_=player;round_=s.round;phase_=s.phase;owner_=s.players[player].id;
     role_=s.players[player].role_id;options_=c;

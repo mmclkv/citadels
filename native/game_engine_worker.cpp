@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <optional>
 #include <stdexcept>
@@ -26,6 +27,32 @@ using namespace citadels::native;
 namespace {
 std::unordered_map<std::string, NativeGameState> games;
 std::unordered_map<std::string, HeuristicSearchSession> heuristic_sessions;
+
+HeuristicSearchConfig heuristic_options(const JsonValue& request) {
+  auto config = heuristic_search_defaults();
+  const auto* value = request.get("heuristicMcts");
+  if (!value || !value->is_object()) return config;
+  const auto integer = [&](const char* key, int fallback, int minimum) {
+    const auto* field = value->get(key);
+    if (!field || !field->is_number()) return fallback;
+    const double number = field->as_number();
+    if (number < minimum || number > std::numeric_limits<int>::max()) return fallback;
+    return static_cast<int>(number);
+  };
+  config.simulations = integer("simulations", config.simulations, 1);
+  config.particles = integer("particles", config.particles, 1);
+  config.max_depth = integer("maxDepth", config.max_depth, 1);
+  config.time_budget_ms = integer("timeBudgetMs", config.time_budget_ms, 0);
+  config.critical_time_budget_ms = integer("criticalTimeBudgetMs", config.critical_time_budget_ms, 0);
+  config.rollout_steps = integer("rolloutSteps", config.rollout_steps, 0);
+  config.rollouts = integer("rollouts", config.rollouts, 1);
+  config.max_tree_nodes = integer("maxTreeNodes", config.max_tree_nodes, 1);
+  if (const auto* field = value->get("cPuct"); field && field->is_number())
+    config.c_puct = static_cast<float>(std::max(0.0, field->as_number()));
+  if (const auto* field = value->get("reuseTree"); field && field->is_bool())
+    config.reuse_tree = field->as_bool();
+  return config;
+}
 
 void emit_error(const std::string& id, const std::string& message) {
   std::cout << "{\"v\":1,\"t\":\"error\",\"id\":";
@@ -248,7 +275,7 @@ int main() {
         const auto actions = actor < 0 ? std::vector<NativeSearchAction>{} : rules.legal_actions(state, actor);
         if (mode == "npc") {
           const auto decision = choose_native_npc(state, actor, actions,
-              static_cast<uint32_t>(int_field(request, "seed", 1)),heuristic_search_defaults(),&heuristic_sessions[game_id]);
+              static_cast<uint32_t>(int_field(request, "seed", 1)),heuristic_options(request),&heuristic_sessions[game_id]);
           const int selected=decision.selected;
           std::cout << "{\"v\":1,\"t\":\"npc_result\",\"id\":";
           write_json_string(std::cout, id);

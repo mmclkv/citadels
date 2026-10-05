@@ -25,7 +25,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import cards
-from .rooms import RoomRegistry, _bot_seat, _empty_seat, _seat_mcts, lobby_view, public_room
+from .rooms import (RoomRegistry, _bot_seat, _empty_seat, _seat_mcts,
+                    _seat_heuristic_mcts, lobby_view, public_room)
 from .views import sanitize
 from .agent import AgentClient, AgentError, config_from_env
 from .voice import VoiceService
@@ -1405,7 +1406,8 @@ class PythonServer:
                         raise RuntimeError("NPC 策略需要运行中的 C++ 游戏引擎")
                     action = await asyncio.to_thread(
                         worker.decide_npc, game_id=str(room["id"]), player_id=actor_now["id"],
-                        seed=secrets.randbits(32))
+                        seed=secrets.randbits(32),
+                        heuristic_mcts=actor_now.get("heuristicMcts"))
                 if action is None:
                     break
                 result = await self._apply_game_action(room, actor_now["id"], action)
@@ -1590,10 +1592,13 @@ class PythonServer:
                 previous = room["seats"][index]
                 bot_config = {**room["config"],
                               "mcts": message.get("mcts") or previous.get("mcts"),
+                              "heuristicMcts": message.get("heuristicMcts") or previous.get("heuristicMcts"),
                               "botType": message.get("botType") or room["config"].get("botType"),
                               "botLevel": message.get("botLevel") or room["config"].get("botLevel")}
                 room["seats"][index] = _bot_seat(index, bot_config)
                 room["seats"][index]["mcts"] = _seat_mcts(bot_config["mcts"], room["config"])
+                if message.get("heuristicMcts"):
+                    room["seats"][index]["heuristicMcts"] = _seat_heuristic_mcts(message["heuristicMcts"])
             elif message.get("kind") == "open":
                 room["seats"][index] = _empty_seat()
             else:

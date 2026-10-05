@@ -371,7 +371,8 @@
     M.actions=grouped.filter(a=>!a._targetGroup&&!(M.selection&&a.type==='choose_cards'));
     const prompt=s.available?.prompt||(s.phase==='draft'?'选角阶段':s.phase==='gameover'?'游戏结束':'等待其他玩家行动');
     $('selectedInfo').textContent=M.targetType?'在公开区域选择目标玩家':choice?choice.title:prompt;
-    const buttons=M.actions.map((a,i)=>`<button class="btn ${a.type==='end_turn'||a.type==='ability_skip'?'ghost':a.type==='ability'?'purple':'primary'}" type="button" data-action-index="${i}" title="${esc(a.label||a.type)}">${esc(a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type)}</button>`);
+    const buttons=M.actions.map((a,i)=>{const label=a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
+      return `<button class="btn ${a.type==='end_turn'||a.type==='ability_skip'?'ghost':a.type==='ability'?'purple':'primary'}" type="button" data-action-index="${i}" title="${esc(label)}">${esc(label)}</button>`;});
     const current=s.phase==='draft'?s.draft?.currentPlayer:s.turn?.playerId;
     if(current===M.id&&!M.targetType&&!M.selection&&choice)buttons.unshift(`<button class="btn gold" type="button" id="chooseTarget">${esc(String(choice.title||'选择目标').replace(/^请/,''))}</button>`);
     if(!M.targetType&&!M.selection&&all.some(a=>a.type==='build'))buttons.unshift('<button class="btn gold" type="button" id="chooseBuild">建造建筑</button>');

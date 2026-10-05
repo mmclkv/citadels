@@ -66,9 +66,9 @@ class _ReferenceRulesWorker:
         return {"phase": state["phase"], **result}
 
     def decide_npc(self, *, player_id: str, seed: int = 1, state: dict | None = None,
-                   game_id: str | None = None) -> dict | None:
+                   game_id: str | None = None, heuristic_mcts: dict | None = None) -> dict | None:
         state = self._state(game_id, state)
-        del seed
+        del seed, heuristic_mcts
         if self.npc_decisions >= 2:
             return None
         self.npc_decisions += 1
@@ -910,6 +910,37 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(negative["config"]["mctsParticles"], 1)
         zero = rooms.create_room("Zero", {"playerCount": 2, "mctsSimulations": 0})
         self.assertEqual(zero["config"]["mctsSimulations"], 0)
+
+    async def test_room_exposes_configurable_heuristic_mcts_per_bot_seat(self) -> None:
+        room = RoomRegistry().create_room("Host", {"playerCount": 2, "bots": 1,
+            "heuristicMcts": {"simulations": 640, "particles": 12, "maxDepth": 96,
+                              "cPuct": 1.8, "reuseTree": False}})
+        self.assertEqual(room["seats"][1]["heuristicMcts"]["simulations"], 640)
+        self.assertEqual(room["seats"][1]["heuristicMcts"]["particles"], 12)
+        self.assertEqual(room["seats"][1]["heuristicMcts"]["maxDepth"], 96)
+        self.assertEqual(room["seats"][1]["heuristicMcts"]["cPuct"], 1.8)
+        self.assertFalse(room["seats"][1]["heuristicMcts"]["reuseTree"])
+
+    async def test_set_seat_saves_heuristic_mcts_options(self) -> None:
+        class StubClient:
+            def __init__(self, player_id, room_id):
+                self.id, self.room_id = player_id, room_id
+            async def send(self, _payload):
+                return None
+
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        host = StubClient(room["seats"][0]["id"], room["id"])
+        options = {"simulations": 640, "particles": 12, "maxDepth": 96,
+                   "timeBudgetMs": 350, "criticalTimeBudgetMs": 800,
+                   "cPuct": 1.8, "rolloutSteps": 10, "rollouts": 2,
+                   "maxTreeNodes": 8192, "reuseTree": False}
+        await self.app._handle_message(host, {"t": "setSeat", "index": 1, "kind": "bot",
+            "botType": "npc-hard", "heuristicMcts": options})
+        seat = room["seats"][1]
+        self.assertEqual(seat["botLevel"], "hard")
+        self.assertEqual(seat["heuristicMcts"]["simulations"], 640)
+        self.assertEqual(seat["heuristicMcts"]["criticalTimeBudgetMs"], 800)
+        self.assertFalse(seat["heuristicMcts"]["reuseTree"])
 
     async def test_python_npc_driver_takes_a_legal_draft_action(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
