@@ -27,6 +27,13 @@ def _worker_sources() -> list[Path]:
     return [NATIVE_DIR / "mcts_worker.cpp", *sorted(NATIVE_DIR.glob("*.hpp"))]
 
 
+def _msvc_build_command(devcmd: str, args: list[str]) -> str:
+    # Passing the /c payload as a list element makes list2cmdline insert
+    # backslash-escaped quotes, which cmd.exe does not interpret as escaping.
+    command = f'call "{devcmd}" -arch=x64 -host_arch=x64 && {subprocess.list2cmdline(args)}'
+    return f'cmd.exe /d /s /c "{command}"'
+
+
 class NativeWorkerManager:
     def __init__(self, log=print) -> None:
         self.log = log
@@ -166,8 +173,7 @@ class NativeWorkerManager:
             # Windows, launching clang directly from Python can produce an exe
             # that links successfully but fails at process startup.
             if os.name == "nt":
-                command = f'call "{devcmd}" -arch=x64 -host_arch=x64 && {subprocess.list2cmdline(args)}'
-                run_args = ["cmd.exe", "/d", "/c", command]
+                run_args = _msvc_build_command(devcmd, args)
             else:
                 run_args = args
             result = subprocess.run(run_args, shell=False,
@@ -218,8 +224,7 @@ class NativeWorkerManager:
         self.log("[game] 游戏引擎源码已更新，使用 clang++ 编译独立游戏主进程…")
         try:
             if os.name == "nt" and devcmd:
-                command = f'call "{devcmd}" -arch=x64 -host_arch=x64 && {subprocess.list2cmdline(args)}'
-                run_args = ["cmd.exe", "/d", "/c", command]
+                run_args = _msvc_build_command(devcmd, args)
             else:
                 run_args = args
             result = subprocess.run(run_args, shell=False, cwd=ROOT,

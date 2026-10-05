@@ -30,6 +30,16 @@ class _GameWorker:
 
 
 class NativeWorkerManagerTests(unittest.TestCase):
+    def test_msvc_command_preserves_cmd_quotes(self):
+        command = manager_module._msvc_build_command(
+            "C:/Program Files/VS/VsDevCmd.bat",
+            ["C:/Program Files/LLVM/bin/clang++.exe", "C:/User Name/game.cpp"])
+        self.assertIsInstance(command, str)
+        self.assertTrue(command.startswith('cmd.exe /d /s /c "call "'))
+        self.assertIn('&& "C:/Program Files/LLVM/bin/clang++.exe"', command)
+        self.assertIn('"C:/User Name/game.cpp"', command)
+        self.assertNotIn('\\"', command)
+
     def test_game_only_mode_does_not_import_torch_or_start_mcts(self):
         logs = []
         manager = manager_module.NativeWorkerManager(logs.append)
