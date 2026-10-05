@@ -1402,7 +1402,7 @@ class PythonServer:
                     worker = (self.native_worker_manager.game_worker
                               if self.native_worker_manager and self.native_worker_manager.running else None)
                     if worker is None:
-                        raise RuntimeError("NPC 策略需要运行中的 C++ MCTS worker")
+                        raise RuntimeError("NPC 策略需要运行中的 C++ 游戏引擎")
                     action = await asyncio.to_thread(
                         worker.decide_npc, game_id=str(room["id"]), player_id=actor_now["id"],
                         seed=secrets.randbits(32))
@@ -1765,17 +1765,29 @@ class PythonServer:
                 if seat:
                     seat["disconnected"] = True
                     seat["left"] = False
-                    if room["state"] and room["state"]["phase"] != "gameover":
-                        player = next((p for p in room["state"]["players"]
-                                       if p["id"] == seat["id"]), None)
-                        if player:
-                            player["isBot"] = True
-                        _append_game_log(room["state"], seat["name"] + " 已断连，由电脑托管。", "sys")
                     await self._send_room_notice(room, {"kind": "player_disconnected",
                                                         "playerId": seat["id"],
                                                         "playerName": seat["name"]}, client.id)
                     await self._broadcast_state(room)
-                    self._schedule_bot(room)
+                    # A desktop/lobby → mobile-page navigation briefly closes the
+                    # socket. Give the same resume token time to reconnect before
+                    # allowing the NPC to take an irreversible game action.
+                    async def takeover_after_grace() -> None:
+                        await asyncio.sleep(5)
+                        if not seat.get("disconnected") or seat.get("left") or not room.get("state"):
+                            return
+                        if any(other.id == seat["id"] and other.room_id == room["id"]
+                               for other in self.clients):
+                            return
+                        if room["state"]["phase"] != "gameover":
+                            player = next((p for p in room["state"]["players"]
+                                           if p["id"] == seat["id"]), None)
+                            if player:
+                                player["isBot"] = True
+                            _append_game_log(room["state"], seat["name"] + " 已断连，由电脑托管。", "sys")
+                            await self._broadcast_state(room)
+                            self._schedule_bot(room)
+                    asyncio.create_task(takeover_after_grace())
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -2038,9 +2050,9 @@ class PythonServer:
                 pass
 
 
-async def serve(host: str, port: int) -> None:
+async def serve(host: str, port: int, *, skip_neural_policy: bool = False) -> None:
     native_worker = NativeWorkerManager(lambda message: print(message, flush=True))
-    await asyncio.to_thread(native_worker.start)
+    await asyncio.to_thread(native_worker.start, skip_neural_policy=skip_neural_policy)
     try:
         app = PythonServer(native_worker)
         server = await asyncio.start_server(app.handle, host, port, limit=MAX_HEADER_BYTES)
@@ -2078,6 +2090,8 @@ def parse_server_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("port", nargs="?", type=int, default=default_port)
     parser.add_argument("--host", default=os.environ.get(
         "CITADELS_HOST", os.environ.get("HOST", "127.0.0.1")))
+    parser.add_argument("--skip-neural-policy", action="store_true",
+                        help="只启动 C++ 游戏规则引擎，跳过 LibTorch 神经策略 worker")
     args = parser.parse_args(argv)
     allow_ephemeral = os.environ.get("CITADELS_ALLOW_EPHEMERAL_PORT") == "1"
     minimum_port = 0 if allow_ephemeral else 1
@@ -2090,7 +2104,7 @@ def parse_server_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_server_args()
-    asyncio.run(serve(args.host, args.port))
+    asyncio.run(serve(args.host, args.port, skip_neural_policy=args.skip_neural_policy))
 
 
 if __name__ == "__main__":

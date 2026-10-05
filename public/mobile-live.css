@@ -1,0 +1,181 @@
+/* The game board above comes directly from the V12 prototype. These rules only
+   cover live-game controls and small corrections discovered during comparison. */
+.phone{isolation:isolate}
+.sidebar-toggle{justify-self:end;width:36px;min-width:36px;font-size:26px;line-height:1}
+.entry-overlay,.menu-overlay,.reference-overlay{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(2,7,14,.94)}
+.entry-overlay[hidden],.menu-overlay[hidden],.reference-overlay[hidden]{display:none}
+.entry-card,.menu-card{width:min(100%,390px);padding:20px;border:1px solid #27506d;border-radius:18px;background:linear-gradient(180deg,#0b1d2e,#06111e);box-shadow:0 20px 60px #000b}
+.entry-card h1{margin:0;color:#79e8ff;text-align:center;font-size:27px;text-shadow:0 0 18px #29caff77}
+.entry-card>p{text-align:center;color:#a9c4d7;font-size:12px}
+.entry-fields{display:grid;grid-template-columns:1fr 95px;gap:9px;margin:22px 0 12px}
+.entry-fields label{display:grid;gap:5px;color:#b8d0e0;font-size:11px;font-weight:800}
+.entry-card input,.entry-card select{min-width:0;width:100%;height:41px;padding:0 10px;border:1px solid #2b5878;border-radius:9px;outline:none;background:#071422;color:#eff8ff;font:inherit}
+.entry-card>.btn{width:100%;margin:4px 0}
+.entry-join{display:grid;grid-template-columns:1fr 116px;gap:7px;margin:12px 0 5px}
+.entry-join .btn{height:41px}
+.entry-message{min-height:22px;color:#ffbd76!important}
+.menu-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;font-size:17px;font-weight:900}
+.menu-heading .close{width:32px;height:32px;border:1px solid #31516b;border-radius:8px;background:#0d2438;color:white}
+.menu-card>.btn{width:100%;margin:7px 0}
+.menu-card{max-height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden}.menu-options{overflow:auto;min-height:0}.menu-options .btn{width:100%;margin:5px 0}.menu-theme{padding:10px;text-align:center;color:#8ab5d1;font-size:12px}
+.reference-card{width:min(100%,420px);height:min(94%,780px);display:flex;flex-direction:column;padding:14px;border:1px solid #27506d;border-radius:16px;background:#071421;box-shadow:0 20px 60px #000c}.reference-card .menu-heading{flex:0 0 auto}.reference-card #referenceBody{min-height:0;overflow:auto;display:block}.reference-card p{font-size:12px;line-height:1.55;color:#a9c3d6;margin:4px 0}
+#roomInfo{flex:0 0 auto}
+.sidebar-mask{position:absolute;inset:0;z-index:31;background:#0008}.sidebar-mask[hidden],.mobile-sidebar[hidden]{display:none}.mobile-sidebar{position:absolute;right:0;top:0;bottom:0;z-index:32;width:min(86%,340px);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);border-left:1px solid #2c6586;background:linear-gradient(180deg,#0a1c2d,#04101c);box-shadow:-14px 0 30px #000a}.mobile-sidebar-head{height:45px;flex:0 0 45px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid #1a4059;font-size:14px}.sidebar-close{width:32px;height:32px;border:1px solid #2d607c;border-radius:8px;background:#0a2941;color:#66e5ff;font-size:25px}.sidebar-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:7px}.sidebar-tabs button{height:34px;border:1px solid #244d67;border-radius:8px;background:#0a1b2a;color:#b6d3e5;font-weight:800}.sidebar-tabs button.active{border-color:#52dfff;background:#123954;color:#fff}.sidebar-content{flex:1;min-height:0;overflow:auto;padding:5px 10px 16px}.sidebar-entry{padding:7px 3px;border-bottom:1px solid #1b3e55;font-size:11px;line-height:1.5;color:#c3dcec}.sidebar-entry .name{color:#60e8ff;font-weight:900;margin-right:5px}.sidebar-entry .time{float:right;color:#789ab0}.sidebar-empty{padding:20px 5px;color:#8aa8bc;text-align:center;font-size:12px}.sidebar-chat-form{flex:0 0 auto;display:flex;gap:5px;padding:9px;border-top:1px solid #1a4059}.sidebar-chat-form[hidden]{display:none}.sidebar-chat-form input{min-width:0;flex:1;border:1px solid #2c5875;border-radius:7px;background:#07121f;color:#fff;padding:8px}.sidebar-chat-form button{border:1px solid #2d85f4;border-radius:7px;background:#1e64ec;color:#fff;padding:0 10px;font-weight:800}
+#roomInfo{padding:10px;border:1px solid #1a405b;border-radius:9px;color:#b6d2e2;font-size:12px;line-height:1.7}
+.lobby-seats{display:grid;gap:6px;margin:12px 0}.lobby-seat{border:1px solid #20435e;padding:7px;border-radius:8px;background:#081827;font-size:12px}
+.lobby-seat button{float:right;background:#0d3150;color:#dff5ff;border:1px solid #38698b;border-radius:6px}
+.bottom .actions{max-height:110px;overflow:auto;scrollbar-width:none}
+.bottom .actions::-webkit-scrollbar{display:none}
+.bottom .btn{min-width:0;padding:0 8px;font-size:12px}
+.bottom .actions.many{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fold-summary-grid .city-mini{height:44px;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;padding:2px 1px;border-top:4px solid var(--district-color);border-left-width:1px}
+#handSummary{grid-template-columns:repeat(var(--summary-count,1),42px);justify-content:start;overflow-x:auto;scrollbar-width:none}
+#handSummary::-webkit-scrollbar{display:none}
+.fold-summary-grid .mini-cost{width:15px;height:15px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--district-color) 70%,#18202c);font-size:8px}
+.fold-summary-grid .mini-name{font-size:9.2px;text-align:center}
+.city-mini.selected{border-color:#ffe08a;box-shadow:0 0 10px #f1bd4b66}
+.city-mini.buildable,.small-card-btn.buildable{border-color:#42dfff;box-shadow:0 0 0 1px #42dfff55,0 0 10px #42dfff44}
+.removed-cards .summary-role{width:31px;height:44px;flex:0 0 31px}
+.removed-cards .summary-role .role-mini-name{font-size:7px}
+.removed-back{height:44px;width:31px}
+.role-area[hidden]{display:none}
+.small-card-btn img,.detail-card-btn img{object-fit:contain}
+.detail-card-btn.selected img{border-color:#ffe08a;box-shadow:0 0 10px #f1bd4b66}
+.target-option{border-color:#43e4ff!important;box-shadow:0 0 0 1px #43e4ff66,0 0 10px #43e4ff33}
+.choice-help{font-size:10px;color:#a9c0d0;padding:5px 7px}
+.action-list{display:grid;gap:6px}
+.action-list .btn{width:100%}
+.reference-overlay~.viewer,.viewer{z-index:50}
+.sidebar-tabs:has(#sidebarVoiceTab:not([hidden])){grid-template-columns:repeat(3,minmax(0,1fr))}.sidebar-tabs button[hidden]{display:none}.voice-action{width:100%;height:39px;margin:6px 0;border:1px solid #318cfa;border-radius:9px;background:#1651b9;color:#fff;font-weight:900}.voice-action.secondary{background:#0b2a42;border-color:#376487}
+/* 展开态卡牌：等距紧凑排列，卡片随可用宽度铺满 */
+.thumb-grid{grid-template-columns:repeat(auto-fill,minmax(64px,1fr));justify-content:start;gap:6px}
+.thumb-grid .small-card-btn{width:100%;height:auto;aspect-ratio:2/3}
+/* 战报：原样沿用 PC 端 .log（style.css:176-185 + 霓虹 themes/neon/theme.css:222-256）
+   霓虹下 PC 把战报做成浅色纸面板 + 深色高对比正文，标签和聊天保持浅色文字 */
+.log-list{display:block;margin:2px 4px 8px;padding:10px 14px;border-radius:10px;font-size:12.5px;line-height:1.65;
+  color:#173447;background:rgba(234,247,255,.92);box-shadow:0 0 0 1px #2c6586,0 8px 26px #0007}
+.log-list>div{padding:2px 0;border-bottom:1px dotted rgba(67,228,255,.10)}
+.log-list .sys{font-weight:600}
+.log-list .sys,.log-list .good,.log-list .bad,.log-list .magic,.log-list .build,.log-list .crown,.log-list .score{color:#173447}
+.log-list .crown,.log-list .score{font-weight:700}
+.log-list .info{color:#1b6179;font-weight:600;text-shadow:0 0 6px rgba(67,228,255,.18)}
+.log-list .round{margin:4px -14px;padding:5px 14px;border-bottom:0;border-left:3px solid var(--cyan);border-radius:5px;
+  color:#173447;background:rgba(67,228,255,.14);font-weight:700;box-shadow:inset 0 0 14px rgba(67,228,255,.08),0 0 12px rgba(67,228,255,.08)}
+/* 聊天记录：对齐 PC 端 .chat-log */
+#sidebarContent .chat-entry{padding:4px 0;border-bottom:1px dotted rgba(67,228,255,.16);overflow-wrap:anywhere;font-size:12.5px;line-height:1.65;color:#eaf7ff}
+#sidebarContent .chat-entry .name{color:#eaf7ff;font-weight:700;margin-right:5px}
+#sidebarContent .chat-entry .text{color:#eaf7ff}
+#sidebarContent .chat-entry .ts{color:#b4c9d8;font-size:10.5px;margin-left:6px}
+#sidebarContent .chat-entry.self .name{color:var(--cyan)}
+/* 本轮宣告类效果常驻横幅（回合结束由引擎清空 state.effects 后自动消失） */
+.effects-banner{display:flex;flex-wrap:wrap;gap:4px;margin:3px 5px 4px;padding:5px 6px;border:1px solid #6b2f3c;border-radius:9px;background:linear-gradient(90deg,#2a0e14,#0a1725);box-shadow:inset 0 0 14px #ff5e691f}
+.effects-banner[hidden]{display:none}
+.effects-item{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border:1px solid #7d3a46;border-radius:999px;background:#170a10;color:#ffd7dc;font-size:9.5px;font-weight:850;white-space:nowrap}
+.effects-item i{font-style:normal;color:#ff8b7f;font-size:10px}
+.effects-item.magic{border-color:#5c3f8f;background:#100a1d;color:#e3ccff}
+.effects-item.magic i{color:#c79bff}
+.effects-item.warn{border-color:#7a5c1d;background:#1a1406;color:#ffe6a8}
+.effects-item.warn i{color:#f1bd4b}
+/* 角色能力发动的全场提示（对齐 PC 端 #event-overlay） */
+.event-overlay{position:absolute;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:18px 14px;background:rgba(2,7,13,.72);backdrop-filter:blur(4px)}
+.event-overlay[hidden]{display:none}
+.event-box{position:relative;width:min(100%,340px);padding:20px 16px 16px;border:1px solid #23506f;border-top:5px solid var(--cyan);border-radius:14px;background:linear-gradient(180deg,#0b1d2e,#04101c);box-shadow:0 22px 60px #000c;text-align:center;animation:evPop .22s ease}
+@keyframes evPop{from{transform:translateY(10px) scale(.96);opacity:0}to{transform:none;opacity:1}}
+.event-box.tone-danger{border-top-color:#ff5e69}
+.event-box.tone-magic{border-top-color:var(--magenta)}
+.event-box.tone-warn{border-top-color:var(--gold)}
+.event-box.tone-info{border-top-color:#3d9bff}
+.event-icon{font-size:34px;line-height:1;margin-bottom:6px;color:var(--cyan);text-shadow:0 0 12px #43e4ff6b}
+.event-box.tone-danger .event-icon{color:#ff8b7f;text-shadow:0 0 12px #ff5e6966}
+.event-box.tone-magic .event-icon{color:#c79bff;text-shadow:0 0 12px #aa5cff66}
+.event-box.tone-warn .event-icon{color:#ffd465;text-shadow:0 0 12px #f1bd4b66}
+.event-title{font-size:15px;font-weight:900;color:#eef7ff;margin-bottom:7px}
+.event-text{font-size:12px;line-height:1.55;color:#c3dcec;margin-bottom:12px}
+.event-text b{color:#eef7ff}
+.event-detail{display:block;margin-top:6px;color:#8ea9bd;font-size:10.5px;font-weight:600}
+.event-bar{position:absolute;left:0;bottom:0;width:100%;height:3px;border-radius:0 0 14px 14px;background:#123049;overflow:hidden}
+.event-bar i{display:block;height:100%;width:100%;background:var(--cyan)}
+.event-box.tone-danger .event-bar i{background:#ff5e69}
+.event-box.tone-magic .event-bar i{background:var(--magenta)}
+.event-box.tone-warn .event-bar i{background:var(--gold)}
+.event-box.tone-info .event-bar i{background:#3d9bff}
+/* 选目标动作：点亮目标区域 */
+.focus-glow{outline:2px solid #43e4ff;outline-offset:-2px;border-radius:14px;animation:focusPulse 1.6s ease-in-out 2}
+@keyframes focusPulse{0%,100%{box-shadow:0 0 0 1px #43e4ff33,0 0 12px #43e4ff1f}50%{box-shadow:0 0 0 1px #43e4ff66,0 0 26px #43e4ff4d}}
+/* 公开区域里自己的城区整行加亮 */
+.player-row.self{border-color:#3a86c2;background:linear-gradient(135deg,#12456f,#0d2f4f 55%,#0a2038);box-shadow:inset 0 0 26px #35b7ff38,0 0 12px #06263f}
+.player-row.self .pname{color:#fff}
+.player-row.self .city-mini{background:color-mix(in srgb,var(--district-color) 22%,#0d2c46)}
+/* 底部按钮：一行排开，不换行、不滚动，靠字号自适应 */
+.actions{display:flex;flex-wrap:nowrap;gap:5px;max-height:none;overflow:visible}
+.actions .btn{flex:1 1 0;min-width:0;padding:0 5px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.actions.count-3 .btn{font-size:11px}
+.actions.count-4 .btn{font-size:10px}
+.actions.count-5 .btn,.actions.count-6 .btn{font-size:9px;letter-spacing:-.3px}
+/* 角色 / 建筑一览：沿用 PC 端 #modal 的版式与类名
+   （style.css:818-836 + 霓虹覆盖 themes/neon/theme.css:601-610；单列同 style.css:1029） */
+#referenceBody .section-title{margin:14px 0 7px;padding-bottom:5px;border-bottom:1px solid #1d4560;font-size:13px;font-weight:700;color:var(--cyan)}
+#referenceBody .section-title:first-child{margin-top:0}
+#referenceBody .color-sub{margin:12px 0 6px;font-size:12px;font-weight:800;color:#63dff6}
+#referenceBody .color-legend{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;font-size:12px;color:#a9c3d6}
+#referenceBody .color-legend span{display:inline-flex;align-items:center;gap:5px}
+#referenceBody .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+#referenceBody .char-grid{display:grid;grid-template-columns:1fr;gap:9px}
+#referenceBody .ref-card{display:block;width:100%;padding:9px 10px;border:1px solid #1d4560;border-left:4px solid var(--cyan);border-radius:9px;background:rgba(8,19,32,.84);text-align:left;color:var(--ink);cursor:pointer}
+#referenceBody .ref-card.c-yellow{border-left-color:var(--yellow)}
+#referenceBody .ref-card.c-blue{border-left-color:var(--blue)}
+#referenceBody .ref-card.c-green{border-left-color:var(--green)}
+#referenceBody .ref-card.c-red{border-left-color:var(--red)}
+#referenceBody .ref-card.c-purple{border-left-color:var(--purple)}
+#referenceBody .ref-card h4{margin:0 0 6px;font-size:13px;display:flex;align-items:center;gap:7px}
+#referenceBody .ref-card .rc-num{width:20px;height:20px;border-radius:50%;background:rgba(67,228,255,.16);color:var(--cyan);font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+#referenceBody .ref-card .rc-en{font-size:10px;color:#7890a4;font-weight:400}
+#referenceBody .ref-card p{margin:0;font-size:12px;line-height:1.5;color:#a9c3d6}
+#referenceBody .ref-card .rc-art{width:100%;height:auto;display:block;border-radius:6px;margin-bottom:6px;background:#07111d}
+#referenceBody .small{font-size:11.5px;color:#a9c3d6}
+#referenceBody .dim{color:#7890a4}
+#referenceBody .ref-card .rc-art{max-height:210px;object-fit:contain}
+/* 效果气泡：非宣告类效果落在发动者那一行的城区上 */
+.player-row{position:relative}
+.row-bubble{position:absolute;left:5px;right:5px;bottom:5px;z-index:5;padding:5px 9px 6px;
+  border:1px solid rgba(120,205,255,.42);border-radius:12px 12px 12px 4px;
+  background:linear-gradient(180deg,rgba(16,44,68,.97),rgba(7,22,36,.97));
+  color:#dff2ff;font-size:10.5px;font-weight:700;line-height:1.4;letter-spacing:.2px;
+  box-shadow:0 8px 22px rgba(0,0,0,.6),inset 0 1px 0 rgba(150,225,255,.14);
+  opacity:1;transition:opacity .6s ease,transform .6s ease}
+.row-bubble::before{content:"";position:absolute;left:-1px;bottom:-1px;width:11px;height:11px;
+  background:linear-gradient(135deg,transparent 50%,rgba(16,44,68,.97) 50%);border-left:1px solid rgba(120,205,255,.42);border-bottom:1px solid rgba(120,205,255,.42);
+  transform:rotate(45deg) translate(-5px,-1px);border-bottom-right-radius:3px}
+.row-bubble.tone-magic{border-color:rgba(190,140,255,.5);background:linear-gradient(180deg,rgba(38,20,62,.97),rgba(14,9,26,.97));color:#eddcff}
+.row-bubble.tone-warn{border-color:rgba(241,189,75,.5);background:linear-gradient(180deg,rgba(52,38,10,.97),rgba(22,16,5,.97));color:#ffeab8}
+.row-bubble.tone-danger{border-color:rgba(255,110,118,.5);background:linear-gradient(180deg,rgba(56,16,22,.97),rgba(24,7,11,.97));color:#ffd9dc}
+.row-bubble.enter{animation:bubbleIn .26s cubic-bezier(.2,.9,.3,1.2)}
+.row-bubble.fading{opacity:0;transform:translateY(5px) scale(.97)}
+@keyframes bubbleIn{from{opacity:0;transform:translateY(8px) scale(.9)}to{opacity:1;transform:none}}
+/* 角色 / 建筑一览：一行三张，压缩卡片内边距与字号 */
+#referenceBody .char-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;align-items:start}
+#referenceBody .ref-card{padding:5px}
+#referenceBody .ref-card h4{margin-bottom:4px;gap:4px;font-size:10.5px;flex-wrap:wrap}
+#referenceBody .ref-card .rc-num{width:15px;height:15px;flex:0 0 15px;font-size:9px}
+#referenceBody .ref-card .rc-en{font-size:8.5px}
+#referenceBody .ref-card p{font-size:9px;line-height:1.45}
+#referenceBody .ref-card .rc-art{max-height:none;margin-bottom:4px}
+/* 角色 / 建筑一览：弹窗占满整屏，列数随宽度自适应（保持单张约 124px，宽屏多排几列） */
+.reference-overlay{padding:0}
+.reference-card{width:100%;height:100%;max-width:none;max-height:none;border:0;border-radius:0;padding:10px 10px calc(10px + env(safe-area-inset-bottom))}
+#referenceBody .char-grid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:7px}
+/* 结算页：沿用 PC 端 #screen-over（panel + .score-table + 两个按钮），霓虹配色同 theme.css:611-615 */
+.over-overlay{position:absolute;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(2,7,14,.95)}
+.over-overlay[hidden]{display:none}
+.over-card{width:100%;max-height:100%;display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid #27506d;border-radius:16px;background:linear-gradient(180deg,#0b1d2e,#06111e);box-shadow:0 20px 60px #000c}
+.over-card h2{margin:0;font-size:19px;color:var(--gold);text-align:center;text-shadow:0 0 14px rgba(241,189,75,.35)}
+.over-scroll{flex:1 1 auto;min-height:0;overflow:auto}
+.score-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.score-table th,.score-table td{padding:7px 6px;border-bottom:1px solid #17374e;text-align:left;color:#dceaf5}
+.score-table th{font-size:10px;letter-spacing:.06em;color:var(--cyan)}
+.score-table tr.win td{background:rgba(67,228,255,.08);color:#eaf7ff;font-weight:800}
+.score-table td.total{font-size:16px;font-weight:800;color:var(--gold)}
+.score-table tr.detail-row td{padding:2px 6px 8px;border-bottom:1px solid #143045;font-size:9.5px;line-height:1.5;color:#8ea9bd}
+.over-card .btn-row{display:flex;gap:8px;flex:0 0 auto}
+.over-card .btn{flex:1 1 0;min-width:0}
+.score-table tr.win td.total{color:var(--gold)}

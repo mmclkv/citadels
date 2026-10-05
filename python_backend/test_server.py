@@ -514,6 +514,8 @@ class ServerArgumentTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual((parse_server_args([]).host, parse_server_args([]).port),
                              ("127.0.0.1", 8788))
+            self.assertFalse(parse_server_args([]).skip_neural_policy)
+            self.assertTrue(parse_server_args(["--skip-neural-policy"]).skip_neural_policy)
             with self.assertRaises(SystemExit):
                 parse_server_args(["70000"])
 

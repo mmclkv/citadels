@@ -10,7 +10,7 @@
   };
   const listeners = [];
   const manager = {
-    current: 'classic',
+    current: 'neon',
 
     available() { return Object.keys(THEMES); },
     info(id) { return THEMES[id] || THEMES.classic; },
@@ -35,8 +35,8 @@
     },
 
     init() {
-      let saved = 'classic';
-      try { saved = root.localStorage.getItem(STORAGE_KEY) || 'classic'; } catch (e) { /* 隐私模式 */ }
+      let saved = 'neon';
+      try { saved = root.localStorage.getItem(STORAGE_KEY) || 'neon'; } catch (e) { /* 隐私模式 */ }
       return this.apply(saved, { persist: false });
     },
 

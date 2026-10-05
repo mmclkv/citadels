@@ -25,6 +25,8 @@
     myId: null,
     name: '我',
     sel: null,             // 选择模式
+    mobileHandExpanded: false,
+    mobileDraftExpanded: true,
     logOpen: true,
     chatOpen: false,
     voiceOpen: false,
@@ -826,6 +828,13 @@
   }
 
   /* ============================== 联机驱动 ============================== */
+  function enterPrototypeMobileGame(state) {
+    if (!state || state.phase === 'lobby' ||
+        !window.matchMedia || !window.matchMedia('(max-width: 820px)').matches ||
+        new URLSearchParams(location.search).has('desktop')) return false;
+    location.replace(new URL('./mobile.html', location.href).href);
+    return true;
+  }
   const Net = {
     autoStart: false,
     ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
@@ -891,6 +900,7 @@
           this.myId = m.youId; this.roomId = m.roomId;
           if (m.resumeToken) saveNetSession(m.resumeToken, m.roomId, this.name);
           App.myId = m.youId;
+          if (enterPrototypeMobileGame(m.state)) break;
           App.botDebugEntries = [];
           if (App.botDebugOpen) renderBotDebug();
           // 大厅里加入 → 从 0 开始（后续事件全部提示）；中途加入 → 对齐进度，不回放历史
@@ -910,6 +920,7 @@
           if (App.leavingNetGame) break;
           App.state = m.state;
           if (m.state.you) App.myId = m.state.you;
+          if (enterPrototypeMobileGame(m.state)) break;
           if (m.state.phase === 'lobby' && App.localServerGame) {
             App.chatHistory = [];
             clearGameBoardView();
@@ -1876,7 +1887,9 @@
       return null;
     }
 
-    const touchMode = isTouchDevice();
+    // The compact mobile board uses its own card viewer even when a narrow
+    // viewport is driven by a mouse (for example, a tablet with a pointer).
+    const touchMode = isTouchDevice() || isMobileGameUI();
 
     /* ---------------- 触屏：点一下放大，确认 / 取消 ---------------- */
     if (touchMode) {
@@ -2725,6 +2738,12 @@
     const root = $('#mobile-fit-root');
     const screen = $('#screen-game');
     if (!root || !screen) return;
+    if ($('#opponents') && $('#opponents').dataset.layout === 'mobile-grid') {
+      root.classList.remove('mobile-fit-scaled');
+      root.style.removeProperty('--mobile-fit-scale');
+      screen.classList.remove('pwa-readable-mode');
+      return;
+    }
     const mobile = typeof window !== 'undefined' && window.innerWidth <= 820;
     const standalone = typeof window !== 'undefined' && window.matchMedia &&
       window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
@@ -2919,6 +2938,15 @@
 
     const isDraft = s.phase === 'draft';
     const gameScreen = $('#screen-game');
+    const mobilePhase = $('#mobile-phase-status');
+    if (mobilePhase) {
+      mobilePhase.hidden = !isMobileGameUI();
+      if (!mobilePhase.hidden) {
+        $('#mobile-phase-title').textContent = '第 ' + s.round + ' 轮 · ' +
+          (isDraft ? '选角阶段' : '行动阶段');
+        $('#mobile-phase-sub').textContent = s.players.length + ' 人局 · 公开局面按顺时针排列';
+      }
+    }
     if (gameScreen) {
       gameScreen.classList.toggle('draft-phase', isDraft);
       gameScreen.classList.toggle('pwa-action-phase', s.phase === 'action');
@@ -2927,6 +2955,7 @@
     $('#play-area').hidden = false;
     renderRemoved(s);
     if (isDraft) {
+      renderMobileChoiceShelf(s);
       renderDraft(s);
       // 选角阶段也展示全场局势（对手城市 / 我的城市与手牌），方便决策
       $('#turn-banner').innerHTML =
@@ -2936,6 +2965,7 @@
       renderTableGuide(s);
       renderOpponents(s);
       renderMe(s);
+      refreshMobileDetail(s);
       scheduleDraftBoardLayout(s);
       scheduleMobilePanelInnerCollisionPass();
       renderLog(s);
@@ -2952,6 +2982,8 @@
     scheduleMobilePanelInnerCollisionPass();
     renderLog(s);
     renderActions(s);
+    renderMobileChoiceShelf(s);
+    refreshMobileDetail(s);
     autoOpenPick(s);
     requestAnimationFrame(positionPlayerChatBubbles);
     restoreScroll(_scrollSnap);
@@ -2960,6 +2992,7 @@
 
   /** 抽牌保留 / 学者选牌 / 预言家归还：自动弹出卡牌选择窗 */
   function autoOpenPick(s) {
+    if (isMobileGameUI()) return;
     const t = s.turn;
     if (!t || !t.pending || t.playerId !== App.myId) { App.pickKey = null; return; }
     const k = t.pending.kind;
@@ -3097,6 +3130,7 @@
   }
 
   function renderOpponents(s) {
+    if (isMobileGameUI()) { renderMobilePlayers(s); return; }
     hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
     const wrap = $('#opponents');
     const totalPlayers = s.players.length || 1;
@@ -3234,11 +3268,335 @@
     }
   }
 
+  const MOBILE_V12_DISTRICT_COLORS = {
+    yellow: '#e0a92b', blue: '#3d7ec4', green: '#3fa46a',
+    red: '#d0503f', purple: '#8b5cc7'
+  };
+  function mobileDistrictColor(color) {
+    return MOBILE_V12_DISTRICT_COLORS[color] || MOBILE_V12_DISTRICT_COLORS.purple;
+  }
+  function mobileDistrictName(name) {
+    return String(name || '').slice(0, 3);
+  }
+  function renderMobilePlayers(s) {
+    const wrap = $('#opponents');
+    const arena = $('#table-arena');
+    if (!wrap) return;
+    wrap.dataset.layout = 'mobile-grid';
+    wrap.dataset.players = String(s.players.length);
+    wrap.style.height = '';
+    wrap.style.display = '';
+    if (arena) { arena.dataset.layout = 'mobile-grid'; arena.dataset.players = String(s.players.length); }
+    $('#mobile-public-count').textContent = s.players.length + ' 人局';
+    const targeting = mobileHasTargetChoice(s);
+    $('#mobile-public-status').textContent = targeting
+      ? (availableMobileActions().some(a => a.type === 'choose_district') ? '选择目标玩家和建筑' : '点击目标玩家')
+      : '顺时针排列';
+    const ordered = [];
+    for (let low = 0, high = s.players.length - 1; low <= high; low++, high--) {
+      ordered.push(s.players[low]);
+      if (low !== high) ordered.push(s.players[high]);
+    }
+    wrap.innerHTML = '';
+    ordered.forEach(p => {
+      const idx = s.players.indexOf(p);
+      const score = s.scores && s.scores[idx] ? s.scores[idx].total : 0;
+      const playerActions = mobilePlayerActionsFor(p.id);
+      const buildingActions = mobileDistrictActionsFor(p.id);
+      const selectable = playerActions.length || buildingActions.length;
+      const active = s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id ||
+        s.turn && s.turn.playerId === p.id;
+      const d = el('div', 'opp mobile-player' + (p.id === App.myId ? ' self' : '') +
+        (p.threat ? ' threat' : '') +
+        (active ? ' active' : '') + (targeting && selectable ? ' mobile-target' : '') +
+        (targeting && !selectable ? ' mobile-unavailable' : ''));
+      d.dataset.seat = p.seat;
+      d.setAttribute('role', 'button'); d.tabIndex = 0;
+      d.setAttribute('aria-label', '查看' + p.name + '的详细信息');
+      const role = s.phase === 'action' && p.revealedCharNum != null
+        ? '<span class="mobile-role-tag"><span class="mobile-role-no">' + p.revealedCharNum + '</span><span>' +
+          escapeHtml((charMeta(p.revealedCharId, p.revealedCharNum) || {}).name || '') + '</span></span>' : '';
+      const head = el('div', 'mobile-player-head');
+      head.innerHTML = '<strong class="mobile-player-name">' + escapeHtml(p.name) + '</strong>' +
+        (p.id === App.myId ? '<span class="mobile-you-chip">你</span>' : '') +
+        (p.hasCrown ? '<i class="crown-icon" aria-label="皇冠">♛</i>' : '') +
+        threatMarkHTML(p.threat) + warrantMarkHTML(p.warrant) + role +
+        '<span class="mobile-player-stats"><span><i class="coin-icon" aria-hidden="true"></i><span class="mobile-stat-value">' + p.gold +
+        '</span></span><span><i class="score-icon" aria-hidden="true"></i><span class="mobile-stat-value">' + score +
+        '</span></span><span class="mobile-hand-count" title="手牌 ' + p.handCount + ' 张"><i class="mobile-hand-back" aria-hidden="true"></i><span class="mobile-stat-value">×' + p.handCount + '</span></span></span>';
+      d.appendChild(head);
+      const city = el('div', 'mobile-player-city');
+      (p.city || []).forEach(card => {
+        const chip = el('span', 'mobile-city-chip');
+        chip.style.setProperty('--district-color', mobileDistrictColor(card.color));
+        chip.title = card.name + ' · 费用 ' + card.cost;
+        chip.innerHTML = '<b>' + card.cost + '</b><span>' + escapeHtml(mobileDistrictName(card.name)) + '</span>';
+        city.appendChild(chip);
+      });
+      d.appendChild(city);
+      if (Voice.speakers.has(p.id)) d.classList.add('voice-speaking');
+      onTap(d, () => openMobilePlayerDetail(p.id));
+      d.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); openMobilePlayerDetail(p.id); } };
+      wrap.appendChild(d);
+    });
+  }
+
   function isMobileOpponentLayout() {
     if (typeof window === 'undefined') return false;
     const touch = (typeof navigator !== 'undefined' &&
       (navigator.maxTouchPoints > 0 || 'ontouchstart' in window));
     return window.innerWidth <= 1000 || (touch && window.innerWidth <= 1400);
+  }
+
+  /* 移动端的目标选择共用公开玩家区、玩家详情和卡图确认。 */
+  const MobileDetail = { playerId: null, preview: null };
+  function isMobileGameUI() {
+    return typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(max-width: 820px)').matches;
+  }
+  const MOBILE_PLAYER_ACTIONS = ['choose_player', 'spy_target', 'wizard_target', 'emperor_crown'];
+  const MOBILE_ROLE_ACTIONS = ['choose_char', 'magistrate_signed', 'magistrate_char',
+    'blackmailer_signed', 'blackmailer_char'];
+  function availableMobileActions() {
+    return (App.state && App.state.available && App.state.available.actions) || [];
+  }
+  function mobilePlayerActionsFor(playerId) {
+    return availableMobileActions().filter(a => MOBILE_PLAYER_ACTIONS.includes(a.type) && a.target === playerId);
+  }
+  function mobileDistrictActionsFor(playerId) {
+    return availableMobileActions().filter(a => a.type === 'choose_district' && a.target === playerId);
+  }
+  function mobileHasTargetChoice(s) {
+    return !!(s && s.turn && s.turn.playerId === App.myId &&
+      availableMobileActions().some(a => MOBILE_PLAYER_ACTIONS.includes(a.type) || a.type === 'choose_district'));
+  }
+  function closeMobileDetail() {
+    MobileDetail.playerId = null;
+    MobileDetail.preview = null;
+    const overlay = $('#mobile-detail');
+    if (overlay) overlay.hidden = true;
+  }
+  function mobileDetailBack() {
+    if (MobileDetail.preview) {
+      MobileDetail.preview = null;
+      if (MobileDetail.playerId) refreshMobileDetail(App.state);
+      else closeMobileDetail();
+    } else closeMobileDetail();
+  }
+  function openMobilePlayerDetail(playerId) {
+    if (!isMobileGameUI() || !App.state || !App.state.players.some(p => p.id === playerId)) return;
+    MobileDetail.playerId = playerId;
+    MobileDetail.preview = null;
+    refreshMobileDetail(App.state);
+  }
+  function mobilePreview(card, action, kind) {
+    MobileDetail.preview = { card: card, action: action || null, kind: kind || 'district' };
+    refreshMobileDetail(App.state);
+  }
+  function mobileDetailButton(label, callback, className) {
+    const button = el('button', 'btn ' + (className || ''), escapeHtml(label));
+    button.type = 'button';
+    onTap(button, callback);
+    return button;
+  }
+  function mobileActionStillAvailable(action) {
+    if (!action) return null;
+    if ((action.type === 'draft_pick' || action.type === 'draft_discard') &&
+        App.state && App.state.phase === 'draft' && App.state.draft &&
+        App.state.draft.currentPlayer === App.myId &&
+        App.state.draft.pool.some(c => c.id === action.charId)) return action;
+    return availableMobileActions().find(a => a.type === action.type &&
+      a.uid === action.uid && a.target === action.target && a.num === action.num &&
+      a.name === action.name && a.charId === action.charId) || null;
+  }
+  function refreshMobileDetail(s) {
+    const overlay = $('#mobile-detail');
+    if (!overlay || !isMobileGameUI() || !s) { closeMobileDetail(); return; }
+    if (s.reaction) { closeMobileDetail(); return; }
+    const player = MobileDetail.playerId && s.players.find(p => p.id === MobileDetail.playerId);
+    if (MobileDetail.playerId && !player) { closeMobileDetail(); return; }
+    if (MobileDetail.preview && MobileDetail.preview.action &&
+        !mobileActionStillAvailable(MobileDetail.preview.action)) MobileDetail.preview = null;
+    if (!player && !MobileDetail.preview) { overlay.hidden = true; return; }
+    overlay.hidden = false;
+    overlay.classList.toggle('is-preview', !!MobileDetail.preview);
+    const body = $('#mobile-detail-body');
+    const footer = $('#mobile-detail-actions');
+    const title = $('#mobile-detail-title');
+    const kicker = $('#mobile-detail-kicker');
+    const close = $('#mobile-detail-close');
+    body.innerHTML = '';
+    footer.innerHTML = '';
+    close.textContent = '×';
+    close.setAttribute('aria-label', MobileDetail.preview ? '返回详情' : '关闭玩家详情');
+    if (MobileDetail.preview) {
+      const preview = MobileDetail.preview;
+      const card = preview.card;
+      kicker.textContent = '';
+      title.textContent = (preview.action ? '确认目标 · ' : '查看卡牌 · ') + (card.name || '卡牌');
+      const stage = el('div', 'mobile-detail-preview');
+      const imageSrc = preview.kind === 'role' ? roleFull(card) :
+        (Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(card, 'full') : null);
+      if (imageSrc) {
+        const image = el('img'); image.src = imageSrc; image.alt = card.name || '卡牌';
+        stage.appendChild(image);
+      } else {
+        const node = preview.kind === 'role' ? charNode(card) : cardNode(card);
+        node.__noZoom = true;
+        stage.appendChild(node);
+      }
+      body.appendChild(stage);
+      const meta = el('p', 'mobile-detail-description');
+      meta.textContent = preview.kind === 'role'
+        ? (card.num ? card.num + ' · ' : '') + (card.name || '角色')
+        : (player ? player.name + ' · ' : '') +
+          (Cards.COLORS[card.color] ? Cards.COLORS[card.color].name + ' · ' : '') +
+          '费用 ' + (card.cost || 0) + ' · 计分 ' + (card.scoreValue || card.cost || 0);
+      body.appendChild(meta);
+      const previewActions = el('div', 'mobile-preview-actions');
+      previewActions.appendChild(mobileDetailButton('返回重选', mobileDetailBack, 'ghost'));
+      const liveAction = mobileActionStillAvailable(preview.action);
+      if (liveAction) previewActions.appendChild(mobileDetailButton(
+        preview.action.label ? '确认 · ' + preview.action.label : '确认选择',
+        () => {
+          if (liveAction.type === 'wizard_card' && MobileDetail.playerId) MobileDetail.preview = null;
+          else closeMobileDetail();
+          runAction(liveAction);
+        }, 'primary'));
+      body.appendChild(previewActions);
+      return;
+    }
+    kicker.textContent = player.id === App.myId ? '我的详情' : '玩家详情 · 座位 ' + (player.seat + 1);
+    const playerActions = mobilePlayerActionsFor(player.id);
+    const districtActions = mobileDistrictActionsFor(player.id);
+    title.textContent = playerActions.length ? '选择玩家 · ' + player.name :
+      districtActions.length ? '选择建筑 · ' + player.name : player.name + ' · 详情';
+    if (playerActions.length || districtActions.length) body.appendChild(el('p', 'mobile-detail-context',
+      playerActions.length ? '已选择玩家 <b>' + escapeHtml(player.name) + '</b>。确认目标，或返回公开区域重选。' :
+        '已选择玩家 <b>' + escapeHtml(player.name) + '</b>。请在下方城区选择目标建筑。'));
+    const scoreIdx = s.players.indexOf(player);
+    const score = s.scores && s.scores[scoreIdx] || { base: 0, bonus: 0, total: 0, detail: [] };
+    const stats = el('div', 'mobile-detail-stats');
+    stats.innerHTML = '<span>金币 <b><i class="coin-icon" aria-hidden="true"></i>' + player.gold +
+      '</b></span><span>当前得分 <b><i class="score-icon" aria-hidden="true"></i>' + score.total +
+      '</b></span><span>城区 <b>' + player.city.length + '</b></span><span>手牌 <b><i class="mobile-hand-back" aria-hidden="true"></i>×' +
+      player.handCount + '</b></span>';
+    body.appendChild(stats);
+    const knownRoles = player.id === App.myId ? (player.chars || []) :
+      s.phase === 'action' && player.revealedCharNum != null
+        ? [charMeta(player.revealedCharId, player.revealedCharNum)].filter(Boolean) : [];
+    const scorePanel = el('div', 'mobile-detail-score-panel' + (!knownRoles.length ? ' no-role' : ''));
+    if (knownRoles.length) {
+      const roleBox = el('div', 'mobile-detail-role-box');
+      const node = charNode(knownRoles[0]); node.__noZoom = true;
+      onTap(node, () => mobilePreview(knownRoles[0], null, 'role'));
+      roleBox.appendChild(node);
+      roleBox.appendChild(el('b', '', knownRoles[0].num + ' · ' + escapeHtml(knownRoles[0].name)));
+      scorePanel.appendChild(roleBox);
+    }
+    const scoreDetails = el('div', 'mobile-detail-score-details');
+    scoreDetails.innerHTML = '<div class="mobile-detail-score-kpis"><div>建筑分<b>' +
+      (score.base || 0) + '</b></div><div>总分<b>' + (score.total || 0) + '</b></div></div>' +
+      '<div class="mobile-detail-score-bonus"><span>奖励分 <b>+' + (score.bonus || 0) +
+      '</b></span><ul>' + ((score.detail || []).filter(item => item.label !== '建筑总分').map(item =>
+        '<li>' + escapeHtml(item.label) + '<b>+' + item.value + '</b></li>').join('') ||
+        '<li>暂无奖励分</li>') + '</ul></div>';
+    scorePanel.appendChild(scoreDetails);
+    body.appendChild(scorePanel);
+    body.appendChild(el('h3', 'mobile-detail-section-title', districtActions.length
+      ? '选择建筑 · ' + player.city.length + ' 栋' : '公开城区 · ' + player.city.length + ' 栋'));
+    const city = el('div', 'mobile-detail-city');
+    if (!player.city.length) city.appendChild(el('p', 'empty-hint', '尚无建筑'));
+    player.city.forEach(card => {
+      const action = districtActions.find(a => a.uid === card.uid);
+      const node = cardNode(card, { clickable: false });
+      node.__noZoom = true;
+      const wrapper = el('button', 'mobile-detail-card' + (action ? ' targetable' : ''));
+      wrapper.type = 'button';
+      wrapper.appendChild(node);
+      wrapper.appendChild(el('span', '', escapeHtml(card.name) + ' · ' + card.cost));
+      onTap(wrapper, () => mobilePreview(card, action, 'district'));
+      city.appendChild(wrapper);
+    });
+    body.appendChild(city);
+    const pending = s.turn && s.turn.pending;
+    if (pending && pending.kind === 'wizard_card' && s.turn.playerId === App.myId &&
+        s.players[pending.targetIdx] && s.players[pending.targetIdx].id === player.id) {
+      body.appendChild(el('h3', 'mobile-detail-section-title', '法师视野 · 目标手牌'));
+      const hand = el('div', 'mobile-detail-city');
+      (pending.cards || []).forEach(card => {
+        const node = cardNode(card, { clickable: false });
+        const action = availableMobileActions().find(a => a.type === 'wizard_card' && a.uid === card.uid);
+        node.__noZoom = true;
+        const wrapper = el('button', 'mobile-detail-card targetable');
+        wrapper.type = 'button'; wrapper.appendChild(node);
+        wrapper.appendChild(el('span', '', escapeHtml(card.name) + ' · ' + card.cost));
+        onTap(wrapper, () => mobilePreview(card, action, 'district'));
+        hand.appendChild(wrapper);
+      });
+      body.appendChild(hand);
+    }
+    footer.appendChild(mobileDetailButton('返回重选', closeMobileDetail, 'ghost'));
+    playerActions.forEach(action => footer.appendChild(mobileDetailButton(
+      '确认 · ' + (action.label || player.name),
+      () => {
+        if (!['spy_target', 'wizard_target', 'emperor_crown'].includes(action.type)) closeMobileDetail();
+        runAction(action);
+      }, 'primary')));
+    if (pending && s.turn && s.turn.playerId === App.myId &&
+        s.players[pending.targetIdx] && s.players[pending.targetIdx].id === player.id) {
+      const followUpTypes = pending.kind === 'spy_color' ? ['spy_color'] :
+        pending.kind === 'emperor_take' ? ['emperor_take'] :
+        pending.kind === 'wizard_choice' ? ['wizard_take', 'wizard_build'] : [];
+      availableMobileActions().filter(a => followUpTypes.includes(a.type)).forEach(action =>
+        footer.appendChild(mobileDetailButton(action.label || action.type,
+          () => { closeMobileDetail(); runAction(action); }, 'primary')));
+    }
+    if (districtActions.length) body.appendChild(el('p', 'mobile-detail-hint', '点击高亮建筑查看大图并确认目标'));
+  }
+
+  function renderMobileChoiceShelf(s) {
+    const shelf = $('#mobile-choice-shelf');
+    if (!shelf) return;
+    shelf.hidden = true;
+    if (!isMobileGameUI() || s.phase !== 'action' || !s.turn || s.turn.playerId !== App.myId) return;
+    const pending = s.turn.pending;
+    const actions = availableMobileActions();
+    const roles = actions.filter(a => MOBILE_ROLE_ACTIONS.includes(a.type));
+    const cardKind = pending && pending.kind;
+    let cards = [];
+    let title = '';
+    if (roles.length) {
+      title = (s.available && s.available.prompt) || '选择角色';
+      cards = roles.map(action => {
+        const num = Number(action.num != null ? action.num : action.name);
+        return { card: (s.charDeck || []).find(c => c.num === num) ||
+          charMeta(null, num) || { num, name: action.label }, action, kind: 'role' };
+      });
+    } else if (cardKind === 'draw_keep' || cardKind === 'scholar_pick' || cardKind === 'prophet_give') {
+      title = cardKind === 'scholar_pick' ? '学者 · 选择保留的建筑' :
+        cardKind === 'prophet_give' ? '预言家 · 选择归还的手牌' : '选择保留的建筑';
+      const pool = cardKind === 'prophet_give'
+        ? ((s.players.find(p => p.id === App.myId) || {}).hand || []) : (pending.cards || []);
+      cards = pool.map(card => ({ card, action: actions.find(a => a.type === cardKind && a.uid === card.uid) ||
+        (cardKind === 'prophet_give' ? { type: 'prophet_give', uid: card.uid } : null), kind: 'district' }));
+    }
+    if (!cards.length) return;
+    shelf.hidden = false;
+    $('#mobile-choice-title').textContent = title;
+    $('#mobile-choice-count').textContent = cards.length + ' 张可选';
+    const list = $('#mobile-choice-cards'); list.innerHTML = '';
+    cards.forEach(item => {
+      const node = item.kind === 'role' ? charNode(item.card, { clickable: true }) :
+        cardNode(item.card, { clickable: true });
+      node.__noZoom = true;
+      node.setAttribute('role', 'button'); node.setAttribute('tabindex', '0');
+      onTap(node, () => { MobileDetail.playerId = null; mobilePreview(item.card, item.action, item.kind); });
+      node.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); MobileDetail.playerId = null; mobilePreview(item.card, item.action, item.kind); } };
+      list.appendChild(node);
+    });
   }
 
   // 首次进入对局时，选角状态可能在棋盘从 display:none 切为可见前抵达。
@@ -3259,7 +3617,7 @@
   // and give the owning player panel enough room before resolving panel-vs-panel
   // collisions. This is intentionally run after card sizes/layout are applied.
   function scheduleMobilePanelInnerCollisionPass() {
-    if (!isMobileOpponentLayout() || typeof window.requestAnimationFrame !== 'function') return;
+    if (!isMobileOpponentLayout() || isMobileGameUI() || typeof window.requestAnimationFrame !== 'function') return;
     window.requestAnimationFrame(() => {
       const wrap = $('#opponents');
       if (!wrap || !document.documentElement.contains(wrap)) return;
@@ -3949,8 +4307,43 @@
         else if (App.sel && App.sel.kind === 'handpick') clickable = true;
         else if (App.sel && App.sel.kind === 'multi') clickable = true;
         else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) clickable = c.canBuild;
-        if (clickable) bindCardAction(node, () => onHandClick(c), !(App.sel && (App.sel.kind === 'labpick' || App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
+        let mobileLabel = node.querySelector('.mobile-card-label');
+        if (isMobileGameUI()) {
+          if (!mobileLabel) {
+            mobileLabel = el('span', 'mobile-card-label');
+            node.appendChild(mobileLabel);
+          }
+          mobileLabel.textContent = c.name;
+        } else if (mobileLabel) mobileLabel.remove();
+        if (isMobileGameUI() && !App.sel) {
+          node.__noZoom = true;
+          const action = availableMobileActions().find(a => a.type === 'build' && a.uid === c.uid);
+          onTap(node, () => mobilePreview(c, action, 'district'));
+        } else if (clickable) bindCardAction(node, () => onHandClick(c), !(App.sel && (App.sel.kind === 'labpick' || App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
         else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
+      });
+    }
+    if (isMobileGameUI()) {
+      const pendingKind = s.turn && s.turn.pending && s.turn.pending.kind;
+      const forceOpen = !!App.sel || ['prophet_give', 'bishop_repay', 'magician_redraw'].includes(pendingKind);
+      const expanded = App.mobileHandExpanded || forceOpen;
+      meArea.classList.toggle('mobile-hand-expanded', expanded);
+      $('#my-hand-count').textContent = me.hand.length + ' 张';
+      const toggle = $('#mobile-hand-toggle');
+      toggle.textContent = expanded ? '收起' : '展开';
+      toggle.setAttribute('aria-expanded', String(expanded));
+      toggle.disabled = forceOpen;
+      const summary = $('#mobile-hand-summary'); summary.innerHTML = '';
+      summary.style.setProperty('--summary-count', String(Math.max(1, me.hand.length)));
+      me.hand.forEach(card => {
+        const chip = el('button', 'mobile-hand-chip');
+        chip.type = 'button';
+        chip.style.setProperty('--district-color', mobileDistrictColor(card.color));
+        chip.title = card.name + ' · 费用 ' + card.cost;
+        chip.innerHTML = '<b>' + card.cost + '</b><span>' + escapeHtml(mobileDistrictName(card.name)) + '</span>';
+        const buildAction = availableMobileActions().find(a => a.type === 'build' && a.uid === card.uid);
+        onTap(chip, () => mobilePreview(card, buildAction, 'district'));
+        summary.appendChild(chip);
       });
     }
   }
@@ -4004,6 +4397,8 @@
     sp.classList.toggle('show', any);
     sp.classList.toggle('collapsed', collapsed);
     const sideToggle = $('#btn-side-panel-toggle');
+    const mobileSideToggle = $('#btn-side-panel-mobile-toggle');
+    if (mobileSideToggle) mobileSideToggle.hidden = !(isMobileGameUI() && collapsed);
     if (sideToggle) {
       sideToggle.setAttribute('aria-expanded', String(!collapsed));
       sideToggle.setAttribute('aria-label', collapsed ? '展开右侧边栏' : '收起右侧边栏');
@@ -4060,12 +4455,39 @@
       (stuckDraft ? ' · <b style="color:#c0392b">选角进度异常</b>' : '');
 
     const pool = $('#draft-pool'); pool.innerHTML = '';
+    const mobileDraft = isMobileGameUI();
+    const summary = $('#mobile-draft-summary');
+    if (summary) {
+      summary.innerHTML = '';
+      summary.style.setProperty('--summary-count', String(Math.max(1, d.pool.length)));
+      if (mobileDraft && isPicker) d.pool.forEach(c => {
+        const chip = el('button', 'mobile-role-summary');
+        chip.type = 'button';
+        chip.innerHTML = '<b>' + c.num + '</b><span>' + escapeHtml(c.name) + '</span>';
+        onTap(chip, () => mobilePreview(c, { type: d.sub === 'discard' ? 'draft_discard' : 'draft_pick', charId: c.id }, 'role'));
+        summary.appendChild(chip);
+      });
+      summary.hidden = !mobileDraft || App.mobileDraftExpanded;
+    }
+    const draftToggle = $('#mobile-draft-toggle');
+    if (draftToggle) {
+      draftToggle.textContent = App.mobileDraftExpanded ? '收起' : '展开';
+      draftToggle.setAttribute('aria-expanded', String(App.mobileDraftExpanded));
+    }
+    pool.classList.toggle('mobile-collapsed', mobileDraft && !App.mobileDraftExpanded);
     if (!isPicker) {
       pool.appendChild(el('div', 'empty-hint', '只有当前选角的玩家可以看到牌池内容'));
     } else {
       d.pool.forEach(c => {
         const n = charNode(c, { clickable: true });
-        if (isTouchDevice()) {
+        if (mobileDraft) {
+          n.__noZoom = true;
+          n.setAttribute('role', 'button'); n.tabIndex = 0;
+          n.appendChild(el('span', 'mobile-card-label', c.num + ' · ' + c.name));
+          const pick = () => mobilePreview(c, { type: d.sub === 'discard' ? 'draft_discard' : 'draft_pick', charId: c.id }, 'role');
+          onTap(n, pick);
+          n.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+        } else if (isTouchDevice()) {
           // 触屏：点一下先放大，再由浮窗下方的「确认 / 取消」决定是否选它
           if (n.dataset) {
             n.dataset.pickChar = c.id;
@@ -4132,6 +4554,30 @@
     // Keep the corner control visible throughout an active game, including
     // the opening draft before any role cards have been removed.
     corner.hidden = false;
+    renderMobileRemoved(s);
+  }
+
+  function renderMobileRemoved(s) {
+    const area = $('#mobile-removed');
+    if (!area) return;
+    area.hidden = !isMobileGameUI();
+    if (area.hidden) return;
+    const wrap = $('#mobile-removed-cards'); wrap.innerHTML = '';
+    const rem = s.removed || { faceUp: [], faceDownCount: 0 };
+    wrap.appendChild(el('span', 'mobile-removed-label', '弃置'));
+    (rem.faceUp || []).forEach(c => {
+      const node = el('button', 'mobile-role-summary mobile-removed-role');
+      node.type = 'button';
+      node.title = '明置弃置：' + c.name;
+      node.setAttribute('aria-label', '查看明置弃置角色 ' + c.name);
+      node.innerHTML = '<b>' + c.num + '</b><span>' + escapeHtml(c.name) + '</span>';
+      onTap(node, () => mobilePreview(c, null, 'role'));
+      wrap.appendChild(node);
+    });
+    for (let i = 0; i < Number(rem.faceDownCount || 0); i++)
+      wrap.appendChild(el('span', 'facedown mobile-removed-back', ''));
+    wrap.appendChild(el('span', 'mobile-removed-count', String((rem.faceUp || []).length + Number(rem.faceDownCount || 0))));
+    if (Number(rem.faceDownCount || 0)) wrap.appendChild(el('span', 'mobile-removed-note', '暗置身份不可见'));
   }
 
   /* ============================== 行动栏 ============================== */
@@ -4190,6 +4636,7 @@
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     const representedActions = new Set();
+    if (isMobileGameUI()) av.actions.filter(a => a.type === 'build').forEach(a => representedActions.add(a));
     // Keep the native action schema unchanged: group its existing lab choices
     // into a front-end-only activation step followed by card selection.
     const labGroups = new Map();
@@ -4220,17 +4667,24 @@
       const prompt = s.turn && s.turn.pending && s.turn.pending.kind === 'emperor_crown'
         ? '选择接收皇冠的玩家'
         : '选择目标玩家';
-      appendTargetActionButtons(actionsEl, promptEl, playerActions, prompt);
+      if (isMobileGameUI()) promptEl.textContent = prompt + ' · 点击高亮的玩家区域';
+      else appendTargetActionButtons(actionsEl, promptEl, playerActions, prompt);
     }
     const roleActions = av.actions.filter(a =>
       ['choose_char', 'magistrate_signed', 'magistrate_char',
        'blackmailer_signed', 'blackmailer_char'].includes(a.type));
     if (roleActions.length) {
       roleActions.forEach(a => representedActions.add(a));
-      appendRoleActionButtons(actionsEl, promptEl, roleActions, av.prompt || '选择角色');
+      if (isMobileGameUI()) promptEl.textContent = (av.prompt || '选择角色') + ' · 点击上方角色卡';
+      else appendRoleActionButtons(actionsEl, promptEl, roleActions, av.prompt || '选择角色');
     }
     if (districtSelectMode()) {
       av.actions.filter(a => a.type === 'choose_district').forEach(a => representedActions.add(a));
+      if (isMobileGameUI() && av.actions.some(a => a.type === 'choose_district' && a.target === App.myId)) {
+        const own = el('button', 'act main', '查看我的建筑');
+        onTap(own, () => openMobilePlayerDetail(App.myId));
+        actionsEl.appendChild(own);
+      }
     }
     const pendingKind = s.turn && s.turn.pending && s.turn.pending.kind;
     const cardPickTypes = {
@@ -4285,9 +4739,11 @@
     // pending 卡牌选择弹窗（抽牌保留 / 学者 / 预言家归还）
     const tk = s.turn && s.turn.pending ? s.turn.pending.kind : null;
     if (tk === 'draw_keep' || tk === 'scholar_pick' || tk === 'prophet_give' || tk === 'wizard_card') {
-      const b = el('button', 'act main', '打开卡牌选择');
-      onTap(b, openPickModal);
-      actionsEl.appendChild(b);
+      if (!isMobileGameUI()) {
+        const b = el('button', 'act main', '打开卡牌选择');
+        onTap(b, openPickModal);
+        actionsEl.appendChild(b);
+      }
     }
   }
 
@@ -4311,6 +4767,7 @@
 
   function actionBtn(a, cls) {
     const b = el('button', 'act ' + (cls || '') + (a.disabled ? ' disabled' : ''));
+    b.dataset.actionType = a.type || '';
     b.innerHTML = escapeHtml(a.label || a.type);
     b.disabled = !!a.disabled;
     if (!a.disabled) onTap(b, () => runAction(a));
@@ -4861,6 +5318,16 @@
     if (serverStartupBtn) serverStartupBtn.onclick = openServerStartupInfo;
     $('#modal-close').onclick = closeModal;
     $('#modal').onclick = e => { if (e.target === $('#modal')) closeModal(); };
+    $('#mobile-detail-close').onclick = mobileDetailBack;
+    $('#mobile-detail').onclick = e => { if (e.target === $('#mobile-detail')) mobileDetailBack(); };
+    $('#mobile-hand-toggle').onclick = () => {
+      App.mobileHandExpanded = !App.mobileHandExpanded;
+      if (App.state) renderMe(App.state);
+    };
+    $('#mobile-draft-toggle').onclick = () => {
+      App.mobileDraftExpanded = !App.mobileDraftExpanded;
+      if (App.state && App.state.phase === 'draft') renderDraft(App.state);
+    };
 
     // 关键事件弹层
     $('#event-ok').onclick = dismissEvent;
@@ -5028,13 +5495,14 @@
     $('#btn-buildings').onclick = openBuildings;
     $('#btn-rules-top').onclick = openRules;
     const sidePanelToggle = $('#btn-side-panel-toggle');
-    if (sidePanelToggle) {
-      sidePanelToggle.onclick = () => {
-        if (!App.logOpen && !App.chatOpen) return;
+    const mobileSidePanelToggle = $('#btn-side-panel-mobile-toggle');
+    [sidePanelToggle, mobileSidePanelToggle].filter(Boolean).forEach(toggle => {
+      toggle.onclick = () => {
+        if (!App.logOpen && !App.chatOpen && !App.voiceOpen) return;
         App.sidePanelCollapsed = !App.sidePanelCollapsed;
         updateSidePanel();
       };
-    }
+    });
     $('#btn-log-toggle').onclick = () => {
       // 竖屏下拉需从顶栏下沿开始：同步顶栏实际高度，避免盖住按钮也无法返回
       const tb = document.querySelector('.topbar');
@@ -5115,6 +5583,7 @@
       }
       if (e.key !== 'Escape') return;
       if (composer && !composer.hidden) { closeChatComposer(); return; }
+      if (!$('#mobile-detail').hidden) { mobileDetailBack(); return; }
       // 展开的菜单优先级高于弹层：Esc 先收起菜单，再关弹层。
       if (gameScreen && gameScreen.classList.contains('mobile-menu-open')) { setMenuOpen(false); return; }
       closeModal();

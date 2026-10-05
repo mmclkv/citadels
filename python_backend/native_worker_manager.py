@@ -39,15 +39,36 @@ class NativeWorkerManager:
 
     @property
     def running(self) -> bool:
-        return (self.process is not None and self.process.poll() is None and
-                self.game_worker is not None and self.game_worker.process.poll() is None)
+        # The game engine owns authoritative state and is required for every
+        # match. The LibTorch worker is optional and is only needed by neural
+        # policy players and training.
+        return (self.game_worker is not None and
+                self.game_worker.process.poll() is None)
+
+    @staticmethod
+    def _compiler_target(compiler: str) -> str:
+        result = subprocess.run([compiler, "-dumpmachine"], capture_output=True,
+                                text=True, encoding="utf-8", errors="replace",
+                                timeout=10, check=False)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().lower()
+        return ""
 
     def _compiler_environment(self) -> tuple[str, dict[str, str], str | None]:
         compiler = os.environ.get("CITADELS_CLANGXX") or shutil.which("clang++")
         if not compiler:
             raise RuntimeError("找不到 clang++；请将 clang++ 加入 PATH 或设置 CITADELS_CLANGXX")
+        target = self._compiler_target(str(compiler))
         if os.name != "nt":
             return str(compiler), os.environ.copy(), None
+        if "windows-gnu" in target or "mingw" in target:
+            # LLVM-MinGW is a self-contained Windows toolchain and does not use
+            # Visual Studio's environment setup or linker. Its runtime DLLs
+            # live beside clang++, so make them visible to the game process.
+            environment = os.environ.copy()
+            compiler_bin = str(Path(compiler).resolve().parent)
+            environment["PATH"] = compiler_bin + os.pathsep + environment.get("PATH", "")
+            return str(compiler), environment, None
         devcmd_candidates = [
             Path(os.environ.get("VSINSTALLDIR", "")) / "Common7" / "Tools" / "VsDevCmd.bat",
             *Path("C:/Program Files/Microsoft Visual Studio").glob("*/Community/Common7/Tools/VsDevCmd.bat"),
@@ -68,7 +89,9 @@ class NativeWorkerManager:
         return str(compiler), os.environ.copy(), short_path.value
 
     def _build_identity(self, compiler: str, torch_version: str) -> dict:
-        target = "x86_64-pc-windows-msvc" if os.name == "nt" else f"{platform.machine()}-{platform.system().lower()}"
+        target = self._compiler_target(compiler) or (
+            "x86_64-pc-windows-msvc" if os.name == "nt" else
+            f"{platform.machine()}-{platform.system().lower()}")
         return {"compiler": str(Path(compiler).resolve()).lower(), "torch": torch_version,
                 "compilerMtimeNs": Path(compiler).stat().st_mtime_ns,
                 "target": target, "standard": "c++20",
@@ -166,7 +189,10 @@ class NativeWorkerManager:
         sources = [NATIVE_DIR / "game_engine_worker.cpp", *sorted(NATIVE_DIR.glob("*.hpp"))]
         identity = {"compiler": str(Path(compiler).resolve()).lower(),
                     "compilerMtimeNs": Path(compiler).stat().st_mtime_ns,
-                    "target": ("x86_64-pc-windows-msvc" if os.name == "nt" else f"{platform.machine()}-{platform.system().lower()}"), "standard": "c++20",
+                    "target": (self._compiler_target(compiler) or
+                               ("x86_64-pc-windows-msvc" if os.name == "nt" else
+                                f"{platform.machine()}-{platform.system().lower()}")),
+                    "standard": "c++20",
                     "sources": {path.name: path.stat().st_mtime_ns for path in sources}}
         destination, stamp = self._versioned_artifact("game_engine", identity)
         try:
@@ -182,12 +208,16 @@ class NativeWorkerManager:
         args = [compiler, "-std=c++20", "-O2", "-fexceptions", "-I", str(NATIVE_DIR),
                 str(NATIVE_DIR / "game_engine_worker.cpp"), "-o", str(output)]
         if os.name == "nt":
-            args[1:1] = ["--target=x86_64-pc-windows-msvc", "-fms-compatibility", "-fms-extensions",
-                         "-fdelayed-template-parsing", "-finput-charset=UTF-8", "-fexec-charset=UTF-8",
-                         "-DWIN32_LEAN_AND_MEAN"]
+            target = self._compiler_target(compiler)
+            if "windows-gnu" in target or "mingw" in target:
+                args[1:1] = [f"--target={target}"]
+            else:
+                args[1:1] = ["--target=x86_64-pc-windows-msvc", "-fms-compatibility", "-fms-extensions",
+                             "-fdelayed-template-parsing", "-finput-charset=UTF-8", "-fexec-charset=UTF-8",
+                             "-DWIN32_LEAN_AND_MEAN"]
         self.log("[game] 游戏引擎源码已更新，使用 clang++ 编译独立游戏主进程…")
         try:
-            if os.name == "nt":
+            if os.name == "nt" and devcmd:
                 command = f'call "{devcmd}" -arch=x64 -host_arch=x64 && {subprocess.list2cmdline(args)}'
                 run_args = ["cmd.exe", "/d", "/c", command]
             else:
@@ -207,56 +237,64 @@ class NativeWorkerManager:
             except OSError:
                 pass
 
-    def start(self) -> None:
-        import torch
-
-        torch_root = Path(torch.__file__).resolve().parent
+    def start(self, *, skip_neural_policy: bool = False) -> None:
         compiler, environment, devcmd = self._compiler_environment()
-        identity = self._build_identity(compiler, torch.__version__)
+        target = self._compiler_target(compiler)
+        torch = None
+        if not skip_neural_policy:
+            if os.name == "nt" and target and "windows-msvc" not in target:
+                raise RuntimeError(
+                    "策略神经网络 worker 需要 MSVC ABI 的 clang++；"
+                    "当前工具链仅支持游戏规则引擎，请使用 --skip-neural-policy 启动")
+            import torch as torch_module
+            torch = torch_module
+        identity = (self._build_identity(compiler, torch.__version__)
+                    if torch is not None else None)
         with self._lock:
             game_executable = self._build_game_engine(compiler, environment, devcmd)
-            mcts_executable, mcts_stamp = self._versioned_artifact("mcts_worker_libtorch", identity)
-            if not self._is_current(identity, mcts_executable, mcts_stamp):
-                self._build(compiler, environment, torch_root, devcmd, mcts_executable,
-                            torch_abi=bool(torch.compiled_with_cxx11_abi()))
-                mcts_stamp.write_text(json.dumps(identity, indent=2), encoding="utf-8")
-                self.rebuilt = True
-            else:
-                self.log(f"[native] {mcts_executable.name} 已是最新，跳过编译")
-            self.worker = NativeMctsWorker(mcts_executable)
+            mcts_executable = None
+            if not skip_neural_policy:
+                assert torch is not None and identity is not None
+                torch_root = Path(torch.__file__).resolve().parent
+                mcts_executable, mcts_stamp = self._versioned_artifact("mcts_worker_libtorch", identity)
+                if not self._is_current(identity, mcts_executable, mcts_stamp):
+                    self._build(compiler, environment, torch_root, devcmd, mcts_executable,
+                                torch_abi=bool(torch.compiled_with_cxx11_abi()))
+                    mcts_stamp.write_text(json.dumps(identity, indent=2), encoding="utf-8")
+                    self.rebuilt = True
+                else:
+                    self.log(f"[native] {mcts_executable.name} 已是最新，跳过编译")
+
             self.game_worker = GameEngineWorker(game_executable, env=environment)
-            self.process = self.worker.process
-            if self.process.poll() is not None:
-                code = self.process.returncode
-                self.worker = None
-                self.process = None
-                if self.game_worker is not None:
-                    self.game_worker.close()
-                    self.game_worker = None
-                raise RuntimeError(f"{mcts_executable.name} 启动失败（exit={code}）；请检查 LibTorch 动态库依赖")
             if self.game_worker.process.poll() is not None:
                 code = self.game_worker.process.returncode
                 self.close()
                 raise RuntimeError(f"{game_executable.name} 启动失败（exit={code}）")
             self.compiler = compiler
-            self.log(f"[native] {self.worker.executable.name} 已启动（pid={self.process.pid}）")
             self.log(f"[game] {self.game_worker.executable.name} 已启动（pid={self.game_worker.process.pid}）")
+            if skip_neural_policy:
+                self.log("[native] 已按启动参数跳过策略神经网络 worker；普通 NPC 与规则引擎保持可用")
+                return
+
+            assert mcts_executable is not None
+            self.worker = NativeMctsWorker(mcts_executable)
+            self.process = self.worker.process
+            if self.process.poll() is not None:
+                code = self.process.returncode
+                self.worker = None
+                self.process = None
+                self.close()
+                raise RuntimeError(f"{mcts_executable.name} 启动失败（exit={code}）；请检查 LibTorch 动态库依赖")
+            self.log(f"[native] {self.worker.executable.name} 已启动（pid={self.process.pid}）")
 
     def close(self) -> None:
         with self._lock:
             worker, self.worker = self.worker, None
             game_worker, self.game_worker = self.game_worker, None
             process, self.process = self.process, None
-            if process is None:
-                if game_worker is not None:
-                    game_worker.close()
-                return
             if worker is not None:
                 worker.close()
-                if game_worker is not None:
-                    game_worker.close()
-                return
-            if process.poll() is None:
+            elif process is not None and process.poll() is None:
                 try:
                     if process.stdin:
                         process.stdin.close()
@@ -268,5 +306,7 @@ class NativeWorkerManager:
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
-            if process.stdin:
-                process.stdin.close()
+                if process.stdin:
+                    process.stdin.close()
+            if game_worker is not None:
+                game_worker.close()

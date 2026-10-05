@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>富饶之城 · 移动端</title>
+<style>
+:root{
+  --bg:#030811;--panel:#071421;--panel2:#0a1b2b;--line:#153b58;--line2:#235a7e;
+  --cyan:#43e4ff;--gold:#f1bd4b;--magenta:#aa5cff;--ink:#eef7ff;--muted:#8ea9bd;
+  --yellow:#e0a92b;--blue:#3d7ec4;--green:#3fa46a;--red:#d0503f;--purple:#8b5cc7;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#02060c;color:var(--ink);font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif}
+button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 0,#07111d 35%,#02060c 72%);padding:24px}
+.shell{max-width:1220px;margin:0 auto;display:grid;grid-template-columns:minmax(330px,430px) 1fr;gap:28px;align-items:start}.phone-wrap{display:flex;justify-content:center}
+.note{position:sticky;top:24px;background:rgba(6,16,28,.92);border:1px solid #173b57;border-radius:22px;padding:22px;box-shadow:0 18px 60px #0008}.note h1{font-size:24px;margin:0 0 12px}.note p{color:#abc1d4;line-height:1.7;margin:8px 0}.note b{color:#fff}.note code{color:#8eefff}.note .legend{display:grid;gap:9px;margin-top:16px}.note .legend div{padding:10px 12px;border:1px solid #15344b;background:#07131f;border-radius:12px;color:#aac0d2;font-size:13px;line-height:1.55}
+.phone{width:min(100%,430px);height:min(920px,calc(100vh - 48px));min-height:700px;background:#030913;border:1px solid #274865;border-radius:30px;overflow:hidden;box-shadow:0 20px 70px #000b,0 0 0 4px #06111c;display:flex;flex-direction:column;position:relative}
+.top{height:51px;flex:0 0 51px;border-bottom:1px solid #12324a;display:grid;grid-template-columns:64px 1fr 64px;align-items:center;padding:0 8px;background:rgba(4,12,22,.97)}
+.iconbtn{min-width:54px;height:36px;border-radius:10px;border:1px solid #1b4564;background:#0a1827;color:#eaf6ff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:5px}.iconbtn .menu-symbol{font-size:15px}.phase{text-align:center;font-weight:800;font-size:14px}.phase small{display:block;color:var(--gold);font-weight:650;font-size:10px;margin-top:3px}.top-spacer{width:54px}
+.mobile-stage-switch{height:38px;flex:0 0 38px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px 7px;border-bottom:1px solid #12324a;background:#04101b}.mobile-stage-switch button{min-width:0;border:1px solid #1a4767;border-radius:8px;background:#07131f;color:#9fb8ca;font-size:10.5px;font-weight:850;cursor:pointer}.mobile-stage-switch button.on{border-color:#2b86ff;background:linear-gradient(180deg,#11437b,#0b2d55);color:#fff;box-shadow:inset 0 0 12px #3d98ff22,0 0 8px #2681ff22}
+.viewport{flex:1;min-height:0;overflow:auto;padding:7px 7px 184px;scrollbar-width:none}.viewport::-webkit-scrollbar{display:none}.section{border:1px solid #123851;background:linear-gradient(180deg,#081624,#06111d);border-radius:13px;margin-bottom:7px;overflow:hidden}.section-title{min-height:29px;display:flex;align-items:center;justify-content:space-between;padding:5px 9px;border-bottom:1px solid #102f46;font-size:11px;font-weight:800}.section-title .sub{font-size:9px;color:var(--muted);font-weight:600}.badge8{display:inline-flex;align-items:center;padding:2px 7px;border:1px solid #335a76;border-radius:999px;color:#d5e7f4;background:#0b1a28;font-size:9px}
+/* 与项目现有 style.css 对齐的金币 / 分数 / 皇冠图标 */
+.coin-icon{position:relative;display:inline-block;flex:0 0 auto;width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 34% 28%,#fff3a8 0 12%,#f5c94b 30%,#d99318 72%,#8e5b0c 100%);border:1px solid #8e5b0c;box-shadow:inset 0 0 0 2px rgba(255,245,170,.42),0 1px 3px rgba(100,60,0,.35)}.coin-icon::before{content:'';position:absolute;inset:3px;border:1px solid rgba(255,247,177,.72);border-radius:50%}.coin-icon::after{content:'✦';position:absolute;inset:0;display:grid;place-items:center;color:#fff1a0;font-size:7px;line-height:1;text-shadow:0 1px 1px #9b650e}
+.score-icon{position:relative;display:inline-block;flex:0 0 auto;width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 34% 28%,#bcd8ff 0 12%,#5a9ae8 30%,#2f6fc4 72%,#123a72 100%);border:1px solid #123a72;box-shadow:inset 0 0 0 2px rgba(214,232,255,.45),0 1px 3px rgba(10,40,90,.35)}.score-icon::before{content:'';position:absolute;inset:3px;border:1px solid rgba(214,232,255,.7);border-radius:50%}.crown-icon{display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-family:"Segoe UI Symbol","Noto Sans Symbols 2",serif;font-size:15px;line-height:1;color:var(--gold);text-shadow:0 1px 2px rgba(80,50,0,.28)}
+.hand-back{width:14px;height:21px;flex:0 0 14px;border-radius:3px;background:url('/assets/themes/neon/card-back.png') center/cover no-repeat;border:1px solid #2f6f97;box-shadow:0 1px 4px #0008}.stat-with-icon{display:inline-flex;align-items:center;gap:3px}.stat-value{font-weight:800;color:#eef7ff;font-variant-numeric:tabular-nums}
+/* 公开信息：2列×4行的环形摘要。每位玩家内建筑4张一行、最多两行。 */
+.players{position:relative;padding:5px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 5px}
+.player-row{min-width:0;border:1px solid #143b57;background:#06111d;border-radius:10px;padding:4px;min-height:76px;cursor:pointer;overflow:hidden}
+.player-row.threat{box-shadow:inset 0 0 14px #d89d1712}
+.player-row.self{background:linear-gradient(135deg,#082139,#07131f);box-shadow:inset 0 0 20px #22a9ff18}
+.player-row.active-turn{border-color:#f2bd4b;box-shadow:0 0 0 1px #f2bd4b66,0 0 12px #f2bd4b44,inset 0 0 14px #f2bd4b12}
+.player-row.target-selectable{border-color:#41d9ff;box-shadow:0 0 0 1px #41d9ff55,0 0 10px #41d9ff2c,inset 0 0 12px #41d9ff12}.player-row.target-selectable:active{transform:scale(.985)}.player-row.target-ineligible{opacity:.48;filter:saturate(.72)}
+.players.targeting{border-radius:11px;background:linear-gradient(180deg,#06243a55,#07121c00)}
+.player-meta{min-width:0;cursor:pointer}
+.player-headline{height:20px;display:flex;align-items:center;gap:3px;min-width:0;overflow:hidden;margin-bottom:3px}
+.pname{flex:1 1 34px;min-width:18px;max-width:54px;font-size:10.5px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.public-role-inline{min-width:max-content;display:flex;align-items:center;flex:0 0 auto;overflow:visible}
+.public-role-btn{max-width:none;height:18px;padding:0 4px 0 2px;border-radius:7px;border:1px solid #76591d;background:linear-gradient(180deg,#2a1d08,#15150f);color:#ffe08a;display:inline-flex;align-items:center;gap:2px;cursor:pointer;font-size:9.3px;font-weight:900;white-space:nowrap;overflow:visible}
+.public-role-btn>span:last-child{overflow:visible;text-overflow:clip;white-space:nowrap;flex:0 0 auto}
+.public-role-btn .role-no{width:auto;height:auto;flex:0 0 auto;border:0;border-radius:0;background:transparent;color:#ffd45e;font-size:9.3px;font-weight:950;line-height:1}
+.public-role-btn:active{transform:scale(.97)}
+.you-chip{flex:0 0 auto;border-radius:999px;padding:1px 3px;font-size:6.7px;font-weight:850;line-height:1.25;color:#03111a;background:#65e8ff;border:1px solid #9af1ff;box-shadow:0 0 9px #43e4ff44}
+.crown-icon{flex:0 0 auto}
+.p-stats{margin-left:auto;display:flex;align-items:center;gap:3px;font-size:7.5px;color:#a9c0d0;white-space:nowrap;flex:0 0 auto}
+.p-stats .hand-stat{display:inline-flex;align-items:center;gap:1px;white-space:nowrap}
+.p-stats .coin-icon,.p-stats .score-icon{width:11px;height:11px}
+.p-stats .coin-icon::before,.p-stats .score-icon::before{inset:2px}
+.p-stats .coin-icon::after{font-size:5px}
+.p-stats .hand-back{width:8px;height:12px;flex-basis:8px;border-radius:2px}
+.p-stats .stat-value{font-size:8px}
+.city-compact{min-width:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;margin-top:1px}
+.city-mini{height:22px;min-width:0;padding:0 2px;border:1px solid color-mix(in srgb,var(--district-color) 58%,#1e3546);border-left:3px solid var(--district-color);border-radius:5px;background:color-mix(in srgb,var(--district-color) 14%,#07131e);color:#f6fbff;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:2px;cursor:pointer;overflow:hidden}
+.city-mini:active{transform:scale(.96)}
+.mini-cost{flex:0 0 auto;display:inline-block;background:transparent;border:0;border-radius:0;font-size:9px;font-weight:950;color:#fff;line-height:1;font-variant-numeric:tabular-nums}
+.mini-name{min-width:0;display:block;font-size:9.5px;font-weight:900;line-height:1;letter-spacing:-.45px;white-space:nowrap;overflow:hidden;text-overflow:clip;color:#f7fbff}
+/* 自己的城区不再单独常驻；手牌 / 角色池采用同一套可折叠结构。 */
+.fold-section{border-color:#1764a0}.fold-section.role-area{border-color:#62420c}.fold-section .section-title{background:#071d32;gap:8px}.fold-section.role-area .section-title{background:linear-gradient(90deg,#251a08,#0c1620);color:#ffd465}.fold-title-left{min-width:0;display:flex;align-items:center;gap:7px}.fold-toggle{flex:0 0 auto;height:24px;padding:0 9px;border-radius:999px;border:1px solid #28536f;background:#0b2031;color:#d8ebf6;font-size:9px;font-weight:850;cursor:pointer}.role-area .fold-toggle{border-color:#70501c;background:#241807;color:#ffd66f}.fold-summary{padding:5px 6px;background:#06111d}.fold-section:not(.collapsed) .fold-summary{display:none}.fold-section.collapsed .fold-expanded{display:none}.fold-summary-grid{display:grid;grid-template-columns:repeat(var(--summary-count,8),minmax(0,1fr));gap:2px}.summary-role{height:44px;min-width:0;padding:2px 1px;border:1px solid #6c5426;border-top:4px solid var(--gold);border-radius:5px;background:linear-gradient(180deg,#251b0b,#101722);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;color:#fff;cursor:pointer;overflow:hidden}.summary-role .role-num{width:15px;height:15px;border-radius:50%;display:grid;place-items:center;background:#6e5016;border:1px solid #d3a640;font-size:8px;font-weight:950}.summary-role .role-mini-name{width:100%;font-size:9.2px;font-weight:900;line-height:1;letter-spacing:-.8px;white-space:nowrap;overflow:hidden;text-align:center}.summary-role.selected{border-color:#ffe08a;box-shadow:0 0 10px #f1bd4b55}.fold-expanded{padding:7px}.thumb-grid{display:grid;grid-template-columns:repeat(5,64px);justify-content:space-between;gap:7px 5px}.small-card-btn{position:relative;width:64px;height:96px;border:1px solid #315472;border-radius:7px;background:#09141e;padding:0;overflow:hidden;cursor:pointer}.small-card-btn img{width:100%;height:100%;display:block;object-fit:contain;background:#06101a}.small-card-btn.selected{border:2px solid var(--gold);box-shadow:0 0 0 2px #f1bd4b33,0 0 16px #f1bd4b55}.small-card-btn .small-card-label{position:absolute;z-index:2;left:2px;right:2px;bottom:2px;padding:2px 1px;border-radius:4px;background:#000a;color:#fff;font-size:8px;font-weight:900;text-align:center;text-shadow:0 1px 2px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.small-card-btn:active{transform:scale(.97)}
+/* 弃置角色常驻：沿用项目角色缩略图 / 牌背素材。 */
+.removed-mobile{display:flex;align-items:center;gap:6px;padding:5px 7px;min-height:46px}.removed-label{flex:0 0 auto;font-size:9px;font-weight:850;color:#9fb8ca}.removed-cards{display:flex;align-items:center;gap:5px;min-width:0}.removed-role-card{width:26px;height:41px;border:1px solid #5f4820;border-radius:4px;background:#0a1420;padding:0;overflow:hidden;cursor:pointer}.removed-role-card img{width:100%;height:100%;object-fit:contain;display:block}.removed-back{width:26px;height:41px;border:1px solid #2f6f97;border-radius:4px;background:url('/assets/themes/neon/card-back.png') center/cover no-repeat;cursor:pointer}.removed-note{font-size:8px;color:#86a2b6;white-space:nowrap}.removed-count{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:#13283a;border:1px solid #31536c;color:#dbeaf3;font-size:8px;font-weight:900}
+.bottom{position:absolute;left:0;right:0;bottom:0;padding:6px 7px calc(7px + env(safe-area-inset-bottom));background:linear-gradient(180deg,#06111df2,#030913 24%);border-top:1px solid #153b55;box-shadow:0 -14px 34px #000a}.selected-info{height:30px;display:flex;align-items:center;justify-content:center;color:#d7e6f1;font-size:10px;text-align:center}.selected-info b{color:var(--gold);margin:0 3px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.actions.one{grid-template-columns:1fr}.btn{border:0;border-radius:11px;height:44px;color:white;font-weight:850;font-size:13px;cursor:pointer}.btn.primary{background:linear-gradient(135deg,#1c6eff,#2849ef);box-shadow:0 0 18px #236cff55}.btn.gold{background:linear-gradient(135deg,#a96d09,#efb62e)}.btn.purple{background:linear-gradient(135deg,#6a31ff,#a143ff)}.btn.ghost{background:#0b1928;border:1px solid #244964;color:#c6dae8}.btn.danger{background:linear-gradient(135deg,#b72e43,#ff5e69)}.tabs{display:flex;gap:6px;margin-top:16px}.tabs button{flex:1;height:40px;border-radius:10px;border:1px solid #1a4767;background:#07131f;color:#bcd1df;font-weight:750;cursor:pointer}.tabs button.on{background:#0f3260;color:#fff;border-color:#2b86ff}
+/* 玩家详情：用足空间，小卡图 + 原项目得分明细结构 */
+.sheet-mask{position:absolute;inset:80px 0 0;background:#0009;display:none;z-index:10}.sheet{position:absolute;left:7px;right:7px;bottom:78px;max-height:76%;overflow:auto;background:#081522;border:1px solid #27506d;border-radius:18px 18px 12px 12px;box-shadow:0 -20px 50px #000c;z-index:11;display:none}.sheet.player-detail-mode{top:calc(8px + env(safe-area-inset-top));bottom:calc(8px + env(safe-area-inset-bottom));max-height:none;border-radius:18px;box-shadow:0 12px 55px #000e}.sheet-mask.player-detail-mode{inset:0}.sheet-head{position:sticky;top:0;z-index:2;background:#081522;border-bottom:1px solid #153851;padding:11px 13px;display:flex;align-items:center;justify-content:space-between;font-weight:850;font-size:15px}.sheet-body{padding:9px}.sheet .close{border:0;background:#102337;color:white;border-radius:8px;width:32px;height:32px}.sheet.show,.sheet-mask.show{display:block}.detail-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px}.detail-stat{min-width:0;min-height:50px;border:1px solid #153a55;border-radius:9px;background:#07131f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;color:#a9c0d0;font-weight:700}.detail-stat b{font-size:16px;color:#eef7ff}.detail-stat .hand-back{width:13px;height:20px}.detail-stat-line{display:flex;align-items:center;gap:4px}.detail-block{border:1px solid #153a55;background:#07131f;border-radius:10px;margin-bottom:8px;overflow:hidden}.detail-block-title{padding:9px 10px;border-bottom:1px solid #123249;font-size:12px;font-weight:850;color:#dcecf7;display:flex;align-items:center;justify-content:space-between;gap:8px}.detail-role-score{display:grid;grid-template-columns:82px minmax(0,1fr);gap:8px;margin-bottom:9px;align-items:stretch}.detail-role-score.no-role{grid-template-columns:1fr}.detail-role-card{border:1px solid #6b5124;background:linear-gradient(180deg,#211806,#09131d);border-radius:10px;padding:4px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;min-width:0}.detail-role-thumb{width:74px;height:111px;border:0;border-radius:7px;padding:0;background:#07131f;overflow:hidden;cursor:pointer;box-shadow:0 0 0 1px #856729,0 4px 12px #0007}.detail-role-thumb img{width:100%;height:100%;object-fit:contain;display:block}.detail-role-caption{width:100%;text-align:center;color:#ffe19a;font-size:12px;font-weight:900;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.score-compact{display:grid;grid-template-columns:minmax(60px,.72fr) minmax(0,1.45fr);gap:5px;min-width:0}.score-left-stack{display:grid;grid-template-rows:1fr 1fr;gap:5px}.score-kpi{border:1px solid #173a53;border-radius:9px;background:#081827;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:48px;padding:6px 4px;text-align:center}.score-kpi span{font-size:11px;color:#b3c9d8;font-weight:800}.score-kpi b{margin-top:3px;font-size:21px;line-height:1;color:#eef7ff}.score-kpi.total{border-color:#2d6389;background:linear-gradient(180deg,#0d2840,#091b2c);box-shadow:inset 0 0 14px #3b9ce71c}.score-kpi.total span{color:#bcdaf0}.score-kpi.total b{font-size:24px;color:#78bcff}.score-reward-card{border:1px solid #5e5129;border-radius:9px;background:linear-gradient(180deg,#161607,#0b1721);min-width:0;padding:8px 9px;display:flex;flex-direction:column}.score-reward-head{display:flex;align-items:baseline;justify-content:space-between;gap:6px;padding-bottom:4px;border-bottom:1px solid #443e20}.score-reward-head span{font-size:12px;color:#eadb9f;font-weight:900}.score-reward-head b{font-size:22px;line-height:1;color:#ffe17c}.score-reward-detail{list-style:none;margin:0;padding:7px 0 0;display:grid;gap:5px}.score-reward-row{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:7px;padding:5px 7px;border-radius:7px;background:#101c25;font-size:11px;color:#d2dee5;line-height:1.25}.score-reward-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.score-reward-row strong{flex:0 0 auto;color:#ffe17c}.score-reward-empty{margin:auto 0;color:#8fa7b7;font-size:11px;text-align:center}.detail-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:9px}.detail-card-btn{min-width:0;border:0;background:transparent;padding:0;cursor:pointer}.detail-card-btn img{width:100%;aspect-ratio:2/3;object-fit:cover;border:1px solid #315472;border-radius:6px;display:block}.detail-card-name{text-align:center;margin-top:4px;color:#c2d3de;font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.helper{padding:8px 9px;border-radius:9px;background:#07131f;border:1px dashed #1b4868;color:#9fb7c8;font-size:10px;line-height:1.5;margin-bottom:8px}
+.target-context{padding:10px 11px;border:1px solid #2a6688;border-radius:10px;background:#08233a;color:#ccecff;font-size:12px;font-weight:800;line-height:1.45;margin-bottom:9px}.target-context b{color:#fff0a0}.sheet-target-actions{position:sticky;bottom:0;z-index:4;display:grid;grid-template-columns:1fr 1.35fr;gap:7px;margin:10px -9px -9px;padding:9px;background:linear-gradient(180deg,#081522dd,#06101df8 35%);border-top:1px solid #1a415b;backdrop-filter:blur(8px)}.sheet-target-actions.one{grid-template-columns:1fr}.detail-card-btn.targetable{border-radius:8px;padding:3px;background:#0b2740;box-shadow:0 0 0 1px #42d8ff66,0 0 9px #42d8ff20}.detail-card-btn.targetable .detail-card-name{color:#e7f8ff}.detail-block-title .target-hint{color:#67e5ff;font-weight:900}.target-player{border:1px solid #1e5275;border-radius:10px;background:#07131f;padding:7px;margin-bottom:6px}.target-player-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}.target-player strong{font-size:11px}.target-player small{color:#93adbf;font-size:9px;margin-left:auto}
+/* 全屏高清卡牌查看器 */
+.viewer{position:absolute;inset:0;z-index:30;background:rgba(1,5,10,.94);display:none;flex-direction:column;align-items:center;justify-content:center;padding:16px 14px calc(16px + env(safe-area-inset-bottom));backdrop-filter:blur(5px)}.viewer.show{display:flex}.viewer-head{position:absolute;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top));height:44px;display:flex;align-items:center;justify-content:space-between;z-index:2}.viewer-title{font-size:13px;font-weight:850}.viewer-close{width:38px;height:38px;border-radius:11px;border:1px solid #244c6a;background:#0a1928;color:white;font-size:20px}.viewer-card{max-width:min(82vw,340px);max-height:69vh;object-fit:contain;border-radius:10px;box-shadow:0 22px 60px #000,0 0 0 1px #315779;touch-action:pinch-zoom}.viewer-meta{margin-top:10px;width:min(88vw,360px);display:flex;align-items:center;justify-content:center;gap:8px;color:#a9bdcc;font-size:11px;min-height:22px}.viewer-meta .color-dot{width:10px;height:10px;border-radius:50%;background:var(--district-color,#777);box-shadow:0 0 8px var(--district-color,#777)}.viewer-actions{width:min(88vw,360px);display:grid;grid-template-columns:1fr;gap:7px;margin-top:9px}.viewer-actions.two{grid-template-columns:1fr 1fr}
+@media(max-width:860px){body{padding:0}.shell{display:block}.note{display:none}.phone{width:100%;height:100dvh;min-height:0;border:0;border-radius:0;box-shadow:none}.phone-wrap{display:block}.district-card{height:96px}.district-card.hand{height:103px}}
+@media(max-width:395px){.players{padding-left:3px;padding-right:3px;gap:3px}.player-row{padding:3px;min-height:73px}.player-headline{gap:2px}.pname{font-size:9.9px;max-width:46px}.public-role-btn{font-size:8.8px;padding:0 3px 0 1px;gap:1px}.public-role-btn .role-no{font-size:8.8px}.p-stats{gap:2px}.p-stats .stat-value{font-size:7.6px}.city-compact{gap:1px}.city-mini{padding:0 1px;border-left-width:2px}.mini-name{font-size:9px;letter-spacing:-.6px}.mini-cost{font-size:8.5px}.thumb-grid{grid-template-columns:repeat(5,60px);gap:6px 4px}.small-card-btn{width:60px;height:90px}.summary-role .role-mini-name{font-size:8.6px}}
+@media(max-height:760px){.player-row{min-height:70px}.city-mini{height:20px}.district-card{height:83px}.district-card.hand{height:89px}.viewport{padding-bottom:170px}.roles{gap:4px}.bottom{padding-top:4px}.btn{height:41px}}
+</style>
+<link rel="stylesheet" href="./mobile-live.css?v=19"/>
+</head>
+<body>
+<div class="shell">
+  <div class="phone-wrap">
+    <main class="phone" id="phone">
+      <header class="top">
+        <button class="iconbtn" id="menuButton" type="button" aria-label="菜单"><span class="menu-symbol">☰</span><span>菜单</span></button>
+        <div class="phase" id="phase">富饶之城<small>霓虹主题</small></div>
+        <button class="iconbtn sidebar-toggle" id="sidebarToggle" type="button" aria-label="展开侧边栏" aria-expanded="false" aria-controls="mobileSidebar">‹</button>
+      </header>
+
+      <div class="viewport" id="viewport">
+        <section class="section">
+          <div class="section-title"><strong>公开局面 <span class="badge8" id="playerCount">— 人局</span></strong><span class="sub" id="publicSub">顺时针排列</span></div>
+          <div class="effects-banner" id="effectsBanner" hidden></div>
+          <div class="players" id="players"></div>
+        </section>
+
+        <section class="section fold-section collapsed" id="handSection">
+          <div class="section-title">
+            <div class="fold-title-left"><strong>我的手牌</strong><span class="sub">0 张</span></div>
+            <button class="fold-toggle" type="button" data-fold="handSection">展开</button>
+          </div>
+          <div class="fold-summary"><div class="fold-summary-grid" id="handSummary"></div></div>
+          <div class="fold-expanded"><div class="thumb-grid" id="myHand"></div></div>
+        </section>
+
+        <section class="section fold-section role-area" id="roleArea">
+          <div class="section-title">
+            <div class="fold-title-left"><strong>请选择一个角色</strong><span class="sub">点击卡图查看 / 选择</span></div>
+            <button class="fold-toggle" type="button" data-fold="roleArea">收起</button>
+          </div>
+          <div class="fold-summary"><div class="fold-summary-grid" id="roleSummary"></div></div>
+          <div class="fold-expanded"><div class="thumb-grid" id="roles"></div></div>
+        </section>
+
+        <section class="section" id="removedArea">
+          <div class="section-title"><strong>本轮弃置角色</strong><span class="sub">明置可查看 · 暗置仅牌背</span></div>
+          <div class="removed-mobile" id="removedRoles"></div>
+        </section>
+      </div>
+
+      <div class="sheet-mask" id="mask"></div>
+      <section class="sheet" id="sheet">
+        <div class="sheet-head"><span id="sheetTitle">玩家详情</span><button class="close" id="closeSheet">×</button></div>
+        <div class="sheet-body" id="sheetBody"></div>
+      </section>
+
+      <section class="viewer" id="viewer" aria-modal="true" role="dialog">
+        <div class="viewer-head"><div class="viewer-title" id="viewerTitle">卡牌</div><button class="viewer-close" id="viewerClose">×</button></div>
+        <img class="viewer-card" id="viewerImg" alt="卡牌大图"/>
+        <div class="viewer-meta" id="viewerMeta"></div>
+        <div class="viewer-actions" id="viewerActions"><button class="btn ghost">返回</button></div>
+      </section>
+
+      <footer class="bottom">
+        <div class="selected-info" id="selectedInfo">正在连接游戏服务</div>
+        <div class="actions one" id="actions"></div>
+      </footer>
+      <section class="over-overlay" id="overOverlay" hidden><div class="over-card">
+        <h2 id="overTitle">游戏结束</h2>
+        <div class="over-scroll"><table class="score-table" id="scoreTable"></table></div>
+        <div class="btn-row"><button class="btn ghost" id="overExit" type="button">回主菜单</button><button class="btn primary" id="overAgain" type="button">再来一局</button></div>
+      </div></section>
+      <section class="event-overlay" id="eventOverlay" hidden><div class="event-box" id="eventBox"><div class="event-icon" id="eventIcon"></div><div class="event-title" id="eventTitle"></div><div class="event-text" id="eventText"></div><button class="btn ghost" id="eventOk" type="button">知道了</button><div class="event-bar"><i id="eventBarFill"></i></div></div></section>
+      <div class="sidebar-mask" id="sidebarMask" hidden></div>
+      <aside class="mobile-sidebar" id="mobileSidebar" aria-label="游戏侧边栏" hidden>
+        <div class="mobile-sidebar-head"><strong>对局信息</strong><button class="sidebar-close" id="sidebarClose" type="button" aria-label="收起侧边栏">›</button></div>
+        <div class="sidebar-tabs"><button type="button" data-sidebar-tab="log" class="active">战报</button><button type="button" data-sidebar-tab="chat">聊天记录</button><button type="button" data-sidebar-tab="voice" id="sidebarVoiceTab" hidden>语音</button></div>
+        <div class="sidebar-content" id="sidebarContent"></div>
+        <div id="voiceAudio" hidden></div>
+        <form class="sidebar-chat-form" id="sidebarChatForm" hidden><input id="sidebarChatInput" maxlength="500" placeholder="发言…" aria-label="聊天内容"><button type="submit">发送</button></form>
+      </aside>
+      <section class="entry-overlay" id="entryOverlay"><div class="entry-card"><h1>富饶之城</h1><p id="entryMessage">正在进入对局…</p></div></section>
+      <section class="menu-overlay" id="menuOverlay" hidden>
+        <div class="menu-card"><div class="menu-heading">菜单 <button id="menuClose" class="close" type="button">×</button></div>
+        <div id="roomInfo"></div><div class="menu-options">
+          <button class="btn ghost" id="menuSpeed" type="button">电脑速度 · 标准</button>
+          <button class="btn ghost" id="menuRoles" type="button">角色一览</button>
+          <button class="btn ghost" id="menuBuildings" type="button">建筑一览</button>
+          <button class="btn ghost" id="menuRules" type="button">游戏规则</button>
+          <button class="btn ghost" id="menuLog" type="button">战报</button>
+          <button class="btn ghost" id="menuChat" type="button">聊天记录 / 发言</button>
+          <button class="btn ghost" id="menuVoice" type="button" hidden>语音</button>
+          <div class="menu-theme">主题 · 霓虹</div>
+          <button class="btn ghost" id="menuNewGame" type="button">离开对局并返回首页</button>
+          <button class="btn ghost" id="menuCloseBottom" type="button">返回对局</button>
+        </div></div>
+      </section>
+      <section class="reference-overlay" id="referenceOverlay" hidden aria-modal="true" role="dialog"><div class="reference-card"><div class="menu-heading"><span id="referenceTitle"></span><button id="referenceClose" class="close" type="button">×</button></div><div id="referenceBody"></div></div></section>
+    </main>
+  </div>
+</div>
+
+<script src="./themes/neon/manifest.js"></script>
+<script src="./themes/theme-manager.js"></script>
+<script src="./src/cards.js?v=4"></script>
+<script src="./mobile.js?v=3"></script>
+</body>
+</html>

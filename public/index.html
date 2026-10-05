@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=65">
+  <link rel="stylesheet" href="./style.css?v=66">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=16">
 </head>
 <body>
@@ -251,20 +251,30 @@
     </div>
   </header>
 
+  <div class="mobile-phase-status" id="mobile-phase-status" hidden>
+    <strong id="mobile-phase-title"></strong><span id="mobile-phase-sub"></span>
+  </div>
+
   <main class="board">
     <div class="board-main" id="board-main">
       <!-- 选角阶段 -->
       <div id="draft-area" class="draft-area" hidden>
         <div class="draft-head">
-          <h3 id="draft-title">选择角色</h3>
+          <div class="mobile-draft-title-left"><h3 id="draft-title">选择角色</h3><span>点击卡图查看 / 选择</span></div>
+          <button class="btn tiny ghost mobile-draft-toggle" id="mobile-draft-toggle" type="button" aria-expanded="true">收起</button>
           <p class="dim small" id="draft-sub"></p>
         </div>
+        <div class="mobile-draft-summary" id="mobile-draft-summary" hidden></div>
         <div class="draft-pool" id="draft-pool"></div>
       </div>
 
       <!-- 行动阶段 -->
       <div id="play-area" class="play-area">
         <div class="turn-banner" id="turn-banner"></div>
+        <section class="mobile-choice-shelf" id="mobile-choice-shelf" hidden aria-live="polite">
+          <div class="mobile-choice-head"><h3 id="mobile-choice-title"></h3><span id="mobile-choice-count"></span></div>
+          <div class="mobile-choice-cards" id="mobile-choice-cards"></div>
+        </section>
         <div class="table-arena" id="table-arena">
           <div class="turn-order-guide" id="turn-order-guide" aria-label="行动顺序"></div>
           <div class="removed-corner" id="removed-corner" aria-label="本轮出局角色" hidden>
@@ -284,6 +294,7 @@
               </div>
             </div>
           </div>
+          <div class="mobile-public-heading" id="mobile-public-heading"><strong>公开局面 <span id="mobile-public-count"></span></strong><span id="mobile-public-status">顺时针排列</span></div>
           <div class="opponents" id="opponents"></div>
           <div class="me-area" id="me-area">
           <div class="zone-head"><span class="dim small" id="my-city-count"></span><span class="me-stats">
@@ -295,12 +306,17 @@
             <div class="me-char-stats" id="my-char-stats"></div>
           </div>
           <div class="city-row" id="my-city"></div>
-          <div class="zone-head"><h3>我的手牌 <span class="dim small" id="my-hand-count"></span></h3>
-            <span class="dim small" id="my-chars-tip"></span></div>
+          <div class="zone-head" id="mobile-hand-head"><div class="mobile-hand-title-left"><h3>我的手牌</h3><span class="dim small" id="my-hand-count"></span></div>
+            <span class="dim small" id="my-chars-tip"></span><button class="btn tiny ghost mobile-hand-toggle" id="mobile-hand-toggle" type="button" aria-expanded="false">展开</button></div>
+          <div class="mobile-hand-summary" id="mobile-hand-summary"></div>
           <div class="hand-row" id="my-hand"></div>
           </div>
         </div>
       </div>
+      <section class="mobile-removed" id="mobile-removed" hidden>
+        <div class="mobile-removed-title"><strong>本轮弃置角色</strong><span>明置可查看 · 暗置仅牌背</span></div>
+        <div class="mobile-removed-cards" id="mobile-removed-cards"></div>
+      </section>
     </div>
 
     <aside class="side-panel" id="side-panel">
@@ -343,6 +359,8 @@
   <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
     <span aria-hidden="true">☰</span><span>菜单</span>
   </button>
+  <button class="mobile-side-expand" id="btn-side-panel-mobile-toggle" type="button" hidden
+    aria-label="展开右侧边栏" aria-controls="side-panel-body" title="展开右侧边栏">‹</button>
   <aside class="bot-debug-console" id="bot-debug-console" hidden aria-label="电脑决策调试控制台">
     <div class="bot-debug-head">
       <h3>电脑决策调试</h3>
@@ -373,6 +391,18 @@
   <div class="modal-box">
     <div class="modal-head"><h3 id="modal-title">标题</h3><button class="btn tiny ghost" id="modal-close">关闭</button></div>
     <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- 移动端玩家详情与确认卡图，公开区的整个玩家框进入这里 -->
+<div class="mobile-detail" id="mobile-detail" hidden role="dialog" aria-modal="true" aria-labelledby="mobile-detail-title">
+  <div class="mobile-detail-sheet">
+    <header class="mobile-detail-head">
+      <div><span class="mobile-detail-kicker" id="mobile-detail-kicker">玩家详情</span><h2 id="mobile-detail-title"></h2></div>
+      <button class="btn tiny ghost" id="mobile-detail-close" type="button">返回重选</button>
+    </header>
+    <div class="mobile-detail-body" id="mobile-detail-body"></div>
+    <div class="mobile-detail-actions" id="mobile-detail-actions"></div>
   </div>
 </div>
 
@@ -443,8 +473,8 @@
 <div id="voice-audio" aria-hidden="true"></div>
 
 <script src="./themes/neon/manifest.js?v=11"></script>
-<script src="./themes/theme-manager.js?v=2"></script>
+<script src="./themes/theme-manager.js?v=3"></script>
 <script src="./src/cards.js?v=4"></script>
-<script src="./app.js?v=90"></script>
+<script src="./app.js?v=91"></script>
 </body>
 </html>

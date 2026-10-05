@@ -9,6 +9,7 @@
 ```bash
 python python_backend/run.py 8787 --host 0.0.0.0  # Python HTTP + WebSocket + C++ 游戏 worker
 python python_backend/run.py 9000 --host 0.0.0.0  # 指定端口
+python python_backend/run.py 8787 --skip-neural-policy  # 跳过神经策略 worker，保留普通 NPC 和游戏规则
 ```
 
 Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\python.exe`，不需要安装 Node.js。
@@ -17,6 +18,7 @@ Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\pyth
 启动后浏览器打开：
 
 - 本机：`http://localhost:8787`
+- 手机：首页和联机大厅沿用原页面；正式对局会自动进入基于 V12 霓虹原型的 `mobile.html`，刷新后继续当前房间。
 - 局域网：`http://<你的内网IP>:8787`（启动时会在终端打印，同一 WiFi 下的朋友可直接用它联机；
   浏览器只在 HTTPS 下开放麦克风，所以房间语音需要另外配 HTTPS，见「联机语音」）
 
