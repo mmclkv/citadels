@@ -15,6 +15,15 @@ namespace citadels::native {
 // produced by NativeGameAdapter, so it cannot invent an action the rules reject.
 class NativeNpcPolicy {
  public:
+  // Cheap rollout policy: no bounded turn planner and no nested search.
+  static int choose_rollout(const NativeGameState& state,int player,
+      const std::vector<NativeSearchAction>& actions,uint32_t seed) {
+    if(player<0 || player>=static_cast<int>(state.players.size()) || actions.empty())return -1;
+    uint32_t rng=seed?seed:1;double best=-std::numeric_limits<double>::infinity();int selected=0;
+    for(size_t i=0;i<actions.size();++i){const double value=score_action(state,player,actions[i],rng)-i*1e-7;
+      if(value>best){best=value;selected=static_cast<int>(i);}}
+    return selected;
+  }
   static int choose(const NativeGameState& state, int player,
                     const std::vector<NativeSearchAction>& actions,
                     uint32_t seed = 1) {

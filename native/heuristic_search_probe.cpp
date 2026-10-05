@@ -51,6 +51,51 @@ int main(){
   require(legal[a.selected].type==ActionType::Build,"search ignored profitable affordable construction");
   require(a.selected==b.selected && a.visits==b.visits && a.expansions==b.expansions,"fixed-seed search depends on hidden arrangement");
   require(s.players[0].hand.size()==1 && s.deck.deck_count()==2,"search mutated authoritative state");
+  require(a.rollout_actions>0 && a.rollouts>0,"search did not run rollouts");
+  NativeHeuristicEvaluator rollout(8,1,71);
+  const auto rolled=rollout.evaluate(s,0,legal);
+  auto tail=s;for(int step=0;step<8 && !rules.terminal(tail);++step){
+    const int actor=rules.next_player(tail);const auto options=rules.legal_actions(tail,actor);
+    // Fixture moves are deterministic (no draft); replicate the greedy policy.
+    const int selected=NativeNpcPolicy::choose_rollout(tail,actor,options,1);
+    require(selected>=0 && rules.apply(tail,actor,options[selected]),"manual rollout failed");
+  }
+  const auto start_value=NativeHeuristicEvaluator::static_value(s,0),tail_value=NativeHeuristicEvaluator::static_value(tail,0);
+  for(size_t i=0;i<kValueSlots;++i)
+    require(std::abs(rolled.value_vector[i]-(0.4f*start_value[i]+0.6f*tail_value[i]))<1e-5,"rollout changed the value-vector perspective");
+  auto reusable=fixture();reusable.players[0].hand.push_back(card("own2",1,"blue"));
+  reusable.players[0].role_id="architect";reusable.players[0].role_ids={"architect"};
+  reusable.players[0].played={"architect"};reusable.bonus_done=true;
+  reusable.players[1].role_id="king";reusable.players[1].role_ids={"king"};
+  reusable.call_queue={{"architect",7,0},{"king",4,1},{"warlord",8,2}};
+  HeuristicSearchSession cache;auto deterministic=fixed;deterministic.rollout_steps=0;
+  auto choices=rules.legal_actions(reusable,0);
+  const auto first=choose_native_npc(reusable,0,choices,71,deterministic,&cache);
+  require(first.reused_visits==0 && first.new_visits==deterministic.simulations,"fresh search visits wrong");
+  const auto previous=reusable;
+  require(choices[first.selected].type==ActionType::Build && rules.apply(reusable,0,choices[first.selected]),"reuse fixture failed to build");
+  cache.advance(previous,0,choices[first.selected],reusable);
+  require(cache.tree.nodes()>0,"matching build subtree was discarded");
+  choices=rules.legal_actions(reusable,0);
+  const auto second=choose_native_npc(reusable,0,choices,72,deterministic,&cache);
+  require(second.reused_visits>0 && second.new_visits==deterministic.simulations,"subtree statistics not reused across actions");
+  // An observation can look like a simulated child, but changes the posterior.
+  auto observed=reusable;observed.players[0].hand.push_back(card("newly-seen",1));
+  cache.advance(reusable,0,choices[second.selected],observed);
+  require(cache.tree.nodes()==0,"new private card did not invalidate retained statistics");
+  choose_native_npc(previous,0,rules.legal_actions(previous,0),71,deterministic,&cache);
+  cache.advance(previous,1,choices[0],reusable);
+  require(cache.tree.nodes()==0,"other player's action did not clear the tree");
+  choose_native_npc(previous,0,rules.legal_actions(previous,0),71,deterministic,&cache);
+  auto new_round=previous;++new_round.round;
+  const auto reset=choose_native_npc(new_round,0,rules.legal_actions(new_round,0),71,deterministic,&cache);
+  require(reset.reused_visits==0,"round change reused stale statistics");
+  deterministic.rollout_steps=1;
+  const auto new_evaluation=choose_native_npc(new_round,0,rules.legal_actions(new_round,0),71,deterministic,&cache);
+  require(new_evaluation.reused_visits==0,"rollout configuration change reused incompatible values");
+  deterministic.max_tree_nodes=1;
+  choose_native_npc(new_round,0,rules.legal_actions(new_round,0),71,deterministic,&cache);
+  require(cache.tree.nodes()==0,"retained node budget did not release the tree");
   s.players[0].bot_level="normal";require(!choose_native_npc(s,0,legal).searched,"normal difficulty unexpectedly searches");
   const auto single=choose_native_npc(s,0,{legal.front()});require(single.selected==0 && !single.searched,"single action should bypass search");
   require(choose_native_npc(s,0,{}).selected==-1,"empty legal actions accepted");
@@ -70,6 +115,7 @@ int main(){
   for(int i=0;i<8;++i){const auto world=determinize_native_state(arrest,0,100+i,true);
     require(world.players[1].hand[0].uid==arrest.reaction_uid,"announced construction disappeared from reaction particle");}
   require(evaluator.evaluate(terminal,0,{}).value_vector==native_terminal_reward_vector(terminal,0),"terminal heuristic differs from true reward");
+  require(rollout.evaluate(terminal,0,{}).value_vector==native_terminal_reward_vector(terminal,0),"terminal rollout evaluation was blended with a nonterminal estimate");
   SlowEvaluator slow;Mcts<NativeGameState,NativeSearchAction>::Config deadline;
   deadline.simulations=1000;deadline.max_depth=3;deadline.time_budget_ms=1;
   const auto limited=Mcts<NativeGameState,NativeSearchAction>(rules,slow,deadline).search(fixture(),0);

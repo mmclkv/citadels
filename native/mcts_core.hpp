@@ -146,7 +146,48 @@ inline void add_root_noise(std::vector<float>& priors, std::mt19937& rng, float 
 
 template <typename State, typename Action>
 class Mcts {
+ private:
+  struct Node {
+    int player = 0;
+    std::vector<Action> actions;
+    std::vector<float> priors;
+    std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
+    std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
+    InformationSetKey information_set_key;
+    std::array<float, kValueSlots> total{};
+    std::array<float, kValueSlots> value_vector{};
+    float value = 0.0f;
+    int visits = 0;
+    bool expanded = false;
+  };
+
  public:
+  // Owns search statistics only, never an authoritative state or particles.
+  // Advancement follows an observed action AND information-set identity.
+  class Tree {
+    friend class Mcts;
+   public:
+    void clear() { root_.reset(); }
+    bool empty() const { return !root_; }
+    bool matches(InformationSetKey key,int player) const {
+      return root_ && root_->player==player && root_->information_set_key==key;
+    }
+    size_t nodes() const { return count(root_.get()); }
+    bool advance(size_t action,InformationSetKey key,int player) {
+      if(!root_ || action>=root_->child_variants.size()){clear();return false;}
+      std::unique_ptr<Node> next;
+      for(auto& child:root_->child_variants[action])
+        if(child->player==player && child->information_set_key==key){next=std::move(child);break;}
+      root_=std::move(next);return static_cast<bool>(root_);
+    }
+   private:
+    static size_t count(const Node* n) {
+      if(!n)return 0;size_t total=1;
+      for(const auto& edge:n->child_variants)for(const auto& child:edge)total+=count(child.get());
+      return total;
+    }
+    std::unique_ptr<Node> root_;
+  };
   struct Config {
     int simulations = 50;
     int max_depth = 400;
@@ -165,6 +206,9 @@ class Mcts {
     std::array<float, kValueSlots> value_vector{};
     int visits = 0;
     int expansions = 0;
+    int new_visits = 0;
+    int reused_visits = 0;
+    size_t retained_nodes = 0;
   };
 
   Mcts(const GameAdapter<State, Action>& game,
@@ -188,7 +232,7 @@ class Mcts {
    * 只看得到公开信息（特征里是 hand_count 而不是牌面）。
    */
   Result search(const std::vector<State>& root_states, int root_player,
-                const std::vector<float>& particle_weights = {}) {
+                const std::vector<float>& particle_weights = {},Tree* retained_tree = nullptr) {
     if (root_states.empty()) return {};
     roots_ = &root_states;
     weights_ = &particle_weights;
@@ -198,14 +242,21 @@ class Mcts {
     expansions_ = 0;
     const State& seed_state = root_states.front();
     player_count_ = state_player_count(seed_state, 0);
-    Node root;
+    Tree local_tree;
+    Tree& tree=retained_tree?*retained_tree:local_tree;
+    const auto root_key=retained_tree?game_.information_set_hash(seed_state,root_player):InformationSetKey{};
+    if(root_key==InformationSetKey{} || !tree.matches(root_key,root_player))tree.clear();
+    if(!tree.root_)tree.root_=std::make_unique<Node>();
+    Node& root=*tree.root_;
+    const int inherited=root.visits;
     const auto deadline = std::chrono::steady_clock::now() +
       std::chrono::milliseconds(std::max(0,config_.time_budget_ms));
     root.player = root_player;
+    root.information_set_key=root_key;
     root.actions = game_.legal_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
     expand(root, seed_state);
-    add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
+    if(!inherited)add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
 
     for (int i = 0; i < config_.simulations; ++i) {
       if (i > 0 && config_.time_budget_ms > 0 && std::chrono::steady_clock::now() >= deadline) break;
@@ -262,6 +313,9 @@ class Mcts {
     }
 
     Result result;
+    result.new_visits=root.visits-inherited;
+    result.reused_visits=inherited;
+    if(retained_tree)result.retained_nodes=tree.nodes();
     result.policy.resize(root.actions.size(), 0.0f);
     for (size_t i = 0; i < root.child_variants.size(); ++i) {
       for (const auto& child : root.child_variants[i]) {
@@ -283,20 +337,6 @@ class Mcts {
   }
 
  private:
-  struct Node {
-    int player = 0;
-    std::vector<Action> actions;
-    std::vector<float> priors;
-    std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
-    std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
-    InformationSetKey information_set_key;
-    std::array<float, kValueSlots> total{};
-    std::array<float, kValueSlots> value_vector{};
-    float value = 0.0f;
-    int visits = 0;
-    bool expanded = false;
-  };
-
   void expand(Node& node, const State& state) {
     if (node.expanded) return;
     Evaluation evaluation = evaluator_.evaluate(state, node.player, node.actions);

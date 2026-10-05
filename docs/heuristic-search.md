@@ -7,7 +7,26 @@ LibTorch are needed. Both the `npc` and `advance_npcs` game-engine requests use
 use the fast heuristic policy. The neural worker's simulation heuristic does not
 start another search.
 
-This is phase 1: static leaf evaluation, without rollouts or persistent tree reuse.
+Leaves now combine static evaluation (40%) and bounded heuristic rollouts (60%).
+Each rollout copies its determinized world and uses a cheap greedy heuristic,
+without the bounded turn planner or nested MCTS. At the action horizon it uses
+static expected-rank values; terminal rollout outcomes use exact terminal rewards.
+The value vector always remains in the original leaf player's seat order even
+when other actors move. Rollout work stops when the search deadline is reached.
+
+Search statistics survive consecutive compatible actions in a game-local session.
+After an actual action, the matching action/information-set child becomes the new
+root and sibling branches are freed. No authoritative states or old particle pools
+are cached: every new decision resamples hidden worlds from current information.
+Reuse is conservative: other actors, new rounds/phases/roles, new privately seen
+cards, changed hidden-pile counts, missing branches and changed evaluation
+settings invalidate the tree.
+Creating/replacing/closing a game also releases its session. Exact own-card UIDs,
+public counts and legal actions supplement feature hashes so encoding capacity
+limits cannot alias distinct reuse roots. Both IPC advancement modes advance the
+same session. This intentionally does not reuse across opponents' turns or new
+private observations; that would require posterior reweighting.
+
 Unknown cards/roles are sampled into shared-tree particles; heuristic evaluation
 uses the current actor's information, not opponents' private cards. Wizard-visible
 cards and announced construction pending a Magistrate reaction stay pinned.
@@ -22,12 +41,19 @@ cards and announced construction pending a Magistrate reaction stay pinned.
 | `CITADELS_HEURISTIC_MCTS_MAX_DEPTH` | `32` | Maximum actions on a simulation path. |
 | `CITADELS_HEURISTIC_MCTS_TIME_MS` | `200` | Ordinary search budget. |
 | `CITADELS_HEURISTIC_MCTS_CRITICAL_TIME_MS` | `400` | Draft/near-endgame budget. |
+| `CITADELS_HEURISTIC_MCTS_ROLLOUT_STEPS` | `8` | Maximum actions per rollout; `0` disables rollout. |
+| `CITADELS_HEURISTIC_MCTS_ROLLOUTS` | `1` | Rollouts per newly evaluated leaf (and a fresh root). |
+| `CITADELS_HEURISTIC_MCTS_REUSE_TREE` | `1` | `0` disables retained search trees. |
+| `CITADELS_HEURISTIC_MCTS_TREE_NODES` | `4096` | Explicit retained-node budget per game session. |
 
 Time budgets are checked between simulations, include initial root evaluation,
 and allow at least one simulation. A single simulation is not forcibly interrupted.
 Particle preparation and heuristic fallback are outside that budget. Set both time
 budgets to `0` for reproducible fixed-simulation evaluation. No arbitrary upper
 clamps are applied to these options; excessive budgets increase CPU/RAM use.
+The node budget limits retention, not simulations: an oversized tree is released
+after the decision. Each decision performs up to the configured number of NEW
+simulations even when older visits are inherited.
 
 The Python event loop dispatches NPC work off-thread. The shared C++ game process
 still processes requests sequentially: longer searches can delay other rooms'
@@ -39,6 +65,12 @@ engine requests. Neural training with hard opponents will also sample more slowl
 expansions, particles, elapsed time and fallback reason. `advance_npcs` reports
 aggregate searches/fallbacks/visits/time plus the first fallback reason. Exceptions
 or unaligned particles fall back to the existing legal-action heuristic.
+`newVisits` counts completed new simulations; `reusedVisits` counts inherited
+root visits. `visits` is the total number of visits on root action edges, including
+inherited visits, and need not equal their sum (a node's initial leaf evaluation
+visits the node without traversing an outgoing edge). `rolloutActions` counts
+executed rollout actions; individual responses also include `rollouts` and
+`retainedNodes` measured before enforcing the retention budget.
 
 Compile/run `native/heuristic_search_probe.cpp` for prior normalization, vector
 values, hidden-information invariance, deterministic particles, legal fallback,
