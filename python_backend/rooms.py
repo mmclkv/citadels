@@ -27,16 +27,16 @@ def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
 
 def _seat_heuristic_mcts(value: dict | None = None) -> dict:
     value = value or {}
-    defaults = {"simulations": (128, 1), "particles": (8, 1), "maxDepth": (32, 1),
-                "timeBudgetMs": (200, 0), "criticalTimeBudgetMs": (400, 0),
-                "cPuct": (1.4, 0), "rolloutSteps": (8, 0), "rollouts": (1, 1),
+    defaults = {"simulations": (500, 1), "particles": (8, 1), "maxDepth": (700, 1),
+                "timeBudgetMs": (10000, 0), "criticalTimeBudgetMs": (20000, 0),
+                "cPuct": (0.0, 0), "rolloutSteps": (8, 0), "rollouts": (1, 1),
                 "maxTreeNodes": (4096, 1)}
     result = {key: _int_at_least(value.get(key), default, minimum)
               for key, (default, minimum) in defaults.items() if key != "cPuct"}
     try:
-        result["cPuct"] = max(0.0, float(value.get("cPuct", 1.4)))
+        result["cPuct"] = max(0.0, float(value.get("cPuct", 0.0)))
     except (TypeError, ValueError, OverflowError):
-        result["cPuct"] = 1.4
+        result["cPuct"] = 0.0
     result["reuseTree"] = value.get("reuseTree") is not False
     return result
 

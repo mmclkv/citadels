@@ -5261,11 +5261,11 @@
             const box = el('div', 'seat-mcts heuristic-mcts');
             box.innerHTML = '<span class="seat-mcts-title">启发式 MCTS 参数</span>';
             const fields = [
-              ['模拟次数', 'simulations', 128, 1, 16], ['隐藏信息粒子数', 'particles', 8, 1, 1],
-              ['最大搜索深度', 'maxDepth', 32, 1, 8], ['常规时间预算 ms', 'timeBudgetMs', 200, 0, 50],
-              ['关键局面时间预算 ms', 'criticalTimeBudgetMs', 400, 0, 50],
+              ['模拟次数', 'simulations', 500, 1, 16], ['隐藏信息粒子数', 'particles', 8, 1, 1],
+              ['最大搜索深度', 'maxDepth', 700, 1, 8], ['常规时间预算 ms', 'timeBudgetMs', 10000, 0, 1000],
+              ['关键局面时间预算 ms', 'criticalTimeBudgetMs', 20000, 0, 1000],
               ['Rollout 步数', 'rolloutSteps', 8, 0, 1], ['每叶 Rollout 数', 'rollouts', 1, 1, 1],
-              ['最大树节点数', 'maxTreeNodes', 4096, 1, 256], ['c_puct', 'cPuct', 1.4, 0, 0.1]
+              ['最大树节点数', 'maxTreeNodes', 4096, 1, 256], ['c_puct', 'cPuct', 0, 0, 0.1]
             ];
             const values = Object.fromEntries(fields.map(([, key, fallback]) => [key, cfg[key] == null ? fallback : cfg[key]]));
             fields.forEach(([label, key, fallback, min, step]) => {

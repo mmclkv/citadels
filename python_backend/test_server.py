@@ -920,6 +920,10 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(room["seats"][1]["heuristicMcts"]["maxDepth"], 96)
         self.assertEqual(room["seats"][1]["heuristicMcts"]["cPuct"], 1.8)
         self.assertFalse(room["seats"][1]["heuristicMcts"]["reuseTree"])
+        defaults = RoomRegistry().create_room("Defaults", {"playerCount": 2, "bots": 1})["seats"][1]["heuristicMcts"]
+        self.assertEqual(defaults, {"simulations": 500, "particles": 8, "maxDepth": 700,
+            "timeBudgetMs": 10000, "criticalTimeBudgetMs": 20000, "cPuct": 0.0,
+            "rolloutSteps": 8, "rollouts": 1, "maxTreeNodes": 4096, "reuseTree": True})
 
     async def test_set_seat_saves_heuristic_mcts_options(self) -> None:
         class StubClient:

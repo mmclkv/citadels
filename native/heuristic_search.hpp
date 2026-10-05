@@ -107,12 +107,12 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
 };
 
 struct HeuristicSearchConfig {
-  int simulations=128;
+  int simulations=500;
   int particles=8;
-  int max_depth=32;
-  int time_budget_ms=200;
-  int critical_time_budget_ms=400;
-  float c_puct=1.4f;
+  int max_depth=700;
+  int time_budget_ms=10000;
+  int critical_time_budget_ms=20000;
+  float c_puct=0.0f;
   bool enabled=true;
   int rollout_steps=8;
   int rollouts=1;
