@@ -179,3 +179,7 @@
 .over-card .btn-row{display:flex;gap:8px;flex:0 0 auto}
 .over-card .btn{flex:1 1 0;min-width:0}
 .score-table tr.win td.total{color:var(--gold)}
+/* 底部按钮：保持一行排列，文字过长时在按钮内换行 */
+.actions .btn{height:auto;min-height:44px;padding:6px 4px;display:flex;align-items:center;justify-content:center;
+  white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;text-align:center;word-break:break-word}
+.actions.count-5 .btn,.actions.count-6 .btn{font-size:10px}
