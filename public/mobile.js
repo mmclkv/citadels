@@ -12,7 +12,7 @@
     sheetPlayer:null, viewer:null, actions:[], menu:false, leavePending:false,
     sidebar:false, sidebarTab:'log', chat:[], speed:localStorage.getItem('citadels.speed')||'normal',
     stage:null, sequence:null, noticeSeen:null, events:[], event:null, eventTimer:0, effectFallback:null, effectTimer:0,
-    focus:null, confirm:null, autoFocus:null, bubbles:[], bubbleTimer:0, fxMemo:null };
+    focus:null, confirm:null, autoFocus:null, bubbles:[], bubbleTimer:0, fxMemo:null, logSeen:null };
   const V = {room:null,joining:false,muted:true,error:''};
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const attr = esc;
@@ -110,7 +110,7 @@
     $('viewport').scrollTop=scroll;
     $('sheet').scrollTop=sheetScroll;
     if(focusMoved&&wantFocus)scrollFocus();
-    processNotices(s);
+    processNotices(s);logBubbles(s);
   }
   // 本轮生效的宣告类效果：与 PC 端 #tb-effects 同源（state.effects）。
   // 引擎会在目标被叫到、效果结算的那一刻清空 effects.thief（game_state.hpp:1005-1010），
@@ -190,7 +190,20 @@
     M.effectTimer=setTimeout(()=>{if(!M.effectFallback)return;const text2=M.effectFallback;M.effectFallback=null;
       bubbleOn({actor:M.id,text:text2,tone:'magic'});},900);}
   function bubbleOn(ev){if(!ev.text)return;if(!ev.actor){message(ev.text);return;}
-    M.bubbles.push({id:ev.actor,text:ev.text,tone:ev.tone||'info',until:Date.now()+5000,fresh:true});render();armBubbles();}
+    const name=(M.state?.players||[]).find(p=>p.id===ev.actor)?.name;
+    const text=name&&ev.text.startsWith(name+'：')?ev.text.slice(name.length+1):ev.text;
+    M.bubbles.push({id:ev.actor,text,tone:ev.tone||'info',until:Date.now()+5000,fresh:true});render();armBubbles();}
+  // 拿金币 / 抽建筑牌 / 领取收入这类资源动作引擎不发 notice，用战报文本补一条气泡。
+  const RESOURCE_LOG=/^(拿取金币|抽取建筑牌|领取收入)/;
+  function logBubbles(s){const log=s.log||[];if(!log.length)return;const last=log[log.length-1].i;
+    if(M.logSeen==null||last<M.logSeen){M.logSeen=last;return;}
+    const fresh=log.filter(x=>x.i>M.logSeen);M.logSeen=last;let any=false;
+    fresh.forEach(x=>{const text=String(x.text||''),at=text.indexOf('：');if(at<0)return;
+      const who=text.slice(0,at),what=text.slice(at+1);if(!RESOURCE_LOG.test(what))return;
+      const p=(s.players||[]).find(q=>q.name===who);if(!p)return;
+      if(M.bubbles.some(b=>b.id===p.id&&b.text===what))return;
+      M.bubbles.push({id:p.id,text:what,tone:'info',until:Date.now()+5000,fresh:true});any=true;});
+    if(any){renderPlayers();armBubbles();}}
   function armBubbles(){clearTimeout(M.bubbleTimer);if(!M.bubbles.length)return;M.bubbleTimer=setTimeout(tickBubbles,220);}
   function tickBubbles(){const now=Date.now();let changed=false;
     M.bubbles.forEach(b=>{if(!b.fading&&now>=b.until-800){b.fading=true;changed=true;}});
