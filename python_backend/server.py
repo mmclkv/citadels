@@ -500,6 +500,7 @@ class PythonServer:
             self._append_crown_transfer_notice(current, merged, action)
             self._append_marshal_seize_notice(current, merged, action)
             self._append_magistrate_confiscate_notice(current, merged, action)
+            self._append_blackmailer_reveal_notice(current, merged, action)
             self._append_role_ability_notice(current, merged, player_id, action)
             self._append_magistrate_declare_notice(current, merged, player_id, action)
             self._append_role_effect_detail_notice(current, merged, player_id, action)
@@ -580,6 +581,12 @@ class PythonServer:
                      if item.get("num") == number), {})
 
     @staticmethod
+    def _reaction_used(action: dict) -> bool:
+        """Match the native decoder for both wire and internal reaction actions."""
+        return (action.get("name") or action.get("effect") or
+                ("use" if action.get("use") else "skip")) == "use"
+
+    @staticmethod
     def _native_action_view(state: dict, action: dict) -> dict:
         rendered = dict(action)
         kind = action.get("type", "action")
@@ -611,7 +618,7 @@ class PythonServer:
             role = cards.CHAR_MAP.get(action.get("charId") or "", {})
             label = ("选取 " if kind == "draft_pick" else "弃置 ") + role.get("name", action.get("charId", "角色"))
         elif kind == "reaction":
-            label = "发动" if action.get("use") else "不发动"
+            label = "发动" if PythonServer._reaction_used(action) else "不发动"
         elif kind in ("build", "wizard_build"):
             district = cards_by_uid.get(action.get("uid"), {})
             if not district and kind == "wizard_build":
@@ -875,6 +882,57 @@ class PythonServer:
             "byName": magistrate.get("name") or "行政官",
             "cardUid": card.get("uid"), "card": card,
         })
+        updated["noticeSeq"] = seq
+        updated["notices"] = notices[-12:]
+
+    @staticmethod
+    def _append_blackmailer_reveal_notice(previous: dict, updated: dict,
+                                          action: dict) -> None:
+        """Notify the marked player when the Blackmailer reveals or drops a threat."""
+        reaction = previous.get("reaction") or {}
+        turn = previous.get("turn") or {}
+        pending = turn.get("pending") or {}
+        if action.get("type") != "reaction" or reaction.get("kind") != "blackmailer":
+            return
+        players_before = previous.get("players") or []
+        players_after = updated.get("players") or []
+        victim_idx = turn.get("playerIdx")
+        blackmailer_idx = reaction.get("playerIdx")
+        if (not isinstance(victim_idx, int) or not isinstance(blackmailer_idx, int) or
+                not (0 <= victim_idx < len(players_before)) or
+                not (0 <= blackmailer_idx < len(players_before)) or
+                victim_idx >= len(players_after) or blackmailer_idx >= len(players_after)):
+            return
+
+        revealed = PythonServer._reaction_used(action)
+        threat = (previous.get("effects") or {}).get("blackmailer") or {}
+        is_real = (bool(pending.get("signed")) if pending.get("kind") == "blackmailer_threat"
+                   else "signed" in threat and threat["signed"] == reaction.get("num"))
+        amount = max(0, int(players_before[victim_idx].get("gold") or 0) -
+                     int(players_after[victim_idx].get("gold") or 0)) if revealed and is_real else 0
+        if revealed and is_real:
+            # Only report successful confiscation; keep this event tied to the
+            # actual authoritative balance change rather than the declaration.
+            if (int(players_after[blackmailer_idx].get("gold") or 0) -
+                    int(players_before[blackmailer_idx].get("gold") or 0) != amount):
+                return
+        victim = players_before[victim_idx]
+        blackmailer = players_before[blackmailer_idx]
+        notices = updated.setdefault("notices", list(previous.get("notices") or []))
+        seq = max(int(updated.get("noticeSeq") or 0),
+                  int(previous.get("noticeSeq") or 0)) + 1
+        notice = {
+            "seq": seq, "kind": "blackmailer_reveal",
+            "fromIdx": victim_idx, "toIdx": blackmailer_idx,
+            "playerIdx": victim_idx, "byIdx": blackmailer_idx,
+            "playerId": victim.get("id"), "byId": blackmailer.get("id"),
+            "playerName": victim.get("name") or "玩家",
+            "byName": blackmailer.get("name") or "勒索者",
+            "revealed": revealed, "amount": amount,
+        }
+        if revealed:
+            notice["isReal"] = is_real
+        notices.append(notice)
         updated["noticeSeq"] = seq
         updated["notices"] = notices[-12:]
 
@@ -1160,10 +1218,11 @@ class PythonServer:
                         f"免费建入{magistrate}的城市；建造者支付的{cost}枚建造金币已退还。")
         reaction = state.get("reaction") or {}
         if kind == "reaction" and reaction.get("kind") == "blackmailer":
-            target_idx = reaction.get("targetIdx", turn.get("playerIdx"))
+            target_idx = (turn.get("playerIdx") if pending.get("kind") == "blackmailer_threat"
+                          else reaction.get("targetIdx", turn.get("playerIdx")))
             target = PythonServer._player_label(state, target_idx)
             owner = PythonServer._player_label(state, reaction.get("playerIdx"))
-            revealed = bool(action["use"]) if "use" in action else action.get("name") == "use"
+            revealed = PythonServer._reaction_used(action)
             if not revealed:
                 return f"【勒索者】放弃对{target}发动勒索，不翻开威胁标记；该标记本轮作废。"
             # Native snapshots keep the secret in pending; Python snapshots
