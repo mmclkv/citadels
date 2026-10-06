@@ -332,7 +332,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     }
     if (state.pending_kind == "emperor_take") {
       if (player != state.active_player) return {};
-      return {{ActionType::EmperorTake, {}, "gold", {}}, {ActionType::EmperorTake, {}, "card", {}}};
+      std::vector<NativeSearchAction> actions;
+      for (const auto& mode : {"gold", "card"}) {
+        NativeSearchAction action{ActionType::EmperorTake, {}, mode, {}};
+        action.mode = mode;
+        actions.push_back(std::move(action));
+      }
+      return actions;
     }
     if (state.pending_kind == "diplomat_mine") {
       if (player != state.active_player) return {};
@@ -776,8 +782,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       return true;
     }
     if (action.type == ActionType::EmperorTake && state.pending_kind == "emperor_take") {
-      const bool ok = action.name == "gold" ? state.emperor_take_gold() :
-        (action.name == "card" ? state.emperor_take_card() : false);
+      if (player != state.active_player) return false;
+      const auto& mode = action.name.empty() ? action.mode : action.name;
+      const bool ok = mode == "gold" ? state.emperor_take_gold() :
+        (mode == "card" ? state.emperor_take_card() : false);
       if (ok) { state.pending_kind.clear(); state.ability_used = true; }
       return ok;
     }

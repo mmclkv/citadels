@@ -708,7 +708,7 @@ class PythonServer:
             label = district.get("name", labels[kind])
         elif kind in ("emperor_take", "magician_mode"):
             label = {"gold": "拿取1枚金币", "card": "取得1张手牌", "swap": "交换手牌", "redraw": "弃牌重抽"}.get(
-                action.get("mode") or action.get("name"), labels[kind])
+                action.get("name") or action.get("mode"), labels[kind])
         else:
             label = labels.get(kind, kind.replace("_", " "))
         rendered["label"] = label
@@ -1040,10 +1040,7 @@ class PythonServer:
             target_idx = cls._player_index(previous, action.get("target"))
             description = f"皇冠移交对象：{cls._player_label(previous, target_idx)}。随后皇帝从新皇冠持有者处取得1枚金币或1张建筑牌。"
         elif kind == "emperor_take" and role_id == "emperor":
-            target_idx = pending.get("targetIdx")
-            mode = action.get("mode") or action.get("name")
-            resource = "1枚金币" if mode == "gold" else "1张建筑牌"
-            description = f"皇帝从新皇冠持有者{cls._player_label(previous, target_idx)}处取得了{resource}。"
+            description = cls._emperor_take_text(previous, action, updated) + "。"
         elif kind == "wizard_target" and role_id == "wizard":
             target_idx = cls._player_index(previous, action.get("target"))
             description = f"法师选择查看{cls._player_label(previous, target_idx)}的手牌；具体牌面仅对法师可见。"
@@ -1229,6 +1226,28 @@ class PythonServer:
                           else reaction.get("targetIdx", turn.get("playerIdx")))
             target = PythonServer._player_label(state, target_idx)
             owner = PythonServer._player_label(state, reaction.get("playerIdx"))
+    @staticmethod
+    def _emperor_take_text(state: dict, action: dict, updated: dict | None = None) -> str:
+        turn = state.get("turn") or {}
+        target_idx = (turn.get("pending") or {}).get("targetIdx")
+        # Match native decoding: legacy actions use name, mobile actions use mode.
+        mode = action.get("name") or action.get("mode")
+        players = state.get("players") or []
+        target = players[target_idx] if isinstance(target_idx, int) and 0 <= target_idx < len(players) else {}
+        amount = min(1, max(0, int(target.get("gold", 1)))) if mode == "gold" else min(1, len(target.get("hand", [None])))
+        actor_idx = turn.get("playerIdx")
+        after = (updated or {}).get("players") or []
+        if (updated is not None and isinstance(actor_idx, int) and
+                0 <= actor_idx < len(players) and actor_idx < len(after)):
+            before_actor, after_actor = players[actor_idx], after[actor_idx]
+            amount = max(0, (int(after_actor.get("gold", 0)) - int(before_actor.get("gold", 0)))
+                         if mode == "gold" else len(after_actor.get("hand") or []) - len(before_actor.get("hand") or []))
+        resource = f"{amount}枚金币" if mode == "gold" else f"{amount}张建筑牌"
+        target_name = PythonServer._player_label(state, target_idx)
+        if not amount:
+            return f"皇帝从新皇冠持有者{target_name}处选择拿取{'金币' if mode == 'gold' else '手牌'}；实际获得{resource}"
+        return f"皇帝从新皇冠持有者{target_name}处取得{resource}"
+
             revealed = PythonServer._reaction_used(action)
             if not revealed:
                 return f"【勒索者】放弃对{target}发动勒索，不翻开威胁标记；该标记本轮作废。"
@@ -1332,9 +1351,7 @@ class PythonServer:
             target_idx = PythonServer._player_index(state, action.get("target"))
             return f"皇帝将皇冠交给{PythonServer._player_label(state, target_idx)}"
         if kind == "emperor_take":
-            target_idx = pending.get("targetIdx")
-            resource = "1枚金币" if action.get("mode") == "gold" else "1张建筑牌"
-            return f"皇帝从新皇冠持有者{PythonServer._player_label(state, target_idx)}处取得{resource}"
+            return PythonServer._emperor_take_text(state, action, updated)
         if kind == "choose_player" and pending.get("kind") in ("magician_swap", "bishop_payer"):
             target_idx = PythonServer._player_index(state, action.get("target"))
             target = PythonServer._player_label(state, target_idx)

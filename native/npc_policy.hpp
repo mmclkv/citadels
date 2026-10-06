@@ -500,7 +500,7 @@ class NativeNpcPolicy {
     if (type == ActionType::MonkResource || type == ActionType::AbbotResource) {
       return (p.gold < 6 ? a.gold : a.cards) * 0.1 - std::abs(a.gold - std::max(0, 6-p.gold))*0.01;
     }
-    if (type == ActionType::EmperorTake) return a.mode == "gold" ? 1 : 0;
+    if (type == ActionType::EmperorTake) return (a.name.empty() ? a.mode : a.name) == "gold" ? 1 : 0;
     if (type == ActionType::TaxCollect || type == ActionType::BlackmailerBribe) return 10;
     return 5;
   }
