@@ -1,8 +1,12 @@
 """Shared checkpoint and feature-version contract for training and live play."""
 
 MODEL_CONTRACTS = {
-    "entity-v6": {"state": 14, "action": 9, "stateSize": 1790, "actionSize": 256},
+    "entity-v6": {"state": 14, "action": 10, "stateSize": 1790, "actionSize": 256},
 }
+
+
+def encoding_compatible(state_version, action_version):
+    return state_version == 14 and action_version in (9, 10)
 
 
 def validate_checkpoint_contract(checkpoint: dict, architecture: str) -> dict:
@@ -27,9 +31,10 @@ def validate_checkpoint_contract(checkpoint: dict, architecture: str) -> dict:
     action_version = encoding.get("action")
     if action_version is None:
         raise ValueError("checkpoint 缺少明确的动作编码版本")
-    if (state_version, action_version) != (expected["state"], expected["action"]):
+    if not encoding_compatible(state_version, action_version):
         raise ValueError(
             "checkpoint 状态/动作编码版本不兼容："
             f"({state_version}, {action_version}) != "
             f"({expected['state']}, {expected['action']})")
-    return expected
+    # Live inference MUST keep the encoding declared by this checkpoint.
+    return {**expected, "action": action_version}

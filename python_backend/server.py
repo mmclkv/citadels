@@ -32,7 +32,7 @@ from .agent import AgentClient, AgentError, config_from_env
 from .voice import VoiceService
 from .neural import NeuralPolicy
 from .training_runtime import TrainingManager
-from .model_contract import MODEL_CONTRACTS
+from .model_contract import MODEL_CONTRACTS, encoding_compatible
 from .frp import FrpManager
 from .codex_gateway import CodexGateway, detect_codex
 from .native_worker_manager import NativeWorkerManager
@@ -48,7 +48,7 @@ ACTION_ENCODING_VERSION = _ENTITY_V6_CONTRACT["action"]
 
 
 def _encoding_compatible(state_version: int | None, action_version: int | None) -> bool:
-    return (state_version, action_version) == (STATE_ENCODING_VERSION, ACTION_ENCODING_VERSION)
+    return encoding_compatible(state_version, action_version)
 
 
 def _append_game_log(state: dict, message: str, kind: str = "info") -> None:

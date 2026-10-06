@@ -76,7 +76,9 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
                                                 int perspective_player = -1,
                                                 int action_encoding_version = kActionEncodingVersion) {
   std::vector<float> result(256, 0.0f);
-  result[0] = static_cast<float>(action_encoding_version);
+  // v10 extends the unused suffix; preserve v9's normalized prefix exactly
+  // so zero-initialized new columns provide a lossless weight warm start.
+  result[0] = static_cast<float>(std::min(action_encoding_version, 9));
   const int type_index = action_type_feature_index(action.type);
   if (type_index >= 0) result[1 + static_cast<size_t>(type_index)] = 1.0f;
   if (state && perspective_player >= 0 && perspective_player < static_cast<int>(state->players.size())) {
@@ -147,6 +149,42 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
     }
   }
   normalize_action_vector(result);
+  if (action_encoding_version >= 10 && state) {
+    // Two 31-wide district references: primary [182,213), secondary [213,244).
+    // Instance attributes and explicit owner/slot links distinguish identical
+    // card types with different beautification, museum contents or costs.
+    const auto reference = [&](const std::string& uid, size_t offset) {
+      if (uid.empty()) return;
+      for (size_t owner = 0; owner < state->players.size(); ++owner) {
+        const auto& city = state->players[owner].city;
+        for (size_t slot = 0; slot < city.size(); ++slot) {
+          const auto& d = city[slot];
+          if (d.card.uid != uid) continue;
+          result[offset] = 1;
+          result[offset + 1] = d.beautified ? 1 : 0;
+          result[offset + 2] = std::min(1.0f, static_cast<float>(d.museum_cards.size()) / 8);
+          result[offset + 3] = std::min(1.0f, static_cast<float>(d.built_round) / 100);
+          result[offset + 4] = d.fortress ? 1 : 0;
+          const int score = d.card.score_as > 0 ? d.card.score_as
+            : d.card.score_value > 0 ? d.card.score_value : d.card.cost;
+          result[offset + 5] = (score + d.museum_cards.size() + int(d.beautified)) / 20.0f;
+          const bool wall = std::any_of(city.begin(), city.end(), [&](const NativeDistrict& other) {
+            return other.card.uid != uid && other.effect == "wallCost";
+          });
+          result[offset + 6] = destroy_cost(MilitaryCard{d.name, d.card.cost, d.fortress, d.beautified}, wall) / 20.0f;
+          if (perspective_player >= 0 && perspective_player < static_cast<int>(state->players.size())) {
+            const size_t relative = (owner + state->players.size() - perspective_player) % state->players.size();
+            if (relative < 8) result[offset + 7 + relative] = 1;
+          }
+          if (slot < kEntityV6CitySlots) result[offset + 15 + slot] = 1;
+          return;
+        }
+      }
+    };
+    reference(action.uid, 182);
+    reference(!action.secondary_uid.empty() ? action.secondary_uid
+      : state->pending_kind == "diplomat_theirs" ? state->pending_uid : std::string{}, 213);
+  }
   return result;
 }
 

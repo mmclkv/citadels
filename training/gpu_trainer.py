@@ -18,7 +18,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 try:
-    from entity_transformer import EntityTransformerNet
+    from entity_transformer import EntityTransformerNet, migrate_action_encoding
 except ImportError as error:
     EntityTransformerNet = None
     ENTITY_TRANSFORMER_IMPORT_ERROR = error

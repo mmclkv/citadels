@@ -161,7 +161,7 @@ def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
     actions = np.zeros((4, 256), dtype=np.float32)
     action_type_indices = (8, 19, 20, 12)  # build, end turn, income, choose player
     for row, action_type in enumerate(action_type_indices):
-        actions[row, 0] = contract["action"]
+        actions[row, 0] = min(contract["action"], 9)
         actions[row, 1 + action_type] = 1.0
         actions[row, 107] = (row + 1) / 9.0
         actions[row, 108] = row / 20.0
@@ -169,6 +169,10 @@ def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
         norm = float(np.linalg.norm(actions[row]))
         if norm > 1.0:
             actions[row] /= norm
+        actions[row, 182] = float(row == 0)
+        actions[row, 183] = float(row == 0)
+        actions[row, 188] = row / 20.0
+        actions[row, 213] = float(row == 2)
     probes = [(state, actions)]
 
     # A two-seat state forces the transformer to mask the remaining player
@@ -190,7 +194,7 @@ def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
     many_actions = np.zeros((11, ACTION_SIZE), dtype=np.float32)
     action_types = (20, 8, 12, 19, 8, 20, 12, 19, 8, 20, 12)
     for row, action_type in enumerate(action_types):
-        many_actions[row, 0] = contract["action"]
+        many_actions[row, 0] = min(contract["action"], 9)
         many_actions[row, 1 + action_type] = 1.0
         many_actions[row, 107] = (row + 1) / 12.0
         many_actions[row, 108] = (row % 5) / 8.0
@@ -430,7 +434,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                 c_puct=config["mctsC_puct"], dirichlet_alpha=config["mctsDirichletAlpha"],
                 dirichlet_epsilon=config["mctsDirichletEpsilon"], seed=seed + steps,
                 batch_size=config.get("mctsBatchSize", 32),
-                action_encoding_version=9,
+                action_encoding_version=MODEL_CONTRACTS[config["networkArchitecture"]]["action"],
                 include_training_features=True)
             policy = np.asarray(search_result["policy"], dtype=np.float32)
             inference_ms += float(search_result.get("inferenceMs") or
@@ -746,7 +750,7 @@ class TrainingManager:
                 metadata = checkpoint.get("model") or {}
                 if metadata.get("architecture") != architecture or metadata.get("profile") != config["profile"]:
                     raise ValueError("续训 checkpoint 的网络架构/profile 与本次配置不一致")
-                validate_checkpoint_contract(checkpoint, architecture)
+                resume_contract = validate_checkpoint_contract(checkpoint, architecture)
                 values = np.asarray(metadata.get("flat") or [], dtype="<f4")
                 if values.size != metadata.get("parameterCount"):
                     raise ValueError("续训 checkpoint 权重数量不匹配")
@@ -773,6 +777,9 @@ class TrainingManager:
                     # learning rate explicitly selected for this resumed run.
                     for group in self._optimizer.param_groups:
                         group["lr"] = float(config["learningRate"])
+            if resume_path and trainer.migrate_action_encoding(
+                    self._model, self._optimizer, resume_contract["action"]):
+                self._log("动作编码迁移 v9→v10：新增建筑实例特征；新输入列及 Adam 动量置零，保留旧策略前向结果。")
             suffix = ".exe" if os.name == "nt" else ""
             candidates = list((ROOT / "native").glob(f"mcts_worker_libtorch-*{suffix}"))
             default_worker = (max(candidates, key=lambda item: item.stat().st_mtime_ns)
@@ -791,7 +798,7 @@ class TrainingManager:
             config["gameEnginePath"] = str(getattr(self.game_worker, "executable", "") or default_game)
             config["nativeModelPath"] = str(Path(native_model_dir.name) / "model.bin")
             self._model.save_flat(config["nativeModelPath"])
-            action_version = 9
+            action_version = MODEL_CONTRACTS[architecture]["action"]
             self._check_entity_forward_parity(
                 torch, architecture, config["profile"], self._device,
                 config["nativeModelPath"], action_version, worker_path)

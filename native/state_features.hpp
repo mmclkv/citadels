@@ -19,7 +19,7 @@ constexpr int kEntityV6PlayerEmbedFeatureSize = 56 + kEntityV6CitySlots * (7 + k
 constexpr int kEntityV6BaseFeatureSize = 32 + 8 * kEntityV6PlayerFeatureSize + kCityCardFeatureSize;
 constexpr int kEntityV6PublicContextSize = 256;
 constexpr int kEntityV6StateFeatureSize = kEntityV6BaseFeatureSize + kEntityV6PublicContextSize;
-constexpr int kActionEncodingVersion = 9;
+constexpr int kActionEncodingVersion = 10;
 constexpr std::array<const char*, 27> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
   "king", "emperor", "noble", "bishop", "monk", "merchant", "alchemist", "businessman",
   "architect", "navigator", "scholar", "warlord", "diplomat", "marshal", "queen", "artist",

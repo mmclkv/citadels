@@ -25,6 +25,22 @@ ENTITY_V6_BASE_SIZE = 32 + 8 * ENTITY_V6_PLAYER_FEATURE_SIZE + CITY_CARD_FEATURE
 ENTITY_V6_CONTEXT_FEATURES = 256
 ENTITY_V6_STATE_SIZE = ENTITY_V6_BASE_SIZE + ENTITY_V6_CONTEXT_FEATURES
 ACTION_SIZE = 256
+INSTANCE_FEATURE_SLICE = slice(182, 244)
+
+
+def migrate_action_encoding(model, optimizer, source_version):
+    """Warm-start v9 weights in v10 without altering their initial logits."""
+    if source_version == 10:
+        return False
+    if source_version != 9:
+        raise ValueError(f"unsupported action encoding migration: {source_version}")
+    parameter = model.action_embed.weight
+    with torch.no_grad():
+        parameter[:, INSTANCE_FEATURE_SLICE].zero_()
+        for value in optimizer.state.get(parameter, {}).values():
+            if isinstance(value, torch.Tensor) and value.shape == parameter.shape:
+                value[:, INSTANCE_FEATURE_SLICE].zero_()
+    return True
 
 
 class EntityTransformerBlock(nn.Module):

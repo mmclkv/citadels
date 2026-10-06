@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .model_contract import validate_checkpoint_contract
+from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
 
 class NeuralPolicy:
     def __init__(self, checkpoint: str | None = None, profile: str | None = None,
@@ -29,7 +29,7 @@ class NeuralPolicy:
         if self.device_name == "auto":
             self.device_name = "cuda"
         self.architecture = "entity-v6"
-        self.action_version = 9
+        self.action_version = MODEL_CONTRACTS["entity-v6"]["action"]
         self.worker = worker
         self.model_path = ""
         self._model_dir = None

@@ -65,7 +65,7 @@ class NativeMctsWorker:
                model_path: str, model_version: int, profile: str, architecture: str,
                device: str, simulations: int, max_depth: int, c_puct: float,
                dirichlet_alpha: float, dirichlet_epsilon: float, seed: int,
-               batch_size: int = 32, action_encoding_version: int = 9,
+               batch_size: int = 32, action_encoding_version: int = 10,
                include_training_features: bool = False) -> dict:
         with self._lock:
             if self.process.poll() is not None:
