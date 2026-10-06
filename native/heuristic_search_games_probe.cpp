@@ -13,7 +13,7 @@ int main(int argc,char** argv){
   HeuristicSearchConfig config;
   const bool matchup=argc>4 && std::string(argv[4])=="matchup";
   double wins=0,reward=0;
-  if(argc>3){config.simulations=std::stoi(argv[3]);config.time_budget_ms=0;config.critical_time_budget_ms=0;}
+  if(argc>3){config.simulations=std::stoi(argv[3]);config.time_budget_ms=0;}
   const auto start=std::chrono::steady_clock::now();
   for(int g=0;g<games;++g){
     std::ostringstream q;q<<"{\"seed\":"<<1700+g<<",\"initialCrownSeat\":"<<(g/players)%players<<",\"endDistricts\":8,\"charSetMode\":\"random\",\"catalog\":"<<catalog<<",\"seats\":[";

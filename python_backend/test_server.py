@@ -915,15 +915,13 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         room = RoomRegistry().create_room("Host", {"playerCount": 2, "bots": 1,
             "heuristicMcts": {"simulations": 640, "particles": 12, "maxDepth": 96,
                               "cPuct": 1.8, "reuseTree": False}})
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["simulations"], 640)
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["particles"], 12)
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["maxDepth"], 96)
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["cPuct"], 1.8)
-        self.assertFalse(room["seats"][1]["heuristicMcts"]["reuseTree"])
+        self.assertEqual(room["seats"][1]["heuristicMcts"], {"timeBudgetMs": 10000})
         defaults = RoomRegistry().create_room("Defaults", {"playerCount": 2, "bots": 1})["seats"][1]["heuristicMcts"]
-        self.assertEqual(defaults, {"simulations": 10000, "particles": 8, "maxDepth": 700,
-            "timeBudgetMs": 10000, "criticalTimeBudgetMs": 20000, "cPuct": 1.0,
-            "rolloutSteps": 8, "rollouts": 1, "maxTreeNodes": 4096, "reuseTree": True})
+        self.assertEqual(defaults, {"timeBudgetMs": 10000})
+        for invalid in (0, -1, "bad", float("nan")):
+            normalized = RoomRegistry().create_room("Budget", {"bots": 1,
+                "heuristicMcts": {"timeBudgetMs": invalid}})["seats"][1]["heuristicMcts"]
+            self.assertGreaterEqual(normalized["timeBudgetMs"], 1)
 
     async def test_set_seat_saves_heuristic_mcts_options(self) -> None:
         class StubClient:
@@ -942,9 +940,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             "botType": "npc-hard", "heuristicMcts": options})
         seat = room["seats"][1]
         self.assertEqual(seat["botLevel"], "hard")
-        self.assertEqual(seat["heuristicMcts"]["simulations"], 640)
-        self.assertEqual(seat["heuristicMcts"]["criticalTimeBudgetMs"], 800)
-        self.assertFalse(seat["heuristicMcts"]["reuseTree"])
+        self.assertEqual(seat["heuristicMcts"], {"timeBudgetMs": 350})
 
     async def test_python_npc_driver_takes_a_legal_draft_action(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,

@@ -107,36 +107,37 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
 };
 
 struct HeuristicSearchConfig {
-  int simulations=10000;
+  int simulations=std::numeric_limits<int>::max();
   int particles=8;
   int max_depth=700;
   int time_budget_ms=10000;
-  int critical_time_budget_ms=20000;
   float c_puct=1.0f;
   bool enabled=true;
   int rollout_steps=8;
   int rollouts=1;
   bool reuse_tree=true;
-  int max_tree_nodes=4096;
+  int max_tree_nodes=8192;
 };
-inline HeuristicSearchConfig heuristic_search_defaults() {
+// Runtime has one resource knob. Simulations run until the deadline rather
+// than a hardware-dependent estimated count; other sizes are budget tiers.
+inline HeuristicSearchConfig heuristic_search_for_budget(int milliseconds) {
   HeuristicSearchConfig config;
+  config.time_budget_ms=std::max(1,milliseconds);
+  config.simulations=std::numeric_limits<int>::max();
+  config.particles=milliseconds<1000?2:milliseconds<5000?4:milliseconds<30000?8:16;
+  config.max_depth=static_cast<int>(std::clamp<int64_t>(static_cast<int64_t>(milliseconds)*7/100,64,700));
+  config.rollout_steps=milliseconds<1000?4:8;
+  config.max_tree_nodes=static_cast<int>(std::clamp<int64_t>(static_cast<int64_t>(milliseconds)*8192/10000,4096,32768));
+  return config;
+}
+inline HeuristicSearchConfig heuristic_search_defaults() {
   const auto read=[](const char* name,int fallback,int minimum) {
     const char* raw=std::getenv(name);if(!raw)return fallback;
     char* end=nullptr;errno=0;const long value=std::strtol(raw,&end,10);
     return errno==0 && end!=raw && *end=='\0' && value>=minimum && value<=std::numeric_limits<int>::max()
       ? static_cast<int>(value):fallback;
   };
-  config.simulations=read("CITADELS_HEURISTIC_MCTS_SIMULATIONS",config.simulations,1);
-  config.particles=read("CITADELS_HEURISTIC_MCTS_PARTICLES",config.particles,1);
-  config.max_depth=read("CITADELS_HEURISTIC_MCTS_MAX_DEPTH",config.max_depth,1);
-  config.time_budget_ms=read("CITADELS_HEURISTIC_MCTS_TIME_MS",config.time_budget_ms,0);
-  config.critical_time_budget_ms=read("CITADELS_HEURISTIC_MCTS_CRITICAL_TIME_MS",config.critical_time_budget_ms,0);
-  config.rollout_steps=read("CITADELS_HEURISTIC_MCTS_ROLLOUT_STEPS",config.rollout_steps,0);
-  config.rollouts=read("CITADELS_HEURISTIC_MCTS_ROLLOUTS",config.rollouts,1);
-  config.max_tree_nodes=read("CITADELS_HEURISTIC_MCTS_TREE_NODES",config.max_tree_nodes,1);
-  const char* reuse=std::getenv("CITADELS_HEURISTIC_MCTS_REUSE_TREE");
-  config.reuse_tree=!reuse || std::string(reuse)!="0";
+  auto config=heuristic_search_for_budget(read("CITADELS_HEURISTIC_MCTS_TIME_MS",10000,1));
   const char* enabled=std::getenv("CITADELS_HEURISTIC_MCTS_ENABLED");
   config.enabled=!enabled || std::string(enabled)!="0";
   return config;
@@ -172,7 +173,6 @@ class HeuristicSearchSession {
        options_.rollouts!=c.rollouts || options_.particles!=c.particles ||
        options_.simulations!=c.simulations || options_.max_depth!=c.max_depth ||
        options_.c_puct!=c.c_puct || options_.time_budget_ms!=c.time_budget_ms ||
-       options_.critical_time_budget_ms!=c.critical_time_budget_ms ||
        options_.reuse_tree!=c.reuse_tree || options_.max_tree_nodes!=c.max_tree_nodes ||
        tree.nodes()>static_cast<size_t>(c.max_tree_nodes))tree.clear();
     player_=player;round_=s.round;phase_=s.phase;owner_=s.players[player].id;
@@ -236,9 +236,11 @@ inline HeuristicDecision choose_native_npc(const NativeGameState& state,int play
     Mcts<NativeGameState,NativeSearchAction>::Config config;
     config.simulations=std::max(1,options.simulations);config.max_depth=std::max(1,options.max_depth);
     config.seed=seed;config.c_puct=options.c_puct;config.dirichlet_epsilon=0;
-    bool critical=state.phase==NativePhase::Draft;
-    for(const auto& p:state.players)if(p.city.size()+2>=static_cast<size_t>(state.end_districts))critical=true;
-    config.time_budget_ms=critical?options.critical_time_budget_ms:options.time_budget_ms;
+    // Particle preparation consumes the same budget as tree search. Keep a
+    // minimum completed simulation; deadline checks are cooperative, not a
+    // forced interruption of an individual rules/evaluation operation.
+    const auto setup_ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count();
+    config.time_budget_ms=options.time_budget_ms>0?static_cast<int>(std::max<int64_t>(1,options.time_budget_ms-setup_ms)):0;
     NativeHeuristicEvaluator evaluator(options.rollout_steps,options.rollouts,seed,config.time_budget_ms);
     if(session)session->prepare(state,player,options);
     const auto result=Mcts<NativeGameState,NativeSearchAction>(rules,evaluator,config).search(particles,player,{},

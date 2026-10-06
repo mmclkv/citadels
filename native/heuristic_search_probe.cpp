@@ -45,7 +45,13 @@ int main(){
   changed.magistrate_signed=7;changed.blackmailer_signed=8;
   const auto hidden_eval=evaluator.evaluate(changed,0,legal);
   require(e.priors==hidden_eval.priors && e.value_vector==hidden_eval.value_vector,"evaluation leaks hidden truth");
-  HeuristicSearchConfig fixed;fixed.simulations=96;fixed.time_budget_ms=0;fixed.critical_time_budget_ms=0;fixed.max_depth=24;
+  const auto small_budget=heuristic_search_for_budget(100),large_budget=heuristic_search_for_budget(10000);
+  require(small_budget.simulations==std::numeric_limits<int>::max(),"time search has a simulation cap");
+  require(small_budget.particles<large_budget.particles && small_budget.max_depth<large_budget.max_depth &&
+          small_budget.rollout_steps<large_budget.rollout_steps && small_budget.max_tree_nodes<large_budget.max_tree_nodes,
+          "search sizes do not follow budget");
+  require(heuristic_search_for_budget(0).time_budget_ms==1,"zero created unlimited search");
+  HeuristicSearchConfig fixed;fixed.simulations=96;fixed.time_budget_ms=0;fixed.max_depth=24;
   const auto a=choose_native_npc(s,0,legal,71,fixed),b=choose_native_npc(changed,0,legal,71,fixed);
   require(a.searched && !a.fallback && a.visits>0 && a.particles==8,"hard did not search");
   require(legal[a.selected].type==ActionType::Build,"search ignored profitable affordable construction");

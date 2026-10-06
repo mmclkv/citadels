@@ -24,7 +24,7 @@ class NativeHeuristicSearchTests(unittest.TestCase):
                                CITADELS_HEURISTIC_MCTS_ROLLOUTS="1",
                                CITADELS_HEURISTIC_MCTS_REUSE_TREE="1",
                                CITADELS_HEURISTIC_MCTS_TREE_NODES="4096",
-                               CITADELS_HEURISTIC_MCTS_TIME_MS="0",
+                               CITADELS_HEURISTIC_MCTS_TIME_MS="100",
                                CITADELS_HEURISTIC_MCTS_CRITICAL_TIME_MS="0")
         self.worker = GameEngineWorker(os.environ["CITADELS_TEST_GAME_ENGINE"], env=self.search_env)
         self.new_game = {"seed": 1700, "endDistricts": 8, "charSetMode": "random",
@@ -46,7 +46,7 @@ class NativeHeuristicSearchTests(unittest.TestCase):
         self.assertGreater(stats["rolloutActions"], 0)
         self.assertGreater(stats["newVisits"], 0)
         self.assertEqual(stats["reusedVisits"], 0)
-        self.assertEqual(stats["particles"], 8)
+        self.assertEqual(stats["particles"], 2)
         legal = self.worker.legal_actions(game_id="real", player_id=actor)["actions"]
         self.assertIn(result["action"], legal)
         self.assertEqual(before, self.worker.snapshot("real"))
@@ -77,15 +77,17 @@ class NativeHeuristicSearchTests(unittest.TestCase):
         env = dict(self.search_env, CITADELS_HEURISTIC_MCTS_ENABLED="1",
                    CITADELS_HEURISTIC_MCTS_SIMULATIONS="3",
                    CITADELS_HEURISTIC_MCTS_PARTICLES="2",
-                   CITADELS_HEURISTIC_MCTS_TIME_MS="0",
+                   CITADELS_HEURISTIC_MCTS_TIME_MS="80",
                    CITADELS_HEURISTIC_MCTS_CRITICAL_TIME_MS="0")
         self.worker = GameEngineWorker(os.environ["CITADELS_TEST_GAME_ENGINE"], env=env)
         self.worker.create_game(self.new_game, "budget")
         actor = self.worker.current("budget")["playerId"]
         stats = self.worker._request("npc", gameId="budget", playerId=actor)["heuristicSearch"]
         self.assertTrue(stats["searched"])
-        self.assertEqual(stats["visits"], 3)
+        self.assertGreater(stats["visits"], 3)  # obsolete simulation cap is ignored
         self.assertEqual(stats["particles"], 2)
+        self.assertGreaterEqual(stats["elapsedMs"], 60)
+        self.assertLess(stats["elapsedMs"], 1000)
 
     def test_session_isolated_between_games_and_recreation(self):
         self.worker.create_game(self.new_game, "a")
@@ -139,23 +141,48 @@ class NativeHeuristicSearchTests(unittest.TestCase):
         self.assertFalse(result["heuristicSearch"]["fallback"])
         self.assertIn(result["action"], self.worker.legal_actions(game_id="disabled", player_id=actor)["actions"])
 
-    def test_rollout_and_reuse_can_be_disabled_independently(self):
+    def test_legacy_rollout_and_reuse_overrides_are_ignored(self):
         self.worker.close()
         env = dict(self.search_env, CITADELS_HEURISTIC_MCTS_ROLLOUT_STEPS="0",
                    CITADELS_HEURISTIC_MCTS_REUSE_TREE="0",
                    CITADELS_HEURISTIC_MCTS_SIMULATIONS="16",
-                   CITADELS_HEURISTIC_MCTS_TIME_MS="0",
+                   CITADELS_HEURISTIC_MCTS_TIME_MS="100",
                    CITADELS_HEURISTIC_MCTS_CRITICAL_TIME_MS="0")
         self.worker = GameEngineWorker(os.environ["CITADELS_TEST_GAME_ENGINE"], env=env)
         self.worker.create_game(self.new_game, "static")
         actor = self.worker.current("static")["playerId"]
-        for seed in (71, 72):
+        for i, seed in enumerate((71, 72)):
             stats = self.worker._request("npc", gameId="static", playerId=actor, seed=seed)["heuristicSearch"]
             self.assertTrue(stats["searched"])
-            self.assertEqual(stats["newVisits"], 16)
-            self.assertEqual(stats["reusedVisits"], 0)
-            self.assertEqual(stats["retainedNodes"], 0)
-            self.assertEqual(stats["rolloutActions"], 0)
+            self.assertGreater(stats["newVisits"], 0)
+            self.assertGreater(stats["retainedNodes"], 0)
+            self.assertGreater(stats["rolloutActions"], 0)
+            if i:
+                self.assertGreater(stats["reusedVisits"], 0)
+
+    def test_request_budget_is_shared_by_draft_action_and_training(self):
+        self.worker.create_game(self.new_game, "unified")
+        for step in range(20):
+            actor = self.worker.current("unified")["playerId"]
+            before = self.worker.snapshot("unified")
+            result = self.worker._request("npc", gameId="unified", playerId=actor,
+                heuristicMcts={"timeBudgetMs": 30, "simulations": 1,
+                               "criticalTimeBudgetMs": 100000, "particles": 99})
+            stats = result["heuristicSearch"]
+            if stats["searched"]:
+                self.assertGreaterEqual(stats["elapsedMs"], 20)
+                self.assertLess(stats["elapsedMs"], 1000)
+                self.assertEqual(stats["particles"], 2)
+                self.assertGreater(stats["visits"], 1)
+            self.worker.apply(game_id="unified", player_id=actor, action=result["action"])
+            if before["phase"] == "action" and stats["searched"]:
+                break
+        else:
+            self.fail("Did not exercise an action-phase search")
+        advanced = self.worker._request("advance_npcs", gameId="unified", networkPlayerIds=[],
+            maxSteps=2, heuristicMcts={"timeBudgetMs": 30}, seed=1)
+        self.assertEqual(advanced["steps"], 2)
+        self.assertLess(advanced["heuristicSearch"]["elapsedMs"], 2000)
 
 
 if __name__ == "__main__":

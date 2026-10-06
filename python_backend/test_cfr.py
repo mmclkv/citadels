@@ -28,7 +28,7 @@ class CfrConfigurationTests(unittest.TestCase):
             seat = lobby_view(room)["seats"][1]
             self.assertEqual(seat["botType"], "npc")
             self.assertEqual(seat["botLevel"], kind[4:] if kind.startswith("npc-") else "hard")
-            self.assertEqual(seat["heuristicMcts"]["simulations"], 10000)
+            self.assertEqual(seat["heuristicMcts"], {"timeBudgetMs": 10000})
 
     def test_neural_and_agent_are_not_migrated(self):
         for kind in ("agent", "neural"):
@@ -104,7 +104,8 @@ class CfrNativeTests(unittest.TestCase):
             self.assertIn(result["action"], worker.legal_actions(game_id="room", player_id=actor)["actions"])
             self.assertEqual(before, worker.snapshot("room"))
             advanced = worker._request("advance_npcs", gameId="room", networkPlayerIds=[], seed=71,
-                                       maxSteps=1, maxRounds=1000, includeTrainingFeatures=False)
+                                       maxSteps=1, maxRounds=1000, includeTrainingFeatures=False,
+                                       heuristicMcts={"timeBudgetMs": 10})
             self.assertEqual(advanced["steps"], 1)
             self.assertGreater(advanced["heuristicSearch"]["searches"], 0)
         finally:

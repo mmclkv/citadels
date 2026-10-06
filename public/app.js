@@ -5279,35 +5279,19 @@
           if (s.botType === 'npc' && s.botLevel === 'hard') {
             const cfg = s.heuristicMcts || {};
             const box = el('div', 'seat-mcts heuristic-mcts');
-            box.innerHTML = '<span class="seat-mcts-title">启发式 MCTS 参数</span>';
-            const fields = [
-              ['模拟次数', 'simulations', 10000, 1, 100], ['隐藏信息粒子数', 'particles', 8, 1, 1],
-              ['最大搜索深度', 'maxDepth', 700, 1, 8], ['常规时间预算 ms', 'timeBudgetMs', 10000, 0, 1000],
-              ['关键局面时间预算 ms', 'criticalTimeBudgetMs', 20000, 0, 1000],
-              ['Rollout 步数', 'rolloutSteps', 8, 0, 1], ['每叶 Rollout 数', 'rollouts', 1, 1, 1],
-              ['最大树节点数', 'maxTreeNodes', 4096, 1, 256], ['c_puct', 'cPuct', 1.0, 0, 0.1]
-            ];
-            const values = Object.fromEntries(fields.map(([, key, fallback]) => [key, cfg[key] == null ? fallback : cfg[key]]));
-            fields.forEach(([label, key, fallback, min, step]) => {
-              const field = el('label', 'seat-mcts-field');
-              field.innerHTML = '<span>' + label + '</span>';
-              const input = document.createElement('input');
-              input.type = 'number'; input.min = String(min); input.step = String(step);
-              input.value = String(values[key]);
-              input.onchange = () => {
-                values[key] = input.value;
-                Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
-                  heuristicMcts: { ...values, reuseTree: cfg.reuseTree !== false } });
-              };
-              field.appendChild(input); box.appendChild(field);
-            });
-            const reuseLabel = el('label', 'seat-mcts-field');
-            reuseLabel.innerHTML = '<span>跨行动复用搜索树</span>';
-            const reuse = document.createElement('input'); reuse.type = 'checkbox';
-            reuse.checked = cfg.reuseTree !== false;
-            reuse.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
-              heuristicMcts: { ...values, reuseTree: reuse.checked } });
-            reuseLabel.appendChild(reuse); box.appendChild(reuseLabel);
+            box.innerHTML = '<span class="seat-mcts-title">启发式 MCTS</span>';
+            const field = el('label', 'seat-mcts-field');
+            field.innerHTML = '<span>搜索时间预算 ms</span>';
+            const input = document.createElement('input');
+            input.type = 'number'; input.min = '1'; input.step = '1';
+            input.value = String(cfg.timeBudgetMs == null ? 10000 : cfg.timeBudgetMs);
+            input.onchange = () => {
+              if (!input.checkValidity()) { input.reportValidity(); return; }
+              Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
+                heuristicMcts: { timeBudgetMs: input.value } });
+            };
+            field.appendChild(input); box.appendChild(field);
+            box.appendChild(el('span', 'hint', '所有局面共用此预算；模拟次数随实际速度自适应，粒子数、深度和 rollout 自动配置。'));
             ops.appendChild(box);
           }
         }

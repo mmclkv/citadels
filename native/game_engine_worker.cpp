@@ -32,25 +32,14 @@ HeuristicSearchConfig heuristic_options(const JsonValue& request) {
   auto config = heuristic_search_defaults();
   const auto* value = request.get("heuristicMcts");
   if (!value || !value->is_object()) return config;
-  const auto integer = [&](const char* key, int fallback, int minimum) {
-    const auto* field = value->get(key);
-    if (!field || !field->is_number()) return fallback;
-    const double number = field->as_number();
-    if (number < minimum || number > std::numeric_limits<int>::max()) return fallback;
-    return static_cast<int>(number);
-  };
-  config.simulations = integer("simulations", config.simulations, 1);
-  config.particles = integer("particles", config.particles, 1);
-  config.max_depth = integer("maxDepth", config.max_depth, 1);
-  config.time_budget_ms = integer("timeBudgetMs", config.time_budget_ms, 0);
-  config.critical_time_budget_ms = integer("criticalTimeBudgetMs", config.critical_time_budget_ms, 0);
-  config.rollout_steps = integer("rolloutSteps", config.rollout_steps, 0);
-  config.rollouts = integer("rollouts", config.rollouts, 1);
-  config.max_tree_nodes = integer("maxTreeNodes", config.max_tree_nodes, 1);
-  if (const auto* field = value->get("cPuct"); field && field->is_number())
-    config.c_puct = static_cast<float>(std::max(0.0, field->as_number()));
-  if (const auto* field = value->get("reuseTree"); field && field->is_bool())
-    config.reuse_tree = field->as_bool();
+  const auto* field=value->get("timeBudgetMs");
+  if(field && field->is_number() && std::isfinite(field->as_number())) {
+    const double milliseconds=field->as_number();
+    if(milliseconds>=0 && milliseconds<=std::numeric_limits<int>::max()) {
+      auto derived=heuristic_search_for_budget(static_cast<int>(milliseconds));
+      derived.enabled=config.enabled;config=derived;
+    }
+  }
   return config;
 }
 
@@ -194,7 +183,7 @@ int main() {
           if (network_players.count(state.players[actor].id)) break;
           const auto actions = rules.legal_actions(state, actor);
           const auto heuristic_decision = choose_native_npc(state, actor, actions,
-              seed + static_cast<uint32_t>(steps) * 0x9E3779B1u,heuristic_search_defaults(),&heuristic_sessions[game_id]);
+              seed + static_cast<uint32_t>(steps) * 0x9E3779B1u,heuristic_options(request),&heuristic_sessions[game_id]);
           const int selected=heuristic_decision.selected;
           heuristic_searches+=heuristic_decision.searched;heuristic_fallbacks+=heuristic_decision.fallback;
           heuristic_visits+=heuristic_decision.visits;heuristic_ms+=heuristic_decision.elapsed_ms;
