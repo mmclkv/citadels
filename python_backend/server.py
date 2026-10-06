@@ -1158,6 +1158,32 @@ class PythonServer:
                 cost = max(0, int(card.get("cost") or 0))
                 return (f"【行政官】执行逮捕令，从{builder}处没收刚建造的『{name}』，"
                         f"免费建入{magistrate}的城市；建造者支付的{cost}枚建造金币已退还。")
+        reaction = state.get("reaction") or {}
+        if kind == "reaction" and reaction.get("kind") == "blackmailer":
+            target_idx = reaction.get("targetIdx", turn.get("playerIdx"))
+            target = PythonServer._player_label(state, target_idx)
+            owner = PythonServer._player_label(state, reaction.get("playerIdx"))
+            revealed = bool(action["use"]) if "use" in action else action.get("name") == "use"
+            if not revealed:
+                return f"【勒索者】放弃对{target}发动勒索，不翻开威胁标记；该标记本轮作废。"
+            # Native snapshots keep the secret in pending; Python snapshots
+            # keep it in effects after the marked player refuses the ransom.
+            if pending.get("kind") == "blackmailer_threat":
+                is_real = bool(pending.get("signed"))
+            else:
+                threat = (state.get("effects") or {}).get("blackmailer") or {}
+                is_real = threat.get("signed") == reaction.get("num") and "signed" in threat
+            if not is_real:
+                return (f"【勒索者】对{target}发动勒索，翻开的是假威胁标记『玫瑰花』；"
+                        "勒索无效，目标没有损失金币。")
+            before = state.get("players") or []
+            after = (updated or {}).get("players") or []
+            amount = 0
+            if isinstance(target_idx, int) and 0 <= target_idx < len(before) and target_idx < len(after):
+                amount = max(0, int(before[target_idx].get("gold") or 0) -
+                             int(after[target_idx].get("gold") or 0))
+            return (f"【勒索者】对{target}发动勒索，翻开真威胁标记『带血的刀』；"
+                    f"没收目标的全部{amount}枚金币，交给{owner}。")
         if kind == "tax_collect":
             amount = max(0, int((state.get("effects") or {}).get("taxCollectorGold") or 0))
             return f"税务官收取了{amount}枚建筑税"
