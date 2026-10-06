@@ -76,7 +76,7 @@
     if(msg.t==='hello') { M.id=msg.youId || M.id; if(!msg.resumed){try{localStorage.removeItem(SESSION);}catch(_){}location.replace('./index.html');} }
     else if(msg.t==='joined') { M.id=msg.youId; M.room=msg.roomId; if(msg.resumeToken)remember(msg.resumeToken,msg.roomId); M.state=msg.state; render(); }
     else if(msg.t==='state') { M.state=msg.state; if(msg.state.you)M.id=msg.state.you; if(!driveSequence())render(); }
-    else if(msg.t==='chat') { M.chat.push(msg); renderSidebar(); }
+    else if(msg.t==='chat') { M.chat.push(msg); renderSidebar(); chatBubble(msg); }
     else if(msg.t==='error') { M.sequence=null;message(msg.error); $('selectedInfo').textContent=msg.error; render();$('selectedInfo').textContent=msg.error; }
   }
   function render() {
@@ -195,6 +195,15 @@
   function expectEffect(text){clearTimeout(M.effectTimer);M.effectFallback=text;
     M.effectTimer=setTimeout(()=>{if(!M.effectFallback)return;const text2=M.effectFallback;M.effectFallback=null;
       bubbleOn({actor:M.id,text:text2,tone:'magic'});},900);}
+  function chatBubble(msg){
+    if(!msg.text||!(M.state?.players||[]).some(p=>p.id===msg.playerId))return;
+    // 同一玩家连续发言显示最新一条；完整聊天记录仍保留在侧栏。
+    M.bubbles=M.bubbles.filter(b=>!(b.id===msg.playerId&&b.tone==='chat'));
+    const text=String(msg.text);
+    M.bubbles.push({id:msg.playerId,text,tone:'chat',
+      until:Date.now()+Math.min(15000,Math.max(8000,text.length*120)),fresh:true});
+    renderPlayers();armBubbles();
+  }
   function bubbleOn(ev){if(!ev.text)return;if(!ev.actor){message(ev.text);return;}
     const name=(M.state?.players||[]).find(p=>p.id===ev.actor)?.name;
     const text=name&&ev.text.startsWith(name+'：')?ev.text.slice(name.length+1):ev.text;
