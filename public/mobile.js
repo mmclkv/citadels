@@ -33,13 +33,11 @@
   };
   const districtImg = (card, variant='thumb') => T.districtAsset(card,variant) || '';
   const roleImg = (card, variant='thumb') => T.roleAsset(card,variant) || '';
-  const warmedFullImages = new Map();
-  function warmFullImage(src){if(!src||warmedFullImages.has(src))return;const img=new Image();img.decoding='async';img.fetchPriority='high';img.src=src;warmedFullImages.set(src,img);while(warmedFullImages.size>4)warmedFullImages.delete(warmedFullImages.keys().next().value);}
   const badge = card => `<span class="role-num">${esc(card.num)}</span><span class="role-mini-name">${esc(card.name)}</span>`;
   const roleTag = (card, extra='') => `<button class="summary-role ${extra}" type="button" data-kind="role" data-key="${attr(card.id)}">${badge(card)}</button>`;
   const canBuild = card => !!card?.uid && legal().some(a=>a.type==='build'&&a.uid===card.uid);
   const canBuildAny = () => legal().some(a=>a.type==='build');
-  const mini = card => `<button class="city-mini ${M.selection?.uids.has(card.uid)?'selected':''} ${canBuild(card)?'buildable':''}${stageCls('district',card.uid)}${stageCls('hand',card.uid)}" type="button" data-kind="district" data-key="${attr(cardKey(card))}" style="--district-color:${C[card.color]||C.purple}" title="${attr(card.name)} · ${card.cost} 金币"><span class="mini-cost">${esc(card.cost)}</span><span class="mini-name">${esc(String(card.name||'').slice(0,3))}</span></button>`;
+  const mini = card => `<button class="city-mini ${M.selection?.uids.has(card.uid)?'selected':''} ${canBuild(card)?'buildable':''}${stageCls('district',card.uid)}${stageCls('hand',card.uid)}" type="button" data-kind="district" data-key="${attr(cardKey(card))}" style="--district-color:${C[card.color]||C.purple}" title="${attr(card.name)} · ${card.cost} 金币"><span class="mini-cost">${esc(card.cost)}</span><span class="mini-name">${esc(String(card.name||'').slice(0,3))}</span>${card.museumCount?`<span class="mini-museum" title="博物馆下叠放 ${esc(card.museumCount)} 张牌">${esc(card.museumCount)}</span>`:''}</button>`;
   const thumb = (card, kind) => `<button class="small-card-btn ${M.selection?.uids.has(card.uid)?'selected':''} ${kind==='district'&&canBuild(card)?'buildable':''}${kind==='district'?stageCls('district',card.uid)+stageCls('hand',card.uid):''}" type="button" data-kind="${kind}" data-key="${attr(cardKey(card))}"><img src="${attr(kind==='role'?roleImg(card):districtImg(card))}" alt="${attr(card.name)}"><span class="small-card-label">${kind==='role'?esc(card.num)+' · ':''}${esc(card.name)}</span></button>`;
   const coin = n => `<span class="stat-with-icon"><i class="coin-icon"></i><span class="stat-value">${esc(n)}</span></span>`;
   const points = n => `<span class="stat-with-icon"><i class="score-icon"></i><span class="stat-value">${esc(n)}</span></span>`;
@@ -395,17 +393,38 @@
   }
   function findCard(key,kind){const s=M.state;if(kind==='role')return [ ...(s.charDeck||[]),...(s.draft?.pool||[]),...(s.removed?.faceUp||[]) ].find(c=>String(cardKey(c))===key)||role(key);
     const cards=[...(myPlayer()?.hand||[]),...(s.turn?.pending?.cards||[]),...s.players.flatMap(p=>p.city||[])];return cards.find(c=>String(cardKey(c))===key);}
-  function openViewer(kind,card,confirm,context,stageOption){if(!card&&kind!=='back')return;M.viewer={kind,card,confirm,context,stageOption};
+  // 静态资源一律带 Cache-Control: no-store，靠浏览器缓存留不住原图，大卡图每次
+  // 打开都要重新下载。这里把取回的原图转成 blob 常驻内存，同一张卡一局只下一次；
+  // 手机直接打开 mobile.html 时没有 Service Worker，这是唯一还能生效的一层缓存。
+  const artCache=new Map(), artPending=new Set();
+  function artSrc(url){
+    if(!url) return '';
+    const cached=artCache.get(url);
+    if(cached) return cached;
+    if(!artPending.has(url)){
+      artPending.add(url);
+      fetch(url).then(r=>r.ok?r.blob():null).then(blob=>{
+        if(!blob) return;
+        const objectUrl=URL.createObjectURL(blob);
+        artCache.set(url,objectUrl);
+        // 正看着这张就换成内存副本，下次重开直接命中。
+        if(M.viewer&&M.viewer.art===url)$('viewerImg').src=objectUrl;
+      }).catch(()=>{}).finally(()=>artPending.delete(url));
+    }
+    return url;
+  }
+  function openViewer(kind,card,confirm,context,stageOption){if(!card&&kind!=='back')return;
+    const art=kind==='back'?'./assets/themes/neon/card-back.png':kind==='role'?roleImg(card,'full'):districtImg(card,'full');
+    M.viewer={kind,card,confirm,context,stageOption,art};
     $('viewerTitle').textContent=kind==='back'?'暗置角色牌':kind==='role'?`${card.num} · ${card.name} · 角色卡`:`${card.name} · 建筑卡`;
-    const fullSrc=kind==='back'?'./assets/themes/neon/card-back.png':kind==='role'?roleImg(card,'full'):districtImg(card,'full');
-    warmFullImage(fullSrc);const viewerImg=$('viewerImg');viewerImg.fetchPriority='high';viewerImg.decoding='async';viewerImg.src=fullSrc;
+    const viewerImg=$('viewerImg');viewerImg.fetchPriority='high';viewerImg.decoding='async';viewerImg.src=artSrc(art);
     $('viewerMeta').innerHTML=kind==='back'?'暗置弃置角色的身份不会公开。':kind==='role'?`编号 ${esc(card.num)} · ${esc(card.name)}`:`<span class="color-dot" style="--district-color:${C[card.color]||C.purple}"></span><span>${esc(CN[card.color]||'独特')} · 费用 ${esc(card.cost)} · ${esc(context||'点击查看卡牌')}</span>`;
     const pick=stageOption>=0, act=confirm||pick;
     $('viewerActions').className='viewer-actions '+(act?'two':'');
     $('viewerActions').innerHTML='<button class="btn ghost" type="button" id="viewerBack">返回</button>'+(act?`<button class="btn ${confirm?.type==='draft_discard'?'danger':'gold'}" type="button" id="viewerConfirm">${esc(confirm?.label||'确认选择')}</button>`:'');
     $('viewer').classList.add('show');
   }
-  function closeViewer(){M.viewer=null;$('viewer').classList.remove('show');$('viewerImg').removeAttribute('src');}
+  function closeViewer(){M.viewer=null;$('viewer').classList.remove('show');}
   function closeSheet(){M.sheetPlayer=null;$('sheet').classList.remove('show','player-detail-mode');$('mask').classList.remove('show','player-detail-mode');}
   function renderDetail(playerId){const p=M.state.players.find(x=>x.id===playerId);if(!p){closeSheet();return;}
     M.sheetPlayer=playerId;const s=score(p),ch=p.revealedCharId&&!(M.state.phase==='draft'&&p.id!==M.id)?role(p.revealedCharId):null;

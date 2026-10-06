@@ -100,14 +100,16 @@ def _gunzip_limited(data: bytes, limit: int = 1_073_741_824) -> bytes:
 
 async def _http_response(writer: asyncio.StreamWriter, code: int, body: bytes,
                          content_type: str = "application/json; charset=utf-8",
-                         headers: dict[str, str] | None = None) -> None:
-    reason = {200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
+                         headers: dict[str, str] | None = None,
+                         cache_control: str = "no-store") -> None:
+    reason = {200: "OK", 304: "Not Modified", 400: "Bad Request", 403: "Forbidden",
+              404: "Not Found",
               405: "Method Not Allowed", 401: "Unauthorized", 413: "Payload Too Large",
               429: "Too Many Requests",
               426: "Upgrade Required", 501: "Not Implemented", 503: "Service Unavailable",
               204: "No Content"}.get(code, "Error")
     header = (f"HTTP/1.1 {code} {reason}\r\nContent-Type: {content_type}\r\n"
-              f"Content-Length: {len(body)}\r\nCache-Control: no-store\r\n"
+              f"Content-Length: {len(body)}\r\nCache-Control: {cache_control}\r\n"
               "X-Content-Type-Options: nosniff\r\n" +
               "".join(f"{key}: {value}\r\n" for key, value in (headers or {}).items()) +
               "Connection: close\r\n\r\n")
@@ -1983,11 +1985,11 @@ class PythonServer:
                 return
             if route == "/api/agent/status":
                 await _http_response(writer, 200, _json_bytes(self._agent_status()), headers={
-                    "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
+                    "Access-Control-Allow-Origin": "*"})
                 return
             if route == "/api/neural/status":
                 await _http_response(writer, 200, _json_bytes(self.neural.status()), headers={
-                    "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
+                    "Access-Control-Allow-Origin": "*"})
                 return
             if route == "/api/voice/status":
                 status = self.voice.status()
@@ -2037,7 +2039,19 @@ class PythonServer:
                 or "application/octet-stream"
             if mime.startswith("text/") or mime in ("application/javascript", "application/json"):
                 mime += "; charset=utf-8"
-            await _http_response(writer, 200, candidate.read_bytes(), mime)
+            # 静态资源不再一律 no-store：带 ?v= 的 URL 内容由版本号决定，可以长缓存；
+            # 其余（入口 HTML / 无版本号的 js、css、卡图）用 no-cache 每次回源校验，
+            # 命中就回 304，既不会拿到旧文件，也不用重传 body。
+            stat = candidate.stat()
+            etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+            versioned = any(part.split("=", 1)[0] == "v"
+                            for part in urlsplit(target).query.split("&") if part)
+            cache_control = "public, max-age=31536000, immutable" if versioned else "no-cache"
+            if headers.get("if-none-match") == etag:
+                await _http_response(writer, 304, b"", mime, {"ETag": etag}, cache_control)
+                return
+            await _http_response(writer, 200, candidate.read_bytes(), mime,
+                                 {"ETag": etag}, cache_control)
         except (asyncio.IncompleteReadError, asyncio.LimitOverrunError,
                 asyncio.TimeoutError, UnicodeError, ValueError):
             try:
