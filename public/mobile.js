@@ -370,16 +370,17 @@
       const key=target?a.type:((a.type==='lab'||a.type==='museum')?a.type:JSON.stringify(a));if(seen.has(key))continue;seen.add(key);grouped.push({...a,_targetGroup:target});}
     M.actions=grouped.filter(a=>!a._targetGroup&&!(M.selection&&a.type==='choose_cards'));
     const prompt=s.available?.prompt||(s.phase==='draft'?'选角阶段':s.phase==='gameover'?'游戏结束':'等待其他玩家行动');
-    $('selectedInfo').textContent=M.targetType?'在公开区域选择目标玩家':choice?choice.title:prompt;
+    const current=s.phase==='draft'?s.draft?.currentPlayer:s.turn?.playerId;
+    const waitingForMagistrate=s.reaction?.kind==='magistrate'&&current===M.id;
+    $('selectedInfo').textContent=waitingForMagistrate?'请等待行政官响应':M.targetType?'在公开区域选择目标玩家':choice?choice.title:prompt;
     const buttons=M.actions.map((a,i)=>{const label=a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
       return `<button class="btn ${a.type==='end_turn'||a.type==='ability_skip'?'ghost':a.type==='ability'?'purple':'primary'}" type="button" data-action-index="${i}" title="${esc(label)}">${esc(label)}</button>`;});
-    const current=s.phase==='draft'?s.draft?.currentPlayer:s.turn?.playerId;
     if(current===M.id&&!M.targetType&&!M.selection&&choice)buttons.unshift(`<button class="btn gold" type="button" id="chooseTarget">${esc(String(choice.title||'选择目标').replace(/^请/,''))}</button>`);
     if(!M.targetType&&!M.selection&&all.some(a=>a.type==='build'))buttons.unshift('<button class="btn gold" type="button" id="chooseBuild">建造建筑</button>');
     if(M.selection)buttons.unshift(`<button class="btn gold" type="button" id="confirmSelection">确认所选 ${M.selection.uids.size} 张</button>`,`<button class="btn ghost" type="button" id="cancelSelection">清空选择</button>`);
     $('actions').className=actionsClass(buttons.length);
     const waiting=s.phase==='gameover'?'对局已结束':current!==M.id?'等待其他玩家':M.targetType?'点击上方高亮玩家选择目标':M.selection?'点击手牌选择要偿还的建筑牌':choice?'点击上方卡牌完成选择':'请从上方选择行动';
-    $('actions').innerHTML=buttons.join('')||`<button class="btn ghost" disabled>${waiting}</button>`;
+    $('actions').innerHTML=buttons.join('')||(waitingForMagistrate?'':`<button class="btn ghost" disabled>${waiting}</button>`);
   }
   function findCard(key,kind){const s=M.state;if(kind==='role')return [ ...(s.charDeck||[]),...(s.draft?.pool||[]),...(s.removed?.faceUp||[]) ].find(c=>String(cardKey(c))===key)||role(key);
     const cards=[...(myPlayer()?.hand||[]),...(s.turn?.pending?.cards||[]),...s.players.flatMap(p=>p.city||[])];return cards.find(c=>String(cardKey(c))===key);}
