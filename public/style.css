@@ -1046,10 +1046,14 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   .score-detail{font-size:10.5px}
 
   /* -------- 大厅座位 -------- */
-  #screen-lobby .wide-panel{width:calc(100vw - 20px)}
-  #screen-lobby #lobby-pre .lobby-cols{grid-template-columns:1fr}
+  /* Fit inside the screen's padding (including safe areas), not the viewport. */
+  #screen-lobby.active{overflow-x:hidden;overflow-y:auto}
+  #screen-lobby .wide-panel{width:100%;max-width:100%;min-width:0;flex-shrink:0}
+  #screen-lobby #lobby-pre .lobby-cols{grid-template-columns:minmax(0,1fr)}
+  #screen-lobby .lobby-box,#screen-lobby .room-cfg{min-width:0}
+  #screen-lobby .room-item{flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}
   #screen-lobby #lobby-pre #net-bot-type{min-width:0}
-  #screen-lobby #lobby-room .seat-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  #screen-lobby #lobby-room .seat-grid{grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))}
   #screen-lobby #lobby-room .seat{min-height:100px;padding:10px}
   #screen-lobby #lobby-room .seat select{min-width:150px;flex-basis:150px}
   #screen-lobby #lobby-room .seat-mcts{grid-template-columns:repeat(3,minmax(58px,1fr))}
