@@ -115,6 +115,7 @@ class NativeMctsWorker:
                 raise RuntimeError("C++ MCTS worker 错误：" + detail)
             if result.get("t") != "search_result":
                 raise RuntimeError("C++ MCTS worker 响应类型不支持")
+            self._validate_search_encoding(result, action_encoding_version)
             if result.get("fallback"):
                 native_types = ",".join(result.get("nativeActionTypes") or [])
                 supplied_types = ",".join(result.get("suppliedActionTypes") or [])
@@ -137,6 +138,17 @@ class NativeMctsWorker:
             if not isinstance(policy, list) or len(policy) != len(legal_actions):
                 raise RuntimeError("C++ MCTS 返回的策略长度与合法动作数不一致")
             return result
+
+    @staticmethod
+    def _validate_search_encoding(result: dict, requested: int) -> None:
+        returned = result.get("actionEncodingVersion")
+        supported = result.get("supportedActionEncodingVersion")
+        # Legacy v9 workers did not echo their encoding; retain compatibility
+        # only for v9 checkpoints, never silently feed v10 to an old encoder.
+        if requested == 9 and returned is None:
+            return
+        if returned != requested or not isinstance(supported, int) or supported < requested:
+            raise RuntimeError("C++ MCTS worker 动作编码版本不匹配；请重新编译 worker 后再启动新训练")
 
     def determinize(self, *, state: dict, player_id: str, count: int,
                     seed: int, belief: bool = True) -> dict:

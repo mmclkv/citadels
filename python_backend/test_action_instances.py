@@ -9,6 +9,16 @@ from python_backend.model_contract import MODEL_CONTRACTS, validate_checkpoint_c
 
 
 class ActionInstanceTests(unittest.TestCase):
+    def test_stale_worker_cannot_silently_encode_v10(self):
+        from python_backend.native_worker import NativeMctsWorker
+        check = NativeMctsWorker._validate_search_encoding
+        check({}, 9)
+        check({'actionEncodingVersion': 10, 'supportedActionEncodingVersion': 10}, 10)
+        for response in ({}, {'actionEncodingVersion': 9, 'supportedActionEncodingVersion': 10},
+                         {'actionEncodingVersion': 10, 'supportedActionEncodingVersion': 9}):
+            with self.assertRaises(RuntimeError):
+                check(response, 10)
+
     def test_native_instance_features_and_legacy_prefix(self):
         compiler = shutil.which("clang++")
         if not compiler:
