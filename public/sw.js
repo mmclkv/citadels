@@ -1,4 +1,4 @@
-const CACHE_NAME = 'citadels-shell-v63';
+const CACHE_NAME = 'citadels-shell-v64';
 // 语音 SDK（vendor/livekit-client.umd.min.js，近 600KB）故意不放进预缓存清单：
 // 它只在第一次点「语音」时才动态加载，下面的运行时缓存会在那次请求后把它存下来。
 // 放进 APP_SHELL 会让每个单机玩家都白白下载一遍。
@@ -6,6 +6,7 @@ const APP_SHELL = [
   './', './index.html', './manifest.json', './style.css',
   './themes/neon/theme.css', './themes/neon/manifest.js', './themes/theme-manager.js',
   './src/cards.js', './app.js', './mobile.html', './mobile-live.css', './mobile.js',
+  './mobile-theme.js', './themes/classic/mobile.css',
   './icons/citadels.svg'
 ];
 

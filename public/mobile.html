@@ -69,6 +69,7 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 @media(max-height:760px){.player-row{min-height:70px}.city-mini{height:20px}.district-card{height:83px}.district-card.hand{height:89px}.viewport{padding-bottom:170px}.roles{gap:4px}.bottom{padding-top:4px}.btn{height:41px}}
 </style>
 <link rel="stylesheet" href="./mobile-live.css?v=26"/>
+<link rel="stylesheet" href="./themes/classic/mobile.css?v=1"/>
 </head>
 <body>
 <div class="shell">
@@ -153,7 +154,7 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
           <button class="btn ghost" id="menuLog" type="button">战报</button>
           <button class="btn ghost" id="menuChat" type="button">聊天记录 / 发言</button>
           <button class="btn ghost" id="menuVoice" type="button" hidden>语音</button>
-          <div class="menu-theme">主题 · 霓虹</div>
+          <button class="btn ghost" id="menuTheme" type="button">切换主题</button>
           <button class="btn ghost" id="menuNewGame" type="button">离开对局并返回首页</button>
           <button class="btn ghost" id="menuCloseBottom" type="button">返回对局</button>
         </div></div>
@@ -166,6 +167,7 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 <script src="./themes/neon/manifest.js"></script>
 <script src="./themes/theme-manager.js"></script>
 <script src="./src/cards.js?v=4"></script>
-<script src="./mobile.js?v=4"></script>
+<script src="./mobile-theme.js?v=1"></script>
+<script src="./mobile.js?v=6"></script>
 </body>
 </html>

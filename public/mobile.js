@@ -3,7 +3,6 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const T = window.CitadelThemeManager;
-  T.apply('neon', { persist: false });
   const C = { yellow:'#e0a92b', blue:'#3d7ec4', green:'#3fa46a', red:'#d0503f', purple:'#8b5cc7' };
   const CN = { yellow:'皇家', blue:'宗教', green:'商业', red:'军事', purple:'独特' };
   const SESSION = 'citadels.net.session';
@@ -31,8 +30,8 @@
     const index = M.state.players.findIndex(x => x.id === p.id);
     return M.state.scores && M.state.scores[index] || {base:0,bonus:0,total:0,detail:[]};
   };
-  const districtImg = (card, variant='thumb') => T.districtAsset(card,variant) || '';
-  const roleImg = (card, variant='thumb') => T.roleAsset(card,variant) || '';
+  const districtImg = (card, variant='thumb') => window.CitadelMobileTheme.cardAsset('district',card,variant);
+  const roleImg = (card, variant='thumb') => window.CitadelMobileTheme.cardAsset('role',card,variant);
   const badge = card => `<span class="role-num">${esc(card.num)}</span><span class="role-mini-name">${esc(card.name)}</span>`;
   const roleTag = (card, extra='') => `<button class="summary-role ${extra}" type="button" data-kind="role" data-key="${attr(card.id)}">${badge(card)}</button>`;
   const canBuild = card => !!card?.uid && legal().some(a=>a.type==='build'&&a.uid===card.uid);
@@ -399,6 +398,7 @@
   const artCache=new Map(), artPending=new Set();
   function artSrc(url){
     if(!url) return '';
+    if(url.startsWith('data:')) return url;
     const cached=artCache.get(url);
     if(cached) return cached;
     if(!artPending.has(url)){
@@ -414,7 +414,7 @@
     return url;
   }
   function openViewer(kind,card,confirm,context,stageOption){if(!card&&kind!=='back')return;
-    const art=kind==='back'?'./assets/themes/neon/card-back.png':kind==='role'?roleImg(card,'full'):districtImg(card,'full');
+    const art=kind==='back'?window.CitadelMobileTheme.cardAsset('back'):kind==='role'?roleImg(card,'full'):districtImg(card,'full');
     M.viewer={kind,card,confirm,context,stageOption,art};
     $('viewerTitle').textContent=kind==='back'?'暗置角色牌':kind==='role'?`${card.num} · ${card.name} · 角色卡`:`${card.name} · 建筑卡`;
     const viewerImg=$('viewerImg');viewerImg.fetchPriority='high';viewerImg.decoding='async';viewerImg.src=artSrc(art);
@@ -485,7 +485,7 @@
   function warmCardFromIntent(e){const target=e.target.closest?.('[data-kind], [data-detail-card]');if(!target)return;
     const kind=target.dataset.kind||(target.hasAttribute('data-detail-card')?'district':'');if(kind==='back')return;
     let card;if(target.hasAttribute('data-detail-card'))card=M.state?.players.find(p=>p.id===M.sheetPlayer)?.city.find(c=>String(c.uid)===target.dataset.detailCard);
-    else card=findCard(target.dataset.key,kind);if(card)warmFullImage(kind==='role'?roleImg(card,'full'):districtImg(card,'full'));}
+    else card=findCard(target.dataset.key,kind);if(card)artSrc(kind==='role'?roleImg(card,'full'):districtImg(card,'full'));}
   document.addEventListener('pointerover',warmCardFromIntent,{passive:true});
   document.addEventListener('pointerdown',warmCardFromIntent,{passive:true});
   document.addEventListener('click',e=>{
@@ -568,6 +568,23 @@
   $('menuRules').onclick=()=>openReference('游戏规则','<div class="section-title">一局总体流程</div><p>随机移除部分角色牌后，由皇冠持有者开始秘密选角。角色按编号依次被叫号并行动。本轮全部角色行动完毕后重洗角色牌，进入下一轮。</p><div class="section-title">每回合</div><p>领取资源：拿 2 枚金币，或抽 2 张建筑牌保留 1 张。之后可建造建筑、使用一次角色能力、领取对应颜色建筑收入，最后结束回合。通常每回合只能建造 1 栋，同名建筑不可重复。</p><div class="section-title">结束与计分</div><p>有人达到本局的建筑数量目标后，在本轮结束时计分。分数包括建筑费用、五色齐全奖励、达标奖励和特殊建筑奖励。总分最高者获胜。</p>');
   $('menuLog').onclick=()=>{closeMenu();showSidebar('log');};$('menuChat').onclick=()=>{closeMenu();showSidebar('chat');};
   $('menuVoice').onclick=()=>{closeMenu();showSidebar('voice');};
+  function syncTheme(){
+    $('menuTheme').textContent='主题 · '+(T.is('classic')?'经典':'霓虹')+'（点击切换）';
+    if(!M.state)$('phase').innerHTML='富饶之城<small>'+esc(T.label())+'</small>';
+  }
+  $('menuTheme').onclick=()=>T.toggle();
+  T.onChange(()=>{
+    syncTheme();
+    // Only repaint local presentation; keep selected actions and connection intact.
+    if(M.state)render();
+    if(M.viewer){const v=M.viewer;openViewer(v.kind,v.card,v.confirm,v.context,v.stageOption);}
+    if(!$('referenceOverlay').hidden){
+      const title=$('referenceTitle').textContent;
+      if(title==='角色一览')$('menuRoles').onclick();
+      else if(title==='建筑一览')$('menuBuildings').onclick();
+    }
+  });
+  syncTheme();
   const leaveToLobby=()=>{closeMenu();try{localStorage.removeItem(SESSION);}catch(_){}
     if(M.room&&M.ws?.readyState===1){M.leavePending=true;send({t:'leaveRoom'});setTimeout(()=>{if(M.leavePending)location.replace('./index.html');},1500);}
     else location.replace('./index.html');
