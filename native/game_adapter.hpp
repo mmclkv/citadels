@@ -171,6 +171,38 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     return result;
   }
 
+  // Back is a human navigation control, not a strategic decision. Keep the
+  // authoritative human action list and the existing feature schema intact.
+  std::vector<NativeSearchAction> ai_actions(const NativeGameState& state, int player) const override {
+    auto actions = legal_actions(state, player);
+    actions.erase(std::remove_if(actions.begin(), actions.end(), [](const NativeSearchAction& action) {
+      return action.type == ActionType::PendingBack;
+    }), actions.end());
+    return actions;
+  }
+
+  InformationSetKey no_progress_key(const NativeGameState& state, int player) const override {
+    if (state.pending_kind != "wizard_card" && state.pending_kind != "wizard_choice") return {};
+    // Scoped to reversible wizard navigation. These transitions do not change
+    // rules, resources or randomness; use raw values, not lossy neural inputs.
+    InformationSetKeyBuilder key;
+    key.i32(player); key.i32(static_cast<int>(state.phase));
+    key.i32(state.active_player); key.i32(state.round); key.i32(state.call_index);
+    key.i32(state.turns_completed); key.string(state.turn_phase);
+    key.string(state.pending_kind); key.i32(state.pending_target); key.string(state.pending_uid);
+    key.i32(state.builds); key.i32(state.spent_on_build); key.u64(state.rng.state());
+    key.boolean(state.resources_taken); key.boolean(state.income_taken); key.boolean(state.ability_used);
+    key.u64(state.players.size());
+    for (const auto& p : state.players) {
+      key.string(p.id); key.string(p.role_id); key.i32(p.gold);
+      key.u64(p.hand.size()); for (const auto& c : p.hand) key.string(c.uid);
+      key.u64(p.city.size()); for (const auto& d : p.city) key.string(d.card.uid);
+    }
+    key.u64(state.pending_cards.size());
+    for (const auto& c : state.pending_cards) key.string(c.uid);
+    return key.finish();
+  }
+
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
     if (state.phase == NativePhase::RoundConfirm) {

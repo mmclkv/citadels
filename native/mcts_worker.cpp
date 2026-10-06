@@ -396,7 +396,7 @@ int main() {
         return Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
           .search(states, perspective, weights);
       };
-      const auto native_actions = game.legal_actions(state, root);
+      const auto native_actions = game.ai_actions(state, root);
       context += " · 原生动作=" + std::to_string(native_actions.size());
       std::vector<float> policy;
       float root_value = 0.0f;
@@ -428,7 +428,7 @@ int main() {
         pool.push_back(std::move(state));
         pool_weights.push_back(weight_at(0));
         for (size_t i = 0; i < particles.size(); ++i) {
-          const auto particle_actions = game.legal_actions(particles[i], root);
+          const auto particle_actions = game.ai_actions(particles[i], root);
           if (!actions_aligned(particle_actions, supplied)) continue;
           pool.push_back(std::move(particles[i]));
           pool_weights.push_back(weight_at(i + 1));

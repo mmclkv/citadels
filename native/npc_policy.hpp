@@ -264,7 +264,7 @@ class NativeNpcPolicy {
     double best = position_value(s,index) + expected;
     if (!depth || budget <= 0 || !s.pending_kind.empty() || !s.reaction_kind.empty()) return best;
     NativeGameAdapter rules;
-    auto actions = rules.legal_actions(s,index);
+    auto actions = rules.ai_actions(s,index);
     uint32_t rng = 1;
     std::stable_sort(actions.begin(),actions.end(),[&](const auto& a,const auto& b){
       uint32_t ra=rng,rb=rng; return score_action(s,index,a,ra)>score_action(s,index,b,rb); });
@@ -330,7 +330,7 @@ class NativeNpcPolicy {
     if (!rules.apply(next,index,a)) return -100;
     if (s.pending_kind=="diplomat_mine") {
       double best=-100;
-      for (const auto& choice:rules.legal_actions(next,index)) if (choice.type==ActionType::ChooseDistrict)
+      for (const auto& choice:rules.ai_actions(next,index)) if (choice.type==ActionType::ChooseDistrict)
         best=std::max(best,district_payoff(next,index,choice));
       return best;
     }
@@ -420,7 +420,7 @@ class NativeNpcPolicy {
         pending.pending_kind=p.role_id=="warlord"?"warlord_destroy":p.role_id=="marshal"?"marshal_seize":"diplomat_mine";
         NativeGameAdapter rules;
         double benefit=0;
-        for(const auto& candidate:rules.legal_actions(pending,index))
+        for(const auto& candidate:rules.ai_actions(pending,index))
           if(candidate.type==ActionType::ChooseDistrict)benefit=std::max(benefit,district_payoff(pending,index,candidate));
         return benefit>0?100+benefit*8:-30;
       }

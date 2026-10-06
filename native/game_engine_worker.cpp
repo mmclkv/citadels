@@ -151,7 +151,7 @@ int main() {
         const int actor = rules.next_player(state);
         if (actor < 0 || actor >= static_cast<int>(state.players.size()))
           throw std::runtime_error("当前局面没有行动玩家");
-        const auto actions = rules.legal_actions(state, actor);
+        const auto actions = rules.ai_actions(state, actor);
         std::cout << "{\"v\":1,\"t\":\"decision_result\",\"id\":";
         write_json_string(std::cout, id);
         std::cout << ",\"playerId\":"; write_json_string(std::cout, state.players[actor].id);
@@ -181,7 +181,7 @@ int main() {
           const int actor = rules.next_player(state);
           if (actor < 0 || actor >= static_cast<int>(state.players.size())) break;
           if (network_players.count(state.players[actor].id)) break;
-          const auto actions = rules.legal_actions(state, actor);
+          const auto actions = rules.ai_actions(state, actor);
           const auto heuristic_decision = choose_native_npc(state, actor, actions,
               seed + static_cast<uint32_t>(steps) * 0x9E3779B1u,heuristic_options(request),&heuristic_sessions[game_id]);
           const int selected=heuristic_decision.selected;
@@ -261,7 +261,9 @@ int main() {
         std::cout << "}\n" << std::flush;
       } else if (mode == "actions" || mode == "npc") {
         const int actor = player_index(state, string_field(request, "playerId"));
-        const auto actions = actor < 0 ? std::vector<NativeSearchAction>{} : rules.legal_actions(state, actor);
+        const auto actions = actor < 0 ? std::vector<NativeSearchAction>{}
+            : (mode == "npc" || state.players[actor].is_bot ? rules.ai_actions(state, actor)
+                                                         : rules.legal_actions(state, actor));
         if (mode == "npc") {
           const auto decision = choose_native_npc(state, actor, actions,
               static_cast<uint32_t>(number_field(request, "seed", 1)),heuristic_options(request),&heuristic_sessions[game_id]);
@@ -303,7 +305,8 @@ int main() {
             action.type == ActionType::ConfirmRound;
         if (!round_confirmation && actor != rules.next_player(state))
           throw std::runtime_error("不是该玩家的行动时机");
-        const auto legal = rules.legal_actions(state, actor);
+        const auto legal = state.players[actor].is_bot ? rules.ai_actions(state, actor)
+                                                     : rules.legal_actions(state, actor);
         if (std::none_of(legal.begin(), legal.end(), [&](const auto& candidate) { return matches(candidate, action); }))
           throw std::runtime_error("行动不在当前合法动作列表中");
         std::optional<NativeGameState> previous;

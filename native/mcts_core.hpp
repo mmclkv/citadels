@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -80,6 +81,12 @@ template <typename State, typename Action>
 struct GameAdapter {
   virtual ~GameAdapter() = default;
   virtual std::vector<Action> legal_actions(const State& state, int player) const = 0;
+  virtual std::vector<Action> ai_actions(const State& state, int player) const {
+    return legal_actions(state, player);
+  }
+  // Opt-in identity for reversible UI stages, not an information-set identity.
+  // Zero disables pruning: partial-observation aliases are NOT cycles.
+  virtual InformationSetKey no_progress_key(const State&, int) const { return {}; }
   virtual bool apply(State& state, int player, const Action& action) const = 0;
   virtual int next_player(const State& state) const = 0;
   virtual bool terminal(const State& state) const = 0;
@@ -100,6 +107,30 @@ struct GameAdapter {
     return builder.finish();
   }
 };
+
+template <typename Node>
+void prune_no_progress_path(std::vector<Node*>& path, std::vector<size_t>& edges, size_t action) {
+  path.back()->cycle_pruned.at(action) = true;
+  while (path.size() > 1 && std::all_of(path.back()->cycle_pruned.begin(),
+                                       path.back()->cycle_pruned.end(), [](bool b) { return b; })) {
+    path.pop_back();
+    const size_t incoming = edges.back(); edges.pop_back();
+    path.back()->cycle_pruned.at(incoming) = true;
+  }
+}
+
+template <typename Node>
+void mask_cycle_policy(const Node& root, std::vector<float>& policy) {
+  float sum = 0;
+  size_t remaining = 0;
+  for (size_t i = 0; i < policy.size(); ++i) {
+    if (root.cycle_pruned[i]) policy[i] = 0;
+    else { sum += policy[i]; ++remaining; }
+  }
+  if (!remaining) throw std::runtime_error("MCTS has no non-cyclic action in a no-progress stage");
+  for (size_t i = 0; i < policy.size(); ++i)
+    if (!root.cycle_pruned[i]) policy[i] = sum > 0 ? policy[i] / sum : 1.0f / remaining;
+}
 
 struct Evaluation {
   std::vector<float> priors;
@@ -151,6 +182,7 @@ class Mcts {
     int player = 0;
     std::vector<Action> actions;
     std::vector<float> priors;
+    std::vector<bool> cycle_pruned;
     std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
     std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
     InformationSetKey information_set_key;
@@ -257,7 +289,7 @@ class Mcts {
       std::chrono::steady_clock::now() >= deadline; };
     root.player = root_player;
     root.information_set_key=root_key;
-    root.actions = game_.legal_actions(seed_state, root_player);
+    root.actions = game_.ai_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
     expand(root, seed_state);
     if(!inherited)add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
@@ -267,9 +299,14 @@ class Mcts {
       // 每条模拟重新抽一个粒子：世界只在本次模拟内有效，不是被钉死在树上
       State state = root_states[pick_particle()];
       std::vector<Node*> path{&root};
+      std::vector<size_t> edges;
+      std::unordered_set<InformationSetKey, InformationSetKeyHasher> seen;
+      const auto first_cycle_key = game_.no_progress_key(state, root_player);
+      if (!(first_cycle_key == InformationSetKey{})) seen.insert(first_cycle_key);
       Node* node = &root;
       bool backed_up = false;
       bool interrupted = false;
+      bool cycle_cut = false;
       for (int depth = 0; depth < config_.max_depth; ++depth) {
         if (expired()) { interrupted = true; break; }
         if (game_.terminal(state)) {
@@ -284,6 +321,10 @@ class Mcts {
           break;
         }
         const size_t index = select(*node);
+        if (index >= node->actions.size() && !node->cycle_pruned.empty() &&
+            std::all_of(node->cycle_pruned.begin(), node->cycle_pruned.end(), [](bool b) { return b; })) {
+          cycle_cut = true; break;
+        }
         if (index >= node->actions.size() ||
             !game_.apply(state, node->player, node->actions[index])) {
           backup(path, node->value_vector);
@@ -293,6 +334,11 @@ class Mcts {
         // Terminal states have no next actor. Keep the mover as the value
         // perspective so terminal rewards are not collapsed to an all-zero vector.
         const int player = game_.terminal(state) ? node->player : game_.next_player(state);
+        const auto cycle_key = game_.no_progress_key(state, player);
+        if (!(cycle_key == InformationSetKey{}) && !seen.insert(cycle_key).second) {
+          prune_no_progress_path(path, edges, index);
+          cycle_cut = true; break;
+        }
         const InformationSetKey key = game_.information_set_hash(state, player);
         Node* child = find_child(*node, index, key);
         if (!child) {
@@ -301,15 +347,17 @@ class Mcts {
           node->child_variants[index].push_back(std::move(fresh));
           child->player = player;
           child->information_set_key = key;
-          child->actions = game_.legal_actions(state, player);
+          child->actions = game_.ai_actions(state, player);
           node->child_by_key[index].emplace(key, child);
         }
         node = child;
+        edges.push_back(index);
         path.push_back(node);
       }
       // An interrupted path is not a completed visit. Keep earlier statistics
       // without doing an additional expensive leaf evaluation after expiry.
       if (interrupted || (!backed_up && expired())) break;
+      if (cycle_cut) continue;  // Consumes work budget, not a value/visit observation.
       if (!backed_up) {
         if (game_.terminal(state)) backup(path, game_.terminal_value_vector(state, node->player));
         else {
@@ -342,6 +390,7 @@ class Mcts {
     } else result.value_vector = root.value_vector;
     result.value = result.value_vector[0];
     result.expansions = expansions_;
+    mask_cycle_policy(root, result.policy);
     return result;
   }
 
@@ -358,16 +407,18 @@ class Mcts {
     node.value = node.value_vector[0];
     node.child_variants.resize(node.actions.size());
     node.child_by_key.resize(node.actions.size());
+    node.cycle_pruned.resize(node.actions.size(), false);
     node.expanded = true;
     ++expansions_;
   }
 
   size_t select(const Node& node) {
-    size_t best = 0;
+    size_t best = node.actions.size();
     float best_score = -std::numeric_limits<float>::infinity();
     const float parent = static_cast<float>(std::max(1, node.visits));
     const float fpu = node.visits ? node.total[0] / node.visits : node.value_vector[0];
     for (size_t i = 0; i < node.actions.size(); ++i) {
+      if (node.cycle_pruned[i]) continue;
       const auto& variants = node.child_variants[i];
       float visits = 0.0f, total = 0.0f;
       for (const auto& child : variants) {
@@ -480,7 +531,7 @@ class BatchedMcts {
     expansions_ = 0;
     Node root;
     root.player = root_player;
-    root.actions = game_.legal_actions(seed_state, root_player);
+    root.actions = game_.ai_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
     expand(root, seed_state);
     add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
@@ -495,13 +546,19 @@ class BatchedMcts {
       std::vector<bool> terminal;
       std::vector<size_t> path_evaluation_indices;
       std::unordered_map<Node*, size_t> pending_evaluations;
+      int pruned_attempts = 0;
       for (int i = 0; i < count; ++i) {
         // 每条模拟重新抽一个粒子：世界只在本次模拟内有效
         State state = root_states[pick_particle()];
         Node* node = &root;
         std::vector<Node*> path{&root};
+        std::vector<size_t> edges;
+        std::unordered_set<InformationSetKey, InformationSetKeyHasher> seen;
+        const auto first_cycle_key = game_.no_progress_key(state, root_player);
+        if (!(first_cycle_key == InformationSetKey{})) seen.insert(first_cycle_key);
         bool collected = false;
         bool pending_collision = false;
+        bool cycle_cut = false;
         for (int depth = 0; depth < config_.max_depth; ++depth) {
           if (game_.terminal(state)) {
             terminal.push_back(true); terminal_values.push_back(game_.terminal_value_vector(state, node->player));
@@ -528,6 +585,10 @@ class BatchedMcts {
             collected = true; break;
           }
           const size_t index = select(*node);
+          if (index >= node->actions.size() && !node->cycle_pruned.empty() &&
+              std::all_of(node->cycle_pruned.begin(), node->cycle_pruned.end(), [](bool b) { return b; })) {
+            cycle_cut = true; break;
+          }
           if (index >= node->actions.size() ||
               !game_.apply(state, node->player, node->actions[index])) {
             terminal.push_back(true); terminal_values.push_back(node->value_vector);
@@ -536,6 +597,11 @@ class BatchedMcts {
             collected = true; break;
           }
           const int player = game_.terminal(state) ? node->player : game_.next_player(state);
+          const auto cycle_key = game_.no_progress_key(state, player);
+          if (!(cycle_key == InformationSetKey{}) && !seen.insert(cycle_key).second) {
+            prune_no_progress_path(path, edges, index);
+            cycle_cut = true; break;
+          }
           const InformationSetKey key = game_.information_set_hash(state, player);
           Node* child = find_child(*node, index, key);
           if (!child) {
@@ -548,9 +614,11 @@ class BatchedMcts {
             node->child_by_key[index].emplace(key, child);
           }
           node = child;
+          edges.push_back(index);
           path.push_back(node);
         }
         if (pending_collision) break;
+        if (cycle_cut) { ++pruned_attempts; continue; }
         if (!collected) {
           if (!game_.terminal(state) && !node->expanded) {
             if (pending_evaluations.find(node) != pending_evaluations.end()) break;
@@ -595,7 +663,7 @@ class BatchedMcts {
         }
         backup(paths[i], value);
       }
-      completed += static_cast<int>(paths.size());
+      completed += static_cast<int>(paths.size()) + pruned_attempts;
     }
     return result(root);
   }
@@ -605,6 +673,7 @@ class BatchedMcts {
     int player = 0; std::vector<Action> actions; std::vector<float> priors;
     std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
     std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
+    std::vector<bool> cycle_pruned;
     InformationSetKey information_set_key;
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
@@ -627,15 +696,17 @@ class BatchedMcts {
     node.value = node.value_vector[0];
     node.child_variants.resize(node.actions.size());
     node.child_by_key.resize(node.actions.size());
+    node.cycle_pruned.resize(node.actions.size(), false);
     node.expanded = true;
   }
   size_t select(const Node& node) const {
-    size_t best = 0; float score_best = -std::numeric_limits<float>::infinity();
+    size_t best = node.actions.size(); float score_best = -std::numeric_limits<float>::infinity();
     const float parent = static_cast<float>(std::max(1, node.visits + node.pending_visits));
     // Slot zero always belongs to this node's actor, not the root actor.
     // Reservations are not evidence and must not enter this mean.
     const float fpu = node.visits ? node.total[0] / node.visits : node.value_vector[0];
     for (size_t i = 0; i < node.actions.size(); ++i) {
+      if (node.cycle_pruned[i]) continue;
       const auto& variants = node.child_variants[i];
       float visits = 0.0f, pending = 0.0f, total = 0.0f;
       for (const auto& child : variants) {
@@ -671,7 +742,7 @@ class BatchedMcts {
     }
   }
   std::vector<Action> search_actions(const State& state, int player) const {
-    auto actions = game_.legal_actions(state, player);
+    auto actions = game_.ai_actions(state, player);
     if (npc_choice_ && player != root_player_ && !actions.empty()) {
       const int selected = npc_choice_(state, player, root_player_, actions);
       if (selected >= 0 && static_cast<size_t>(selected) < actions.size())
@@ -692,6 +763,7 @@ class BatchedMcts {
     else output.value_vector = root.value_vector;
     output.value = output.value_vector[0];
     output.expansions = expansions_;
+    mask_cycle_policy(root, output.policy);
     return output;
   }
   Node* find_child(Node& node, size_t action, const InformationSetKey& key) {

@@ -12,7 +12,8 @@ namespace citadels::native {
 // Never include opponents' hidden card/role identities or deck order.
 class NativeHeuristicAdapter final : public GameAdapter<NativeGameState,NativeSearchAction> {
  public:
-  std::vector<NativeSearchAction> legal_actions(const NativeGameState& s,int p) const override {return rules_.legal_actions(s,p);}
+  std::vector<NativeSearchAction> legal_actions(const NativeGameState& s,int p) const override {return rules_.ai_actions(s,p);}
+  InformationSetKey no_progress_key(const NativeGameState& s,int p) const override {return rules_.no_progress_key(s,p);}
   bool apply(NativeGameState& s,int p,const NativeSearchAction& a) const override {return rules_.apply(s,p,a);}
   int next_player(const NativeGameState& s) const override {return rules_.next_player(s);}
   bool terminal(const NativeGameState& s) const override {return rules_.terminal(s);}
@@ -75,7 +76,7 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
         auto world=s;
         for(int step=0;step<rollout_steps_ && !rules.terminal(world);++step){
           if(expired())break;
-          const int actor=rules.next_player(world);const auto legal=rules.legal_actions(world,actor);
+          const int actor=rules.next_player(world);const auto legal=rules.ai_actions(world,actor);
           if(actor<0 || legal.empty())break;
           if(expired())break;
           const int selected=NativeNpcPolicy::choose_rollout(world,actor,legal,rng_());
@@ -206,7 +207,7 @@ class HeuristicSearchSession {
     };
     if(newly_seen(before.players[actor].hand,after.players[actor].hand) ||
        newly_seen(before.pending_cards,after.pending_cards)){clear();return;}
-    const auto legal=rules.legal_actions(before,actor);
+    const auto legal=rules.ai_actions(before,actor);
     for(size_t i=0;i<legal.size();++i)if(heuristic_actions_equal(legal[i],action)){
       if(!tree.advance(i,rules.information_set_hash(after,actor),actor))clear();return;
     }
@@ -239,7 +240,7 @@ inline HeuristicDecision choose_native_npc(const NativeGameState& state,int play
     for(int i=0;i<std::max(1,options.particles);++i) {
       if(expired())break;
       auto world=determinize_native_state(state,player,seed+static_cast<uint32_t>(i)*0x9e3779b9u,true);
-      const auto legal=rules.legal_actions(world,player);
+      const auto legal=rules.ai_actions(world,player);
       if(legal.size()!=actions.size())continue;
       bool aligned=true;
       for(size_t j=0;j<legal.size();++j)if(!heuristic_actions_equal(legal[j],actions[j])){aligned=false;break;}
