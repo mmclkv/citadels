@@ -191,8 +191,9 @@ class NativeWorkerManager:
                 except OSError:
                     pass
 
-    def _build_game_engine(self, compiler: str, environment: dict[str, str], devcmd: str | None) -> Path:
-        sources = [NATIVE_DIR / "game_engine_worker.cpp", *sorted(NATIVE_DIR.glob("*.hpp"))]
+    def _build_game_engine(self, compiler: str, environment: dict[str, str], devcmd: str | None,
+                           *, source_name: str = "game_engine_worker.cpp", stem: str = "game_engine") -> Path:
+        sources = [NATIVE_DIR / source_name, *sorted(NATIVE_DIR.glob("*.hpp"))]
         identity = {"compiler": str(Path(compiler).resolve()).lower(),
                     "compilerMtimeNs": Path(compiler).stat().st_mtime_ns,
                     "target": (self._compiler_target(compiler) or
@@ -200,7 +201,7 @@ class NativeWorkerManager:
                                 f"{platform.machine()}-{platform.system().lower()}")),
                     "standard": "c++20",
                     "sources": {path.name: path.stat().st_mtime_ns for path in sources}}
-        destination, stamp = self._versioned_artifact("game_engine", identity)
+        destination, stamp = self._versioned_artifact(stem, identity)
         try:
             current = (destination.is_file() and stamp.is_file() and
                        json.loads(stamp.read_text(encoding="utf-8")) == identity and
@@ -212,7 +213,7 @@ class NativeWorkerManager:
             return destination
         output = destination.with_name(f"{destination.stem}_tmp-{os.getpid()}{PLATFORM_SUFFIX}")
         args = [compiler, "-std=c++20", "-O2", "-fexceptions", "-I", str(NATIVE_DIR),
-                str(NATIVE_DIR / "game_engine_worker.cpp"), "-o", str(output)]
+                str(NATIVE_DIR / source_name), "-o", str(output)]
         if os.name == "nt":
             target = self._compiler_target(compiler)
             if "windows-gnu" in target or "mingw" in target:
@@ -221,7 +222,7 @@ class NativeWorkerManager:
                 args[1:1] = ["--target=x86_64-pc-windows-msvc", "-fms-compatibility", "-fms-extensions",
                              "-fdelayed-template-parsing", "-finput-charset=UTF-8", "-fexec-charset=UTF-8",
                              "-DWIN32_LEAN_AND_MEAN"]
-        self.log("[game] 游戏引擎源码已更新，使用 clang++ 编译独立游戏主进程…")
+        self.log(f"[native] 使用 clang++ 编译 {stem}…")
         try:
             if os.name == "nt" and devcmd:
                 run_args = _msvc_build_command(devcmd, args)
@@ -231,7 +232,7 @@ class NativeWorkerManager:
                                     env=environment, capture_output=True, text=True,
                                     encoding="utf-8", errors="replace", timeout=900, check=False)
             if result.returncode or not output.is_file():
-                raise RuntimeError("clang++ 编译 game_engine 失败：\n" +
+                raise RuntimeError(f"clang++ 编译 {stem} 失败：\n" +
                                    (result.stdout + "\n" + result.stderr)[-6000:])
             os.replace(output, destination)
             stamp.write_text(json.dumps(identity, indent=2), encoding="utf-8")
@@ -257,6 +258,21 @@ class NativeWorkerManager:
                     if torch is not None else None)
         with self._lock:
             game_executable = self._build_game_engine(compiler, environment, devcmd)
+            cfr_executable = self._build_game_engine(compiler, environment, devcmd,
+                                                     source_name="cfr_worker.cpp", stem="cfr_worker")
+            from .cfr_runtime import rules_contract
+            environment["CITADELS_CFR_WORKER"] = str(cfr_executable)
+            environment["CITADELS_CFR_CONTRACT"] = rules_contract()
+            if environment.get("CITADELS_CFR_POLICY"):
+                policy = Path(environment["CITADELS_CFR_POLICY"]).resolve()
+                with policy.open(encoding="utf-8") as stream:
+                    header = json.loads(stream.readline())
+                if header.get("format") != "citadels-mccfr-v1" or header.get("contract") != environment["CITADELS_CFR_CONTRACT"]:
+                    raise RuntimeError("CFR 权重与当前规则/卡牌/信息集版本不兼容，需要重新训练")
+                environment["CITADELS_CFR_POLICY"] = str(policy)
+                self.log(f"[cfr] 已配置平均策略：{policy.name}；未命中局面使用均匀合法动作")
+            else:
+                self.log("[cfr] 警告：尚未配置 CFR 权重，电脑仅使用均匀合法动作，未具备训练后的强度")
             mcts_executable = None
             if not skip_neural_policy:
                 assert torch is not None and identity is not None
@@ -278,7 +294,7 @@ class NativeWorkerManager:
             self.compiler = compiler
             self.log(f"[game] {self.game_worker.executable.name} 已启动（pid={self.game_worker.process.pid}）")
             if skip_neural_policy:
-                self.log("[native] 已按启动参数跳过策略神经网络 worker；普通 NPC 与规则引擎保持可用")
+                self.log("[native] 已按启动参数跳过策略神经网络 worker；CFR 电脑与规则引擎保持可用")
                 return
 
             assert mcts_executable is not None

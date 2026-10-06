@@ -23,6 +23,7 @@ training-data/
 native/*.exe
 native/game_engine-*
 native/mcts_worker_libtorch-*
+native/cfr_worker-*
 native/*_tmp-*
 native/*.lib
 native/*.obj

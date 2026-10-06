@@ -911,21 +911,19 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         zero = rooms.create_room("Zero", {"playerCount": 2, "mctsSimulations": 0})
         self.assertEqual(zero["config"]["mctsSimulations"], 0)
 
-    async def test_room_exposes_configurable_heuristic_mcts_per_bot_seat(self) -> None:
+    async def test_room_merges_legacy_difficulties_into_cfr(self) -> None:
         room = RoomRegistry().create_room("Host", {"playerCount": 2, "bots": 1,
             "heuristicMcts": {"simulations": 640, "particles": 12, "maxDepth": 96,
                               "cPuct": 1.8, "reuseTree": False}})
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["simulations"], 640)
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["particles"], 12)
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["maxDepth"], 96)
-        self.assertEqual(room["seats"][1]["heuristicMcts"]["cPuct"], 1.8)
-        self.assertFalse(room["seats"][1]["heuristicMcts"]["reuseTree"])
-        defaults = RoomRegistry().create_room("Defaults", {"playerCount": 2, "bots": 1})["seats"][1]["heuristicMcts"]
-        self.assertEqual(defaults, {"simulations": 10000, "particles": 8, "maxDepth": 700,
-            "timeBudgetMs": 10000, "criticalTimeBudgetMs": 20000, "cPuct": 1.0,
-            "rolloutSteps": 8, "rollouts": 1, "maxTreeNodes": 4096, "reuseTree": True})
+        self.assertEqual(room["seats"][1]["botType"], "cfr")
+        self.assertNotIn("heuristicMcts", room["seats"][1])
+        self.assertNotIn("botLevel", room["seats"][1])
+        for selection in ("npc-easy", "npc-normal", "npc-hard", "npc", "cfr"):
+            seat = RoomRegistry().create_room("Defaults", {"playerCount": 2, "bots": 1,
+                                                          "botType": selection})["seats"][1]
+            self.assertEqual(seat["botType"], "cfr")
 
-    async def test_set_seat_saves_heuristic_mcts_options(self) -> None:
+    async def test_set_seat_migrates_legacy_npc_to_cfr(self) -> None:
         class StubClient:
             def __init__(self, player_id, room_id):
                 self.id, self.room_id = player_id, room_id
@@ -941,10 +939,9 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         await self.app._handle_message(host, {"t": "setSeat", "index": 1, "kind": "bot",
             "botType": "npc-hard", "heuristicMcts": options})
         seat = room["seats"][1]
-        self.assertEqual(seat["botLevel"], "hard")
-        self.assertEqual(seat["heuristicMcts"]["simulations"], 640)
-        self.assertEqual(seat["heuristicMcts"]["criticalTimeBudgetMs"], 800)
-        self.assertFalse(seat["heuristicMcts"]["reuseTree"])
+        self.assertEqual(seat["botType"], "cfr")
+        self.assertNotIn("botLevel", seat)
+        self.assertNotIn("heuristicMcts", seat)
 
     async def test_python_npc_driver_takes_a_legal_draft_action(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
@@ -1032,7 +1029,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         host = Client(None)  # type: ignore[arg-type]
         host.id, host.room_id = room["seats"][0]["id"], room["id"]
         await self.app._handle_message(host, {"t": "agentControl", "mode": "npc"})
-        self.assertEqual(agent_seat["botType"], "npc")
+        self.assertEqual(agent_seat["botType"], "cfr")
         task = room.get("botTask")
         if task and not task.done():
             await asyncio.wait_for(task, timeout=1)

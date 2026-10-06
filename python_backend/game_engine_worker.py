@@ -12,6 +12,11 @@ from pathlib import Path
 class GameEngineWorker:
     def __init__(self, executable: str | Path, *, env: dict[str, str] | None = None):
         self.executable = Path(executable).resolve()
+        import os
+        environment = env if env is not None else os.environ
+        self.cfr_environment = {key: environment[key] for key in
+                                ("CITADELS_CFR_WORKER", "CITADELS_CFR_CONTRACT", "CITADELS_CFR_POLICY")
+                                if key in environment}
         self.process = subprocess.Popen(
             [str(self.executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
@@ -67,10 +72,9 @@ class GameEngineWorker:
     def legal_actions(self, *, game_id: str, player_id: str) -> dict:
         return self._request("actions", gameId=game_id, playerId=player_id)
 
-    def decide_npc(self, *, game_id: str, player_id: str, seed: int = 1,
-                   heuristic_mcts: dict | None = None):
+    def decide_npc(self, *, game_id: str, player_id: str, seed: int = 1):
         return self._request("npc", gameId=game_id, playerId=player_id,
-                             seed=int(seed), heuristicMcts=heuristic_mcts or {}).get("action")
+                             seed=int(seed)).get("action")
 
     def apply(self, *, game_id: str, player_id: str, action: dict,
               return_state: bool = True) -> dict:

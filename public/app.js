@@ -340,14 +340,8 @@
       }
     });
   }
-  const HEURISTIC_BOT_LEVELS = { 'npc-easy': 'easy', 'npc-normal': 'normal', 'npc-hard': 'hard' };
-  function normalizeBotSelection(type, fallbackLevel) {
-    const level = HEURISTIC_BOT_LEVELS[type];
-    if (level) return { botType: 'npc', botLevel: level };
-    return {
-      botType: type === 'agent' || type === 'neural' ? type : 'npc',
-      botLevel: ['easy', 'normal', 'hard'].includes(fallbackLevel) ? fallbackLevel : 'normal'
-    };
+  function normalizeBotSelection(type) {
+    return { botType: type === 'agent' || type === 'neural' ? type : 'cfr' };
   }
   function clearGameBoardView() {
     // Restarting a local Python room briefly passes through lobby without
@@ -378,7 +372,7 @@
     Net.connect(() => {
       Net.autoStart = true;
       Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
-        playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
+        playerCount: cfg.players, bots: cfg.players - 1, botType: normalizeBotSelection(cfg.botType).botType,
         endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act, voice: false
       }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth', '#cfg-mcts-particles')) });
     });
@@ -5230,8 +5224,7 @@
     const amHost = seats.length && seats[0].id === App.myId;
     seats.forEach((s, i) => {
       const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
-      const heuristicLabel = s.botLevel === 'easy' ? '启发式电脑 · 简单' : s.botLevel === 'hard' ? '启发式电脑 · 困难' : '启发式电脑 · 普通';
-      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : s.botType === 'neural' ? '策略神经网络' : heuristicLabel) : (s.taken ? '真人玩家' : '可加入');
+      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : s.botType === 'neural' ? '策略神经网络' : 'CFR 电脑') : (s.taken ? '真人玩家' : '可加入');
       d.innerHTML = '<div class="seat-no">座位 ' + (i + 1) + (i === 0 ? ' · 房主' : '') + '</div>' +
         '<div class="seat-name">' + (s.taken ? escapeHtml(s.name) : '空缺') + '</div>' +
         '<div class="seat-tag">' + (s.disconnected ? '已断连' : s.left ? '已离开' :
@@ -5244,8 +5237,8 @@
         if (s.isBot) {
           const type = el('select');
           type.setAttribute('aria-label', s.name + '的电脑类型');
-          type.innerHTML = '<option value="npc-easy">启发式电脑 · 简单</option><option value="npc-normal">启发式电脑 · 普通</option><option value="npc-hard">启发式电脑 · 困难</option><option value="neural">策略神经网络（仓库权重）</option><option value="agent">AI Agent（模型）</option>';
-          type.value = s.botType === 'npc' ? 'npc-' + (s.botLevel || 'normal') : (s.botType || 'npc-normal');
+          type.innerHTML = '<option value="cfr">CFR 电脑</option><option value="neural">策略神经网络（仓库权重）</option><option value="agent">AI Agent（模型）</option>';
+          type.value = normalizeBotSelection(s.botType).botType;
           type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
           ops.appendChild(type);
           if (s.botType === 'neural') {
@@ -5276,40 +5269,7 @@
             });
             ops.appendChild(box);
           }
-          if (s.botType === 'npc' && s.botLevel === 'hard') {
-            const cfg = s.heuristicMcts || {};
-            const box = el('div', 'seat-mcts heuristic-mcts');
-            box.innerHTML = '<span class="seat-mcts-title">启发式 MCTS 参数</span>';
-            const fields = [
-              ['模拟次数', 'simulations', 10000, 1, 100], ['隐藏信息粒子数', 'particles', 8, 1, 1],
-              ['最大搜索深度', 'maxDepth', 700, 1, 8], ['常规时间预算 ms', 'timeBudgetMs', 10000, 0, 1000],
-              ['关键局面时间预算 ms', 'criticalTimeBudgetMs', 20000, 0, 1000],
-              ['Rollout 步数', 'rolloutSteps', 8, 0, 1], ['每叶 Rollout 数', 'rollouts', 1, 1, 1],
-              ['最大树节点数', 'maxTreeNodes', 4096, 1, 256], ['c_puct', 'cPuct', 1.0, 0, 0.1]
-            ];
-            const values = Object.fromEntries(fields.map(([, key, fallback]) => [key, cfg[key] == null ? fallback : cfg[key]]));
-            fields.forEach(([label, key, fallback, min, step]) => {
-              const field = el('label', 'seat-mcts-field');
-              field.innerHTML = '<span>' + label + '</span>';
-              const input = document.createElement('input');
-              input.type = 'number'; input.min = String(min); input.step = String(step);
-              input.value = String(values[key]);
-              input.onchange = () => {
-                values[key] = input.value;
-                Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
-                  heuristicMcts: { ...values, reuseTree: cfg.reuseTree !== false } });
-              };
-              field.appendChild(input); box.appendChild(field);
-            });
-            const reuseLabel = el('label', 'seat-mcts-field');
-            reuseLabel.innerHTML = '<span>跨行动复用搜索树</span>';
-            const reuse = document.createElement('input'); reuse.type = 'checkbox';
-            reuse.checked = cfg.reuseTree !== false;
-            reuse.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
-              heuristicMcts: { ...values, reuseTree: reuse.checked } });
-            reuseLabel.appendChild(reuse); box.appendChild(reuseLabel);
-            ops.appendChild(box);
-          }
+          if (s.botType === 'cfr') ops.appendChild(el('span', 'hint', '使用服务器 CFR 平均策略；未命中时均匀选择合法动作'));
         }
         d.appendChild(ops);
       }
@@ -5462,10 +5422,9 @@
     syncNeuralOnlyFields();
 
     $('#btn-start-single').onclick = () => {
-      const botSelection = normalizeBotSelection($('#cfg-bot-type').value, $('#cfg-level').value);
+      const botSelection = normalizeBotSelection($('#cfg-bot-type').value);
       const cfg = {
         players: Number($('#cfg-players').value),
-        level: botSelection.botLevel,
         botType: botSelection.botType,
         end: Number($('#cfg-end').value),
         chars: $('#cfg-chars').value,

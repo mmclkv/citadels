@@ -92,7 +92,10 @@ inline NativeGameState create_native_game(const JsonValue& request) {
     throw std::runtime_error("C++ 引擎开局需要 2 至 8 个座位");
   const int player_count = static_cast<int>(seats.as_array().size());
   NativeGameState state;
-  state.rng = JsRng(static_cast<uint32_t>(int_field(request, "seed", 1)));
+  const double seed = number_field(request, "seed", 1);
+  if (seed < 0 || seed > 4294967295.0 || std::floor(seed) != seed)
+    throw std::runtime_error("Game seed must be a uint32");
+  state.rng = JsRng(static_cast<uint32_t>(seed));
   state.end_districts = int_field(request, "endDistricts", 8);
   state.round = 0;
   state.first_to_finish = -1;
@@ -105,8 +108,10 @@ inline NativeGameState create_native_game(const JsonValue& request) {
     player.seat = static_cast<int>(i);
     player.gold = int_field(request, "startingGold", 2);
     player.is_bot = bool_field(source, "isBot");
-    player.bot_type = string_field(source, "botType", "npc");
-    player.bot_level = string_field(source, "botLevel", "normal");
+    player.bot_type = string_field(source, "botType", "cfr");
+    if (player.bot_type == "npc" || player.bot_type == "npc-easy" ||
+        player.bot_type == "npc-normal" || player.bot_type == "npc-hard") player.bot_type = "cfr";
+    player.bot_level.clear();
     player.connected = true;
     state.players.push_back(std::move(player));
   }

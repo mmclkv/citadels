@@ -90,9 +90,9 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "mctsBatchSize": finite_integer("mctsBatchSize", 1, math.inf, 32),
         "mctsParticles": finite_integer("mctsParticles", 1, math.inf, 4),
         "mctsBelief": raw.get("mctsBelief") is not False,
-        "selfPlayMode": raw.get("selfPlayMode") if raw.get("selfPlayMode") in ("all-network", "network-vs-heuristic", "curriculum") else "all-network",
+        "selfPlayMode": ("network-vs-cfr" if raw.get("selfPlayMode") == "network-vs-heuristic" else
+                         raw.get("selfPlayMode") if raw.get("selfPlayMode") in ("all-network", "network-vs-cfr", "curriculum") else "all-network"),
         "networkPlayerCount": finite_integer("networkPlayerCount", 0, max_players, 0),
-        "heuristicDifficulty": raw.get("heuristicDifficulty") if raw.get("heuristicDifficulty") in ("easy", "normal", "hard", "random") else "normal",
         "curriculumStartPlayers": finite_integer("curriculumStartPlayers", 1, max_players, 1),
         "curriculumEndPlayers": finite_integer("curriculumEndPlayers", 0, max_players, 0),
         "curriculumStepGames": finite_integer("curriculumStepGames", 1, math.inf, 1000),

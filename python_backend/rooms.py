@@ -25,22 +25,6 @@ def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
             "particles": _int_at_least(value.get("particles", fallback.get("mctsParticles")), 4, 1)}
 
 
-def _seat_heuristic_mcts(value: dict | None = None) -> dict:
-    value = value or {}
-    defaults = {"simulations": (10000, 1), "particles": (8, 1), "maxDepth": (700, 1),
-                "timeBudgetMs": (10000, 0), "criticalTimeBudgetMs": (20000, 0),
-                "cPuct": (1.0, 0), "rolloutSteps": (8, 0), "rollouts": (1, 1),
-                "maxTreeNodes": (4096, 1)}
-    result = {key: _int_at_least(value.get(key), default, minimum)
-              for key, (default, minimum) in defaults.items() if key != "cPuct"}
-    try:
-        result["cPuct"] = max(0.0, float(value.get("cPuct", 1.0)))
-    except (TypeError, ValueError, OverflowError):
-        result["cPuct"] = 1.0
-    result["reuseTree"] = value.get("reuseTree") is not False
-    return result
-
-
 def _identity(prefix: str) -> str:
     return prefix + "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
 
@@ -56,18 +40,12 @@ def _human_seat(name: str) -> dict:
 
 
 def _bot_seat(index: int, config: dict) -> dict:
-    bot_type = config.get("botType") or "npc"
-    bot_level = config.get("botLevel") or "normal"
-    if bot_type in ("npc-easy", "npc-normal", "npc-hard"):
-        bot_type, bot_level = "npc", bot_type[4:]
-    if bot_type not in ("npc", "agent", "neural"):
-        bot_type = "npc"
-    if bot_level not in ("easy", "normal", "hard"):
-        bot_level = "normal"
+    bot_type = config.get("botType") or "cfr"
+    if bot_type not in ("cfr", "agent", "neural"):
+        bot_type = "cfr"  # All legacy NPC difficulties migrate to one policy.
     return {"id": _identity("b"), "name": f"电脑 {index}", "isBot": True,
-            "botType": bot_type, "botLevel": bot_level,
+            "botType": bot_type,
             "mcts": _seat_mcts(config.get("mcts"), config),
-            "heuristicMcts": _seat_heuristic_mcts(config.get("heuristicMcts")),
             "taken": True, "disconnected": False, "left": False}
 
 
@@ -75,9 +53,8 @@ def lobby_view(room: dict) -> dict:
     return {"roomId": room["id"], "roomName": room["name"], "phase": "lobby",
             "you": None, "seats": [
                 {"index": index, "id": seat["id"], "name": seat["name"],
-                 "isBot": bool(seat["isBot"]), "botType": seat.get("botType") or "npc",
-                 "botLevel": seat.get("botLevel") or "normal", "mcts": seat.get("mcts"),
-                 "heuristicMcts": seat.get("heuristicMcts"),
+                 "isBot": bool(seat["isBot"]), "botType": seat.get("botType") or "cfr",
+                 "mcts": seat.get("mcts"),
                  "taken": bool(seat["taken"]),
                  "connected": bool(seat["isBot"] or not seat.get("disconnected") and not seat.get("left")),
                  "disconnected": bool(seat.get("disconnected")), "left": bool(seat.get("left"))}
@@ -89,8 +66,7 @@ def public_room(room: dict) -> dict:
     return {"id": room["id"], "name": room["name"],
             "phase": room["state"]["phase"] if room["state"] else "lobby",
             "seats": [{"name": seat["name"], "isBot": bool(seat["isBot"]),
-                       "botType": seat.get("botType") or "npc", "botLevel": seat.get("botLevel"),
-                       "mcts": seat.get("mcts"), "heuristicMcts": seat.get("heuristicMcts"),
+                       "botType": seat.get("botType") or "cfr", "mcts": seat.get("mcts"),
                        "taken": bool(seat["taken"]), "id": seat["id"],
                        "connected": bool(seat["isBot"] or not seat.get("disconnected") and not seat.get("left")),
                        "disconnected": bool(seat.get("disconnected")), "left": bool(seat.get("left"))}
@@ -109,8 +85,7 @@ class RoomRegistry:
         room_id = "".join(secrets.choice(ROOM_ALPHABET) for _ in range(4))
         while room_id in self.rooms:
             room_id = "".join(secrets.choice(ROOM_ALPHABET) for _ in range(4))
-        seat_config = {**config, "botType": config.get("botType") or "npc",
-                       "botLevel": config.get("botLevel") or "normal"}
+        seat_config = {**config, "botType": _bot_seat(0, config)["botType"]}
         seats = [_human_seat(host_name or "房主")]
         seats.extend(_bot_seat(index, seat_config) for index in range(1, bots + 1))
         seats.extend(_empty_seat() for _ in range(total - len(seats)))
@@ -118,7 +93,7 @@ class RoomRegistry:
             "id": room_id, "name": (host_name or "房主") + " 的房间", "seats": seats,
             "config": {"playerCount": total, "endDistricts": config.get("endDistricts") or 8,
                        "charSetMode": config.get("charSetMode") or "base",
-                       "botLevel": seat_config["botLevel"], "botType": seat_config["botType"],
+                       "botType": seat_config["botType"],
                        "botPace": config.get("botPace") or 430,
                        "mctsSimulations": _int_at_least(config.get("mctsSimulations"), 500, 0),
                        "mctsMaxDepth": _int_at_least(config.get("mctsMaxDepth"), 700, 0),
