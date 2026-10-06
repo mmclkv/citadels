@@ -195,9 +195,10 @@ class Mcts {
     float dirichlet_alpha = 0.3f;
     float dirichlet_epsilon = 0.0f;
     uint32_t seed = 1;
-    // Zero preserves fixed-budget training. Checked between simulations;
-    // an individual evaluation/application is not forcibly interrupted.
+    // Zero preserves fixed-budget training. Timed searches also check inside
+    // paths; an individual evaluation/application is not forcibly interrupted.
     int time_budget_ms = 0;
+    std::chrono::steady_clock::time_point deadline{};
   };
 
   struct Result {
@@ -249,8 +250,11 @@ class Mcts {
     if(!tree.root_)tree.root_=std::make_unique<Node>();
     Node& root=*tree.root_;
     const int inherited=root.visits;
-    const auto deadline = std::chrono::steady_clock::now() +
-      std::chrono::milliseconds(std::max(0,config_.time_budget_ms));
+    const auto deadline = config_.deadline != std::chrono::steady_clock::time_point{}
+      ? config_.deadline : std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(std::max(0,config_.time_budget_ms));
+    const auto expired = [&] { return config_.time_budget_ms > 0 &&
+      std::chrono::steady_clock::now() >= deadline; };
     root.player = root_player;
     root.information_set_key=root_key;
     root.actions = game_.legal_actions(seed_state, root_player);
@@ -259,13 +263,15 @@ class Mcts {
     if(!inherited)add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
 
     for (int i = 0; i < config_.simulations; ++i) {
-      if (i > 0 && config_.time_budget_ms > 0 && std::chrono::steady_clock::now() >= deadline) break;
+      if (expired()) break;
       // 每条模拟重新抽一个粒子：世界只在本次模拟内有效，不是被钉死在树上
       State state = root_states[pick_particle()];
       std::vector<Node*> path{&root};
       Node* node = &root;
       bool backed_up = false;
+      bool interrupted = false;
       for (int depth = 0; depth < config_.max_depth; ++depth) {
+        if (expired()) { interrupted = true; break; }
         if (game_.terminal(state)) {
           backup(path, game_.terminal_value_vector(state, node->player));
           backed_up = true;
@@ -301,6 +307,9 @@ class Mcts {
         node = child;
         path.push_back(node);
       }
+      // An interrupted path is not a completed visit. Keep earlier statistics
+      // without doing an additional expensive leaf evaluation after expiry.
+      if (interrupted || (!backed_up && expired())) break;
       if (!backed_up) {
         if (game_.terminal(state)) backup(path, game_.terminal_value_vector(state, node->player));
         else {

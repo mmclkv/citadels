@@ -40,17 +40,22 @@ class NativeHeuristicAdapter final : public GameAdapter<NativeGameState,NativeSe
 
 class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSearchAction> {
  public:
-  NativeHeuristicEvaluator(int rollout_steps=0,int rollouts=1,uint32_t seed=1,int time_ms=0)
+  NativeHeuristicEvaluator(int rollout_steps=0,int rollouts=1,uint32_t seed=1,int time_ms=0,
+      std::chrono::steady_clock::time_point deadline={})
       : rollout_steps_(rollout_steps),rollouts_(std::max(1,rollouts)),rng_(seed),time_ms_(time_ms),
-        deadline_(std::chrono::steady_clock::now()+std::chrono::milliseconds(std::max(0,time_ms))) {}
+        deadline_(deadline != std::chrono::steady_clock::time_point{} ? deadline :
+          std::chrono::steady_clock::now()+std::chrono::milliseconds(std::max(0,time_ms))) {}
   int rollout_actions=0,completed_rollouts=0;
   Evaluation evaluate(const NativeGameState& s,int player,
                       const std::vector<NativeSearchAction>& actions) override {
     Evaluation result;
     if(player<0 || player>=static_cast<int>(s.players.size()))return result;
-    std::vector<double> utilities;
+    std::vector<double> utilities(actions.size(),0);
     double mean=0;
-    for(const auto& a:actions) {const double v=NativeNpcPolicy::search_utility(s,player,a);utilities.push_back(v);mean+=v;}
+    for(size_t i=0;i<actions.size();++i) {
+      if(expired())break;
+      utilities[i]=NativeNpcPolicy::search_utility(s,player,actions[i]);mean+=utilities[i];
+    }
     if(!utilities.empty())mean/=utilities.size();
     double variance=0;
     for(double v:utilities)variance+=(v-mean)*(v-mean);
@@ -62,16 +67,19 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
     for(float& p:result.priors)p=static_cast<float>(0.85*p/total+0.15/actions.size());
     result.has_value_vector=true;
     result.value_vector=static_value(s,player);
-    if(s.phase!=NativePhase::GameOver && rollout_steps_>0) {
+    if(s.phase!=NativePhase::GameOver && rollout_steps_>0 && !expired()) {
       std::array<float,kValueSlots> accumulated{};
       NativeGameAdapter rules;
-      for(int trial=0;trial<rollouts_;++trial){
+      int trials=0;
+      for(int trial=0;trial<rollouts_ && !expired();++trial){
         auto world=s;
         for(int step=0;step<rollout_steps_ && !rules.terminal(world);++step){
-          if(time_ms_>0 && std::chrono::steady_clock::now()>=deadline_)break;
+          if(expired())break;
           const int actor=rules.next_player(world);const auto legal=rules.legal_actions(world,actor);
           if(actor<0 || legal.empty())break;
+          if(expired())break;
           const int selected=NativeNpcPolicy::choose_rollout(world,actor,legal,rng_());
+          if(expired())break;
           if(selected<0 || !rules.apply(world,actor,legal.at(selected)))
             throw std::runtime_error("Heuristic rollout rejected a legal action");
           ++rollout_actions;
@@ -80,9 +88,10 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
         const auto tail=static_value(world,player);
         for(size_t i=0;i<kValueSlots;++i)accumulated[i]+=tail[i];
         ++completed_rollouts;
+        ++trials;
       }
-      for(size_t i=0;i<kValueSlots;++i)
-        result.value_vector[i]=0.4f*result.value_vector[i]+0.6f*accumulated[i]/rollouts_;
+      if(trials)for(size_t i=0;i<kValueSlots;++i)
+        result.value_vector[i]=0.4f*result.value_vector[i]+0.6f*accumulated[i]/trials;
     }
     result.value=result.value_vector[0];return result;
   }
@@ -102,6 +111,7 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
     return values;
   }
  private:
+  bool expired() const {return time_ms_>0 && std::chrono::steady_clock::now()>=deadline_;}
   int rollout_steps_,rollouts_;std::mt19937 rng_;int time_ms_;
   std::chrono::steady_clock::time_point deadline_;
 };
@@ -221,10 +231,13 @@ inline HeuristicDecision choose_native_npc(const NativeGameState& state,int play
     decision.selected=NativeNpcPolicy::choose(state,player,actions,seed);return decision;
   }
   const auto start=std::chrono::steady_clock::now();
+  const auto deadline=start+std::chrono::milliseconds(std::max(0,options.time_budget_ms));
+  const auto expired=[&]{return options.time_budget_ms>0 && std::chrono::steady_clock::now()>=deadline;};
   try {
     NativeHeuristicAdapter rules;
     std::vector<NativeGameState> particles;
     for(int i=0;i<std::max(1,options.particles);++i) {
+      if(expired())break;
       auto world=determinize_native_state(state,player,seed+static_cast<uint32_t>(i)*0x9e3779b9u,true);
       const auto legal=rules.legal_actions(world,player);
       if(legal.size()!=actions.size())continue;
@@ -236,16 +249,14 @@ inline HeuristicDecision choose_native_npc(const NativeGameState& state,int play
     Mcts<NativeGameState,NativeSearchAction>::Config config;
     config.simulations=std::max(1,options.simulations);config.max_depth=std::max(1,options.max_depth);
     config.seed=seed;config.c_puct=options.c_puct;config.dirichlet_epsilon=0;
-    // Particle preparation consumes the same budget as tree search. Keep a
-    // minimum completed simulation; deadline checks are cooperative, not a
-    // forced interruption of an individual rules/evaluation operation.
-    const auto setup_ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count();
-    config.time_budget_ms=options.time_budget_ms>0?static_cast<int>(std::max<int64_t>(1,options.time_budget_ms-setup_ms)):0;
-    NativeHeuristicEvaluator evaluator(options.rollout_steps,options.rollouts,seed,config.time_budget_ms);
+    // Setup, root evaluation, paths and rollout all share the original deadline.
+    // Never grant a fresh minimum simulation after setup has used the budget.
+    config.time_budget_ms=options.time_budget_ms;config.deadline=deadline;
+    NativeHeuristicEvaluator evaluator(options.rollout_steps,options.rollouts,seed,config.time_budget_ms,deadline);
     if(session)session->prepare(state,player,options);
     const auto result=Mcts<NativeGameState,NativeSearchAction>(rules,evaluator,config).search(particles,player,{},
         session && options.reuse_tree?&session->tree:nullptr);
-    if(result.policy.size()!=actions.size() || result.visits<=0)throw std::runtime_error("No completed heuristic simulations");
+    if(result.policy.size()!=actions.size())throw std::runtime_error("Invalid heuristic search policy");
     decision.selected=static_cast<int>(std::max_element(result.policy.begin(),result.policy.end())-result.policy.begin());
     decision.visits=result.visits;decision.expansions=result.expansions;
     decision.particles=static_cast<int>(particles.size());decision.searched=true;
@@ -255,7 +266,10 @@ inline HeuristicDecision choose_native_npc(const NativeGameState& state,int play
     if(session && session->tree.nodes()>static_cast<size_t>(options.max_tree_nodes))session->clear();
   } catch(const std::exception& error) {
     if(session)session->clear();
-    decision.selected=NativeNpcPolicy::choose(state,player,actions,seed);decision.fallback=true;
+    // The hard turn planner must not launch new search after a timed failure.
+    decision.selected=options.time_budget_ms>0 ? NativeNpcPolicy::choose_rollout(state,player,actions,seed)
+                                               : NativeNpcPolicy::choose(state,player,actions,seed);
+    decision.fallback=true;
     decision.fallback_reason=error.what();
   }
   decision.elapsed_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();

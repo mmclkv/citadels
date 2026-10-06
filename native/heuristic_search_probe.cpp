@@ -11,6 +11,30 @@ class SlowEvaluator final : public Evaluator<NativeGameState,NativeSearchAction>
     NativeHeuristicEvaluator evaluator;return evaluator.evaluate(s,player,a);
   }
 };
+// Pre-expanded deep path: checks must occur inside a simulation, not only
+// between them. A 5 ms budget must not traverse 100 slow rule operations.
+struct DeadlineState {int depth=0;};
+class DeadlineRules final : public GameAdapter<DeadlineState,int> {
+ public:
+  int delay_ms=0;
+  std::vector<int> legal_actions(const DeadlineState&,int) const override {return {0};}
+  bool apply(DeadlineState& s,int,const int&) const override {
+    if(delay_ms)std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    ++s.depth;return true;
+  }
+  int next_player(const DeadlineState&) const override {return 0;}
+  bool terminal(const DeadlineState& s) const override {return s.depth>=100;}
+  float terminal_value(const DeadlineState&,int) const override {return 1;}
+  InformationSetKey information_set_hash(const DeadlineState& s,int) const override {
+    return {static_cast<uint64_t>(s.depth+1),1};
+  }
+};
+class DeadlineEvaluator final : public Evaluator<DeadlineState,int> {
+ public:
+  Evaluation evaluate(const DeadlineState&,int,const std::vector<int>&) override {
+    Evaluation e;e.priors={1};return e;
+  }
+};
 DistrictCard card(std::string uid,int cost,std::string color="green"){return {uid,color,cost,uid,cost};}
 NativeGameState fixture(){
   NativeGameState s;s.phase=NativePhase::Action;s.has_turn=true;s.active_player=0;
@@ -125,6 +149,28 @@ int main(){
   SlowEvaluator slow;Mcts<NativeGameState,NativeSearchAction>::Config deadline;
   deadline.simulations=1000;deadline.max_depth=3;deadline.time_budget_ms=1;
   const auto limited=Mcts<NativeGameState,NativeSearchAction>(rules,slow,deadline).search(fixture(),0);
-  require(limited.visits>0 && limited.visits<1000,"time budget did not interrupt fixed simulation loop");
+  require(limited.visits==0,"expired root evaluation forced an extra simulation");
+  DeadlineRules chain_rules;DeadlineEvaluator chain_eval;
+  Mcts<DeadlineState,int>::Tree chain_tree;
+  Mcts<DeadlineState,int>::Config chain_config;chain_config.simulations=150;chain_config.max_depth=150;
+  Mcts<DeadlineState,int>(chain_rules,chain_eval,chain_config).search({DeadlineState{}},0,{},&chain_tree);
+  chain_rules.delay_ms=2;chain_config.time_budget_ms=5;
+  const auto chain_start=std::chrono::steady_clock::now();
+  const auto interrupted=Mcts<DeadlineState,int>(chain_rules,chain_eval,chain_config).search({DeadlineState{}},0,{},&chain_tree);
+  const auto chain_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-chain_start).count();
+  require(chain_ms<100 && interrupted.new_visits==0,"deep simulation ignored deadline or counted incomplete visit");
+  // A shared expired deadline must not start rollout or reset its budget.
+  NativeHeuristicEvaluator expired(700,100,71,1,
+    std::chrono::steady_clock::now()-std::chrono::milliseconds(1));
+  expired.evaluate(fixture(),0,legal);
+  require(expired.rollout_actions==0 && expired.completed_rollouts==0,"expired evaluator started rollout");
+  for(int milliseconds:{1,25,1000}){
+    auto busy=fixture();for(int i=0;i<32;++i)busy.players[0].hand.push_back(card("more"+std::to_string(i),1+i%6));
+    const auto budget=heuristic_search_for_budget(milliseconds);
+    const auto timed=choose_native_npc(busy,0,rules.legal_actions(busy,0),71,budget);
+    require(timed.selected>=0,"deadline did not return a legal action");
+    require(timed.elapsed_ms<milliseconds+200,"heuristic search greatly exceeded wall-clock budget");
+    std::cout<<"budgetMs="<<milliseconds<<" elapsedMs="<<timed.elapsed_ms<<" visits="<<timed.visits<<'\n';
+  }
   std::cout<<"heuristic ISMCTS checks passed visits="<<a.visits<<" expansions="<<a.expansions<<" ms="<<a.elapsed_ms<<'\n';
 }
