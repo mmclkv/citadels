@@ -296,8 +296,13 @@ int main() {
         const int actor = player_index(state, player_id);
         const auto* action_value = request.get("action");
         if (actor < 0 || !action_value) throw std::runtime_error("apply 缺少有效 playerId/action");
-        if (actor != rules.next_player(state)) throw std::runtime_error("不是该玩家的行动时机");
         const auto action = decode_action(*action_value);
+        // Round results are acknowledged independently by each player. The
+        // next-player order only drives sequential gameplay and NPC scheduling.
+        const bool round_confirmation = state.phase == NativePhase::RoundConfirm &&
+            action.type == ActionType::ConfirmRound;
+        if (!round_confirmation && actor != rules.next_player(state))
+          throw std::runtime_error("不是该玩家的行动时机");
         const auto legal = rules.legal_actions(state, actor);
         if (std::none_of(legal.begin(), legal.end(), [&](const auto& candidate) { return matches(candidate, action); }))
           throw std::runtime_error("行动不在当前合法动作列表中");
