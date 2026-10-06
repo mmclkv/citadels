@@ -384,16 +384,38 @@
   }
   function findCard(key,kind){const s=M.state;if(kind==='role')return [ ...(s.charDeck||[]),...(s.draft?.pool||[]),...(s.removed?.faceUp||[]) ].find(c=>String(cardKey(c))===key)||role(key);
     const cards=[...(myPlayer()?.hand||[]),...(s.turn?.pending?.cards||[]),...s.players.flatMap(p=>p.city||[])];return cards.find(c=>String(cardKey(c))===key);}
-  function openViewer(kind,card,confirm,context,stageOption){if(!card&&kind!=='back')return;M.viewer={kind,card,confirm,context,stageOption};
+  // 静态资源一律带 Cache-Control: no-store，靠浏览器缓存留不住原图，大卡图每次
+  // 打开都要重新下载。这里把取回的原图转成 blob 常驻内存，同一张卡一局只下一次；
+  // 手机直接打开 mobile.html 时没有 Service Worker，这是唯一还能生效的一层缓存。
+  const artCache=new Map(), artPending=new Set();
+  function artSrc(url){
+    if(!url) return '';
+    const cached=artCache.get(url);
+    if(cached) return cached;
+    if(!artPending.has(url)){
+      artPending.add(url);
+      fetch(url).then(r=>r.ok?r.blob():null).then(blob=>{
+        if(!blob) return;
+        const objectUrl=URL.createObjectURL(blob);
+        artCache.set(url,objectUrl);
+        // 正看着这张就换成内存副本，下次重开直接命中。
+        if(M.viewer&&M.viewer.art===url)$('viewerImg').src=objectUrl;
+      }).catch(()=>{}).finally(()=>artPending.delete(url));
+    }
+    return url;
+  }
+  function openViewer(kind,card,confirm,context,stageOption){if(!card&&kind!=='back')return;
+    const art=kind==='back'?'./assets/themes/neon/card-back.png':kind==='role'?roleImg(card,'full'):districtImg(card,'full');
+    M.viewer={kind,card,confirm,context,stageOption,art};
     $('viewerTitle').textContent=kind==='back'?'暗置角色牌':kind==='role'?`${card.num} · ${card.name} · 角色卡`:`${card.name} · 建筑卡`;
-    $('viewerImg').src=kind==='back'?'./assets/themes/neon/card-back.png':kind==='role'?roleImg(card,'full'):districtImg(card,'full');
+    $('viewerImg').src=artSrc(art);
     $('viewerMeta').innerHTML=kind==='back'?'暗置弃置角色的身份不会公开。':kind==='role'?`编号 ${esc(card.num)} · ${esc(card.name)}`:`<span class="color-dot" style="--district-color:${C[card.color]||C.purple}"></span><span>${esc(CN[card.color]||'独特')} · 费用 ${esc(card.cost)} · ${esc(context||'点击查看卡牌')}</span>`;
     const pick=stageOption>=0, act=confirm||pick;
     $('viewerActions').className='viewer-actions '+(act?'two':'');
     $('viewerActions').innerHTML='<button class="btn ghost" type="button" id="viewerBack">返回</button>'+(act?`<button class="btn ${confirm?.type==='draft_discard'?'danger':'gold'}" type="button" id="viewerConfirm">${esc(confirm?.label||'确认选择')}</button>`:'');
     $('viewer').classList.add('show');
   }
-  function closeViewer(){M.viewer=null;$('viewer').classList.remove('show');$('viewerImg').removeAttribute('src');}
+  function closeViewer(){M.viewer=null;$('viewer').classList.remove('show');}
   function closeSheet(){M.sheetPlayer=null;$('sheet').classList.remove('show','player-detail-mode');$('mask').classList.remove('show','player-detail-mode');}
   function renderDetail(playerId){const p=M.state.players.find(x=>x.id===playerId);if(!p){closeSheet();return;}
     M.sheetPlayer=playerId;const s=score(p),ch=p.revealedCharId&&!(M.state.phase==='draft'&&p.id!==M.id)?role(p.revealedCharId):null;
