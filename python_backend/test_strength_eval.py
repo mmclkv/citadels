@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import unittest
 
 from python_backend.policy_selection import select_search_action
-from python_backend.strength_eval import ArenaConfig, schedule, summarize, paired_comparison, run_game
+from python_backend.strength_eval import (ArenaConfig, schedule, summarize, paired_comparison, run_game,
+                                         value_calibration, distribution_entropy)
 
 
 class ArenaTests(unittest.TestCase):
@@ -18,15 +19,27 @@ class ArenaTests(unittest.TestCase):
                                   env=dict(os.environ, CITADELS_HEURISTIC_MCTS_ENABLED='0'))
         policy = None
         try:
+            original_search = worker.search
+            def checked_search(**kwargs):
+                response = original_search(**kwargs)
+                if kwargs.get('policy_only'):
+                    self.assertTrue(response['policyOnly'])
+                    self.assertEqual(response['visits'], 0)
+                    self.assertEqual(response['expansions'], 0)
+                return response
+            worker.search = checked_search
             policy = NeuralPolicy(os.environ['CITADELS_ARENA_CHECKPOINT'], device='cpu', worker=worker)
             self.assertFalse(policy.error, policy.error)
             config = ArenaConfig(players=(5,), cycles=1, simulations=1, particles=1,
-                                 depth=4, batch=1, max_rounds=1)
+                                 depth=4, batch=1, max_rounds=1, diagnostics=True)
             for case in schedule(config)[:2]:
-                for selection in ('argmax', 'sample'):
+                for selection in ('argmax', 'sample', 'direct'):
                     result = run_game(engine, worker, policy, case, selection, config)
                     self.assertEqual(result['failure'], 'step/round limit', result)
                     self.assertGreater(result['decisions'], 0)
+                    self.assertIsNotNone(result['networkEntropy'])
+                    if selection == 'direct':
+                        self.assertAlmostEqual(result['networkEntropy'], result['searchEntropy'], places=6)
             # Same weights and encoded inputs, both implementations, v10 suffix included.
             import torch
             from python_backend.training_runtime import _entity_forward_probe_inputs
@@ -75,6 +88,19 @@ class ArenaTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 select_search_action(values, random.Random(1))
 
+    def test_value_calibration_rotates_absolute_seats_and_ignores_padding(self):
+        absolute = [1., -.5, -1., .5]
+        relative = [-1., .5, 1., -.5, 200., 200., 200., 200.]
+        result = value_calibration([relative], absolute, 2)
+        self.assertEqual(result['vectorMSE'], 0)
+        self.assertEqual(result['ownMAE'], 0)
+        self.assertEqual(result['outsideRangeFraction'], 0)
+        self.assertIsNone(value_calibration([], absolute, 2))
+        with self.assertRaises(ValueError):
+            value_calibration([[float('nan')] * 8], absolute, 0)
+        self.assertAlmostEqual(distribution_entropy([1., 1.]), .6931471805599453)
+        self.assertEqual(distribution_entropy([0., 1.]), 0)
+
     def test_failed_games_are_not_hidden(self):
         rows = [{'variant': 'a', 'players': 4, 'completed': True, 'first': True, 'reward': 1, 'rank': 1},
                 {'variant': 'a', 'players': 4, 'completed': False, 'first': False}]
@@ -121,7 +147,9 @@ class ArenaTests(unittest.TestCase):
                 return {'particles': [kwargs['state']], 'weights': [1.]}
             def search(self, **kwargs):
                 self.request = kwargs
-                return {'policy': [.1, .9]}
+                return {'policy': [.1, .9], 'networkPolicy': [.1, .9],
+                        'networkValueVector': [1., -1.] + [100.] * 6,
+                        'valueVector': [1., -1.] + [100.] * 6}
         engine, worker = Engine(), Worker()
         policy = SimpleNamespace(model_path='fixed.bin', profile='fast', architecture='entity-v6', action_version=10)
         case = schedule(ArenaConfig(players=(2,)))[0]
@@ -134,6 +162,11 @@ class ArenaTests(unittest.TestCase):
         self.assertTrue(engine.closed)
         self.assertEqual(worker.request['dirichlet_epsilon'], 0)
         self.assertEqual(worker.request['action_encoding_version'], 10)
+        engine, worker = Engine(), Worker()
+        result = run_game(engine, worker, policy, case, 'direct', ArenaConfig(players=(2,), diagnostics=True))
+        self.assertTrue(worker.request['policy_only'])
+        self.assertEqual(result['networkCalibration']['vectorMSE'], 0)
+        self.assertEqual(result['searchCalibration']['outsideRangeFraction'], 0)
 
 
 if __name__ == '__main__':

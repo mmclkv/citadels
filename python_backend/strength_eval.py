@@ -46,6 +46,7 @@ class ArenaConfig:
     repeat_limit: int = 20
     char_set: str = "random"
     opponent_search_ms: int = 0  # deterministic static hard policy by default
+    diagnostics: bool = False
 
 
 def schedule(config):
@@ -73,6 +74,27 @@ def _sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def distribution_entropy(values):
+    values = [float(value) for value in values]
+    total = sum(values)
+    if not values or any(not math.isfinite(v) or v < 0 for v in values) or not math.isfinite(total) or total <= 0:
+        raise ValueError("invalid diagnostic policy distribution")
+    return -sum((v / total) * math.log(v / total) for v in values if v > 0)
+
+
+def value_calibration(predictions, absolute_rewards, seat):
+    """Network vectors are relative to the decision actor, rewards absolute."""
+    if not predictions:
+        return None
+    n = len(absolute_rewards)
+    target = [absolute_rewards[(seat + relative) % n] for relative in range(n)]
+    if any(len(vector) < n or not all(math.isfinite(v) for v in vector[:n]) for vector in predictions):
+        raise ValueError("invalid multiplayer value diagnostic")
+    return {'vectorMSE': statistics.mean((vector[i] - target[i]) ** 2 for vector in predictions for i in range(n)),
+            'ownMAE': statistics.mean(abs(vector[0] - target[0]) for vector in predictions),
+            'outsideRangeFraction': statistics.mean(abs(vector[i]) > 1 for vector in predictions for i in range(n))}
+
+
 def run_game(engine, worker, policy, case, selection, config):
     game_id = "arena-" + case["case"]
     player_id = f"p{case['seat']}"
@@ -80,6 +102,7 @@ def run_game(engine, worker, policy, case, selection, config):
     steps = decisions = 0
     seen = defaultdict(int)
     failure = None
+    network_values, search_values, network_entropies, search_entropies = [], [], [], []
     result = {**case, "selection": selection, "completed": False, "first": False,
               "winShare": 0, "reward": None, "rank": None}
     try:
@@ -100,6 +123,9 @@ def run_game(engine, worker, policy, case, selection, config):
                 result.update(completed=True, reward=reward, first=first,
                               winShare=1 / winners if first else 0,
                               rank=round(1 + (1 - reward) * (case["players"] - 1) / 2))
+                if config.diagnostics:
+                    result['networkCalibration'] = value_calibration(network_values, rewards, case['seat'])
+                    result['searchCalibration'] = value_calibration(search_values, rewards, case['seat'])
                 break
             if steps >= config.max_steps or current["round"] > config.max_rounds:
                 failure = "step/round limit"
@@ -129,18 +155,26 @@ def run_game(engine, worker, policy, case, selection, config):
                 action = actions[0]
             else:
                 seed = (case["seed"] + decisions * 0x9E3779B1) & 0xFFFFFFFF
-                samples = worker.determinize(state=state, player_id=player_id, count=config.particles,
-                                              seed=seed, belief=True)
+                samples = ({'particles': [state], 'weights': [1.]} if selection == 'direct' else
+                           worker.determinize(state=state, player_id=player_id, count=config.particles,
+                                              seed=seed, belief=True))
                 search = worker.search(state=samples["particles"][0], particles=samples["particles"][1:],
                     root_player_id=player_id, legal_actions=actions, particle_weights=samples["weights"],
                     model_path=policy.model_path, model_version=1, profile=policy.profile,
                     architecture=policy.architecture, device=config.device, simulations=config.simulations,
                     max_depth=config.depth, c_puct=config.c_puct, dirichlet_alpha=0,
                     dirichlet_epsilon=0, seed=seed ^ 0xA511E9B3, batch_size=config.batch,
-                    action_encoding_version=policy.action_version)
+                    action_encoding_version=policy.action_version, policy_only=selection == 'direct',
+                    include_root_diagnostics=config.diagnostics)
                 if len(search["policy"]) != len(actions):
                     raise RuntimeError("search/action count mismatch")
-                action = actions[select_search_action(search["policy"], random.Random(seed), selection)]
+                if config.diagnostics:
+                    network_values.append(search['networkValueVector'])
+                    search_values.append(search['valueVector'])
+                    network_entropies.append(distribution_entropy(search['networkPolicy']))
+                    search_entropies.append(distribution_entropy(search['policy']))
+                action = actions[select_search_action(search["policy"], random.Random(seed),
+                                                       'argmax' if selection == 'direct' else selection)]
                 decisions += 1
             engine.apply(game_id=game_id, player_id=player_id, action=action, return_state=False)
             steps += 1
@@ -153,6 +187,9 @@ def run_game(engine, worker, policy, case, selection, config):
         except Exception:
             pass
     result.update(steps=steps, decisions=decisions, seconds=time.perf_counter() - started, failure=failure)
+    if config.diagnostics:
+        result.update(networkEntropy=statistics.mean(network_entropies) if network_entropies else None,
+                      searchEntropy=statistics.mean(search_entropies) if search_entropies else None)
     return result
 
 
@@ -174,13 +211,18 @@ def summarize(rows):
     for (variant, players), group in sorted(grouped.items()):
         completed = [row for row in group if row["completed"]]
         wins = sum(row["first"] for row in completed)
-        output.append({"variant": variant, "players": players, "attempted": len(group),
+        summary = {"variant": variant, "players": players, "attempted": len(group),
                        "completed": len(completed), "failed": len(group) - len(completed),
                        "wins": wins, "firstRateAllAttempts": wins / len(group),
                        "firstRateCompleted": wins / len(completed) if completed else None,
                        "completedFirstRate95CI": _wilson(wins, len(completed)),
                        "meanReward": statistics.mean(row["reward"] for row in completed) if completed else None,
-                       "meanRank": statistics.mean(row["rank"] for row in completed) if completed else None})
+                       "meanRank": statistics.mean(row["rank"] for row in completed) if completed else None}
+        for source in ('networkCalibration', 'searchCalibration'):
+            diagnostics = [row[source] for row in completed if row.get(source)]
+            summary[source] = {key: statistics.mean(d[key] for d in diagnostics)
+                               for key in ('vectorMSE', 'ownMAE', 'outsideRangeFraction')} if diagnostics else None
+        output.append(summary)
     return output
 
 
@@ -242,14 +284,18 @@ def main(argv=None):
     parser.add_argument("--max-rounds", type=int, default=100)
     parser.add_argument("--char-set", choices=("base", "dark", "mixed", "random"), default="random")
     parser.add_argument("--opponent-search-ms", type=int, default=0)
+    parser.add_argument("--direct-policy", action='store_true', help='add raw network argmax control without MCTS')
+    parser.add_argument("--diagnostics", action='store_true', help='record policy entropy and terminal value calibration')
     args = parser.parse_args(argv)
     config = ArenaConfig(players=tuple(args.players), cycles=args.cycles, seed=args.seed,
                          simulations=args.simulations, particles=args.particles, depth=args.depth,
                          batch=args.batch, device=args.device, max_steps=args.max_steps,
                          max_rounds=args.max_rounds, char_set=args.char_set,
-                         opponent_search_ms=args.opponent_search_ms)
+                         opponent_search_ms=args.opponent_search_ms, diagnostics=args.diagnostics)
     cases = schedule(config)
     selections = ("argmax", "sample") if args.selection == "both" else (args.selection,)
+    if args.direct_policy:
+        selections += ('direct',)
     models = [("candidate", args.checkpoint)] + ([("baseline", args.baseline)] if args.baseline else [])
     variants = [f"{label}:{selection}" for label, _ in models for selection in selections]
     binary_hashes = {"gameEngine": _sha(args.game_engine), "mctsWorker": _sha(args.mcts_worker)}
@@ -272,7 +318,8 @@ def main(argv=None):
               "variants": variants, "binaries": binary_hashes,
               "checkpoints": [metadata for _, _, metadata in snapshots], "rootNoise": 0,
               "opponent": "static-hard" if not config.opponent_search_ms else "hard-mcts",
-              "opponentReproducible": not bool(config.opponent_search_ms)})
+              "opponentReproducible": not bool(config.opponent_search_ms),
+              "searchOpponentModel": "static-native-npc; not a nested heuristic MCTS"})
         try:
             for label, frozen, _ in snapshots:
                 # Separate workers per model prevent cross-checkpoint tree/cache leakage.
@@ -297,8 +344,12 @@ def main(argv=None):
         finally:
             comparisons = []
             for label, _ in models:
-                if len(selections) == 2:
+                if 'argmax' in selections and 'sample' in selections:
                     comparisons.append(paired_comparison(rows, f"{label}:argmax", f"{label}:sample", cases))
+                if 'direct' in selections:
+                    for selection in selections:
+                        if selection != 'direct':
+                            comparisons.append(paired_comparison(rows, f'{label}:{selection}', f'{label}:direct', cases))
             if args.baseline:
                 for selection in selections:
                     comparisons.append(paired_comparison(rows, f"candidate:{selection}", f"baseline:{selection}", cases))

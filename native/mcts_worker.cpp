@@ -6,6 +6,7 @@
 #include <iostream>
 #include <iomanip>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -372,6 +373,20 @@ int main() {
         " · 后端=" + inference_backend;
       auto run_search = [&](const std::vector<NativeGameState>& states, int perspective,
                             int batch, const std::vector<float>& weights) {
+#ifdef CITADELS_LIBTORCH
+        if (bool_field(request, "policyOnly")) {
+          if (!direct_neural) throw std::runtime_error("policyOnly requires LibTorch evaluator");
+          const auto evaluated = direct_neural->evaluate(states.front(), perspective,
+                                                        game.ai_actions(states.front(), perspective));
+          Mcts<NativeGameState, NativeSearchAction>::Result result;
+          result.policy = evaluated.priors;
+          result.value = evaluated.value;
+          result.value_vector = evaluated.value_vector;
+          return result;
+        }
+#else
+        if (bool_field(request, "policyOnly")) throw std::runtime_error("policyOnly requires LibTorch build");
+#endif
         auto npc_choice = [seed = config.seed](const NativeGameState& game_state, int actor,
                                                int root_actor,
                                                const std::vector<NativeSearchAction>& legal) {
@@ -458,6 +473,13 @@ int main() {
         belief_applied = belief_used && particles_used > 1;
       }
       if (policy.size() != supplied.size()) policy.assign(supplied.size(), 1.0f / supplied.size());
+      std::optional<Evaluation> root_diagnostic;
+#ifdef CITADELS_LIBTORCH
+      if (bool_field(request, "includeRootDiagnostics") && actions_match && !pool.empty()) {
+        if (!direct_neural) throw std::runtime_error("root diagnostics require LibTorch evaluator");
+        root_diagnostic = direct_neural->evaluate(pool.front(), root, native_actions);
+      }
+#endif
       std::cout << "{\"v\":1,\"t\":\"search_result\",\"id\":\"" << escape(id)
                 << "\",\"policy\":[";
       for (size_t i = 0; i < policy.size(); ++i) {
@@ -473,6 +495,7 @@ int main() {
                 << ",\"expansions\":" << expansions
                 << ",\"actionEncodingVersion\":" << action_encoding_version
                 << ",\"supportedActionEncodingVersion\":" << kActionEncodingVersion
+                << ",\"policyOnly\":" << (bool_field(request, "policyOnly") ? "true" : "false")
                 << ",\"fallback\":" << (actions_match ? "false" : "true")
                 << ",\"particlesUsed\":" << particles_used
                 << ",\"belief\":" << (belief_applied ? "true" : "false")
@@ -499,6 +522,19 @@ int main() {
         for (size_t i = 0; i < supplied.size(); ++i) {
           if (i) std::cout << ',';
           write_native_action(std::cout, supplied[i]);
+        }
+        std::cout << ']';
+      }
+      if (root_diagnostic) {
+        std::cout << ",\"networkPolicy\":[" << std::setprecision(9);
+        for (size_t i = 0; i < root_diagnostic->priors.size(); ++i) {
+          if (i) std::cout << ',';
+          std::cout << root_diagnostic->priors[i];
+        }
+        std::cout << "],\"networkValueVector\":[";
+        for (size_t i = 0; i < kValueSlots; ++i) {
+          if (i) std::cout << ',';
+          std::cout << root_diagnostic->value_vector[i];
         }
         std::cout << ']';
       }
