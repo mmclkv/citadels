@@ -222,7 +222,9 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
             probs = torch.softmax(logits, dim=-1)
             pi = batch["pi"].masked_fill(~batch["masks"], 0.0)
             pi_sum = pi.sum(dim=-1, keepdim=True)
-            valid = pi_sum.squeeze(-1) > 1e-8
+            # Forced moves carry value evidence but no policy decision. They
+            # must not dilute policy/entropy/KL means through their denominator.
+            valid = (pi_sum.squeeze(-1) > 1e-8) & (batch["masks"].sum(dim=-1) > 1)
             pi = pi / pi_sum.clamp_min(1e-12)
             masked_probs = probs.masked_fill(~batch["masks"], 1e-12)
             norm_probs = masked_probs / masked_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
@@ -269,6 +271,7 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
         "gradientNorm": total["gradient"] / value_denominator,
         "samples": size,
         "policySamples": total["policySamples"],
+        "forcedActionSamples": int(np.count_nonzero(data["lengths"] == 1)),
     }
 
 

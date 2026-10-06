@@ -940,6 +940,8 @@ class TrainingManager:
                         self._model, self._optimizer, self._device, data,
                         int(config["trainingEpochs"]), int(config["miniBatch"]))
                     self._model.eval()
+                    self._log(f"更新完成：有效策略决策样本 {batch_metrics['policySamples']} 条（含 epoch 重复）；"
+                              f"单动作样本 {batch_metrics['forcedActionSamples']} 条仅训练价值头。")
                     batch_metrics["game"] = games
                     batch_metrics["freshSamples"] = len(rows)
                     batch_metrics["replaySamples"] = len(replay_rows)
