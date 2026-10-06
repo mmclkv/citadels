@@ -315,7 +315,8 @@ function render(status) {
   $('total-loss-now').textContent = '总损失 ' + num(point.totalLoss, 4);
   const policy = Number(point.policyLoss);
   $('policy-now').textContent = (Number.isFinite(policy) ? policy.toExponential(3) : '—') +
-    ' · 梯度 ' + num(point.gradientNorm, 3) + ' · 熵 ' + num(point.entropy, 3);
+    ' · 梯度 ' + num(point.gradientNorm, 3) + ' · 网络熵 ' + num(point.entropy, 3) +
+    ' · MCTS 目标熵 ' + num(point.targetEntropy, 3);
   $('approx-kl-now').textContent = 'KL ' + num(point.approxKl, 5);
   $('speed-now').textContent = num(avgGameSeconds, 2) + ' 秒/局';
   $('control-message').textContent = status.error || (status.checkpoint ? '最近存档：' + status.checkpoint : '');
@@ -332,7 +333,8 @@ function render(status) {
     { key: 'totalLoss', color: '#ffd36a', label: '总损失' }
   ]);
   drawLines($('policy-chart'), history, [
-    { key: 'policyLoss', color: '#35dcff', label: '策略损失' }
+    { key: 'policyLoss', color: '#35dcff', label: '策略损失' },
+    { key: 'targetEntropy', color: '#f5b95c', label: 'MCTS 目标熵（损失下界）' }
   ]);
   // KL 量级很小（常见 0.0x），刻度需要 4 位小数才看得出变化；且恒为正，下界锚到 0
   drawLines($('approx-kl-chart'), history, [

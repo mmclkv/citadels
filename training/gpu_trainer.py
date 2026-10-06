@@ -212,7 +212,7 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
     if data["pi_flat"] is None:
         raise ValueError("MCTS 训练样本缺少策略访问分布")
     total = {"policy": 0.0, "value": 0.0, "entropy": 0.0,
-             "kl": 0.0, "gradient": 0.0, "samples": 0, "policySamples": 0}
+             "kl": 0.0, "targetEntropy": 0.0, "gradient": 0.0, "samples": 0, "policySamples": 0}
     size = len(data["rewards"])
     for _ in range(epochs):
         for indices in torch.randperm(size).split(batch_size):
@@ -244,7 +244,10 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
             per_sample_entropy = -(masked_probs * masked_probs.log()).sum(dim=-1)
             entropy = ((per_sample_entropy * valid).sum() / max(1, valid_count)
                        if valid_count else logits.sum() * 0.0)
-            loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
+            target_entropy = (-(pi * pi.clamp_min(1e-12).log()).sum(dim=-1) * valid).sum() / max(1, valid_count)
+            # Exploration belongs to self-play temperature/root noise. The
+            # supervised policy should fit its teacher, not flatten it again.
+            loss = policy_loss + 0.5 * value_loss
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             gradient = torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -253,6 +256,7 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
             total["policy"] += policy_loss.item() * valid_count
             total["value"] += value_loss.item() * count
             total["entropy"] += entropy.item() * valid_count
+            total["targetEntropy"] += target_entropy.item() * valid_count
             total["kl"] += approx_kl.item() * valid_count
             total["gradient"] += float(gradient) * count
             total["samples"] += count
@@ -265,8 +269,9 @@ def train_mcts_distillation(model, optimizer, device, data, epochs, batch_size=2
     return {
         "policyLoss": policy,
         "valueLoss": value,
-        "totalLoss": policy + 0.5 * value - 0.01 * entropy,
+        "totalLoss": policy + 0.5 * value,
         "entropy": entropy,
+        "targetEntropy": total["targetEntropy"] / policy_denominator,
         "approxKl": total["kl"] / policy_denominator,
         "gradientNorm": total["gradient"] / value_denominator,
         "samples": size,

@@ -38,7 +38,7 @@ class PolicyDecisionMaskTests(unittest.TestCase):
         base, base_metrics = self.run_rows([row(2)])
         mixed, mixed_metrics = self.run_rows([row(2), row(1, .5), row(0, .5)])
         torch.testing.assert_close(base.policy_weight.grad, mixed.policy_weight.grad)
-        for key in ("policyLoss", "entropy", "approxKl"):
+        for key in ("policyLoss", "entropy", "targetEntropy", "approxKl"):
             self.assertAlmostEqual(base_metrics[key], mixed_metrics[key], places=6)
         self.assertEqual(mixed_metrics["policySamples"], 1)
         self.assertEqual(mixed_metrics["forcedActionSamples"], 1)
@@ -54,6 +54,16 @@ class PolicyDecisionMaskTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(model.value_weight.grad))
         self.assertNotEqual(model.value_weight.grad.item(), 0)
         self.assertEqual(model.policy_weight.grad.item(), 0)
+
+    def test_gradient_fits_teacher_without_extra_entropy_reward(self):
+        sample = row(3)
+        sample['pi'] = np.asarray([.1, .3, .6], np.float32)
+        model, metrics = self.run_rows([sample])
+        features = torch.arange(3, dtype=torch.float32)
+        expected = ((torch.softmax(features * .3, dim=0) - torch.from_numpy(sample['pi'])) * features).sum()
+        torch.testing.assert_close(model.policy_weight.grad, expected)
+        self.assertAlmostEqual(metrics['policyLoss'], metrics['targetEntropy'] + metrics['approxKl'], places=6)
+        self.assertAlmostEqual(metrics['totalLoss'], metrics['policyLoss'] + .5 * metrics['valueLoss'], places=6)
 
 
 if __name__ == "__main__":
