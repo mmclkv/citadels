@@ -34,6 +34,14 @@ class MobileLobbyLayoutTests(unittest.TestCase):
         self.assertIn("#screen-lobby .room-item{flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}", self.mobile_css)
         self.assertIn("minmax(min(180px,100%),1fr)", self.mobile_css)
 
+    def test_lobby_buttons_scroll_with_content(self):
+        self.assertIn(
+            "#screen-lobby .btn-row{position:static;bottom:auto;background:transparent}",
+            self.mobile_css,
+        )
+        # Other screens keep their mobile sticky action rows.
+        self.assertIn(".btn-row{position:sticky;bottom:0;", self.mobile_css)
+
 
 if __name__ == "__main__":
     unittest.main()

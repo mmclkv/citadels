@@ -1048,6 +1048,7 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   /* -------- 大厅座位 -------- */
   /* Fit inside the screen's padding (including safe areas), not the viewport. */
   #screen-lobby.active{overflow-x:hidden;overflow-y:auto}
+  #screen-lobby .btn-row{position:static;bottom:auto;background:transparent}
   #screen-lobby .wide-panel{width:100%;max-width:100%;min-width:0;flex-shrink:0}
   #screen-lobby #lobby-pre .lobby-cols{grid-template-columns:minmax(0,1fr)}
   #screen-lobby .lobby-box,#screen-lobby .room-cfg{min-width:0}
