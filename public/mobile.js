@@ -33,6 +33,8 @@
   };
   const districtImg = (card, variant='thumb') => T.districtAsset(card,variant) || '';
   const roleImg = (card, variant='thumb') => T.roleAsset(card,variant) || '';
+  const warmedFullImages = new Map();
+  function warmFullImage(src){if(!src||warmedFullImages.has(src))return;const img=new Image();img.decoding='async';img.fetchPriority='high';img.src=src;warmedFullImages.set(src,img);while(warmedFullImages.size>4)warmedFullImages.delete(warmedFullImages.keys().next().value);}
   const badge = card => `<span class="role-num">${esc(card.num)}</span><span class="role-mini-name">${esc(card.name)}</span>`;
   const roleTag = (card, extra='') => `<button class="summary-role ${extra}" type="button" data-kind="role" data-key="${attr(card.id)}">${badge(card)}</button>`;
   const canBuild = card => !!card?.uid && legal().some(a=>a.type==='build'&&a.uid===card.uid);
@@ -386,7 +388,8 @@
     const cards=[...(myPlayer()?.hand||[]),...(s.turn?.pending?.cards||[]),...s.players.flatMap(p=>p.city||[])];return cards.find(c=>String(cardKey(c))===key);}
   function openViewer(kind,card,confirm,context,stageOption){if(!card&&kind!=='back')return;M.viewer={kind,card,confirm,context,stageOption};
     $('viewerTitle').textContent=kind==='back'?'暗置角色牌':kind==='role'?`${card.num} · ${card.name} · 角色卡`:`${card.name} · 建筑卡`;
-    $('viewerImg').src=kind==='back'?'./assets/themes/neon/card-back.png':kind==='role'?roleImg(card,'full'):districtImg(card,'full');
+    const fullSrc=kind==='back'?'./assets/themes/neon/card-back.png':kind==='role'?roleImg(card,'full'):districtImg(card,'full');
+    warmFullImage(fullSrc);const viewerImg=$('viewerImg');viewerImg.fetchPriority='high';viewerImg.decoding='async';viewerImg.src=fullSrc;
     $('viewerMeta').innerHTML=kind==='back'?'暗置弃置角色的身份不会公开。':kind==='role'?`编号 ${esc(card.num)} · ${esc(card.name)}`:`<span class="color-dot" style="--district-color:${C[card.color]||C.purple}"></span><span>${esc(CN[card.color]||'独特')} · 费用 ${esc(card.cost)} · ${esc(context||'点击查看卡牌')}</span>`;
     const pick=stageOption>=0, act=confirm||pick;
     $('viewerActions').className='viewer-actions '+(act?'two':'');
@@ -451,6 +454,12 @@
     if(!exact){$('selectedInfo').textContent='这张手牌当前不可用，请重新选择';return;}
     action(exact);
   }
+  function warmCardFromIntent(e){const target=e.target.closest?.('[data-kind], [data-detail-card]');if(!target)return;
+    const kind=target.dataset.kind||(target.hasAttribute('data-detail-card')?'district':'');if(kind==='back')return;
+    let card;if(target.hasAttribute('data-detail-card'))card=M.state?.players.find(p=>p.id===M.sheetPlayer)?.city.find(c=>String(c.uid)===target.dataset.detailCard);
+    else card=findCard(target.dataset.key,kind);if(card)warmFullImage(kind==='role'?roleImg(card,'full'):districtImg(card,'full'));}
+  document.addEventListener('pointerover',warmCardFromIntent,{passive:true});
+  document.addEventListener('pointerdown',warmCardFromIntent,{passive:true});
   document.addEventListener('click',e=>{
     if($('eventOverlay')&&!$('eventOverlay').hidden){if(e.target.id==='eventOk'||e.target.id==='eventOverlay')closeEvent();e.stopPropagation();return;}
     const fold=e.target.closest('[data-fold]');if(fold){if(fold.dataset.fold==='handSection')M.handOpen=!M.handOpen;else M.roleOpen=!M.roleOpen;render();return;}

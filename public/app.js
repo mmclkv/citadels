@@ -1576,6 +1576,17 @@
     cardHdRenderView();
   }
 
+  const warmedCardHdImages = new Map();
+  function warmCardHdImage(src) {
+    if (!src || warmedCardHdImages.has(src)) return;
+    const image = new Image();
+    image.decoding = 'async';
+    image.fetchPriority = 'high';
+    image.src = src;
+    warmedCardHdImages.set(src, image);
+    while (warmedCardHdImages.size > 4) warmedCardHdImages.delete(warmedCardHdImages.keys().next().value);
+  }
+
   function openCardHd(src, title, previewCloser) {
     const overlay = $('#card-hd-overlay');
     const img = $('#card-hd-img');
@@ -1584,6 +1595,9 @@
     cardHdPreviewCloser = typeof previewCloser === 'function' ? previewCloser : null;
     cardHdPreviousFocus = document.activeElement || null;
     resetCardHdView();
+    warmCardHdImage(src);
+    img.fetchPriority = 'high';
+    img.decoding = 'async';
     img.src = src;
     img.alt = (title || '卡牌') + '高清大图';
     if (titleEl) titleEl.textContent = title || '卡牌高清大图';
@@ -1745,6 +1759,12 @@
       e.preventDefault();
       openCardHdFrom(target);
     });
+    const warmFromIntent = e => {
+      const target = e.target && e.target.closest && e.target.closest('[data-hd-src]');
+      if (target) warmCardHdImage(target.getAttribute('data-hd-src'));
+    };
+    document.addEventListener('pointerover', warmFromIntent, { passive: true });
+    document.addEventListener('pointerdown', warmFromIntent, { passive: true });
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && !overlay.hidden) { closeCardHd(); return; }
       if (!overlay.hidden && (e.key === '+' || e.key === '=')) { e.preventDefault(); setCardHdZoom(cardHdZoom + CARD_HD_ZOOM_STEP); return; }

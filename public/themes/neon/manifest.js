@@ -42,7 +42,8 @@
                 : (versioned ? '?v=2' : ''))))));
     return {
       thumb: base + folder + '/thumb/' + key + '.webp' + version,
-      full: base + folder + '/full/' + key + '.webp' + version
+      // Full-resolution artwork was recompressed; version the URL so browser/PWA caches refresh it.
+      full: base + folder + '/full/' + key + '.webp?v=optimized-1'
     };
   }
 
