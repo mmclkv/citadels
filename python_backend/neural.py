@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
+from .policy_selection import select_search_action
 
 class NeuralPolicy:
     def __init__(self, checkpoint: str | None = None, profile: str | None = None,
@@ -136,9 +137,10 @@ class NeuralPolicy:
         policy = np.asarray(result["policy"], dtype=np.float64)
         if policy.size != len(candidates) or not np.isfinite(policy).all() or policy.sum() <= 0:
             raise RuntimeError("C++ MCTS 返回了无效策略分布")
-        selected = rng.choices(range(len(candidates)), weights=policy.tolist(), k=1)[0]
+        selection = options.get("selection", "sample")
+        selected = select_search_action(policy, rng, selection)
         self._last_mcts = {"determinizations": result.get("particlesUsed", len(particles)),
                            "beliefDecay": decay, "visits": result.get("visits", 0),
                            "expansions": result.get("expansions", 0),
-                           "simulations": simulations, "maxDepth": max_depth}
+                           "simulations": simulations, "maxDepth": max_depth, "selection": selection}
         return candidates[selected]
