@@ -336,10 +336,13 @@ struct NativeGameState {
   }
 
   bool monk_resource(int gold, int cards) {
-    if (!active() || gold < 0 || cards < 0 || gold + cards != blue_districts(active_player)) return false;
+    if (!active() || active()->role_id != "monk" || income_taken ||
+        pending_kind != "monk_declare" || gold < 0 || cards < 0 ||
+        gold + cards != blue_districts(active_player)) return false;
     active()->gold += gold;
     auto drawn = deck.draw(cards, rng);
     active()->hand.insert(active()->hand.end(), std::make_move_iterator(drawn.begin()), std::make_move_iterator(drawn.end()));
+    income_taken = true;
     pending_kind.clear(); return true;
   }
 
@@ -524,13 +527,16 @@ struct NativeGameState {
       return;
     }
     if (p->role_id == "witch") { pending_kind = "witch_target"; return; }
-    if (p->role_id == "monk" && !income_taken) { pending_kind = "monk_declare"; return; }
     if (p->role_id == "prophet") { prophet_collect(); return; }
   }
 
   bool income() {
     auto* p = active();
     if (!p || income_taken) return false;
+    if (p->role_id == "monk") {
+      if (turn_phase == "bewitched" || !pending_kind.empty() || !reaction_kind.empty()) return false;
+      pending_kind = "monk_declare"; return true;
+    }
     std::string color;
     if (p->role_id == "king" || p->role_id == "emperor") color = "yellow";
     else if (p->role_id == "bishop") {
@@ -665,15 +671,26 @@ struct NativeGameState {
     reaction_kind = "blackmailer"; reaction_player = blackmailer_player; return true;
   }
 
-  bool monk_take() {
+  bool monk_take(int target_player = -1) {
     auto* p = active();
-    if (!p || p->role_id != "monk" || !income_taken || monk_extra_taken) return false;
+    if (!p || p->role_id != "monk" || monk_extra_taken || turn_phase == "bewitched" ||
+        !pending_kind.empty() || !reaction_kind.empty()) return false;
     int richest = -1;
     for (size_t i = 0; i < players.size(); ++i) {
       if (static_cast<int>(i) == active_player) continue;
       if (richest < 0 || players[i].gold > players[richest].gold) richest = static_cast<int>(i);
     }
     if (richest < 0 || players[richest].gold <= p->gold) return false;
+    if (target_player >= 0) {
+      if (target_player == active_player || target_player >= static_cast<int>(players.size()) ||
+          players[target_player].gold != players[richest].gold) return false;
+      richest = target_player;
+    } else {
+      // A legacy targetless action remains valid only for an unambiguous target.
+      for (size_t i = 0; i < players.size(); ++i)
+        if (static_cast<int>(i) != active_player && static_cast<int>(i) != richest &&
+            players[i].gold == players[richest].gold) return false;
+    }
     --players[richest].gold; ++p->gold; monk_extra_taken = true;
     return true;
   }

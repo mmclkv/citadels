@@ -517,6 +517,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
             (role != "navigator" || !state.bonus_done)) actions.push_back({ActionType::Ability});
       }
     }
+    if (!state.income_taken && p->role_id == "monk" && state.turn_phase != "bewitched")
+      actions.push_back({ActionType::Income});
     if (state.resources_taken && !state.income_taken) {
       if (state.players[player].role_id == "king" || state.players[player].role_id == "emperor" ||
           state.players[player].role_id == "bishop" || state.players[player].role_id == "abbot" || state.players[player].role_id == "merchant" ||
@@ -525,16 +527,20 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           state.players[player].role_id == "marshal")
         actions.push_back({ActionType::Income});
     }
-    if (state.resources_taken && state.income_taken && !state.monk_extra_taken &&
-        state.players[player].role_id == "monk") {
+    if (!state.monk_extra_taken && p->role_id == "monk" && state.turn_phase != "bewitched") {
       int richest = -1;
       for (size_t i = 0; i < state.players.size(); ++i) {
         if (static_cast<int>(i) == player) continue;
         if (richest < 0 || state.players[i].gold > state.players[richest].gold)
           richest = static_cast<int>(i);
       }
-      if (richest >= 0 && state.players[richest].gold > p->gold)
-        actions.push_back({ActionType::MonkTake});
+      if (richest >= 0 && state.players[richest].gold > p->gold) {
+        for (size_t i = 0; i < state.players.size(); ++i)
+          if (static_cast<int>(i) != player && state.players[i].gold == state.players[richest].gold) {
+            NativeSearchAction take{ActionType::MonkTake};take.target=state.players[i].id;
+            actions.push_back(std::move(take));
+          }
+      }
     }
     if (state.resources_taken) {
       for (const auto& card : p->hand) {
@@ -805,6 +811,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       return ok;
     }
     if (action.type == ActionType::MonkResource && state.pending_kind == "monk_declare") {
+      if (player != state.active_player) return false;
       int gold = -1, cards = -1;
       try { gold = std::stoi(action.name); cards = std::stoi(action.effect); } catch (...) { return false; }
       return state.monk_resource(gold, cards);
@@ -873,7 +880,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       case ActionType::TakeGold: return state.take_gold();
       case ActionType::TakeCards: return state.take_cards();
       case ActionType::Income: return state.income();
-      case ActionType::MonkTake: return state.monk_take();
+      case ActionType::MonkTake: {
+        int target=-1;
+        if (!action.target.empty()) {
+          for (size_t i=0;i<state.players.size();++i)if(state.players[i].id==action.target)target=static_cast<int>(i);
+          if (target<0)return false;
+        }
+        return state.monk_take(target);
+      }
       case ActionType::Ability: return state.start_ability();
       case ActionType::Build: {
         if (state.players[player].role_id == "bishop") {

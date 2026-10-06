@@ -644,7 +644,11 @@ class PythonServer:
         elif kind == "income":
             active = players[turn.get("playerIdx", -1)] if isinstance(turn.get("playerIdx"), int) and 0 <= turn.get("playerIdx", -1) < len(players) else {}
             city = active.get("city") or []
-            if role_id == "bishop":
+            if role_id == "monk":
+                amount = sum(1 for card in city if card.get("color") == "blue" or
+                             (card.get("purpleEffect") or (card.get("purple") or {}).get("effect")) == "anyColorIncome")
+                label = f"发动修士宗教收入（共 {amount} 份资源，选择金币/卡牌组合）"
+            elif role_id == "bishop":
                 amount = sum(1 for card in city if card.get("color") == "blue" or
                              (card.get("purpleEffect") or (card.get("purple") or {}).get("effect")) == "anyColorIncome")
                 label = f"领取收入（抽取 {amount} 张建筑牌）"
@@ -656,6 +660,9 @@ class PythonServer:
                 amount = sum(1 for card in city if card.get("color") == color or
                              (card.get("purpleEffect") or (card.get("purple") or {}).get("effect")) == "anyColorIncome") if color else 0
                 label = f"领取收入（{amount} 金币）"
+        elif kind == "monk_take":
+            target = by_id.get(action.get("target"), {})
+            label = f"修士：从{target.get('name') or '最富有玩家'}处拿取1枚金币"
         elif kind in ("lab", "museum"):
             district = cards_by_uid.get(action.get("secondaryUid") or
                                         action.get("discardUid") or action.get("cardUid"), {})
@@ -1243,6 +1250,13 @@ class PythonServer:
                              int(after[target_idx].get("gold") or 0))
             return (f"【勒索者】对{target}发动勒索，翻开真威胁标记『带血的刀』；"
                     f"没收目标的全部{amount}枚金币，交给{owner}。")
+        if kind == "monk_take":
+            target_idx = PythonServer._player_index(state, action.get("target"))
+            return f"【修士】从{PythonServer._player_label(state, target_idx)}处拿走1枚金币。"
+        if kind == "income" and turn.get("charId") == "monk":
+            return "【修士】发动宗教建筑收入，准备宣告领取的金币与卡牌组合。"
+        if kind == "monk_resource":
+            return f"【修士】领取宗教建筑收入：{action.get('gold', 0)}枚金币、{action.get('cards', 0)}张建筑牌。"
         if kind == "tax_collect":
             amount = max(0, int((state.get("effects") or {}).get("taxCollectorGold") or 0))
             return f"税务官收取了{amount}枚建筑税"
