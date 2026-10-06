@@ -61,6 +61,10 @@ assert(!board.innerHTML.includes('row-bubble'));
 const css=fs.readFileSync('public/mobile-live.css','utf8');
 assert(/\.row-bubble\.tone-chat\{position:relative/.test(css));
 assert(css.includes('overflow-wrap:anywhere'));
+assert(/\.sidebar-chat-form input\{font-size:16px;/.test(css));
+assert(/\.sidebar-chat-form button\{flex:0 0 auto;white-space:nowrap\}/.test(css));
+const html=fs.readFileSync('public/mobile.html','utf8');
+assert(!/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(?:[,"\s]|$)/i.test(html));
 '''
         result = subprocess.run([shutil.which("node"), "-e", script], cwd=ROOT,
                                 capture_output=True, text=True, encoding="utf-8")
