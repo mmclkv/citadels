@@ -1,6 +1,7 @@
 #include <iostream>
 #include "cfr_core.hpp"
 #include "cfr_information.hpp"
+#include "cfr_abstraction.hpp"
 using namespace citadels::native;
 void require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
 DistrictCard card(std::string uid, std::string name="Tavern") {
@@ -71,6 +72,18 @@ void estimator_tests() {
   }
   require(std::abs(expected[0]-.375)<1e-12 && std::abs(expected[1]+1.125)<1e-12,"Biased sampled regret estimator");
   require(std::abs(average[0]-.375)<1e-12 && std::abs(average[1]-.125)<1e-12,"Biased average strategy estimator");
+  std::vector<double> baseline_regret(2,0);
+  for(size_t chosen=0;chosen<2;++chosen){
+    CfrTable t;t.lookup("I",{"a","b"});
+    CfrTraceStep frame{"I",0,chosen,{.75,.25},behavior[chosen],std::log(.2L),std::log(.3L),std::log(.4L)};
+    frame.baseline={.4,-.6};cfr_update_episode(t,{frame},0,chosen==0?1:-1);
+    const auto& e=t.entries.at("I");
+    for(size_t a=0;a<2;++a)baseline_regret[a]+=behavior[chosen]*e.regrets[a]*std::exp(e.regret_scale);
+    std::stringstream saved;t.contract="baseline";t.save(saved);CfrTable loaded;loaded.load(saved,"baseline");
+    require(loaded.entries.at("I").baseline==e.baseline,"Baseline lost on resume");
+  }
+  require(std::abs(baseline_regret[0]-.375)<1e-12 && std::abs(baseline_regret[1]+1.125)<1e-12,
+          "Baseline changes expected regret");
   CfrTable table;auto& entry=table.lookup("I",{"a","b"});entry.regrets={100,0};entry.strategy_sum={1,9};
   bool hit=false;require(std::abs(table.average("I",{"a","b"},hit)[1]-.9)<1e-12 && hit,"Inference uses last strategy instead of average");
   table.contract="test";std::stringstream checkpoint;table.save(checkpoint);CfrTable loaded;loaded.load(checkpoint,"test");
@@ -110,7 +123,7 @@ double expected(const CfrTable& table,int responding=-1,int mask=0){
   double value=0;for(int a=0;a<3;++a)for(int b=0;b<3;++b)if(a!=b)value+=evaluate(table,a,b,"",responding,mask)/6;
   return value;
 }
-void kuhn_test(){
+void kuhn_test(bool with_baseline=false){
   CfrTable table;std::mt19937 rng(711);
   for(int iteration=0;iteration<80000;++iteration)for(int update=0;update<2;++update){
     const int c0=std::uniform_int_distribution<int>(0,2)(rng);int c1;
@@ -123,6 +136,7 @@ void kuhn_test(){
       if(actor==update)for(auto& p:behavior)p=.4*p+.6/behavior.size();
       const auto selected=cfr_sample(behavior,rng);
       trace.push_back({key,actor,selected,policy,behavior[selected],my,opp,sampled});
+      if(with_baseline && actor==update)trace.back().baseline=table.lookup(key,actions).baseline;
       const auto logp=policy[selected]>0?std::log(static_cast<long double>(policy[selected])):-std::numeric_limits<long double>::infinity();
       if(actor==update)my+=logp;else opp+=logp;
       sampled+=std::log(static_cast<long double>(behavior[selected]));history+=actions[selected];
@@ -132,7 +146,25 @@ void kuhn_test(){
   double best0=-10,best1=-10;
   for(int mask=0;mask<64;++mask){best0=std::max(best0,expected(table,0,mask));best1=std::max(best1,-expected(table,1,mask));}
   const double value=expected(table),exploitability=(best0+best1)/2;
-  std::cout<<"Kuhn value="<<value<<", exploitability="<<exploitability<<"\n";
+  std::cout<<"Kuhn baseline="<<with_baseline<<", value="<<value<<", exploitability="<<exploitability<<"\n";
   require(std::abs(value+1.0/18)<.03 && exploitability<.04,"MCCFR fails small-game convergence");
 }
-int main(){information_tests();estimator_tests();kuhn_test();std::cout<<"CFR information, estimator, checkpoint and convergence checks passed\n";}
+void abstraction_tests(){
+  auto s=base();NativeSearchAction build{ActionType::Build};build.uid="a";
+  NativeSearchAction end{ActionType::EndTurn};const auto actions=cfr_abstract_actions(s,0,{build,end});
+  auto changed=s;changed.round+=10;changed.players[0].hand[1].uid="renamed";
+  changed.players[1].hand={card("private","Library")};changed.players[1].role_id="artist";
+  changed.players[1].role_ids={"artist"};changed.rng=JsRng(919);
+  require(cfr_abstract_information(s,0,actions)==cfr_abstract_information(changed,0,actions),
+          "History/hidden identities fragment abstract policy");
+  changed=s;changed.players[0].gold=0;
+  require(cfr_abstract_information(s,0,actions)!=cfr_abstract_information(changed,0,actions),"Resource context lost");
+  const auto different=cfr_abstract_actions(s,0,{end});
+  require(cfr_abstract_information(s,0,actions)!=cfr_abstract_information(s,0,different),"Action support omitted");
+  auto other=build;other.uid="b";changed=s;changed.players[0].hand[1].name="Market";
+  changed.players[0].hand[1].en="Market";changed.players[0].hand[1].cost=2;changed.players[0].hand[1].score_value=2;
+  require(cfr_abstract_actions(changed,0,{build,other}).keys.size()==1,"Equivalent cost/color abstraction not shared");
+  changed.players[0].hand[1].purple_effect="lab";
+  require(cfr_abstract_actions(changed,0,{build,other}).keys.size()==2,"Special effects merged");
+}
+int main(){information_tests();abstraction_tests();estimator_tests();kuhn_test();kuhn_test(true);std::cout<<"CFR information, abstraction, estimator, checkpoint and convergence checks passed\n";}

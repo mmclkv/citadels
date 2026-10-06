@@ -267,7 +267,7 @@ class NativeWorkerManager:
                 policy = Path(environment["CITADELS_CFR_POLICY"]).resolve()
                 with policy.open(encoding="utf-8") as stream:
                     header = json.loads(stream.readline())
-                if header.get("format") != "citadels-mccfr-v1" or header.get("contract") != environment["CITADELS_CFR_CONTRACT"]:
+                if header.get("format") != "citadels-mccfr-v2" or header.get("contract") != environment["CITADELS_CFR_CONTRACT"]:
                     raise RuntimeError("CFR 权重与当前规则/卡牌/信息集版本不兼容，需要重新训练")
                 environment["CITADELS_CFR_POLICY"] = str(policy)
                 self.log(f"[cfr] 已配置平均策略：{policy.name}；未命中局面使用均匀合法动作")

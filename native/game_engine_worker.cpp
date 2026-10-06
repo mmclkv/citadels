@@ -26,7 +26,6 @@ using namespace citadels::native;
 
 namespace {
 std::unordered_map<std::string, NativeGameState> games;
-std::unordered_map<std::string, CfrHistory> cfr_histories;
 CfrClient cfr_client;
 
 void emit_error(const std::string& id, const std::string& message) {
@@ -101,8 +100,6 @@ int main() {
         if (!new_game) throw std::runtime_error("create 缺少 newGame");
         const auto state = create_native_game(*new_game);
         games[game_id] = state;
-        cfr_histories.erase(game_id);
-        cfr_histories.emplace(game_id, CfrHistory(state));
         std::cout << "{\"v\":1,\"t\":\"game_result\",\"id\":";
         write_json_string(std::cout, id);
         std::cout << ",\"state\":"; write_native_state(std::cout, state);
@@ -166,8 +163,9 @@ int main() {
           if (actor < 0 || actor >= static_cast<int>(state.players.size())) break;
           if (network_players.count(state.players[actor].id)) break;
           const auto actions = rules.legal_actions(state, actor);
-          const auto decision = cfr_client.decide(cfr_histories.at(game_id).information(state, actor),
-              cfr_action_set(state, actor, actions), seed + static_cast<uint32_t>(steps) * 0x9E3779B1u);
+          const auto abstract_actions = cfr_abstract_actions(state, actor, actions);
+          const auto decision = cfr_client.decide(cfr_abstract_information(state, actor, abstract_actions),
+              abstract_actions, seed + static_cast<uint32_t>(steps) * 0x9E3779B1u);
           const int selected = decision.selected;
           cfr_hits += decision.hit; cfr_misses += !decision.hit;
           if (selected < 0 || selected >= static_cast<int>(actions.size())) {
@@ -204,7 +202,6 @@ int main() {
             detail << "])";
             throw std::runtime_error(detail.str());
           }
-          cfr_histories.at(game_id).transition(previous, actor, action, state);
           ++steps;
         }
         const int actor = rules.next_player(state);
@@ -236,8 +233,9 @@ int main() {
         const int actor = player_index(state, string_field(request, "playerId"));
         const auto actions = actor < 0 ? std::vector<NativeSearchAction>{} : rules.legal_actions(state, actor);
         if (mode == "npc") {
+          const auto abstract_actions = actor < 0 ? CfrActionSet{} : cfr_abstract_actions(state, actor, actions);
           const auto decision = actor < 0 ? CfrClient::Decision{} : cfr_client.decide(
-              cfr_histories.at(game_id).information(state, actor), cfr_action_set(state, actor, actions),
+              cfr_abstract_information(state, actor, abstract_actions), abstract_actions,
               static_cast<uint32_t>(number_field(request, "seed", 1)));
           const int selected=decision.selected;
           std::cout << "{\"v\":1,\"t\":\"npc_result\",\"id\":";
@@ -289,7 +287,6 @@ int main() {
           detail << "）";
           throw std::runtime_error(detail.str());
         }
-        cfr_histories.at(game_id).transition(previous, actor, *canonical, state);
         std::cout << "{\"v\":1,\"t\":\"game_result\",\"id\":";
         write_json_string(std::cout, id);
         if (bool_field(request, "returnState", true)) {
@@ -298,7 +295,6 @@ int main() {
         std::cout << ",\"round\":" << state.round << "}\n" << std::flush;
       } else if (mode == "close") {
         games.erase(found);
-        cfr_histories.erase(game_id);
         std::cout << "{\"v\":1,\"t\":\"closed\",\"id\":";
         write_json_string(std::cout, id);
         std::cout << "}\n" << std::flush;

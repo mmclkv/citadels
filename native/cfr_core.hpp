@@ -18,7 +18,7 @@ namespace citadels::native {
 
 struct CfrEntry {
   std::vector<std::string> actions;
-  std::vector<double> regrets, strategy_sum;
+  std::vector<double> regrets, strategy_sum, baseline;
   // Values are stored multiplied by exp(-scale). Separate scales preserve
   // regret matching and average-policy normalization without weight clipping.
   double regret_scale = 0, strategy_scale = 0;
@@ -53,6 +53,7 @@ class CfrTable {
     auto& entry = it->second;
     if (inserted) {
       entry.actions = actions; entry.regrets.assign(actions.size(), 0); entry.strategy_sum.assign(actions.size(), 0);
+      entry.baseline.assign(actions.size(),0);
     } else if (entry.actions != actions) {
       throw std::runtime_error("CFR information set has inconsistent legal action support");
     }
@@ -68,7 +69,7 @@ class CfrTable {
     return cfr_normalize(found->second.strategy_sum);
   }
   void save(std::ostream& out) const {
-    out << "{\"format\":\"citadels-mccfr-v1\",\"contract\":";
+    out << "{\"format\":\"citadels-mccfr-v2\",\"contract\":";
     write_json_string(out, contract);
     out << ",\"iterations\":" << iterations << ",\"episodes\":" << episodes << "}\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
@@ -79,6 +80,8 @@ class CfrTable {
       for (size_t a = 0; a < entry.regrets.size(); ++a) { if (a) out << ','; out << entry.regrets[a]; }
       out << "],\"strategy\":[";
       for (size_t a = 0; a < entry.strategy_sum.size(); ++a) { if (a) out << ','; out << entry.strategy_sum[a]; }
+      out << "],\"baseline\":[";
+      for (size_t a=0;a<entry.baseline.size();++a){if(a)out<<',';out<<entry.baseline[a];}
       out << "],\"regretScale\":" << entry.regret_scale
           << ",\"strategyScale\":" << entry.strategy_scale << "}\n";
     }
@@ -88,7 +91,7 @@ class CfrTable {
     CfrTable replacement; std::string line;
     if (!std::getline(input, line)) throw std::runtime_error("Empty CFR checkpoint");
     const auto header = parse_json(line);
-    if (string_field(header, "format") != "citadels-mccfr-v1" ||
+    if (string_field(header, "format") != "citadels-mccfr-v2" ||
         string_field(header, "contract") != expected_contract)
       throw std::runtime_error("Incompatible CFR rules/catalog/information schema");
     replacement.contract = expected_contract;
@@ -114,6 +117,8 @@ class CfrTable {
         }
       };
       read("regrets", entry.regrets, false); read("strategy", entry.strategy_sum, true);
+      read("baseline",entry.baseline,false);
+      for(double b:entry.baseline)if(std::abs(b)>1)throw std::runtime_error("Invalid CFR baseline");
       const auto scale = [&](const char* field) {
         const auto& x = required_field(record, field);
         if (!x.is_number() || !std::isfinite(x.as_number())) throw std::runtime_error("Invalid CFR accumulator scale");
@@ -134,9 +139,10 @@ struct CfrTraceStep {
   std::vector<double> policy;
   double sampling_probability = 0;
   long double log_my_reach = 0, log_opponent_reach = 0, log_sample_reach = 0;
+  std::vector<double> baseline; // Frozen before sampling; own-payoff baseline only.
 };
 
-// Vanilla zero-baseline outcome-sampling estimator. Tail estimates already
+// Baseline-corrected outcome-sampling estimator. Tail estimates already
 // include policy/sample ratios, so prefix weighting is applied only once.
 // Chance is a uniformly sampled initial uint32 seed; all subsequent
 // engine randomness is deterministic conditional on that latent seed. Its
@@ -146,7 +152,21 @@ inline void cfr_update_episode(CfrTable& table, const std::vector<CfrTraceStep>&
                                 int update_player, double terminal_utility) {
   if (!std::isfinite(terminal_utility)) throw std::runtime_error("Invalid MCCFR terminal utility");
   struct SignedLog { int sign = 0; long double magnitude = 0; };
-  struct Delta { std::string key; std::vector<SignedLog> regrets, average; };
+  const auto from_double=[](double v)->SignedLog {
+    return {v>0?1:v<0?-1:0,v==0?0:std::log(std::abs(static_cast<long double>(v)))};
+  };
+  const auto combine=[](SignedLog a,SignedLog b)->SignedLog {
+    if(!a.sign)return b;if(!b.sign)return a;
+    if(a.magnitude<b.magnitude)std::swap(a,b);
+    if(a.sign==b.sign)return {a.sign,a.magnitude+std::log1p(std::exp(b.magnitude-a.magnitude))};
+    if(a.magnitude==b.magnitude)return {};
+    return {a.sign,a.magnitude+std::log(-std::expm1(b.magnitude-a.magnitude))};
+  };
+  const auto multiply=[](SignedLog a,long double log_factor)->SignedLog {
+    if(log_factor==-std::numeric_limits<long double>::infinity())return {};
+    if(a.sign)a.magnitude+=log_factor;return a;
+  };
+  struct Delta { std::string key; std::vector<SignedLog> regrets, average; size_t selected=0; double target=0; bool learn_baseline=false; };
   std::vector<Delta> deltas;
   SignedLog value{terminal_utility > 0 ? 1 : terminal_utility < 0 ? -1 : 0,
                   terminal_utility == 0 ? 0 : std::log(std::abs(static_cast<long double>(terminal_utility)))};
@@ -157,23 +177,33 @@ inline void cfr_update_episode(CfrTable& table, const std::vector<CfrTraceStep>&
       throw std::runtime_error("Invalid MCCFR sampling probability");
     for (double p : step.policy) if (!std::isfinite(p) || p < 0 || p > 1)
       throw std::runtime_error("Invalid MCCFR policy");
-    SignedLog selected_value = value;
-    selected_value.magnitude -= std::log(static_cast<long double>(step.sampling_probability));
-    const double selected_policy = step.policy[step.selected];
-    value = selected_value;
-    if (selected_policy == 0) value.sign = 0;
-    else value.magnitude += std::log(static_cast<long double>(selected_policy));
-    if (step.actor != update_player) continue;
+    if(step.actor!=update_player) {
+      value=multiply(value,step.policy[step.selected]==0?-std::numeric_limits<long double>::infinity():
+        std::log(static_cast<long double>(step.policy[step.selected])/step.sampling_probability));
+      continue;
+    }
+    if(!step.baseline.empty() && step.baseline.size()!=step.policy.size())throw std::runtime_error("Invalid baseline size");
+    std::vector<SignedLog> children(step.policy.size());
+    for(size_t a=0;a<children.size();++a) {
+      const double b=step.baseline.empty()?0:step.baseline[a];
+      if(!std::isfinite(b)||std::abs(b)>1)throw std::runtime_error("Invalid frozen baseline");
+      children[a]=from_double(b);
+    }
+    Delta delta;delta.key=step.information;delta.selected=step.selected;delta.learn_baseline=!step.baseline.empty();
+    // Only baseline fitting is bounded. The regret/value estimator and
+    // importance weights below are never clipped.
+    delta.target=value.sign*(value.magnitude>=0?1:static_cast<double>(std::exp(value.magnitude)));
+    auto negative_baseline=children[step.selected];negative_baseline.sign=-negative_baseline.sign;
+    children[step.selected]=combine(children[step.selected],multiply(combine(value,negative_baseline),
+       -std::log(static_cast<long double>(step.sampling_probability))));
+    value={};
+    for(size_t a=0;a<children.size();++a)if(step.policy[a]>0)
+      value=combine(value,multiply(children[a],std::log(static_cast<long double>(step.policy[a]))));
     const auto weight = step.log_opponent_reach - step.log_sample_reach;
     const auto average_weight = step.log_my_reach - step.log_sample_reach;
-    Delta delta; delta.key = step.information;
     for (size_t a = 0; a < step.policy.size(); ++a) {
-      SignedLog regret;
-      if (a == step.selected && selected_value.sign && selected_policy < 1)
-        regret = {selected_value.sign, selected_value.magnitude + std::log1p(-static_cast<long double>(selected_policy)) + weight};
-      else if (a != step.selected && value.sign) regret = {-value.sign, value.magnitude + weight};
-      if (weight == -std::numeric_limits<long double>::infinity()) regret.sign = 0;
-      delta.regrets.push_back(regret);
+      auto negative_value=value;negative_value.sign=-negative_value.sign;
+      delta.regrets.push_back(multiply(combine(children[a],negative_value),weight));
       delta.average.push_back(step.policy[a] == 0 || average_weight == -std::numeric_limits<long double>::infinity()
         ? SignedLog{} : SignedLog{1, average_weight + std::log(static_cast<long double>(step.policy[a]))});
     }
@@ -200,6 +230,7 @@ inline void cfr_update_episode(CfrTable& table, const std::vector<CfrTraceStep>&
       add(entry.regrets, entry.regret_scale, a, delta.regrets[a]);
       add(entry.strategy_sum, entry.strategy_scale, a, delta.average[a]);
     }
+    if(delta.learn_baseline)entry.baseline[delta.selected]=.9*entry.baseline[delta.selected]+.1*delta.target;
   }
   for (auto& [key, entry] : changed) table.entries.at(key) = std::move(entry);
   ++table.episodes;

@@ -5,6 +5,7 @@
 #include <iostream>
 #include "cfr_core.hpp"
 #include "cfr_information.hpp"
+#include "cfr_abstraction.hpp"
 #include "game_setup.hpp"
 #ifdef _WIN32
 #include <windows.h>
@@ -40,7 +41,7 @@ void load_checkpoint(CfrTable& table, const std::string& path, const std::string
 
 bool episode(CfrTable& table, NativeGameState state, int updating, double exploration,
              int max_steps, std::mt19937& rng) {
-  NativeGameAdapter rules; CfrHistory history(state);
+  NativeGameAdapter rules;
   std::vector<CfrTraceStep> trace;
   long double my = 0, opponents = 0, sampled = 0;
   for (int step = 0; state.phase != NativePhase::GameOver; ++step) {
@@ -48,13 +49,18 @@ bool episode(CfrTable& table, NativeGameState state, int updating, double explor
     const int actor = rules.next_player(state);
     if (actor < 0) throw std::runtime_error("MCCFR game has no actor before terminal");
     const auto legal = rules.legal_actions(state, actor);
-    const auto actions = cfr_action_set(state, actor, legal);
-    const auto info = history.information(state, actor);
-    const auto policy = cfr_normalize(table.lookup(info, actions.keys).regrets);
+    const auto actions = cfr_abstract_actions(state, actor, legal);
+    const auto info = cfr_abstract_information(state, actor, actions);
+    const auto& entry=table.lookup(info, actions.keys);
+    auto policy = cfr_normalize(entry.regrets);
+    // Same target strategy is accumulated and served at inference. A small
+    // tremble prevents deterministic cycles in the imperfect-recall game.
+    for(auto& p:policy)p=.98*p+.02/policy.size();
     auto behavior = policy;
     if (actor == updating) for (double& p : behavior) p = (1-exploration)*p + exploration/behavior.size();
     const auto selected = cfr_sample(behavior, rng);
     trace.push_back({info, actor, selected, policy, behavior[selected], my, opponents, sampled});
+    if(actor==updating)trace.back().baseline=entry.baseline;
     const auto log_policy = policy[selected] == 0 ? -std::numeric_limits<long double>::infinity() : std::log(static_cast<long double>(policy[selected]));
     if (actor == updating) my += log_policy; else opponents += log_policy;
     sampled += std::log(static_cast<long double>(behavior[selected]));
@@ -66,7 +72,6 @@ bool episode(CfrTable& table, NativeGameState state, int updating, double explor
           << ", pending=" << before.pending_kind << ", round=" << before.round << ", action=";
       write_native_action(message, action); throw std::runtime_error(message.str());
     }
-    history.transition(before, actor, action, state);
   }
   cfr_update_episode(table, trace, updating, native_terminal_reward(state, updating));
   return true;

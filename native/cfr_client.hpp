@@ -17,6 +17,7 @@
 #include <unistd.h>
 #endif
 #include "cfr_information.hpp"
+#include "cfr_abstraction.hpp"
 #include "json_value.hpp"
 #include "state_writer.hpp"
 

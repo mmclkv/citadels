@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def rules_contract() -> str:
     # Content-based, so checkpoints move between Linux/Windows checkouts.
-    digest = hashlib.sha256(b"citadels-mccfr-v1:recall:competition-rank:latent-seed")
+    digest = hashlib.sha256(b"citadels-mccfr-v2:abstract:baseline:tremble:competition-rank:latent-seed")
     for path in sorted([*(ROOT / "native").glob("*.hpp"), ROOT / "native/cfr_worker.cpp",
                         ROOT / "native/game_engine_worker.cpp"]):
         digest.update(path.name.encode("utf-8"))
