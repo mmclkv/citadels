@@ -15,20 +15,27 @@ from python_backend.rooms import RoomRegistry, lobby_view
 
 
 class CfrConfigurationTests(unittest.TestCase):
-    def test_single_bot_type_migrates_all_old_difficulties(self):
+    def test_default_and_legacy_cfr_rooms_use_hard_mcts(self):
+        for config in ({}, {"botType": "cfr"}):
+            room = RoomRegistry().create_room("Host", {"bots": 1, **config})
+            self.assertEqual(room["config"]["botType"], "npc")
+            self.assertEqual(room["config"]["botLevel"], "hard")
+            self.assertEqual(room["seats"][1]["botLevel"], "hard")
+
+    def test_rooms_restore_heuristic_difficulties(self):
         for kind in ("npc", "npc-easy", "npc-normal", "npc-hard", "cfr"):
             room = RoomRegistry().create_room("Host", {"bots": 1, "botType": kind, "botLevel": "hard"})
             seat = lobby_view(room)["seats"][1]
-            self.assertEqual(seat["botType"], "cfr")
-            self.assertNotIn("botLevel", seat)
-            self.assertNotIn("heuristicMcts", seat)
+            self.assertEqual(seat["botType"], "npc")
+            self.assertEqual(seat["botLevel"], kind[4:] if kind.startswith("npc-") else "hard")
+            self.assertEqual(seat["heuristicMcts"]["simulations"], 10000)
 
     def test_neural_and_agent_are_not_migrated(self):
         for kind in ("agent", "neural"):
             room = RoomRegistry().create_room("Host", {"bots": 1, "botType": kind})
             self.assertEqual(room["seats"][1]["botType"], kind)
 
-    def test_sampler_passes_same_cfr_environment_to_its_game_process(self):
+    def test_sampler_no_longer_requires_cfr_worker(self):
         from python_backend import training_runtime
         cfr_env = {"CITADELS_CFR_WORKER": "cfr_worker", "CITADELS_CFR_CONTRACT": "contract",
                    "CITADELS_CFR_POLICY": "policy.jsonl"}
@@ -37,8 +44,7 @@ class CfrConfigurationTests(unittest.TestCase):
               mock.patch.object(training_runtime, "GameEngineWorker") as constructor,
               mock.patch.object(training_runtime.atexit, "register")):
             training_runtime._game_worker({"gameEnginePath": "game_engine", "cfrEnvironment": cfr_env})
-            environment = constructor.call_args.kwargs["env"]
-            for key, value in cfr_env.items(): self.assertEqual(environment[key], value)
+            self.assertNotIn("env", constructor.call_args.kwargs)
 
 
 @unittest.skipUnless(os.environ.get("CITADELS_TEST_CFR_WORKER") and os.environ.get("CITADELS_TEST_GAME_ENGINE"),
@@ -85,23 +91,22 @@ class CfrNativeTests(unittest.TestCase):
             self.assertEqual(records[0]["episodes"], 0)
             self.assertTrue(all(all(x == 0 for x in r["regrets"]+r["strategy"]) for r in records[1:]))
 
-    def test_untrained_room_reports_fallback_and_returns_legal_action(self):
+    def test_legacy_cfr_room_uses_heuristic_search(self):
         worker = GameEngineWorker(os.environ["CITADELS_TEST_GAME_ENGINE"], env=self.environment)
         try:
             setup = {"catalog": self.catalog, "seed": 11, "endDistricts": 4, "charSetMode": "random",
                      "seats": [{"id": f"p{i}", "isBot": True, "botType": "cfr"} for i in range(5)]}
             before = worker.create_game(setup, "room")
             actor = worker.current("room")["playerId"]
-            result = worker._request("npc", gameId="room", playerId=actor, seed=19)
-            self.assertFalse(result["cfr"]["configured"])
-            self.assertEqual(result["cfr"]["fallback"], "uniform-legal-actions")
+            result = worker._request("npc", gameId="room", playerId=actor, seed=19,
+                                     heuristicMcts={"simulations": 8, "timeBudgetMs": 0, "criticalTimeBudgetMs": 0})
+            self.assertTrue(result["heuristicSearch"]["searched"])
             self.assertIn(result["action"], worker.legal_actions(game_id="room", player_id=actor)["actions"])
             self.assertEqual(before, worker.snapshot("room"))
             advanced = worker._request("advance_npcs", gameId="room", networkPlayerIds=[], seed=71,
-                                       maxSteps=10000, maxRounds=1000, includeTrainingFeatures=False)
-            self.assertTrue(advanced["gameOver"])
-            self.assertEqual(advanced["cfr"]["hits"], 0)
-            self.assertGreater(advanced["cfr"]["misses"], 0)
+                                       maxSteps=1, maxRounds=1000, includeTrainingFeatures=False)
+            self.assertEqual(advanced["steps"], 1)
+            self.assertGreater(advanced["heuristicSearch"]["searches"], 0)
         finally:
             worker.close()
 
@@ -121,14 +126,14 @@ class CfrNativeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertEqual(json.loads(result.stdout)["t"], "error")
 
-    def test_uniform_policy_completes_two_to_eight_player_games(self):
+    def test_heuristic_policy_completes_two_to_eight_player_games(self):
         worker = GameEngineWorker(os.environ["CITADELS_TEST_GAME_ENGINE"], env=self.environment)
         try:
             for players in range(2, 9):
                 with self.subTest(players=players):
                     setup = {"catalog": self.catalog, "seed": 173+players, "endDistricts": 4,
                              "charSetMode": "random", "seats": [
-                                 {"id": f"p{i}", "isBot": True, "botType": "cfr"} for i in range(players)]}
+                                 {"id": f"p{i}", "isBot": True, "botType": "npc", "botLevel": "normal"} for i in range(players)]}
                     worker.create_game(setup, "game")
                     result = worker._request("advance_npcs", gameId="game", networkPlayerIds=[],
                                              seed=113, maxSteps=20000, maxRounds=1000,

@@ -258,21 +258,7 @@ class NativeWorkerManager:
                     if torch is not None else None)
         with self._lock:
             game_executable = self._build_game_engine(compiler, environment, devcmd)
-            cfr_executable = self._build_game_engine(compiler, environment, devcmd,
-                                                     source_name="cfr_worker.cpp", stem="cfr_worker")
-            from .cfr_runtime import rules_contract
-            environment["CITADELS_CFR_WORKER"] = str(cfr_executable)
-            environment["CITADELS_CFR_CONTRACT"] = rules_contract()
-            if environment.get("CITADELS_CFR_POLICY"):
-                policy = Path(environment["CITADELS_CFR_POLICY"]).resolve()
-                with policy.open(encoding="utf-8") as stream:
-                    header = json.loads(stream.readline())
-                if header.get("format") != "citadels-mccfr-v2" or header.get("contract") != environment["CITADELS_CFR_CONTRACT"]:
-                    raise RuntimeError("CFR 权重与当前规则/卡牌/信息集版本不兼容，需要重新训练")
-                environment["CITADELS_CFR_POLICY"] = str(policy)
-                self.log(f"[cfr] 已配置平均策略：{policy.name}；未命中局面使用均匀合法动作")
-            else:
-                self.log("[cfr] 警告：尚未配置 CFR 权重，电脑仅使用均匀合法动作，未具备训练后的强度")
+            self.log("[game] 电脑使用启发式策略；困难档启用 MCTS、rollout 和跨行动树复用")
             mcts_executable = None
             if not skip_neural_policy:
                 assert torch is not None and identity is not None

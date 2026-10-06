@@ -83,15 +83,24 @@
           <option value="8">8 人</option>
         </select>
       </label>
+      <label class="field" hidden>
+        <span>电脑难度（兼容旧配置）</span>
+        <select id="cfg-level">
+          <option value="easy">简单</option>
+          <option value="normal" selected>普通</option>
+          <option value="hard">困难</option>
+        </select>
+      </label>
       <label class="field">
         <span>电脑类型</span>
         <select id="cfg-bot-type">
-          <option value="cfr" selected>CFR 电脑</option>
+          <option value="npc-easy">启发式电脑 · 简单</option>
+          <option value="npc-normal">启发式电脑 · 普通</option>
+          <option value="npc-hard" selected>启发式电脑 · 困难（MCTS）</option>
           <option value="neural">策略神经网络（仓库自带权重）</option>
           <option value="agent">AI Agent 电脑（大模型决策，需要联网）</option>
         </select>
       </label>
-      <p class="hint">CFR 电脑使用服务器配置的平均策略；尚未训练或未命中的局面采用均匀合法动作，强度取决于训练覆盖率。</p>
       <label class="field neural-only" hidden>
         <span>MCTS 模拟次数（0 = 关闭）</span>
         <input id="cfg-mcts-sims" type="number" min="0" step="50" value="500" inputmode="numeric">

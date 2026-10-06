@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import cards
 from .rooms import (RoomRegistry, _bot_seat, _empty_seat, _seat_mcts,
-                    lobby_view, public_room)
+                    _seat_heuristic_mcts, lobby_view, public_room)
 from .views import sanitize
 from .agent import AgentClient, AgentError, config_from_env
 from .voice import VoiceService
@@ -490,7 +490,7 @@ class PythonServer:
                 old = old_players.get(player.get("id"), {})
                 if "mcts" in old:
                     player["mcts"] = old["mcts"]
-                for key in ("disconnected", "left"):
+                for key in ("heuristicMcts", "disconnected", "left"):
                     if key in old:
                         player[key] = old[key]
             merged = {**retained, **native_state}
@@ -1338,7 +1338,7 @@ class PythonServer:
         state = room.get("state")
         actor_id = self._bot_actor(state) if state else None
         actor = next((p for p in state["players"] if p["id"] == actor_id), None) if actor_id else None
-        if not actor or not actor.get("isBot") or actor.get("botType", "cfr") not in ("cfr", "npc", "agent", "neural"):
+        if not actor or not actor.get("isBot") or actor.get("botType", "npc") not in ("npc", "agent", "neural"):
             return
 
         async def run_turns() -> None:
@@ -1346,7 +1346,7 @@ class PythonServer:
                 actor_id_now = self._bot_actor(state)
                 actor_now = next((p for p in state["players"] if p["id"] == actor_id_now), None)
                 if (not actor_now or not actor_now.get("isBot") or
-                        actor_now.get("botType", "cfr") not in ("cfr", "npc", "agent", "neural")):
+                        actor_now.get("botType", "npc") not in ("npc", "agent", "neural")):
                     break
                 if ((room.get("agentStatus") or {}).get("state") == "error" and
                         room["agentStatus"].get("playerId") == actor_now["id"] and
@@ -1406,7 +1406,8 @@ class PythonServer:
                         raise RuntimeError("NPC 策略需要运行中的 C++ 游戏引擎")
                     action = await asyncio.to_thread(
                         worker.decide_npc, game_id=str(room["id"]), player_id=actor_now["id"],
-                        seed=secrets.randbits(31))
+                        seed=secrets.randbits(32),
+                        heuristic_mcts=actor_now.get("heuristicMcts"))
                 if action is None:
                     break
                 result = await self._apply_game_action(room, actor_now["id"], action)
@@ -1538,7 +1539,7 @@ class PythonServer:
                     raise ValueError(status["message"])
             if updates.get("botType") == "agent" and not self._agent_status()["configured"]:
                 raise ValueError(self._agent_status()["message"])
-            for key in ("endDistricts", "charSetMode", "botType"):
+            for key in ("endDistricts", "charSetMode", "botType", "botLevel"):
                 if updates.get(key):
                     room["config"][key] = updates[key]
             if updates.get("botPace"):
@@ -1591,9 +1592,13 @@ class PythonServer:
                 previous = room["seats"][index]
                 bot_config = {**room["config"],
                               "mcts": message.get("mcts") or previous.get("mcts"),
-                              "botType": message.get("botType") or room["config"].get("botType")}
+                              "heuristicMcts": message.get("heuristicMcts") or previous.get("heuristicMcts"),
+                              "botType": message.get("botType") or room["config"].get("botType"),
+                              "botLevel": message.get("botLevel") or room["config"].get("botLevel")}
                 room["seats"][index] = _bot_seat(index, bot_config)
                 room["seats"][index]["mcts"] = _seat_mcts(bot_config["mcts"], room["config"])
+                if message.get("heuristicMcts"):
+                    room["seats"][index]["heuristicMcts"] = _seat_heuristic_mcts(message["heuristicMcts"])
             elif message.get("kind") == "open":
                 room["seats"][index] = _empty_seat()
             else:
@@ -1623,10 +1628,12 @@ class PythonServer:
                      "charSetMode": config["charSetMode"], "initialCrownSeat": 0,
                      "startingHand": 4, "startingGold": 2,
                      "seats": [{key: seat.get(key) for key in
-                                ("id", "name", "isBot", "botType")} for seat in seats],
+                                ("id", "name", "isBot", "botType", "botLevel")} for seat in seats],
                      "catalog": cards._catalog}, str(room["id"]))
                 for player in native_state["players"]:
                     seat = next(item for item in seats if item["id"] == player["id"])
+                    player["botLevel"] = seat.get("botLevel") or "hard"
+                    player["heuristicMcts"] = seat.get("heuristicMcts")
                     player["mcts"] = seat.get("mcts")
                 native_state.update({"roomId": room["id"],
                                      "config": {**config, "playerCount": len(seats),
@@ -1658,11 +1665,11 @@ class PythonServer:
             room["botTask"] = None
             room["agentStatus"] = None
             if message["mode"] == "npc":
-                actor["botType"] = "cfr"
+                actor["botType"] = "npc"
                 seat = next((s for s in room["seats"] if s["id"] == actor["id"]), None)
                 if seat:
-                    seat["botType"] = "cfr"
-                _append_game_log(room["state"], actor["name"] + " 已由房主切换为 CFR 电脑。", "sys")
+                    seat["botType"] = "npc"
+                _append_game_log(room["state"], actor["name"] + " 已由房主切换为普通电脑。", "sys")
             await self._broadcast_state(room)
             self._schedule_bot(room)
             return

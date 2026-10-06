@@ -56,6 +56,7 @@ function formConfig() {
     mctsBelief: !!$('mcts-belief') && $('mcts-belief').checked,
     selfPlayMode: $('self-play-mode').value,
     networkPlayerCount: +$('network-player-count').value,
+    heuristicDifficulty: $('heuristic-difficulty').value,
     curriculumStartPlayers: +$('curriculum-start-players').value,
     curriculumEndPlayers: +$('curriculum-end-players').value,
     curriculumStepGames: +$('curriculum-step-games').value
@@ -91,6 +92,7 @@ const CONFIG_FIELDS = [
   ['mctsBelief', 'mcts-belief', 'checked'],
   ['selfPlayMode', 'self-play-mode', 'select'],
   ['networkPlayerCount', 'network-player-count', 'number'],
+  ['heuristicDifficulty', 'heuristic-difficulty', 'select'],
   ['curriculumStartPlayers', 'curriculum-start-players', 'number'],
   ['curriculumEndPlayers', 'curriculum-end-players', 'number'],
   ['curriculumStepGames', 'curriculum-step-games', 'number']
@@ -372,11 +374,11 @@ function renderRuntime(status) {
     ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++ ISMCTS' : '—'],
     ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch' : '—'],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
-    ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (['network-vs-cfr', 'network-vs-heuristic'].includes(c.selfPlayMode) ? '策略网络 + CFR' : '课程式递增')],
+    ['自对弈阵容', c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
     ['状态 / 动作编码', 'v14 / v9（entity-v6）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
-    ['非网络电脑', 'CFR 平均策略（统一难度）'],
+    ['启发式难度', c.heuristicDifficulty || '—'],
     ['训练目标', 'MCTS 策略监督 + NPC 决策状态的终局价值监督'],
     ['MCTS', mctsLabel + ' · 深度 ' + (c.mctsMaxDepth || '—') +
       ' · 粒子 ' + (c.mctsParticles || '—') + ' · batch ' + (c.mctsBatchSize || '—')],
@@ -749,7 +751,7 @@ $('char-set').onchange = updateMctsHint;
 $('device').onchange = updateMctsHint;
 function updateCompositionUI() {
   const mode = $('self-play-mode').value;
-  $('network-player-count').disabled = !['network-vs-cfr', 'network-vs-heuristic'].includes(mode);
+  $('network-player-count').disabled = mode !== 'network-vs-heuristic';
   ['curriculum-start-players', 'curriculum-end-players', 'curriculum-step-games'].forEach(id => { $(id).disabled = mode !== 'curriculum'; });
 }
 $('self-play-mode').onchange = updateCompositionUI;

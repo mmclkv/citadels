@@ -272,7 +272,7 @@ def _network_count(config: dict, game_number: int, player_count: int) -> int:
     mode = config["selfPlayMode"]
     if mode == "all-network":
         return player_count
-    if mode in ("network-vs-cfr", "network-vs-heuristic"):
+    if mode == "network-vs-heuristic":
         return max(1, min(player_count, config["networkPlayerCount"] or 1))
     start = max(1, min(player_count, config["curriculumStartPlayers"] or 1))
     end = max(start, min(player_count, config["curriculumEndPlayers"] or player_count))
@@ -339,14 +339,7 @@ def _game_worker(config: dict):
     candidates = list((ROOT / "native").glob(f"game_engine-*{suffix}"))
     fallback = max(candidates, key=lambda item: item.stat().st_mtime_ns) if candidates else ROOT / "native" / f"game_engine{suffix}"
     path = config.get("gameEnginePath") or fallback
-    environment = os.environ.copy()
-    environment.update(config.get("cfrEnvironment") or {})
-    if not environment.get("CITADELS_CFR_WORKER"):
-        from .cfr_runtime import build_cfr_worker, rules_contract
-        cfr_executable, environment = build_cfr_worker()
-        environment["CITADELS_CFR_WORKER"] = str(cfr_executable)
-        environment["CITADELS_CFR_CONTRACT"] = rules_contract()
-    _SAMPLER_GAME_WORKER = GameEngineWorker(path, env=environment)
+    _SAMPLER_GAME_WORKER = GameEngineWorker(path)
     atexit.register(_close_sampler_worker)
     return _SAMPLER_GAME_WORKER
 
@@ -362,7 +355,8 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                            (float(config["temperatureEnd"]) - float(config["temperatureStart"])))
     network_seats = set((game_number - 1 + offset) % player_count for offset in range(network_count))
     seats = [{"id": f"train-{game_number}-{i}", "name": f"玩家 {i + 1}", "isBot": True,
-              "botType": "neural" if i in network_seats else "cfr"} for i in range(player_count)]
+              "botType": "neural" if i in network_seats else "npc",
+              "botLevel": config["heuristicDifficulty"]} for i in range(player_count)]
     if stop_event.is_set():
         return None
     worker = _native_worker(config)
@@ -795,7 +789,6 @@ class TrainingManager:
             default_game = (max(game_candidates, key=lambda item: item.stat().st_mtime_ns)
                             if game_candidates else ROOT / "native" / f"game_engine{suffix}")
             config["gameEnginePath"] = str(getattr(self.game_worker, "executable", "") or default_game)
-            config["cfrEnvironment"] = dict(getattr(self.game_worker, "cfr_environment", {}) or {})
             config["nativeModelPath"] = str(Path(native_model_dir.name) / "model.bin")
             self._model.save_flat(config["nativeModelPath"])
             action_version = 9

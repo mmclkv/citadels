@@ -18,7 +18,7 @@
 #include "game_adapter.hpp"
 #include "game_setup.hpp"
 #include "json_value.hpp"
-#include "cfr_client.hpp"
+#include "heuristic_search.hpp"
 #include "state_loader.hpp"
 #include "state_writer.hpp"
 
@@ -26,7 +26,33 @@ using namespace citadels::native;
 
 namespace {
 std::unordered_map<std::string, NativeGameState> games;
-CfrClient cfr_client;
+std::unordered_map<std::string, HeuristicSearchSession> heuristic_sessions;
+
+HeuristicSearchConfig heuristic_options(const JsonValue& request) {
+  auto config = heuristic_search_defaults();
+  const auto* value = request.get("heuristicMcts");
+  if (!value || !value->is_object()) return config;
+  const auto integer = [&](const char* key, int fallback, int minimum) {
+    const auto* field = value->get(key);
+    if (!field || !field->is_number()) return fallback;
+    const double number = field->as_number();
+    if (number < minimum || number > std::numeric_limits<int>::max()) return fallback;
+    return static_cast<int>(number);
+  };
+  config.simulations = integer("simulations", config.simulations, 1);
+  config.particles = integer("particles", config.particles, 1);
+  config.max_depth = integer("maxDepth", config.max_depth, 1);
+  config.time_budget_ms = integer("timeBudgetMs", config.time_budget_ms, 0);
+  config.critical_time_budget_ms = integer("criticalTimeBudgetMs", config.critical_time_budget_ms, 0);
+  config.rollout_steps = integer("rolloutSteps", config.rollout_steps, 0);
+  config.rollouts = integer("rollouts", config.rollouts, 1);
+  config.max_tree_nodes = integer("maxTreeNodes", config.max_tree_nodes, 1);
+  if (const auto* field = value->get("cPuct"); field && field->is_number())
+    config.c_puct = static_cast<float>(std::max(0.0, field->as_number()));
+  if (const auto* field = value->get("reuseTree"); field && field->is_bool())
+    config.reuse_tree = field->as_bool();
+  return config;
+}
 
 void emit_error(const std::string& id, const std::string& message) {
   std::cout << "{\"v\":1,\"t\":\"error\",\"id\":";
@@ -100,6 +126,7 @@ int main() {
         if (!new_game) throw std::runtime_error("create 缺少 newGame");
         const auto state = create_native_game(*new_game);
         games[game_id] = state;
+        heuristic_sessions.erase(game_id);
         std::cout << "{\"v\":1,\"t\":\"game_result\",\"id\":";
         write_json_string(std::cout, id);
         std::cout << ",\"state\":"; write_native_state(std::cout, state);
@@ -154,7 +181,10 @@ int main() {
         const int max_steps = std::max(1, int_field(request, "maxSteps", 60000));
         const uint32_t seed = static_cast<uint32_t>(number_field(request, "seed", 1));
         int steps = 0;
-        int cfr_hits = 0, cfr_misses = 0;
+        int heuristic_searches=0,heuristic_fallbacks=0,heuristic_visits=0;
+        int heuristic_reused=0,heuristic_rollout_actions=0,heuristic_new_visits=0;
+        double heuristic_ms=0;
+        std::string heuristic_failure;
         const bool include_training_features = bool_field(request, "includeTrainingFeatures");
         std::vector<std::pair<std::string, std::vector<float>>> training_samples;
         while (steps < max_steps && state.phase != NativePhase::GameOver &&
@@ -163,11 +193,15 @@ int main() {
           if (actor < 0 || actor >= static_cast<int>(state.players.size())) break;
           if (network_players.count(state.players[actor].id)) break;
           const auto actions = rules.legal_actions(state, actor);
-          const auto abstract_actions = cfr_abstract_actions(state, actor, actions);
-          const auto decision = cfr_client.decide(cfr_abstract_information(state, actor, abstract_actions),
-              abstract_actions, seed + static_cast<uint32_t>(steps) * 0x9E3779B1u);
-          const int selected = decision.selected;
-          cfr_hits += decision.hit; cfr_misses += !decision.hit;
+          const auto heuristic_decision = choose_native_npc(state, actor, actions,
+              seed + static_cast<uint32_t>(steps) * 0x9E3779B1u,heuristic_search_defaults(),&heuristic_sessions[game_id]);
+          const int selected=heuristic_decision.selected;
+          heuristic_searches+=heuristic_decision.searched;heuristic_fallbacks+=heuristic_decision.fallback;
+          heuristic_visits+=heuristic_decision.visits;heuristic_ms+=heuristic_decision.elapsed_ms;
+          heuristic_reused+=heuristic_decision.reused_visits;
+          heuristic_rollout_actions+=heuristic_decision.rollout_actions;
+          heuristic_new_visits+=heuristic_decision.new_visits;
+          if(heuristic_decision.fallback && heuristic_failure.empty())heuristic_failure=heuristic_decision.fallback_reason;
           if (selected < 0 || selected >= static_cast<int>(actions.size())) {
             std::ostringstream detail;
             detail << "NPC 策略未选出有效行动（player=" << state.players[actor].id
@@ -183,7 +217,8 @@ int main() {
             training_samples.emplace_back(state.players[actor].id,
                 encode_features(state, actor, 8));
           }
-          const auto previous = state;
+          std::optional<NativeGameState> previous;
+          if(!heuristic_sessions[game_id].tree.empty())previous=state;
           if (!rules.apply(state, actor, action)) {
             std::ostringstream detail;
             detail << "游戏主进程无法应用 NPC 合法行动（player=" << state.players[actor].id
@@ -202,13 +237,19 @@ int main() {
             detail << "])";
             throw std::runtime_error(detail.str());
           }
+          if(previous)heuristic_sessions[game_id].advance(*previous,actor,action,state);
           ++steps;
         }
         const int actor = rules.next_player(state);
         std::cout << "{\"v\":1,\"t\":\"advance_result\",\"id\":";
         write_json_string(std::cout, id);
         std::cout << ",\"steps\":" << steps << ",\"round\":" << state.round
-                  << ",\"cfr\":{\"hits\":" << cfr_hits << ",\"misses\":" << cfr_misses << "}"
+                  << ",\"heuristicSearch\":{\"searches\":" << heuristic_searches << ",\"fallbacks\":" << heuristic_fallbacks
+                  << ",\"visits\":" << heuristic_visits << ",\"newVisits\":" << heuristic_new_visits
+                  << ",\"reusedVisits\":" << heuristic_reused << ",\"rolloutActions\":" << heuristic_rollout_actions
+                  << ",\"elapsedMs\":" << heuristic_ms << ",\"fallbackReason\":";
+        write_json_string(std::cout,heuristic_failure);
+        std::cout << "}"
                   << ",\"gameOver\":" << (state.phase == NativePhase::GameOver ? "true" : "false")
                   << ",\"playerId\":";
         if (actor < 0 || actor >= static_cast<int>(state.players.size())) std::cout << "null";
@@ -233,20 +274,22 @@ int main() {
         const int actor = player_index(state, string_field(request, "playerId"));
         const auto actions = actor < 0 ? std::vector<NativeSearchAction>{} : rules.legal_actions(state, actor);
         if (mode == "npc") {
-          const auto abstract_actions = actor < 0 ? CfrActionSet{} : cfr_abstract_actions(state, actor, actions);
-          const auto decision = actor < 0 ? CfrClient::Decision{} : cfr_client.decide(
-              cfr_abstract_information(state, actor, abstract_actions), abstract_actions,
-              static_cast<uint32_t>(number_field(request, "seed", 1)));
+          const auto decision = choose_native_npc(state, actor, actions,
+              static_cast<uint32_t>(number_field(request, "seed", 1)),heuristic_options(request),&heuristic_sessions[game_id]);
           const int selected=decision.selected;
           std::cout << "{\"v\":1,\"t\":\"npc_result\",\"id\":";
           write_json_string(std::cout, id);
           std::cout << ",\"action\":";
           if (selected < 0 || selected >= static_cast<int>(actions.size())) std::cout << "null";
           else write_native_action(std::cout, actions[static_cast<size_t>(selected)]);
-          std::cout << ",\"cfr\":{\"hit\":" << (decision.hit ? "true" : "false")
-                    << ",\"configured\":" << (decision.configured ? "true" : "false")
-                    << ",\"fallback\":";
-          write_json_string(std::cout, decision.hit ? "" : "uniform-legal-actions");
+          std::cout << ",\"heuristicSearch\":{\"searched\":" << (decision.searched?"true":"false")
+                    << ",\"fallback\":" << (decision.fallback?"true":"false")
+                    << ",\"visits\":" << decision.visits << ",\"expansions\":" << decision.expansions
+                    << ",\"newVisits\":" << decision.new_visits << ",\"reusedVisits\":" << decision.reused_visits
+                    << ",\"retainedNodes\":" << decision.retained_nodes << ",\"rollouts\":" << decision.rollouts
+                    << ",\"rolloutActions\":" << decision.rollout_actions
+                    << ",\"particles\":" << decision.particles << ",\"elapsedMs\":" << decision.elapsed_ms << ",\"fallbackReason\":";
+          write_json_string(std::cout,decision.fallback_reason);
           std::cout << "}}\n" << std::flush;
         } else {
           std::cout << "{\"v\":1,\"t\":\"legal_actions_result\",\"id\":";
@@ -267,10 +310,10 @@ int main() {
         if (actor != rules.next_player(state)) throw std::runtime_error("不是该玩家的行动时机");
         const auto action = decode_action(*action_value);
         const auto legal = rules.legal_actions(state, actor);
-        const auto canonical = std::find_if(legal.begin(), legal.end(), [&](const auto& candidate) { return matches(candidate, action); });
-        if (canonical == legal.end())
+        if (std::none_of(legal.begin(), legal.end(), [&](const auto& candidate) { return matches(candidate, action); }))
           throw std::runtime_error("行动不在当前合法动作列表中");
-        const auto previous = state;
+        std::optional<NativeGameState> previous;
+        if(!heuristic_sessions[game_id].tree.empty())previous=state;
         if (!rules.apply(state, actor, action)) {
           std::ostringstream detail;
           detail << "游戏引擎拒绝行动"
@@ -287,6 +330,7 @@ int main() {
           detail << "）";
           throw std::runtime_error(detail.str());
         }
+        if(previous)heuristic_sessions[game_id].advance(*previous,actor,action,state);
         std::cout << "{\"v\":1,\"t\":\"game_result\",\"id\":";
         write_json_string(std::cout, id);
         if (bool_field(request, "returnState", true)) {
@@ -295,6 +339,7 @@ int main() {
         std::cout << ",\"round\":" << state.round << "}\n" << std::flush;
       } else if (mode == "close") {
         games.erase(found);
+        heuristic_sessions.erase(game_id);
         std::cout << "{\"v\":1,\"t\":\"closed\",\"id\":";
         write_json_string(std::cout, id);
         std::cout << "}\n" << std::flush;

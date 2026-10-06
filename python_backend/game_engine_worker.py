@@ -72,9 +72,10 @@ class GameEngineWorker:
     def legal_actions(self, *, game_id: str, player_id: str) -> dict:
         return self._request("actions", gameId=game_id, playerId=player_id)
 
-    def decide_npc(self, *, game_id: str, player_id: str, seed: int = 1):
+    def decide_npc(self, *, game_id: str, player_id: str, seed: int = 1,
+                   heuristic_mcts: dict | None = None):
         return self._request("npc", gameId=game_id, playerId=player_id,
-                             seed=int(seed)).get("action")
+                             seed=int(seed), heuristicMcts=heuristic_mcts or {}).get("action")
 
     def apply(self, *, game_id: str, player_id: str, action: dict,
               return_state: bool = True) -> dict:

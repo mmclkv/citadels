@@ -108,10 +108,12 @@ inline NativeGameState create_native_game(const JsonValue& request) {
     player.seat = static_cast<int>(i);
     player.gold = int_field(request, "startingGold", 2);
     player.is_bot = bool_field(source, "isBot");
-    player.bot_type = string_field(source, "botType", "cfr");
-    if (player.bot_type == "npc" || player.bot_type == "npc-easy" ||
-        player.bot_type == "npc-normal" || player.bot_type == "npc-hard") player.bot_type = "cfr";
-    player.bot_level.clear();
+    player.bot_type = string_field(source, "botType", "npc");
+    player.bot_level = string_field(source, "botLevel", "hard");
+    if (player.bot_type == "cfr") { player.bot_type = "npc"; player.bot_level = "hard"; }
+    if (player.bot_type == "npc-easy" || player.bot_type == "npc-normal" || player.bot_type == "npc-hard") {
+      player.bot_level = player.bot_type.substr(4); player.bot_type = "npc";
+    }
     player.connected = true;
     state.players.push_back(std::move(player));
   }
