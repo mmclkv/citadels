@@ -191,3 +191,8 @@
   color:#84e7b0;font-size:9px;font-weight:900;letter-spacing:.3px;white-space:nowrap}
 /* 顶栏避开刘海/浏览器上沿（桌面 env 为 0，尺寸不变） */
 .phone>.top{flex:0 0 auto;height:calc(51px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top)}
+/* 博物馆标签右上角露出馆下叠放张数；卡片很窄时会盖住名字末尾，这是允许的 */
+.city-mini{position:relative}
+.mini-museum{position:absolute;right:1px;top:50%;transform:translateY(-50%);pointer-events:none;
+  font-size:9.5px;font-weight:950;line-height:1;color:var(--gold);font-variant-numeric:tabular-nums;
+  text-shadow:0 1px 2px #000c,0 0 4px #000a}
