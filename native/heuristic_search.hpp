@@ -10,17 +10,10 @@ namespace citadels::native {
 
 // The heuristic opponent pursues first place. Keep a small rank component to
 // distinguish losing positions without making a safe second place attractive.
-inline constexpr double kHeuristicWinWeight = 0.9;
+inline constexpr double kHeuristicWinWeight = kWinFirstWeight;
 inline std::array<float,kValueSlots> heuristic_terminal_reward_vector(
     const NativeGameState& s,int player) {
-  auto values=native_terminal_reward_vector(s,player);
-  if(player<0 || player>=static_cast<int>(s.players.size()))return values;
-  for(size_t r=0;r<s.players.size() && r<kValueSlots;++r) {
-    // The shared rank reward is exactly 1 for every tied first-place player.
-    const double win=values[r]==1.0f?1.0:-1.0;
-    values[r]=static_cast<float>(kHeuristicWinWeight*win+(1-kHeuristicWinWeight)*values[r]);
-  }
-  return values;
+  return native_win_terminal_reward_vector(s,player);
 }
 
 // Reuse needs exact identity beyond the fixed-size neural feature slots.

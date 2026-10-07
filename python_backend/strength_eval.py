@@ -124,8 +124,8 @@ def run_game(engine, worker, policy, case, selection, config):
                               winShare=1 / winners if first else 0,
                               rank=round(1 + (1 - reward) * (case["players"] - 1) / 2))
                 if config.diagnostics:
-                    result['networkCalibration'] = value_calibration(network_values, rewards, case['seat'])
-                    result['searchCalibration'] = value_calibration(search_values, rewards, case['seat'])
+                    result['networkCalibration'] = value_calibration(network_values, outcome["valueRewards"], case['seat'])
+                    result['searchCalibration'] = value_calibration(search_values, outcome["valueRewards"], case['seat'])
                 break
             if steps >= config.max_steps or current["round"] > config.max_rounds:
                 failure = "step/round limit"

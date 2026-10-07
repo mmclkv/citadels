@@ -37,7 +37,7 @@ Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\pyth
 - 使用合法动作枚举与动作掩码，策略只在通过引擎校验的行动中采样。
 - 每次 Entity Transformer 训练启动时，Python 会把当前权重导出给 LibTorch worker，双方用相同输入比较策略 logits 与价值输出；超出容差会中止训练并报告最大误差。
 - Python 训练调度器按 `workers` 配置并行自对弈；每个采样进程让游戏引擎推进状态，并在网络行动时调用独立 MCTS worker 做 LibTorch 前向。主进程用 PyTorch 串行执行 MCTS 蒸馏更新。服务启动时分别检查并构建游戏引擎与搜索 worker，服务退出时清理两个进程。
-- 使用 MCTS 访问分布交叉熵、终局价值损失与熵正则；控制台把策略损失放在独立纵轴，并实时显示 MCTS 策略散度、梯度范数、显存、速度、推理延迟、分数和座位胜局。
+- 使用 MCTS 访问分布交叉熵与终局价值损失；价值训练和 MCTS 终局回传统一采用争第一目标（90% 夺冠、10% 名次，第一名含并列为 1，非第一名在 -1 到 -0.8 之间）。新检查点记录 `valueObjective=win-first-v1`；旧检查点可以续训，但已有权重需要继续训练适应新目标，replay buffer 每次启动为空。控制台实时显示策略散度、梯度范数、显存、速度、推理延迟、分数和座位胜局，名次统计与 CFR 奖励仍保留历史名次定义。
 - Entity Transformer 只支持 v6 架构；`fast`、`balanced`、`large` 三档控制网络规模。建议先用 `fast` 做短跑验证，再按速度选择档位。
 - 训练过程的模型存档位于 `training-data/checkpoint-XXXXXX.json.gz`，该目录已加入 `.gitignore`。
 

@@ -35,6 +35,23 @@ class NativeHeuristicSearchTests(unittest.TestCase):
     def tearDown(self):
         self.worker.close()
 
+    def test_terminal_value_rewards_prioritize_winning_and_preserve_rank_statistics(self):
+        for seat in self.new_game["seats"]:
+            seat["botLevel"] = "normal"
+        self.worker.create_game(self.new_game, "reward-objective")
+        while not self.worker.current("reward-objective")["gameOver"]:
+            result = self.worker._request("advance_npcs", gameId="reward-objective",
+                networkPlayerIds=[], seed=71, maxSteps=256, maxRounds=100, includeTrainingFeatures=False)
+            self.assertGreater(result["steps"], 0)
+            self.assertLess(result["state"]["round"], 100)
+        outcome = self.worker.current("reward-objective", include_rewards=True)
+        self.assertEqual(outcome["valueObjective"], "win-first-v1")
+        self.assertEqual(len(outcome["valueRewards"]), len(self.new_game["seats"]))
+        for rank, value in zip(outcome["rewards"], outcome["valueRewards"]):
+            self.assertAlmostEqual(value, .9 * (1 if rank == 1 else -1) + .1 * rank, places=5)
+        self.assertTrue(any(rank > 0 and value < 0 for rank, value in
+                            zip(outcome["rewards"], outcome["valueRewards"])))
+
     def test_real_game_npc_search_is_legal_and_does_not_mutate_game(self):
         before = self.worker.create_game(self.new_game, "real")
         actor = self.worker.current("real")["playerId"]

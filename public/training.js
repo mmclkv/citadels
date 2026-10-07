@@ -381,7 +381,7 @@ function renderRuntime(status) {
     ['状态 / 动作编码', 'v14 / v9（entity-v6）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['启发式难度', c.heuristicDifficulty || '—'],
-    ['训练目标', 'MCTS 策略监督 + NPC 决策状态的终局价值监督'],
+    ['训练目标', 'MCTS 策略监督 + 终局价值（90% 夺冠、10% 名次）'],
     ['MCTS', mctsLabel + ' · 深度 ' + (c.mctsMaxDepth || '—') +
       ' · 粒子 ' + (c.mctsParticles || '—') + ' · batch ' + (c.mctsBatchSize || '—')],
     ['日志文件', c.logFile || status.logFile || '—'],

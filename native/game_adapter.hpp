@@ -52,7 +52,7 @@ inline std::array<float, kValueSlots> native_terminal_reward_vector(
     const int player = (perspective_player + static_cast<int>(rel)) % static_cast<int>(state.players.size());
     const float total = scores[static_cast<size_t>(player)].total;
     // Competition ranking: equal totals share a rank; the next rank skips
-    // the tied places. This mirrors the Python training target.
+    // the tied places. Preserve this definition for rank statistics and CFR.
     size_t rank = 0;
     for (const auto& other : scores) if (other.total > total) ++rank;
     result[rel] = scores.size() == 1
@@ -63,6 +63,22 @@ inline std::array<float, kValueSlots> native_terminal_reward_vector(
 
 inline float native_terminal_reward(const NativeGameState& state, int player_index) {
   return native_terminal_reward_vector(state, player_index)[0];
+}
+
+// Search/value training pursue first place; rank remains a small tiebreaking
+// preference among losing positions. Keep the historical rank helpers above
+// for arena statistics and CFR, which have a separate objective.
+inline constexpr double kWinFirstWeight = 0.9;
+inline constexpr const char* kValueObjective = "win-first-v1";
+inline std::array<float,kValueSlots> native_win_terminal_reward_vector(
+    const NativeGameState& state,int player) {
+  auto values=native_terminal_reward_vector(state,player);
+  if(player<0 || player>=static_cast<int>(state.players.size()))return values;
+  for(size_t r=0;r<state.players.size() && r<kValueSlots;++r){
+    const double win=values[r]==1.0f?1.0:-1.0;
+    values[r]=static_cast<float>(kWinFirstWeight*win+(1-kWinFirstWeight)*values[r]);
+  }
+  return values;
 }
 
 struct NativeSearchAction {
@@ -992,12 +1008,12 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   }
 
   float terminal_value(const NativeGameState& state, int player) const override {
-    return native_terminal_reward(state, player);
+    return native_win_terminal_reward_vector(state, player)[0];
   }
 
   std::array<float, kValueSlots> terminal_value_vector(
       const NativeGameState& state, int player) const override {
-    return native_terminal_reward_vector(state, player);
+    return native_win_terminal_reward_vector(state, player);
   }
 
   InformationSetKey information_set_hash(const NativeGameState& state, int player) const override {

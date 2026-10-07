@@ -146,6 +146,12 @@ int main() {
           if (i) std::cout << ',';
           std::cout << native_terminal_reward(state, static_cast<int>(i));
         }
+        std::cout << "],\"valueObjective\":";write_json_string(std::cout,kValueObjective);
+        std::cout << ",\"valueRewards\":[";
+        if (include_rewards) for (size_t i = 0; i < state.players.size(); ++i) {
+          if (i) std::cout << ',';
+          std::cout << native_win_terminal_reward_vector(state,static_cast<int>(i))[0];
+        }
         std::cout << "]}\n" << std::flush;
       } else if (mode == "decision") {
         const int actor = rules.next_player(state);

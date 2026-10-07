@@ -20,7 +20,9 @@ public-material strength (temperature 6), so strong rivals matter more than weak
 ones. Terminal first place, including tied first place, scores 1; losing positions
 score between -1 and -0.8 with a small preference for higher rank. The evaluator,
 rollout tails and MCTS terminal backups all use this same objective. The shared
-game adapter, neural/CFR training rank rewards and easy/normal policies are unchanged.
+game adapter and neural value training now share this terminal objective. CFR
+and arena rank statistics retain the historical rank rewards; easy/normal
+policies are unchanged.
 
 Search statistics survive consecutive compatible actions in a game-local session.
 After an actual action, the matching action/information-set child becomes the new

@@ -113,8 +113,9 @@ void check_win_objective(){
     require(0.4*second[1]+0.6*(-1)>second[0],"search prefers safe second to a real winning chance");
     require(search_rules.terminal_value_vector(s,0)==second && search_rules.terminal_value(s,0)==second[0],
             "search terminal backup uses the rank objective");
-    require(shared_rules.terminal_value_vector(s,0)==native_terminal_reward_vector(s,0) &&
-            shared_rules.terminal_value(s,0)>0,"shared training rank objective changed");
+    require(shared_rules.terminal_value_vector(s,0)==second && shared_rules.terminal_value(s,0)==second[0],
+            "neural search and heuristic search use different objectives");
+    require(native_terminal_reward(s,0)>0,"historical rank statistics or CFR objective changed");
     const auto rotated=heuristic_terminal_reward_vector(s,1);
     for(int i=0;i<count;++i)require(rotated[i]==second[(i+1)%count],"terminal reward seat order changed");
     tied.phase=NativePhase::GameOver;

@@ -133,7 +133,8 @@ class ArenaTests(unittest.TestCase):
             def create_game(self, settings, game_id):
                 self.settings = settings
             def current(self, game_id, include_rewards=False):
-                return {'gameOver': self.count == 2, 'round': 1, 'playerId': 'p0', 'rewards': [1., -1.]}
+                return {'gameOver': self.count == 2, 'round': 1, 'playerId': 'p0', 'rewards': [1., -1.],
+                        'valueRewards': [1., -1.], 'valueObjective': 'win-first-v1'}
             def decision(self, game_id):
                 return {'state': {'step': self.count}, 'actions': [{'type': 'forced'}] if not self.count else
                         [{'type': 'a'}, {'type': 'b'}]}
@@ -167,6 +168,23 @@ class ArenaTests(unittest.TestCase):
         self.assertTrue(worker.request['policy_only'])
         self.assertEqual(result['networkCalibration']['vectorMSE'], 0)
         self.assertEqual(result['searchCalibration']['outsideRangeFraction'], 0)
+
+        class FivePlayerEngine(Engine):
+            def current(self, game_id, include_rewards=False):
+                return {'gameOver': self.count == 2, 'round': 1, 'playerId': 'p0',
+                        'rewards': [1., .5, 0., -.5, -1.],
+                        'valueRewards': [1., -.85, -.9, -.95, -1.], 'valueObjective': 'win-first-v1'}
+        class FivePlayerWorker(Worker):
+            def search(self, **kwargs):
+                response = super().search(**kwargs)
+                response['networkValueVector'] = response['valueVector'] = [1., -.85, -.9, -.95, -1.] + [100.] * 3
+                return response
+        result = run_game(FivePlayerEngine(), FivePlayerWorker(), policy,
+                          schedule(ArenaConfig(players=(5,)))[0], 'argmax',
+                          ArenaConfig(players=(5,), diagnostics=True))
+        self.assertEqual(result['networkCalibration']['vectorMSE'], 0)
+        self.assertEqual(result['searchCalibration']['vectorMSE'], 0)
+        self.assertEqual(result['rank'], 1)
 
 
 if __name__ == '__main__':

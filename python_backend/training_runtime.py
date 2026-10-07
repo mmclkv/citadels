@@ -39,6 +39,22 @@ _SERVER_NATIVE_WORKER = None
 _SERVER_GAME_WORKER = None
 REPLAY_MAX_GAMES = 128
 NETWORK_METRIC_WINDOW = 50
+VALUE_OBJECTIVE = "win-first-v1"
+
+
+def _terminal_value_targets(outcome: dict, player_index: int, count: int):
+    """Use engine win-first rewards, rotated to the sample actor's seat order."""
+    if outcome.get("valueObjective") != VALUE_OBJECTIVE:
+        raise RuntimeError("游戏主进程的价值目标不是 win-first-v1，请重新构建并启动引擎")
+    reward = np.asarray(outcome["valueRewards"], dtype=np.float32)
+    if reward.shape != (count,) or not np.all(np.isfinite(reward)):
+        raise RuntimeError("游戏主进程返回的终局价值奖励无效")
+    relative = np.zeros(8, dtype=np.float32)
+    relative[:min(8, count)] = [reward[(player_index + i) % count]
+                                for i in range(min(8, count))]
+    mask = np.zeros(8, dtype=np.float32)
+    mask[:min(8, count)] = 1
+    return relative, mask
 
 
 class RecentNetworkMetrics:
@@ -457,6 +473,8 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
         current = game_worker.current(game_id, include_rewards=True)
         state = game_worker.snapshot(game_id)
         completed = bool(current.get("gameOver"))
+        if completed and current.get("valueObjective") != VALUE_OBJECTIVE:
+            raise RuntimeError("游戏主进程的价值目标不是 win-first-v1，请重新构建并启动引擎")
         rounds = max(rounds, int(current.get("round") or 0), int(state.get("round") or 0))
         if not completed:
             # Policy targets are still useful, but an unfinished game has no
@@ -464,15 +482,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
             rows.clear()
         for row in rows:
             player_index = next(i for i, seat in enumerate(seats) if seat["id"] == row["playerId"])
-            reward = np.asarray(current["rewards"], dtype=np.float32)
-            count = len(seats)
-            relative = np.zeros(8, dtype=np.float32)
-            relative[:min(8, count)] = [reward[(player_index + i) % count]
-                                        for i in range(min(8, count))]
-            mask = np.zeros(8, dtype=np.float32)
-            mask[:min(8, count)] = 1
-            row["reward"] = relative
-            row["valueMask"] = mask
+            row["reward"], row["valueMask"] = _terminal_value_targets(current, player_index, len(seats))
         game_worker.close_game(game_id)
     except Exception:
         try:
@@ -766,6 +776,9 @@ class TrainingManager:
                 with self._lock:
                     self._status["completedGames"] = games
                 self._log(f"从 checkpoint 续训：{resume_path.name}（{games} 局）")
+                if metadata.get("valueObjective") != VALUE_OBJECTIVE:
+                    self._log("旧检查点将按争第一目标续训：90% 夺冠 + 10% 名次；价值头需要继续训练适应新目标")
+            self._log("价值训练目标：90% 夺冠 + 10% 名次（win-first-v1）")
             self._model.eval()
             self._optimizer = torch.optim.Adam(self._model.parameters(), lr=config["learningRate"])
             if resume_path:
@@ -1004,6 +1017,7 @@ class TrainingManager:
             payload = {"createdAt": datetime.now(timezone.utc).isoformat(), "game": game_number,
                        "config": config, "encoding": {"state": state_version, "action": action_version},
                        "model": {"version": 1, "architecture": architecture,
+                                 "valueObjective": VALUE_OBJECTIVE,
                                  "profile": config["profile"], "stateSize": int(self._model.state_size)
                                  if hasattr(self._model, "state_size") else 672,
                                  "actionSize": ACTION_SIZE, "parameterCount": len(weights),
