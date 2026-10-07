@@ -42,6 +42,8 @@ GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_HEADER_BYTES = 16384
 MAX_FRAME_BYTES = 1_048_576
 MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
+WEBSOCKET_IDLE_TIMEOUT = 15
+AUTO_HOST_GRACE_SECONDS = 180
 _ENTITY_V6_CONTRACT = MODEL_CONTRACTS["entity-v6"]
 STATE_ENCODING_VERSION = _ENTITY_V6_CONTRACT["state"]
 ACTION_ENCODING_VERSION = _ENTITY_V6_CONTRACT["action"]
@@ -430,6 +432,9 @@ class PythonServer:
                      "hostId": room["seats"][0]["id"], "agentStatus": room.get("agentStatus"),
                      "voiceReady": self.voice.configured,
                      "voiceEnabled": room["config"].get("voice") is not False})
+        seat = next((seat for seat in room["seats"] if seat["id"] == player_id), None)
+        if seat:
+            view["autoHostEnabled"] = seat.get("autoHost", room["config"].get("autoHost")) is not False
         if player_id:
             # The synchronous sanitizer cannot query the worker. Its async caller
             # fills this field from C++ before sending the view to a client.
@@ -443,8 +448,6 @@ class PythonServer:
             player["connected"] = connected or bool(seat and seat["isBot"])
             player["disconnected"] = bool(seat and seat.get("disconnected"))
             player["left"] = bool(seat and seat.get("left"))
-            if player["disconnected"] or player["left"]:
-                player["isBot"] = False
         return view
 
     async def _state_for_client(self, room: dict, player_id: str | None) -> dict:
@@ -560,6 +563,10 @@ class PythonServer:
             turn = state.get("turn")
             return state["players"][turn["playerIdx"]]["id"] if turn else None
         return None
+
+    @staticmethod
+    def _auto_host_enabled(room: dict, seat: dict) -> bool:
+        return seat.get("autoHost", room["config"].get("autoHost")) is not False
 
     async def _bot_available_actions(self, state: dict, player_id: str) -> dict:
         manager = self.native_worker_manager
@@ -1643,9 +1650,9 @@ class PythonServer:
                     seat["disconnected"] = False
                     player = next((p for p in state["players"]
                                    if p["id"] == seat["id"]), None)
-                    if player and state["phase"] != "gameover":
+                    if player and state["phase"] != "gameover" and self._auto_host_enabled(room, seat):
                         player["isBot"] = True
-                    if state["phase"] != "gameover":
+                    if state["phase"] != "gameover" and self._auto_host_enabled(room, seat):
                         _append_game_log(state, seat["name"] + " 已离开对局，由电脑托管。", "sys")
                     await self._send_room_notice(room, {"kind": "player_left", "playerId": seat["id"],
                                                         "playerName": seat["name"]}, client.id)
@@ -1841,6 +1848,15 @@ class PythonServer:
             if isinstance(pace, (int, float)) and 60 <= pace <= 6000:
                 room["config"]["botPace"] = round(pace)
             return
+        if kind == "setAutoHost":
+            seat = next((seat for seat in room["seats"]
+                         if seat["id"] == client.id and seat.get("taken") and not seat.get("isBot")), None)
+            if not seat:
+                raise ValueError("只能设置自己的真人座位托管选项")
+            seat["autoHost"] = message.get("enabled") is True
+            await client.send({"t": "hostingSetting", "enabled": seat["autoHost"]})
+            await self._broadcast_state(room)
+            return
         if kind == "chat":
             if not room["state"] or room["state"]["phase"] == "gameover":
                 raise ValueError("仅可在进行中的对局内发言")
@@ -1884,7 +1900,7 @@ class PythonServer:
         self.clients.add(client)
         try:
             while True:
-                opcode, body = await _read_frame(reader)
+                opcode, body = await asyncio.wait_for(_read_frame(reader), timeout=WEBSOCKET_IDLE_TIMEOUT)
                 client.last_seen = time.monotonic()
                 if opcode == 8:
                     break
@@ -1901,7 +1917,7 @@ class PythonServer:
                     await self._handle_message(client, message)
                 except (ValueError, KeyError, TypeError, UnicodeError, NotImplementedError) as exc:
                     await client.send({"t": "error", "error": str(exc)})
-        except (asyncio.IncompleteReadError, ConnectionError, OSError, ValueError):
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError, OSError, ValueError):
             pass
         finally:
             self.clients.discard(client)
@@ -1916,12 +1932,14 @@ class PythonServer:
                                                         "playerId": seat["id"],
                                                         "playerName": seat["name"]}, client.id)
                     await self._broadcast_state(room)
-                    # A desktop/lobby → mobile-page navigation briefly closes the
-                    # socket. Give the same resume token time to reconnect before
-                    # allowing the NPC to take an irreversible game action.
+                    # Keep the seat human-controlled for three minutes after its
+                    # last frame, including time already spent detecting a stale socket.
                     async def takeover_after_grace() -> None:
-                        await asyncio.sleep(5)
-                        if not seat.get("disconnected") or seat.get("left") or not room.get("state"):
+                        remaining = max(0, AUTO_HOST_GRACE_SECONDS -
+                                        (time.monotonic() - client.last_seen))
+                        await asyncio.sleep(remaining)
+                        if (not self._auto_host_enabled(room, seat) or not seat.get("disconnected")
+                                or seat.get("left") or not room.get("state")):
                             return
                         if any(other.id == seat["id"] and other.room_id == room["id"]
                                for other in self.clients):
@@ -1931,7 +1949,7 @@ class PythonServer:
                                            if p["id"] == seat["id"]), None)
                             if player:
                                 player["isBot"] = True
-                            _append_game_log(room["state"], seat["name"] + " 已断连，由电脑托管。", "sys")
+                            _append_game_log(room["state"], seat["name"] + " 断连满 3 分钟，由电脑托管。", "sys")
                             await self._broadcast_state(room)
                             self._schedule_bot(room)
                     asyncio.create_task(takeover_after_grace())

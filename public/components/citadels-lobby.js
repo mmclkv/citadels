@@ -184,7 +184,10 @@
               <option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option>
             </select>
           </label>
-          <p class="dim small">电脑座位和策略网络参数在创建房间后，分别设置在对应的座位卡片内。</p>
+          <label class="field"><span>断线/离开后电脑托管默认值</span>
+            <select id="net-auto-host"><option value="on" selected>开启</option><option value="off">关闭</option></select>
+          </label>
+          <p class="dim small">每位玩家都可以在对局菜单中单独调整自己的托管选项。电脑座位和策略网络参数在创建房间后设置。</p>
           <label class="field"><span>结束条件</span>
             <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
           </label>
@@ -1012,6 +1015,7 @@
               playerCount: Number($('#net-players').value),
               endDistricts: Number($('#net-end').value),
               charSetMode: $('#net-chars').value,
+              autoHost: $('#net-auto-host').value === 'on',
               botPace: pace().act,
               voice: $('#net-voice').value === 'on'
             })

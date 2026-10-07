@@ -90,6 +90,10 @@
     $('playerCount').textContent=s.players.length+' 人局';
     const voiceAvailable=s.voiceReady!==false&&s.voiceEnabled!==false&&s.config?.voice!==false;
     $('menuVoice').hidden=!voiceAvailable;$('sidebarVoiceTab').hidden=!voiceAvailable;
+    const canControlHosting=s.phase!=='lobby'&&s.phase!=='gameover'&&!!myPlayer()&&!myPlayer().isBot;
+    $('menuAutoHost').hidden=!canControlHosting;
+    const autoHostEnabled=s.autoHostEnabled??(s.config?.autoHost!==false);
+    $('menuAutoHost').textContent='断线/离开后托管我 · '+(autoHostEnabled?'开启':'关闭');
     const targetActions=legal().filter(a=>['choose_player','spy_target','wizard_target','emperor_crown','choose_district'].includes(a.type));
     M.targetType=targetActions[0]?.type||null;
     if(s.turn?.pending?.kind==='bishop_repay'&&!M.selection){M.selection={type:'choose_cards',uids:new Set()};M.handOpen=true;M.focus='hand';}
@@ -563,6 +567,7 @@
   const speeds={slow:['慢速',1300],normal:['标准',820],fast:['快速',330]};
   function syncSpeed(){$('menuSpeed').textContent='电脑速度 · '+speeds[M.speed]?.[0];}syncSpeed();
   $('menuSpeed').onclick=()=>{const order=['slow','normal','fast'];M.speed=order[(order.indexOf(M.speed)+1)%3];localStorage.setItem('citadels.speed',M.speed);send({t:'setPace',pace:speeds[M.speed][1]});syncSpeed();};
+  $('menuAutoHost').onclick=()=>send({t:'setAutoHost',enabled:!(M.state?.autoHostEnabled??(M.state?.config?.autoHost!==false))});
   function openReference(title,html){closeMenu();$('referenceTitle').textContent=title;$('referenceBody').innerHTML=html;$('referenceOverlay').hidden=false;}
   function closeReference(){$('referenceOverlay').hidden=true;$('referenceBody').innerHTML='';}
   $('referenceClose').onclick=closeReference;$('referenceOverlay').onclick=e=>{if(e.target.id==='referenceOverlay')closeReference();};

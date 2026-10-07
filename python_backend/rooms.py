@@ -117,7 +117,8 @@ class RoomRegistry:
                        "mctsMaxDepth": _int_at_least(config.get("mctsMaxDepth"), 700, 0),
                        "mctsParticles": _int_at_least(config.get("mctsParticles"), 4, 1),
                        "mctsBelief": config.get("mctsBelief") is not False,
-                       "voice": config.get("voice") is not False},
+                       "voice": config.get("voice") is not False,
+                       "autoHost": config.get("autoHost") is not False},
             "state": None, "createdAt": int(time.time() * 1000),
             "botDebug": [], "closed": False,
         }
