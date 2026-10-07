@@ -22,7 +22,9 @@ struct BuildContext {
 
 inline bool can_build(const BuildCard& card, const BuildContext& context) {
   if (card.cost > context.gold) return false;
-  if (context.role_id == "navigator" && !context.witch_resume) return false;
+  // The Navigator's bonus replaces building. A Witch-resumed Navigator still
+  // receives that bonus, but does not gain a build action from the takeover.
+  if (context.role_id == "navigator") return false;
   const bool green_free = context.role_id == "businessman" &&
                           !context.witch_resume && card.color == "green";
   if (!green_free && context.builds >= context.build_limit) return false;

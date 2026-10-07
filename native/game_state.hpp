@@ -872,7 +872,7 @@ struct NativeGameState {
     int build_limit = 1;
     if (p->role_id == "architect") build_limit = 3;
     else if (p->role_id == "prophet" || p->role_id == "scholar") build_limit = 2;
-    else if (p->role_id == "navigator") build_limit = turn_phase == "witch_resume" ? 1 : 0;
+    else if (p->role_id == "navigator") build_limit = 0;
     BuildContext context{p->role_id, turn_phase == "witch_resume", p->gold, builds, build_limit, same, quarry};
     if (!can_build(card, context)) return false;
     p->gold -= it->cost;
@@ -963,7 +963,8 @@ struct NativeGameState {
     TurnState turn{active()->role_id, false, active()->gold, spent_on_build,
                    0, 0, false};
     if (!citadels::native::end_turn(turn)) return false;
-    if (turn_phase != "witch_resume" && active()->role_id != "navigator" &&
+    if (turn_phase != "witch_resume" && turn_phase != "witch_declared" &&
+        active()->role_id != "navigator" &&
         active()->role_id != "bishop") {
       int build_limit = 1;
       if (active()->role_id == "architect") build_limit = 3;

@@ -147,7 +147,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     int build_limit = 1;
     if (player.role_id == "architect") build_limit = 3;
     else if (player.role_id == "prophet" || player.role_id == "scholar") build_limit = 2;
-    else if (player.role_id == "navigator") build_limit = state.turn_phase == "witch_resume" ? 1 : 0;
+    else if (player.role_id == "navigator") build_limit = 0;
     BuildCard build_card{card.name, card.color, card.cost};
     BuildContext context{player.role_id, state.turn_phase == "witch_resume",
                          player.gold, state.builds, build_limit, same, quarry};
@@ -898,7 +898,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (!known || number <= 1 || number == char_number(state.players[player].role_id)) return false;
       state.bewitched = number; state.witch_player = player;
       state.pending_kind.clear(); state.ability_used = true;
-      return true;
+      // The declaration ends the Witch's initial turn. The selected role will
+      // later resume the remainder of its turn for the Witch.
+      state.turn_phase = "witch_declared";
+      return state.end_turn();
     }
     if (state.phase == NativePhase::Draft) {
       if (player != state.draft_current_player) return false;
