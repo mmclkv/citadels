@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include "npc_policy.hpp"
+#include "heuristic_opponents.hpp"
 #include "determinize.hpp"
 
 namespace citadels::native {
@@ -50,11 +51,11 @@ class NativeHeuristicAdapter final : public GameAdapter<NativeGameState,NativeSe
 class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSearchAction> {
  public:
   NativeHeuristicEvaluator(int rollout_steps=0,int rollouts=1,uint32_t seed=1,int time_ms=0,
-      std::chrono::steady_clock::time_point deadline={})
+      std::chrono::steady_clock::time_point deadline={},int root_player=-1,bool safety_checks=true)
       : rollout_steps_(rollout_steps),rollouts_(std::max(1,rollouts)),rng_(seed),time_ms_(time_ms),
         deadline_(deadline != std::chrono::steady_clock::time_point{} ? deadline :
-          std::chrono::steady_clock::now()+std::chrono::milliseconds(std::max(0,time_ms))) {}
-  int rollout_actions=0,completed_rollouts=0;
+          std::chrono::steady_clock::now()+std::chrono::milliseconds(std::max(0,time_ms))),root_player_(root_player),safety_checks_(safety_checks) {}
+  int rollout_actions=0,completed_rollouts=0,safety_rollouts=0,safety_responses=0;
   Evaluation evaluate(const NativeGameState& s,int player,
                       const std::vector<NativeSearchAction>& actions) override {
     Evaluation result;
@@ -78,23 +79,20 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
     result.value_vector=static_value(s,player);
     if(s.phase!=NativePhase::GameOver && rollout_steps_>0 && !expired()) {
       std::array<float,kValueSlots> accumulated{};
-      NativeGameAdapter rules;
       int trials=0;
       for(int trial=0;trial<rollouts_ && !expired();++trial){
-        auto world=s;
-        for(int step=0;step<rollout_steps_ && !rules.terminal(world);++step){
-          if(expired())break;
-          const int actor=rules.next_player(world);const auto legal=rules.ai_actions(world,actor);
-          if(actor<0 || legal.empty())break;
-          if(expired())break;
-          const int selected=NativeNpcPolicy::choose_rollout(world,actor,legal,rng_());
-          if(expired())break;
-          if(selected<0 || !rules.apply(world,actor,legal.at(selected)))
-            throw std::runtime_error("Heuristic rollout rejected a legal action");
-          ++rollout_actions;
+        std::vector<OpponentStyle> styles;
+        for(size_t i=0;i<s.players.size();++i)styles.push_back(sample_opponent_style(rng_()));
+        const int protected_player=root_player_>=0?root_player_:player;
+        auto tail=rollout_tail(s,player,protected_player,styles,false).first;
+        if(safety_checks_ && critical_opponent_position(s) && !expired()){
+          const auto danger=rollout_tail(s,player,protected_player,styles,true);
+          const size_t protected_slot=(protected_player-player+static_cast<int>(s.players.size()))%s.players.size();
+          // Only a realized tactical response can trigger the risk adjustment.
+          // Keep most of the ordinary expectation rather than taking a hard min.
+          if(danger.second && danger.first[protected_slot]<tail[protected_slot])
+            for(size_t i=0;i<kValueSlots;++i)tail[i]=0.75f*tail[i]+0.25f*danger.first[i];
         }
-        // Keep the leaf perspective even if the actor changed during rollout.
-        const auto tail=static_value(world,player);
         for(size_t i=0;i<kValueSlots;++i)accumulated[i]+=tail[i];
         ++completed_rollouts;
         ++trials;
@@ -128,9 +126,34 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
     return values;
   }
  private:
+  std::pair<std::array<float,kValueSlots>,bool> rollout_tail(const NativeGameState& s,int player,
+      int protected_player,const std::vector<OpponentStyle>& styles,bool safety) {
+    NativeGameAdapter rules;auto world=s;bool response=false;
+    for(int step=0;step<rollout_steps_ && !rules.terminal(world);++step){
+      if(expired())break;
+      const int actor=rules.next_player(world);const auto legal=rules.ai_actions(world,actor);
+      if(actor<0 || legal.empty() || expired())break;
+      int selected=-1;
+      if(safety && actor!=protected_player)
+        selected=CriticalOpponentResponse::choose(world,actor,protected_player,legal,
+          time_ms_>0?deadline_:std::chrono::steady_clock::time_point{});
+      const bool critical=selected>=0;
+      if(selected<0)selected=actor==protected_player?NativeNpcPolicy::choose_rollout(world,actor,legal,rng_()):
+        choose_opponent_rollout(world,actor,legal,styles[actor],rng_());
+      if(expired())break;
+      if(selected<0 || !rules.apply(world,actor,legal.at(selected)))
+        throw std::runtime_error("Heuristic rollout rejected a legal action");
+      if(critical){response=true;++safety_responses;}
+      ++rollout_actions;
+    }
+    if(safety)++safety_rollouts;
+    return {static_value(world,player),response};
+  }
   bool expired() const {return time_ms_>0 && std::chrono::steady_clock::now()>=deadline_;}
   int rollout_steps_,rollouts_;std::mt19937 rng_;int time_ms_;
   std::chrono::steady_clock::time_point deadline_;
+  int root_player_;
+  bool safety_checks_;
 };
 
 struct HeuristicSearchConfig {
@@ -269,7 +292,7 @@ inline HeuristicDecision choose_native_npc(const NativeGameState& state,int play
     // Setup, root evaluation, paths and rollout all share the original deadline.
     // Never grant a fresh minimum simulation after setup has used the budget.
     config.time_budget_ms=options.time_budget_ms;config.deadline=deadline;
-    NativeHeuristicEvaluator evaluator(options.rollout_steps,options.rollouts,seed,config.time_budget_ms,deadline);
+    NativeHeuristicEvaluator evaluator(options.rollout_steps,options.rollouts,seed,config.time_budget_ms,deadline,player);
     if(session)session->prepare(state,player,options);
     const auto result=Mcts<NativeGameState,NativeSearchAction>(rules,evaluator,config).search(particles,player,{},
         session && options.reuse_tree?&session->tree:nullptr);

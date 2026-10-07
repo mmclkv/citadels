@@ -123,7 +123,80 @@ void check_win_objective(){
             "tied winners do not receive first-place reward");
   }
 }
+void check_opponent_models(){
+  NativeGameAdapter rules;auto s=fixture();
+  s.players[0].gold=10;s.players[0].hand={card("cheap",1),card("expensive",6)};
+  const auto legal=rules.ai_actions(s,0);
+  bool saw_fast=false,saw_high=false;std::array<bool,4> styles{};
+  for(uint32_t seed=0;seed<100;++seed){
+    const auto style=sample_opponent_style(seed);styles[static_cast<int>(style)]=true;
+    for(const auto candidate:{OpponentStyle::FastBuild,OpponentStyle::HighScore,OpponentStyle::StopLeader}){
+      const int selected=choose_opponent_rollout(s,0,legal,candidate,seed);
+      require(selected>=0 && selected<static_cast<int>(legal.size()),"opponent mixture selected an illegal action");
+      require(selected==choose_opponent_rollout(s,0,legal,candidate,seed),"opponent mixture is not reproducible");
+      saw_fast|=candidate==OpponentStyle::FastBuild && legal[selected].uid=="cheap";
+      saw_high|=candidate==OpponentStyle::HighScore && legal[selected].uid=="expensive";
+    }
+  }
+  require(std::all_of(styles.begin(),styles.end(),[](bool v){return v;}),"missing opponent strategy");
+  require(saw_fast && saw_high,"opponent styles do not distinguish tempo from points");
+  auto hidden=s;std::swap(hidden.players[1].hand[0],hidden.deck.deck_cards()[0]);
+  for(const auto& a:legal)for(const auto style:{OpponentStyle::FastBuild,OpponentStyle::HighScore,OpponentStyle::StopLeader})
+    require(opponent_action_utility(s,0,a,style)==opponent_action_utility(hidden,0,a,style),"opponent utility reads another player's hidden cards");
+
+  // Architect must choose the cheap two-build winning line, even when the
+  // individually attractive expensive card cannot complete the city.
+  auto threat=fixture();threat.end_districts=7;threat.active_player=1;
+  threat.players[0].city.clear();threat.players[1].city.clear();
+  for(int i=0;i<5;++i){auto c=card("own-city"+std::to_string(i),3);
+    threat.players[0].city.push_back({c,c.name,"",{},false,false,1});
+    c=card("rival-city"+std::to_string(i),2);threat.players[1].city.push_back({c,c.name,"",{},false,false,1});}
+  threat.players[1].gold=4;threat.players[1].hand={card("pricey",4),card("cheap-a",1),card("cheap-b",1)};
+  threat.bonus_done=true;threat.builds=0;threat.call_index=1;
+  auto choices=rules.ai_actions(threat,1);
+  const int finish=CriticalOpponentResponse::choose(threat,1,0,choices);
+  require(finish>=0 && choices[finish].type==ActionType::Build && choices[finish].uid!="pricey","missed affordable multi-build winning response");
+  require(CriticalOpponentResponse::choose(threat,1,1,choices)==-1,"critical check overrides own policy");
+  NativeHeuristicEvaluator safety(8,1,71,0,{},0);
+  safety.evaluate(threat,1,choices);
+  require(safety.safety_rollouts>0 && safety.safety_responses>0,"critical position did not get a separate safety rollout");
+  bool discounted=false;
+  for(int seed=1;seed<=16;++seed){
+    NativeHeuristicEvaluator ordinary(8,1,seed,0,{},0,false),checked(8,1,seed,0,{},0,true);
+    const auto a=ordinary.evaluate(threat,1,choices),b=checked.evaluate(threat,1,choices);
+    // Evaluation is relative to seat 1, but the protected search root is seat 0.
+    const float delta=b.value_vector[2]-a.value_vector[2];
+    require(a.priors==b.priors && delta<=1e-6 && delta>=-0.30001f,"safety correction changed priors, perspective or bounded risk weight");
+    discounted|=delta<-1e-5;
+  }
+  require(discounted,"credible dangerous response never affects the protected root evaluation");
+  auto draws=threat;draws.players[1].hand={card("only-pricey",4)};
+  draws.deck=DeckMachine({card("lucky-cheap-a",1),card("lucky-cheap-b",1)});
+  require(CriticalOpponentResponse::choose(draws,1,0,rules.ai_actions(draws,1))==-1,
+          "critical response relied on unknown future draws");
+  auto resource=threat;auto extra=card("sixth-city",2);
+  resource.players[1].city.push_back({extra,extra.name,"",{},false,false,1});
+  resource.players[1].hand={card("last-build",2)};resource.players[1].gold=0;resource.resources_taken=false;
+  const auto resource_actions=rules.ai_actions(resource,1);
+  const int preparation=CriticalOpponentResponse::choose(resource,1,0,resource_actions);
+  require(preparation>=0 && resource_actions[preparation].type==ActionType::TakeGold,
+          "critical check missed taking resources before winning build");
+
+  auto military=threat;military.active_player=2;military.call_index=2;
+  military.players[2].gold=6;military.ability_used=false;
+  choices=rules.ai_actions(military,2);
+  const int attack=CriticalOpponentResponse::choose(military,2,0,choices);
+  require(attack>=0 && choices[attack].type==ActionType::Ability,"missed profitable military response to near-finisher");
+  auto immune=military;for(auto& district:immune.players[0].city)district.fortress=true;
+  require(CriticalOpponentResponse::choose(immune,2,0,rules.ai_actions(immune,2))==-1,
+          "critical check invented destruction of protected buildings");
+  military.players[0].city.clear();choices=rules.ai_actions(military,2);
+  require(CriticalOpponentResponse::choose(military,2,0,choices)==-1,"invented a critical attack on a distant finisher");
+  const auto deadline=std::chrono::steady_clock::now()-std::chrono::milliseconds(1);
+  require(CriticalOpponentResponse::choose(threat,1,0,rules.ai_actions(threat,1),deadline)==-1,"critical check ignored deadline");
+}
 int main(){
+  check_opponent_models();
   check_warrant_privacy();
   check_win_objective();
   NativeGameAdapter rules;NativeHeuristicEvaluator evaluator;auto s=fixture();
@@ -159,10 +232,13 @@ int main(){
   require(a.rollout_actions>0 && a.rollouts>0,"search did not run rollouts");
   NativeHeuristicEvaluator rollout(8,1,71);
   const auto rolled=rollout.evaluate(s,0,legal);
+  std::mt19937 rollout_rng(71);std::vector<OpponentStyle> rollout_styles;
+  for(size_t i=0;i<s.players.size();++i)rollout_styles.push_back(sample_opponent_style(rollout_rng()));
   auto tail=s;for(int step=0;step<8 && !rules.terminal(tail);++step){
     const int actor=rules.next_player(tail);const auto options=rules.legal_actions(tail,actor);
-    // Fixture moves are deterministic (no draft); replicate the greedy policy.
-    const int selected=NativeNpcPolicy::choose_rollout(tail,actor,options,1);
+    // Replicate the same persistent styles while keeping the original leaf seat.
+    const int selected=actor==0?NativeNpcPolicy::choose_rollout(tail,actor,options,rollout_rng()):
+      choose_opponent_rollout(tail,actor,options,rollout_styles[actor],rollout_rng());
     require(selected>=0 && rules.apply(tail,actor,options[selected]),"manual rollout failed");
   }
   const auto start_value=NativeHeuristicEvaluator::static_value(s,0),tail_value=NativeHeuristicEvaluator::static_value(tail,0);

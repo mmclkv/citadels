@@ -8,11 +8,30 @@ use the fast heuristic policy. The neural worker's simulation heuristic does not
 start another search.
 
 Leaves now combine static evaluation (40%) and bounded heuristic rollouts (60%).
-Each rollout copies its determinized world and uses a cheap greedy heuristic,
-without the bounded turn planner or nested MCTS. At the action horizon it uses
+Each rollout copies its determinized world and uses a cheap heuristic opponent
+mixture, without the full turn planner or nested MCTS. At the action horizon it uses
 static win-focused values; terminal rollout outcomes use the heuristic terminal rewards.
 The value vector always remains in the original leaf player's seat order even
 when other actors move. Rollout work stops when the search deadline is reached.
+
+Opponent rollouts sample one persistent style per seat: greedy (40%), fast
+construction (25%), high-score development (20%), or pressure on the leader
+(15%). Non-greedy styles randomize only among actions within one utility point
+of their best action. The actual search root keeps its greedy rollout policy.
+This mixture applies to human and computer opponents without assuming a known
+personality or using private real-game information.
+
+Near the endgame (a player within three districts of completion or an ending
+already triggered), each leaf rollout may also check a separate tactical line.
+A bounded same-turn check (depth 6, 64 continuation nodes) prioritizes a leading
+completion, including multi-build turns, or profitable military damage against
+a plausible near-finishing root. It clears the simulated draw pile before
+checking, so the threat cannot rely on conveniently sampled future draws. If a
+checked response is executed and the original root's value is lower, the tail
+mixes 75% ordinary expectation with 25% tactical risk. Values retain the leaf's
+seat order, and the protected player remains the original search root. Both
+rollouts and tactical checks share the original search deadline. These extra
+checks cost simulations at a fixed time budget; strength needs matchup evaluation.
 
 The hard heuristic search uses 90% first-place utility and 10% normalized rank
 utility. Nonterminal first-place chances are estimated with a stable softmax of
