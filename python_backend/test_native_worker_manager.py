@@ -30,6 +30,34 @@ class _GameWorker:
 
 
 class NativeWorkerManagerTests(unittest.TestCase):
+    def test_neural_mode_selects_msvc_when_mingw_is_first(self):
+        manager = manager_module.NativeWorkerManager(lambda _: None)
+        targets = {'mingw-clang': 'x86_64-w64-windows-gnu', 'msvc-clang': 'x86_64-pc-windows-msvc'}
+        with (mock.patch.dict(manager_module.os.environ, {'CITADELS_CLANGXX': ''}),
+              mock.patch.object(manager, '_compiler_candidates', return_value=list(targets)),
+              mock.patch.object(manager, '_compiler_target', side_effect=targets.__getitem__)):
+            self.assertEqual(manager._select_compiler(require_msvc=True), 'msvc-clang')
+            self.assertEqual(manager._select_compiler(), 'mingw-clang')
+
+    def test_explicit_compiler_choice_is_not_silently_overridden(self):
+        manager = manager_module.NativeWorkerManager(lambda _: None)
+        with (mock.patch.dict(manager_module.os.environ, {'CITADELS_CLANGXX': 'custom-clang'}),
+              mock.patch.object(manager_module.shutil, 'which', return_value=None),
+              mock.patch.object(manager, '_compiler_candidates') as discover,
+              mock.patch.object(manager, '_compiler_target', return_value='x86_64-w64-windows-gnu')):
+            with self.assertRaisesRegex(RuntimeError, 'CITADELS_CLANGXX'):
+                manager._select_compiler(require_msvc=True)
+            self.assertEqual(manager._select_compiler(), 'custom-clang')
+            discover.assert_not_called()
+
+    def test_missing_or_unusable_msvc_reports_installation_guidance(self):
+        manager = manager_module.NativeWorkerManager(lambda _: None)
+        with (mock.patch.dict(manager_module.os.environ, {'CITADELS_CLANGXX': ''}),
+              mock.patch.object(manager, '_compiler_candidates', return_value=['bad', 'mingw']),
+              mock.patch.object(manager, '_compiler_target', side_effect=[OSError('cannot execute'), 'windows-gnu'])):
+            with self.assertRaisesRegex(RuntimeError, 'Build Tools'):
+                manager._select_compiler(require_msvc=True)
+
     def test_msvc_command_preserves_cmd_quotes(self):
         command = manager_module._msvc_build_command(
             "C:/Program Files/VS/VsDevCmd.bat",

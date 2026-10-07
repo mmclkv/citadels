@@ -1,5 +1,18 @@
 # Python 服务与训练编排
 
+## Windows 编译器自动选择
+
+启用策略神经网络时，启动器会检查 clang++ 的目标 ABI：如果 PATH 中先找到的是 LLVM-MinGW，继续查找 PATH、常见 LLVM 安装目录及 Visual Studio 附带的 MSVC clang++，不会因此要求关闭神经网络。仍需安装 Visual Studio C++ Build Tools（包含 Windows SDK）。`--skip-neural-policy` 模式允许继续使用 MinGW，且不加载 PyTorch。
+
+显式设置 `CITADELS_CLANGXX` 时尊重该选择，不会悄悄覆盖；若指定了不兼容的 MinGW，会给出明确错误。可按实际安装位置指定：
+
+```powershell
+$env:CITADELS_CLANGXX = 'C:\Program Files\LLVM\bin\clang++.exe'
+python python_backend/run.py 8787 --host 0.0.0.0
+```
+
+该选择不改变 FRP 环境变量。请使用已安装 PyTorch 的 Python 环境；Windows 不要求命令必须叫 `python3`。
+
 Python 提供 HTTP/WebSocket、房间协议、Agent/语音/FRP 集成及训练调度。`native/game_engine-<源码指纹>`（Windows 为 `.exe`）是独立、有状态的 C++ 游戏主进程，按 gameId 持有权威局面并负责创建对局、合法行动、NPC 选择及动作推进；`native/mcts_worker_libtorch-<源码指纹>`（Windows 为 `.exe`）只接收策略搜索/隐藏信息确定化请求并返回策略，不维护实时房间状态，也不再运行整局自对弈。浏览器 UI 使用 JavaScript，服务端无需 Node.js。
 
 当前已迁移：

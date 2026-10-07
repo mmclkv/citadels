@@ -61,10 +61,50 @@ class NativeWorkerManager:
             return result.stdout.strip().lower()
         return ""
 
-    def _compiler_environment(self) -> tuple[str, dict[str, str], str | None]:
-        compiler = os.environ.get("CITADELS_CLANGXX") or shutil.which("clang++")
-        if not compiler:
-            raise RuntimeError("找不到 clang++；请将 clang++ 加入 PATH 或设置 CITADELS_CLANGXX")
+    @staticmethod
+    def _compiler_candidates() -> list[str]:
+        candidates = []
+        default = shutil.which("clang++")
+        if default:
+            candidates.append(default)
+        if os.name == "nt":
+            # PATH may put a self-contained LLVM-MinGW installation first.
+            # Discover MSVC LLVM as well rather than disabling neural policies.
+            for entry in os.environ.get("PATH", "").split(os.pathsep):
+                if entry.strip():
+                    candidates.append(str(Path(entry.strip('"')) / "clang++.exe"))
+            for root in (Path(os.environ.get("ProgramFiles", "C:/Program Files")),
+                         Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))):
+                candidates.append(str(root / "LLVM/bin/clang++.exe"))
+                for installation in sorted((root / "Microsoft Visual Studio").glob("*/*"), reverse=True):
+                    for suffix in ("VC/Tools/Llvm/x64/bin/clang++.exe", "VC/Tools/Llvm/bin/clang++.exe"):
+                        candidates.append(str(installation / suffix))
+            if os.environ.get("VSINSTALLDIR"):
+                candidates.append(str(Path(os.environ["VSINSTALLDIR"]) / "VC/Tools/Llvm/x64/bin/clang++.exe"))
+        return list(dict.fromkeys(candidate for candidate in candidates if Path(candidate).is_file()))
+
+    def _select_compiler(self, *, require_msvc: bool = False) -> str:
+        override = os.environ.get("CITADELS_CLANGXX")
+        candidates = ([shutil.which(override) or override] if override else self._compiler_candidates())
+        for compiler in candidates:
+            try:
+                target = self._compiler_target(compiler)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if not require_msvc or "windows-msvc" in target:
+                if require_msvc and not override and compiler != candidates[0]:
+                    self.log(f"[native] PATH 默认工具链不支持 LibTorch；自动选择 MSVC clang++：{compiler}")
+                return compiler
+        if require_msvc:
+            explicit = "CITADELS_CLANGXX 指定的编译器不兼容；" if override else "未找到兼容的编译器；"
+            raise RuntimeError(
+                "策略神经网络 worker 需要 MSVC ABI 的 clang++；" + explicit +
+                "请安装 LLVM 和 Visual Studio C++ Build Tools，或将 CITADELS_CLANGXX 设置为兼容编译器路径。"
+                "仅需规则引擎时可使用 --skip-neural-policy。")
+        raise RuntimeError("找不到可运行的 clang++；请将 clang++ 加入 PATH 或设置 CITADELS_CLANGXX")
+
+    def _compiler_environment(self, *, require_msvc: bool = False) -> tuple[str, dict[str, str], str | None]:
+        compiler = self._select_compiler(require_msvc=require_msvc and os.name == "nt")
         target = self._compiler_target(str(compiler))
         if os.name != "nt":
             return str(compiler), os.environ.copy(), None
@@ -76,12 +116,13 @@ class NativeWorkerManager:
             compiler_bin = str(Path(compiler).resolve().parent)
             environment["PATH"] = compiler_bin + os.pathsep + environment.get("PATH", "")
             return str(compiler), environment, None
-        devcmd_candidates = [
-            Path(os.environ.get("VSINSTALLDIR", "")) / "Common7" / "Tools" / "VsDevCmd.bat",
-            *Path("C:/Program Files/Microsoft Visual Studio").glob("*/Community/Common7/Tools/VsDevCmd.bat"),
-            *Path("C:/Program Files/Microsoft Visual Studio").glob("*/BuildTools/Common7/Tools/VsDevCmd.bat"),
-            *Path("C:/Program Files/Microsoft Visual Studio").glob("*/Professional/Common7/Tools/VsDevCmd.bat"),
-        ]
+        devcmd_candidates = []
+        if os.environ.get("VSINSTALLDIR"):
+            devcmd_candidates.append(Path(os.environ["VSINSTALLDIR"]) / "Common7/Tools/VsDevCmd.bat")
+        for root in (Path(os.environ.get("ProgramFiles", "C:/Program Files")),
+                     Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))):
+            devcmd_candidates.extend(sorted((root / "Microsoft Visual Studio").glob(
+                "*/*/Common7/Tools/VsDevCmd.bat"), reverse=True))
         devcmd = next((path for path in devcmd_candidates if path.is_file()), None)
         if not devcmd:
             raise RuntimeError("clang++ 的 MSVC 目标需要 Visual Studio VsDevCmd.bat 和 link.exe")
@@ -244,7 +285,7 @@ class NativeWorkerManager:
                 pass
 
     def start(self, *, skip_neural_policy: bool = False) -> None:
-        compiler, environment, devcmd = self._compiler_environment()
+        compiler, environment, devcmd = self._compiler_environment(require_msvc=not skip_neural_policy)
         target = self._compiler_target(compiler)
         torch = None
         if not skip_neural_policy:
