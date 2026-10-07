@@ -58,17 +58,6 @@
       return data && data.token && data.roomId ? data : null;
     } catch (e) { return null; }
   }
-  function saveNetSession(token, roomId, name) {
-    if (!token || !roomId) return;
-    try {
-      window.localStorage.setItem(NET_SESSION_KEY,
-        JSON.stringify({ token: token, roomId: roomId, name: name || '', server: gameServerBase() }));
-    } catch (e) { /* 隐私模式或存储被禁用 */ }
-  }
-  function clearNetSession() {
-    try { window.localStorage.removeItem(NET_SESSION_KEY); } catch (e) { /* ignore */ }
-  }
-
   /* --------------------------- 电脑行动节奏 ---------------------------
    * 原先固定 330ms，真人根本来不及看清电脑做了什么。
    * 现在按「这一步有多值得看」分级停顿：
@@ -268,87 +257,6 @@
     }
     return url.href.replace(/\/$/, '');
   }
-  async function checkAgentServer() {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const response = await fetch(gameServerBase() + '/api/agent/status', { cache: 'no-store', signal: controller.signal });
-      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error('当前地址没有 Agent 后端。GitHub Pages 用户请填写已部署的游戏服务器地址');
-      }
-      const status = await response.json();
-      if (!status.configured) throw new Error(status.message || '游戏服务器尚未配置 AI 模型');
-      return true;
-    } catch (e) {
-      const message = e.name === 'AbortError' || e instanceof TypeError
-        ? '无法连接 Agent 后端，请检查游戏服务器地址和网络连接' : e.message;
-      ['#cfg-agent-status', '#net-agent-status'].forEach(sel => { const node = $(sel); if (node) node.textContent = message; });
-      toast(message);
-      return false;
-    } finally { clearTimeout(timer); }
-  }
-  async function checkNeuralServer() {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const response = await fetch(gameServerBase() + '/api/neural/status', { cache: 'no-store', signal: controller.signal });
-      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error('当前地址没有策略神经网络后端，请启动游戏服务器');
-      }
-      const status = await response.json();
-      if (!status.configured) throw new Error(status.message || '服务器上没有可用的策略神经网络权重');
-      const message = status.message || ('已加载 ' + status.checkpoint);
-      ['#cfg-agent-status', '#net-agent-status'].forEach(sel => { const node = $(sel); if (node) node.textContent = message; });
-      return true;
-    } catch (e) {
-      const message = e.name === 'AbortError' || e instanceof TypeError
-        ? '无法连接策略神经网络后端，请检查游戏服务器地址' : e.message;
-      ['#cfg-agent-status', '#net-agent-status'].forEach(sel => { const node = $(sel); if (node) node.textContent = message; });
-      toast(message);
-      return false;
-    } finally { clearTimeout(timer); }
-  }
-  // 「策略神经网络」电脑专属的 MCTS 配置：0 = 关闭搜索（按网络策略直接走子）。
-  const DEFAULT_MCTS_CONFIG = { simulations: 500, maxDepth: 700, particles: 4 };
-  function readMctsConfig(simsId, depthId, particlesId) {
-    const valueOrDefault = (id, fallback) => {
-      const node = $(id);
-      const raw = node ? String(node.value).trim() : '';
-      return raw === '' ? fallback : Number(raw);
-    };
-    const readInteger = (id, fallback, minimum) => {
-      const value = valueOrDefault(id, fallback);
-      return Math.max(minimum, Math.floor(Number.isFinite(value) ? value : fallback));
-    };
-    return { mctsSimulations: readInteger(simsId, DEFAULT_MCTS_CONFIG.simulations, 0),
-      mctsMaxDepth: readInteger(depthId, DEFAULT_MCTS_CONFIG.maxDepth, 0),
-      mctsParticles: readInteger(particlesId, DEFAULT_MCTS_CONFIG.particles, 1) };
-  }
-  function syncNeuralOnlyFields() {
-    [['#screen-setup', '#cfg-bot-type']].forEach(pair => {
-      const root = $(pair[0]);
-      const select = $(pair[1]);
-      if (!root || !select) return;
-      const show = select.value === 'neural';
-      Array.from(root.querySelectorAll('.neural-only')).forEach(node => { node.hidden = !show; });
-      if (show) {
-        const defaults = [
-          ['#cfg-mcts-sims', DEFAULT_MCTS_CONFIG.simulations], ['#cfg-mcts-depth', DEFAULT_MCTS_CONFIG.maxDepth],
-          ['#cfg-mcts-particles', DEFAULT_MCTS_CONFIG.particles]
-        ];
-        defaults.forEach(([id, value]) => { const input = $(id); if (input && String(input.value).trim() === '') input.value = String(value); });
-      }
-    });
-  }
-  const HEURISTIC_BOT_LEVELS = { 'npc-easy': 'easy', 'npc-normal': 'normal', 'npc-hard': 'hard' };
-  function normalizeBotSelection(type, fallbackLevel) {
-    const level = HEURISTIC_BOT_LEVELS[type];
-    if (level) return { botType: 'npc', botLevel: level };
-    return {
-      botType: type === 'agent' || type === 'neural' ? type : 'npc',
-      botLevel: ['easy', 'normal', 'hard'].includes(fallbackLevel) ? fallbackLevel : 'hard'
-    };
-  }
   function clearGameBoardView() {
     // Restarting a local Python room briefly passes through lobby without
     // leaving the game screen. Drop cached card DOM so the previous game can
@@ -361,28 +269,6 @@
     App.noticeSeen = 0;
     hideEvent(true);
   }
-  async function startPythonSingle(cfg) {
-    if (cfg.botType === 'agent' && !(await checkAgentServer())) return;
-    if (cfg.botType === 'neural' && !(await checkNeuralServer())) return;
-    if (Net.roomId) {
-      Net.send({ t: 'leaveRoom' });
-      Net.roomId = null;
-      clearNetSession();
-    }
-    App.localServerGame = true;
-    App.mode = 'net'; App.leavingNetGame = false;
-    App.state = null; App.myId = null; App.noticeSeen = 0;
-    App.botDebugEntries = [];
-    clearGameBoardView();
-    Net.name = cfg.name;
-    Net.connect(() => {
-      Net.autoStart = true;
-      Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
-        playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
-        endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act, voice: false
-      }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth', '#cfg-mcts-particles')) });
-    });
-  }
   function showScreen(id) {
     $$('.screen').forEach(s => s.classList.remove('active'));
     $('#' + id).classList.add('active');
@@ -393,6 +279,17 @@
     // 语音面板挂在侧栏上，不是每次 render 都会走到；切屏时同步一次，
     // 免得上一个界面留下的麦克风按钮状态串到下一个界面。
     voiceSync();
+  }
+  // 取消所有页面级屏幕（首页/设置/大厅已由共享组件渲染）。
+  function hidePageScreens() { $$('.screen').forEach(s => s.classList.remove('active')); }
+  // 离开对局回主菜单：把 socket 交还组件，由组件清会话并显示首页。
+  function leaveToMenu() {
+    Voice.leave();
+    Net.release();
+    App.state = null; App.myId = null; App.localServerGame = false; App.leavingNetGame = false;
+    hidePageScreens();
+    const el = $('#lobby');
+    if (el && el.returnToHome) el.returnToHome();
   }
 
   /* ======================= 关键事件提示（居中弹层） =======================
@@ -827,103 +724,70 @@
     return !!(av.actions && av.actions.length);
   }
 
-  /* ============================== 联机驱动 ============================== */
+  /* ============================== 联机驱动（对局内） ==============================
+   * 首页 / 单人设置 / 联机大厅 / 建房 / 加入房间由共享组件
+   * public/components/citadels-lobby.js 负责。开局时组件通过 lobbyEl.onGameStart
+   * 把 socket 交过来，此后本文件只处理对局内的消息；回到大厅或主菜单时再交还组件。 */
   const Net = {
-    autoStart: false,
-    ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
-    reconnectTimer: null, reconnectDelay: 1000, heartbeatTimer: null,
-    startHeartbeat() {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = setInterval(() => {
-        if (this.ws && this.ws.readyState === 1) this.send({ t: 'heartbeat', ts: Date.now() });
-      }, 5000);
-    },
-    stopHeartbeat() { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; },
-    connect(cb) {
-      let endpoint;
-      try { endpoint = gameServerBase().replace(/^http/, 'ws'); }
-      catch (e) { this.afterHello = null; toast(e.message); return; }
-      if (this.ws && this.ws.readyState === 1 && this.ws.url.replace(/\/$/, '') === endpoint) return cb && cb();
-      if (this.ws) {
-        this.ws.onclose = null; this.ws.onmessage = null;
-        this.stopHeartbeat(); this.ws.close();
-      }
-      this.afterHello = cb || this.afterHello || null;
-      this.ws = new WebSocket(endpoint);
-      this.ws.onopen = () => {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-        this.reconnectDelay = 1000;
-        this.startHeartbeat();
-        const saved = loadNetSession();
-        this.send({ t: 'hello', name: this.name,
-          resumeToken: saved && saved.token, roomId: saved && saved.roomId });
-      };
-      this.ws.onmessage = ev => {
+    ws: null, myId: null, roomId: null, name: '', heartbeatTimer: null,
+    // 接管组件交过来的 socket：接收对局消息并自行维持心跳。
+    install(handle) {
+      this.ws = handle.ws;
+      this.myId = handle.myId || null;
+      this.roomId = handle.roomId || null;
+      this.name = handle.name || this.name;
+      this.stopHeartbeat();
+      this.heartbeatTimer = setInterval(() => this.send({ t: 'heartbeat', ts: Date.now() }), 5000);
+      const ws = this.ws;
+      if (!ws) return;
+      ws.onmessage = ev => {
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
         this.handle(m);
       };
-      this.ws.onclose = () => {
+      ws.onclose = () => {
+        if (this.ws !== ws) return;
         this.stopHeartbeat();
-        toast('与服务器的连接已断开');
-        $$('#screen-lobby .dim').forEach(() => {});
-        // 联机游戏中刷新服务或短暂断网时，自动使用本地令牌回到原房间。
-        // 不清空 App.state，让画面在重连期间保留最后一个已知状态。
-        if (!loadNetSession() || this.reconnectTimer) return;
-        const delay = this.reconnectDelay;
-        this.reconnectDelay = Math.min(8000, Math.round(this.reconnectDelay * 1.6));
-        this.reconnectTimer = setTimeout(() => {
-          this.reconnectTimer = null;
-          this.connect(() => this.send({ t: 'listRooms' }));
-        }, delay);
+        this.ws = null;
+        toast('与服务器的连接已断开，正在重连…');
+        // 重连交回组件：它手里有本地会话，能重新 hello/resume 后再交一次 socket。
+        const el = $('#lobby');
+        if (el && el.reconnect) el.reconnect();
       };
-      this.ws.onerror = () => toast('无法连接服务器');
+      ws.onerror = () => { /* 组件会在重连结果里给出反馈 */ };
     },
+    // 交还 socket（返回大厅或主菜单前调用）：页面不再处理任何对局消息。
+    release() {
+      this.stopHeartbeat();
+      const ws = this.ws;
+      if (ws) { ws.onmessage = null; ws.onclose = null; }
+      this.ws = null;
+    },
+    stopHeartbeat() { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; },
     send(o) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(o)); },
     handle(m) {
       switch (m.t) {
-        case 'hello':
-          this.myId = m.youId;
-          if (!m.resumed && this.afterHello) {
-            const cb = this.afterHello; this.afterHello = null; cb();
-          } else if (m.resumed) this.afterHello = null;
-          break;
-        case 'rooms': renderRoomList(m.rooms); break;
-        case 'joined':
-          this.myId = m.youId; this.roomId = m.roomId;
-          if (m.resumeToken) saveNetSession(m.resumeToken, m.roomId, this.name);
-          App.myId = m.youId;
-          App.botDebugEntries = [];
-          if (App.botDebugOpen) renderBotDebug();
-          // 大厅里加入 → 从 0 开始（后续事件全部提示）；中途加入 → 对齐进度，不回放历史
-          App.noticeSeen = (m.state.notices && m.state.notices.length)
-            ? m.state.notices[m.state.notices.length - 1].seq : 0;
-          App.paused = false; hideEvent(true);
-          if (m.state.phase === 'lobby') {
-            if (!App.localServerGame) { renderLobbyRoom(m.state); showScreen('screen-lobby'); }
-          }
-          else { App.state = m.state; showScreen('screen-game'); render(); }
-          if (this.autoStart) {
-            this.autoStart = false;
-            if (m.state.phase === 'lobby') this.send({ t: 'startGame' });
-          }
-          break;
         case 'state':
           if (App.leavingNetGame) break;
           App.state = m.state;
           if (m.state.you) App.myId = m.state.you;
           if (m.state.phase === 'lobby' && App.localServerGame) {
+            // 单机房间重开：清掉上一局残留的牌，再让服务器重新开局。
             App.chatHistory = [];
             clearGameBoardView();
             this.send({ t: 'startGame' });
-          }
-          else if (m.state.phase === 'lobby') { App.chatHistory = []; renderLobbyRoom(m.state); showScreen('screen-lobby'); }
-          else {
+          } else if (m.state.phase === 'lobby') {
+            // 联机房间重开：还回组件，由它显示大厅房间。
+            App.chatHistory = [];
+            hidePageScreens();
+            this.release();
+            const el = $('#lobby');
+            if (el && el.returnToLobby) el.returnToLobby(m.state);
+          } else {
             showScreen('screen-game'); render();
             if (m.state.phase === 'gameover') showOver(m.state);
           }
           break;
-        case 'error': this.autoStart = false; toast('✗ ' + m.error); break;
+        case 'error': toast('✗ ' + m.error); break;
         case 'chat': {
           // 自己与对手的发言都在各自圆角矩形头顶弹出气泡（含自己）
           if (m.playerId) showPlayerChatBubble(m);
@@ -5187,124 +5051,8 @@
   }
 
   /* ============================== 大厅渲染 ============================== */
-  function renderRoomList(rooms) {
-    const box = $('#room-list');
-    if (!box) return;
-    box.innerHTML = '';
-    if (!rooms || !rooms.length) { box.appendChild(el('div', 'dim', '暂无房间，创建一个吧')); return; }
-    rooms.forEach(r => {
-      const d = el('div', 'room-item');
-      d.innerHTML = '<div><div class="ri-code">' + r.id + '</div>' +
-        '<div class="ri-info">' + escapeHtml(r.name) + ' · ' + r.playerCount + ' 人 · ' +
-        (r.phase === 'lobby' ? '等待中' : '进行中') + '</div></div>';
-      d.onclick = () => { $('#net-code').value = r.id; };
-      box.appendChild(d);
-    });
-  }
-
-  function renderLobbyRoom(st) {
-    App.lobbyState = st;
-    $('#lobby-pre').hidden = true;
-    $('#lobby-room').hidden = false;
-    $('#r-code').textContent = st.roomId;
-    $('#lobby-title').textContent = '房间 ' + st.roomId;
-    if (st.config) {
-      $('#r-players').value = String(st.config.playerCount || 4);
-      $('#r-end').value = String(st.config.endDistricts || 8);
-      $('#r-chars').value = st.config.charSetMode || 'base';
-      $('#r-voice').value = st.config.voice === false ? 'off' : 'on';
-    }
-    voiceSync();
-    const grid = $('#seat-grid');
-    grid.innerHTML = '';
-    const seats = st.seats || [];
-    const amHost = seats.length && seats[0].id === App.myId;
-    seats.forEach((s, i) => {
-      const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
-      const heuristicLabel = s.botLevel === 'easy' ? '启发式电脑 · 简单' : s.botLevel === 'hard' ? '启发式电脑 · 困难' : '启发式电脑 · 普通';
-      const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : s.botType === 'neural' ? '策略神经网络' : heuristicLabel) : (s.taken ? '真人玩家' : '可加入');
-      d.innerHTML = '<div class="seat-no">座位 ' + (i + 1) + (i === 0 ? ' · 房主' : '') + '</div>' +
-        '<div class="seat-name">' + (s.taken ? escapeHtml(s.name) : '空缺') + '</div>' +
-        '<div class="seat-tag">' + (s.disconnected ? '已断连' : s.left ? '已离开' :
-          botLabel) + '</div>';
-      if (amHost && i > 0) {
-        const ops = el('div', 'seat-ops');
-        const b1 = el('button', 'btn tiny', s.isBot ? '换人' : '设为电脑');
-        b1.onclick = () => Net.send({ t: 'setSeat', index: i, kind: s.isBot ? 'open' : 'bot' });
-        ops.appendChild(b1);
-        if (s.isBot) {
-          const type = el('select');
-          type.setAttribute('aria-label', s.name + '的电脑类型');
-          type.innerHTML = '<option value="npc-easy">启发式电脑 · 简单</option><option value="npc-normal">启发式电脑 · 普通</option><option value="npc-hard">启发式电脑 · 困难</option><option value="neural">策略神经网络（仓库权重）</option><option value="agent">AI Agent（模型）</option>';
-          type.value = s.botType === 'npc' ? 'npc-' + (s.botLevel || 'normal') : (s.botType || 'npc-normal');
-          type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
-          ops.appendChild(type);
-          if (s.botType === 'neural') {
-            const mcts = s.mcts || {};
-            const box = el('div', 'seat-mcts');
-            box.innerHTML = '<span class="seat-mcts-title">MCTS 参数</span>';
-            const fields = [
-              ['模拟次数', 'simulations', 500, 0, 50],
-              ['最大深度', 'maxDepth', 700, 0, 10],
-              ['粒子数', 'particles', 4, 1, 1]
-            ];
-            fields.forEach(([label, key, fallback, min, step]) => {
-              const field = el('label', 'seat-mcts-field');
-              field.innerHTML = '<span>' + label + '</span>';
-              const input = document.createElement('input');
-              input.type = 'number'; input.min = String(min); input.step = String(step);
-              const roomValue = st.config && st.config['mcts' + key[0].toUpperCase() + key.slice(1)];
-              input.value = String(mcts[key] == null ? (roomValue == null ? fallback : roomValue) : mcts[key]);
-              input.onchange = () => {
-                const current = s.mcts || {};
-                Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value, mcts: {
-                  simulations: key === 'simulations' ? input.value : current.simulations == null ? 500 : current.simulations,
-                  maxDepth: key === 'maxDepth' ? input.value : current.maxDepth == null ? 700 : current.maxDepth,
-                  particles: key === 'particles' ? input.value : current.particles == null ? 4 : current.particles
-                }});
-              };
-              field.appendChild(input); box.appendChild(field);
-            });
-            ops.appendChild(box);
-          }
-          if (s.botType === 'npc' && s.botLevel === 'hard') {
-            const cfg = s.heuristicMcts || {};
-            const box = el('div', 'seat-mcts heuristic-mcts');
-            box.innerHTML = '<span class="seat-mcts-title">启发式 MCTS</span>';
-            const field = el('label', 'seat-mcts-field');
-            field.innerHTML = '<span>搜索时间预算 ms</span>';
-            const input = document.createElement('input');
-            input.type = 'number'; input.min = '1'; input.step = '1';
-            input.value = String(cfg.timeBudgetMs == null ? 10000 : cfg.timeBudgetMs);
-            input.onchange = () => {
-              if (!input.checkValidity()) { input.reportValidity(); return; }
-              Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
-                heuristicMcts: { timeBudgetMs: input.value } });
-            };
-            field.appendChild(input); box.appendChild(field);
-            box.appendChild(el('span', 'hint', '所有局面共用此预算；模拟次数随实际速度自适应，粒子数、深度和 rollout 自动配置。'));
-            ops.appendChild(box);
-          }
-        }
-        d.appendChild(ops);
-      }
-      grid.appendChild(d);
-    });
-    $('#btn-net-start').style.display = amHost ? '' : 'none';
-    $('#btn-net-shuffle').style.display = amHost ? '' : 'none';
-  }
-
   /* ============================== 事件绑定 ============================== */
   function bind() {
-    ['#cfg-server', '#net-server'].forEach(sel => {
-      const input = $(sel);
-      input.value = selectedGameServer;
-      input.onchange = () => {
-        selectedGameServer = input.value.trim();
-        try { localStorage.setItem('citadels.gameServer', selectedGameServer); } catch (_) { /* storage unavailable */ }
-        ['#cfg-server', '#net-server'].forEach(other => { $(other).value = selectedGameServer; });
-      };
-    });
     if (Theme.onChange) Theme.onChange(() => {
       syncThemeBtn();
       // 主题切换会改变卡片内部结构（neon 用 <img>、classic 用文本），复用旧节点会错乱，
@@ -5312,39 +5060,23 @@
       ['#my-city', '#my-hand', '#opponents'].forEach(sel => { const e = $(sel); if (e) e.innerHTML = ''; });
       if (App.state && App.state.phase !== 'lobby') render();
     });
-    $$('[data-theme-choice]').forEach(b => b.onclick = () => Theme.apply(b.dataset.themeChoice));
     const themeBtn = $('#btn-theme');
     if (themeBtn) themeBtn.onclick = () => Theme.toggle();
     if (Theme.updateControls) Theme.updateControls();
     syncThemeBtn();
-    $$('[data-goto]').forEach(b => b.onclick = () => {
-      const target = b.dataset.goto;
-      if (target === 'home' && App.mode === 'net' && App.state && App.state.phase === 'gameover') {
-        // 结算页返回主菜单代表结束这次联机体验，不应在刷新后自动回到旧计分页。
-        App.leavingNetGame = true;
-        Net.send({ t: 'leaveRoom' });
-        clearNetSession();
-        Net.roomId = null;
-        App.state = null;
-        App.myId = null;
-      }
-      // 离开对局界面就别占着语音房间了：对方面板上不该留着一个已经走了的人。
-      if (target === 'home') Voice.leave();
-      showScreen('screen-' + target);
+    // 首页的「规则速查 / 服务器控制台 / 启动信息」按钮已移入共享组件，
+    // 组件用 citadels-extra 事件请求页面打开自己的弹层。
+    const lobbyHost = $('#lobby');
+    if (lobbyHost) lobbyHost.addEventListener('citadels-extra', e => {
+      const kind = e.detail && e.detail.kind;
+      if (kind === 'rules') openRules();
+      else if (kind === 'console') openServerConsole();
+      else if (kind === 'startup') openServerStartupInfo();
     });
-
-    $('#btn-single').onclick = () => showScreen('screen-setup');
-    $('#btn-online').onclick = () => {
-      App.leavingNetGame = false;
-      showScreen('screen-lobby');
-      Net.name = $('#net-name').value || '玩家';
-      Net.connect(() => { Net.send({ t: 'listRooms' }); });
-    };
-    $('#btn-rules').onclick = openRules;
-    const serverConsoleBtn = $('#btn-server-console');
-    if (serverConsoleBtn) serverConsoleBtn.onclick = openServerConsole;
-    const serverStartupBtn = $('#btn-server-startup');
-    if (serverStartupBtn) serverStartupBtn.onclick = openServerStartupInfo;
+    $$('[data-goto]').forEach(b => b.onclick = () => {
+      if (b.dataset.goto === 'home') leaveToMenu();
+      else showScreen('screen-' + b.dataset.goto);
+    });
     $('#modal-close').onclick = closeModal;
     $('#modal').onclick = e => { if (e.target === $('#modal')) closeModal(); };
     $('#mobile-detail-close').onclick = mobileDetailBack;
@@ -5417,108 +5149,15 @@
       });
     }
 
-    // 电脑节奏：设置页下拉 + 对局内一键切换
+    // 电脑节奏：对局内一键切换（设置页下拉已随首页/设置页移入共享组件）
     loadSpeed();
-    if ($('#cfg-speed')) {
-      $('#cfg-speed').value = App.speed;
-      $('#cfg-speed').onchange = () => {
-        App.speed = PACE[$('#cfg-speed').value] ? $('#cfg-speed').value : 'normal';
-        saveSpeed(); syncSpeedBtn();
-      };
-    }
     $('#btn-speed').onclick = cycleSpeed;
     syncSpeedBtn();
-
-    // MCTS 两项只在电脑类型选「策略神经网络」时才露出来
-    ['#cfg-bot-type'].forEach(id => {
-      const node = $(id);
-      if (node) node.onchange = syncNeuralOnlyFields;
-    });
-    syncNeuralOnlyFields();
-
-    $('#btn-start-single').onclick = () => {
-      const botSelection = normalizeBotSelection($('#cfg-bot-type').value, $('#cfg-level').value);
-      const cfg = {
-        players: Number($('#cfg-players').value),
-        level: botSelection.botLevel,
-        botType: botSelection.botType,
-        end: Number($('#cfg-end').value),
-        chars: $('#cfg-chars').value,
-        name: ($('#cfg-name').value || '我').trim()
-      };
-      if ($('#cfg-speed') && PACE[$('#cfg-speed').value]) {
-        App.speed = $('#cfg-speed').value; saveSpeed();
-      }
-      App.lastCfg = cfg; App.mode = 'net'; App.localServerGame = true; App.name = cfg.name;
-      startPythonSingle(cfg);
-    };
-
-    // 联机
-    $('#btn-create').onclick = async () => {
-      App.localServerGame = false;
-      App.leavingNetGame = false;
-      Net.name = ($('#net-name').value || '玩家').trim();
-      Net.connect(() => {
-        Net.send({
-          t: 'createRoom', name: Net.name, config: Object.assign({
-            playerCount: Number($('#net-players').value),
-            endDistricts: Number($('#net-end').value),
-            charSetMode: $('#net-chars').value,
-            // 房主的节奏偏好决定服务器上机器人的行动间隔
-            botPace: pace().act,
-            voice: $('#net-voice').value === 'on'
-          })
-        });
-      });
-      App.mode = 'net';
-    };
-    $('#btn-join').onclick = () => {
-      App.leavingNetGame = false;
-      const code = ($('#net-code').value || '').trim().toUpperCase();
-      if (code.length !== 4) { toast('请输入 4 位房间号'); return; }
-      App.localServerGame = false;
-      Net.name = ($('#net-name').value || '玩家').trim();
-      Net.connect(() => Net.send({ t: 'joinRoom', roomId: code, name: Net.name }));
-      App.mode = 'net';
-    };
-    $('#btn-refresh').onclick = () => Net.send({ t: 'listRooms' });
-    $('#btn-leave').onclick = () => {
-      Voice.leave();
-      App.lobbyState = null;
-      Net.send({ t: 'leaveRoom' });
-      clearNetSession();
-      $('#lobby-pre').hidden = false; $('#lobby-room').hidden = true;
-      $('#lobby-title').textContent = '联机大厅';
-      Net.send({ t: 'listRooms' });
-    };
-    $('#btn-net-start').onclick = () => Net.send({ t: 'startGame' });
-    $('#btn-net-shuffle').onclick = () => Net.send({ t: 'shuffleSeats' });
-    ['r-players', 'r-end', 'r-chars', 'r-voice'].forEach(id => {
-      $('#' + id).onchange = () => {
-        Net.send({
-          t: 'config', config: {
-            playerCount: Number($('#r-players').value),
-            endDistricts: Number($('#r-end').value),
-            charSetMode: $('#r-chars').value,
-            voice: $('#r-voice').value === 'on'
-          }
-        });
-      };
-    });
 
     // 对局内
     $('#btn-back-home').onclick = () => {
       if (App.state && App.state.phase !== 'gameover' && !confirm('确定离开当前对局吗？')) return;
-      Voice.leave();
-      if (App.localServerGame) {
-        App.leavingNetGame = true;
-        App.localServerGame = false;
-        App.state = null;
-        Net.roomId = null;
-        clearNetSession();
-        Net.send({ t: 'leaveRoom' });
-      }
-      showScreen('screen-home');
+      leaveToMenu();
     };
     $('#btn-chars').onclick = openCharacters;
     $('#btn-buildings').onclick = openBuildings;
@@ -5579,14 +5218,11 @@
       Net.send({ t: 'chat', text: text });
       closeChatComposer();
     };
+    // 再来一局：单机房间由服务器重新开局（handle 收到大厅态会补发 startGame）；
+    // 联机房间服务器回到大厅，handle 会把 socket 交还组件显示房间。
     $('#btn-again').onclick = () => {
-      if (App.localServerGame && App.lastCfg) {
-        Net.send({ t: 'restart' });
-      } else if (App.mode === 'net') {
-        Net.send({ t: 'restart' });
-        $('#lobby-pre').hidden = true; $('#lobby-room').hidden = false;
-        showScreen('screen-lobby');
-      }
+      App.leavingNetGame = false;
+      Net.send({ t: 'restart' });
     };
     window.addEventListener('resize', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
     window.addEventListener('orientationchange', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
@@ -5620,12 +5256,28 @@
   }
 
   bind();
-  // 浏览器刷新或重启后，使用本地保存的令牌自动回到原来的座位/对局。
-  const savedNetSession = loadNetSession();
-  if (savedNetSession) {
-    App.mode = 'net';
-    Net.name = savedNetSession.name || '玩家';
-    Net.connect(() => Net.send({ t: 'listRooms' }));
+  // 首页 / 单人设置 / 联机大厅由共享组件驱动；开局时组件把 socket 交过来。
+  // 刷新后的自动 resume 也由组件完成（它挂载时用本地令牌重连）。
+  const lobbyEl = $('#lobby');
+  if (lobbyEl && customElements.get('c-citadels-lobby')) {
+    lobbyEl.onGameStart = handle => {
+      App.mode = 'net';
+      App.localServerGame = !!handle.localServerGame;
+      App.state = handle.state || null;
+      App.myId = handle.myId || null;
+      App.name = handle.name || App.name;
+      App.leavingNetGame = false;
+      App.botDebugEntries = [];
+      // 中途接管（刷新恢复 / 断线重连）时对齐到最新事件，不回放历史。
+      if (App.state && App.state.notices && App.state.notices.length) {
+        App.noticeSeen = App.state.notices[App.state.notices.length - 1].seq;
+      }
+      App.paused = false; hideEvent(true);
+      Net.install(handle);
+      showScreen('screen-game');
+      render();
+      if (App.state && App.state.phase === 'gameover') showOver(App.state);
+    };
   }
   // 供自动化测试驱动使用
   App.__net = Net;

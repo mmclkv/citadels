@@ -11,6 +11,8 @@
  *       对局开始/恢复时（phase !== 'lobby'）调用一次，随后 socket 交给页面。
  *   el.returnToHome()
  *       回到主菜单/离开对局时由页面调用，组件回收 socket、清会话、回首页。
+ *   el.returnToLobby(state)
+ *       联机房间重开时由页面调用，组件收回 socket 并显示大厅房间。
  *   el.reconnect()
  *       对局中断线时由页面调用，重连并用本地令牌恢复，成功后再次触发 onGameStart。
  *   组件会在每次切屏时设置 document.documentElement 的 data-lobby-screen
@@ -872,7 +874,8 @@
         const cb = host.onGameStart;
         if (typeof cb === 'function') {
           try {
-            cb({ ws: ws, send: o => Net.send(o), myId: App.myId, roomId: Net.roomId, name: Net.name, state: state });
+            cb({ ws: ws, send: o => Net.send(o), myId: App.myId, roomId: Net.roomId, name: Net.name,
+                 state: state, localServerGame: !!App.localServerGame });
           } catch (err) { /* 页面接管后的异常不应影响大厅 */ }
         }
       }
@@ -893,6 +896,21 @@
         showScreen('home');
       }
       host.returnToHome = returnToHome;
+
+      // 联机房间重开（比如结算后「再来一局」）时由页面调用：收回 socket，
+      // 直接显示大厅房间，房主可以再开一局。
+      host.returnToLobby = function (state) {
+        Net.handedOver = false;
+        started = false;
+        Net.attach();
+        if (Net.ws && Net.ws.readyState === 1) Net.startHeartbeat();
+        if (state) {
+          App.state = state;
+          if (state.you) App.myId = state.you;
+          renderLobbyRoom(state);
+        }
+        showScreen('lobby');
+      };
 
       // 对局中断线：socket 已交给页面，页面（mobile.js）检测到断开后调用它重连。
       // 复位 handedOver/started，重连成功后 handle() 会再次 handOver 并回调 onGameStart。
