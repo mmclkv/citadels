@@ -49,6 +49,42 @@ NativeGameState fixture(){
   s.deck=DeckMachine({card("deck1",1),card("deck2",6,"yellow")});
   return s;
 }
+void check_warrant_privacy(){
+  auto s=fixture();s.players[1].role_id="magistrate";s.players[1].role_ids={"magistrate"};
+  s.players[1].played={"magistrate"};
+  s.char_deck={"magistrate","king","warlord"};
+  s.call_queue={{"magistrate",1,1},{"king",4,0},{"warlord",8,2}};s.call_index=1;
+  s.magistrate_player=1;s.magistrate_nums={4,7,8};s.magistrate_signed=4;
+  NativeHeuristicAdapter rules;const auto actions=rules.legal_actions(s,0);
+  std::vector<int> order={4,7,8};
+  do {
+    auto changed=s;changed.magistrate_nums=order;changed.magistrate_signed=order.front();
+    require(rules.information_set_hash(s,0)==rules.information_set_hash(changed,0),"warrant fixture has different public information");
+    for(int seed=1;seed<=8;++seed){
+      for(bool canonical:{false,true}){
+        const auto a=determinize_native_state(s,0,seed,canonical);
+        const auto b=determinize_native_state(changed,0,seed,canonical);
+        require(a.magistrate_nums==b.magistrate_nums && a.magistrate_signed==b.magistrate_signed,
+                "private warrant order or real marker changed hidden-world samples");
+        const auto owner=determinize_native_state(changed,1,seed,canonical);
+        require(owner.magistrate_nums==order && owner.magistrate_signed==order.front(),"warrant owner lost their private information");
+      }
+      std::vector<NativeGameState> a,b;
+      for(int i=0;i<8;++i){const uint32_t particle_seed=seed+static_cast<uint32_t>(i)*0x9e3779b9u;
+        a.push_back(determinize_native_state(s,0,particle_seed,true));
+        b.push_back(determinize_native_state(changed,0,particle_seed,true));}
+      Mcts<NativeGameState,NativeSearchAction>::Config c;c.simulations=64;c.max_depth=24;c.seed=seed;c.dirichlet_epsilon=0;
+      NativeHeuristicEvaluator ea(8,1,seed),eb(8,1,seed);
+      const auto x=Mcts<NativeGameState,NativeSearchAction>(rules,ea,c).search(a,0);
+      const auto y=Mcts<NativeGameState,NativeSearchAction>(rules,eb,c).search(b,0);
+      require(x.policy==y.policy && x.value_vector==y.value_vector && x.visits==y.visits && x.expansions==y.expansions,
+              "search depends on private warrant order or real marker");
+    }
+  } while(std::next_permutation(order.begin(),order.end()));
+  require(s.magistrate_nums==std::vector<int>({4,7,8}) && s.magistrate_signed==4,"sampling changed authoritative warrant");
+  auto claimed=s;claimed.magistrate_claimed=true;claimed.magistrate_nums={8,4,7};
+  require(determinize_native_state(claimed,0,1,true).magistrate_signed==4,"sampling changed revealed warrant");
+}
 void check_win_objective(){
   NativeHeuristicAdapter search_rules;NativeGameAdapter shared_rules;
   for(int count:{4,5,6,8}){
@@ -87,6 +123,7 @@ void check_win_objective(){
   }
 }
 int main(){
+  check_warrant_privacy();
   check_win_objective();
   NativeGameAdapter rules;NativeHeuristicEvaluator evaluator;auto s=fixture();
   auto legal=rules.legal_actions(s,0);auto e=evaluator.evaluate(s,0,legal);

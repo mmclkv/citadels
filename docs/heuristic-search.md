@@ -38,6 +38,9 @@ private observations; that would require posterior reweighting.
 Unknown cards/roles are sampled into shared-tree particles; heuristic evaluation
 uses the current actor's information, not opponents' private cards. Wizard-visible
 cards and announced construction pending a Magistrate reaction stay pinned.
+Magistrate warrant targets are sorted for non-owners before sampling the real
+warrant, so private declaration order cannot affect sampled worlds or search.
+Owners retain their actual private commitment; revealed warrants stay pinned.
 
 ## Startup environment
 

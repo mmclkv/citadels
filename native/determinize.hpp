@@ -92,10 +92,15 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
   for (size_t i = 0; i < hidden_roles.size(); ++i) *hidden_roles[i] = std::move(shuffled_roles[i]);
 
   // Private signed-role guesses are unknown to other players. Keep public
-  // target sets intact and sample only the concealed commitment.
-  if (result.magistrate_player != viewer && !result.magistrate_claimed &&
-      !result.magistrate_nums.empty())
-    result.magistrate_signed = result.magistrate_nums[rng() % result.magistrate_nums.size()];
+  // target sets intact and sample only the concealed commitment. Magistrate
+  // declaration order is private (the real warrant was selected first): remove
+  // that order before sampling, regardless of the card/role canonicalization
+  // option. The owner retains their actual private commitment.
+  if (result.magistrate_player != viewer) {
+    std::sort(result.magistrate_nums.begin(),result.magistrate_nums.end());
+    if (!result.magistrate_claimed && !result.magistrate_nums.empty())
+      result.magistrate_signed = result.magistrate_nums[rng() % result.magistrate_nums.size()];
+  }
   if (result.blackmailer_player != viewer && result.blackmailer_signed >= 0 &&
       !result.blackmailer_nums.empty()) {
     std::vector<int> candidates;
