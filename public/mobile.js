@@ -60,7 +60,7 @@
     M.ws=ws; M.id=handle.myId||M.id; M.room=handle.roomId||M.room; M.name=handle.name||M.name;
     M.leavePending=false;
     ws.onmessage=event=>{ let msg;try{msg=JSON.parse(event.data);}catch(_){return;} receive(msg); };
-    ws.onclose=()=>{ if(M.ws!==ws)return; message('连接中断，正在重连…'); M.ws=null;
+    ws.onclose=()=>{ if(M.ws!==ws)return; message('连接中断，正在重连…'); $('entryOverlay').hidden=false; M.ws=null;
       clearTimeout(M.reconnect);
       // 断线重连交回组件：它手里有 session，能重新 hello/resume，再交一次 socket
       M.reconnect=setTimeout(()=>{const el=$('lobby');if(el&&el.reconnect)el.reconnect();},1500);
