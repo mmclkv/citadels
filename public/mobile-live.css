@@ -198,6 +198,8 @@
   color:#84e7b0;font-size:9px;font-weight:900;letter-spacing:.3px;white-space:nowrap}
 /* 顶栏避开刘海/浏览器上沿（桌面 env 为 0，尺寸不变） */
 .phone>.top{flex:0 0 auto;height:calc(51px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top)}
+/* 共享组件（首页/单人设置/联机大厅）显示时隐藏对局视图；该属性由组件在切屏时写入 */
+html[data-lobby-screen]:not([data-lobby-screen="game"]) .shell{display:none}
 /* 博物馆标签右上角露出馆下叠放张数（实心圆形徽标）；卡片很窄时会盖住名字末尾，这是允许的 */
 .city-mini{position:relative}
 .mini-museum{position:absolute;right:1px;top:50%;transform:translateY(-50%);pointer-events:none;

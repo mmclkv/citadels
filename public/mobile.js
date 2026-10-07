@@ -52,27 +52,28 @@
   function focusArea(area){if(!area)return;M.focus=area;if(area==='hand')M.handOpen=true;if(area==='roles')M.roleOpen=true;
     render();scrollFocus(true);}
   function session() { try { const v=JSON.parse(localStorage.getItem(SESSION)||'null'); return v && v.token && v.roomId ? v:null; } catch (_) { return null; } }
-  function remember(token, roomId) { try {localStorage.setItem(SESSION,JSON.stringify({token,roomId,name:M.name,server:session()?.server||location.origin}));}catch(_){ } }
-  function connect() {
-    if (M.ws && M.ws.readyState<=1) return;
-    const saved=session();
-    if(!saved){location.replace('./index.html');return;}
-    const ws = new WebSocket((saved.server||location.origin).replace(/^http/,'ws'));
-    M.ws=ws;
-    ws.onopen=()=>{ M.name=(saved.name||'玩家').trim();
-      send({t:'hello',name:M.name,resumeToken:saved.token,roomId:saved.roomId});
-    };
+  // 联机的前半程（首页 / 单人设置 / 联机大厅 / 建房 / 加入房间）由共享组件
+  // public/components/citadels-lobby.js 负责。它自己开 socket，开局时通过
+  // onGameStart 把 socket 交过来，之后这个页面只处理对局内的消息。
+  function adoptGame(handle){
+    const ws=handle.ws;
+    M.ws=ws; M.id=handle.myId||M.id; M.room=handle.roomId||M.room; M.name=handle.name||M.name;
+    M.leavePending=false;
     ws.onmessage=event=>{ let msg;try{msg=JSON.parse(event.data);}catch(_){return;} receive(msg); };
     ws.onclose=()=>{ if(M.ws!==ws)return; message('连接中断，正在重连…'); M.ws=null;
-      clearTimeout(M.reconnect); M.reconnect=setTimeout(connect,1500);
+      clearTimeout(M.reconnect);
+      // 断线重连交回组件：它手里有 session，能重新 hello/resume，再交一次 socket
+      M.reconnect=setTimeout(()=>{const el=$('lobby');if(el&&el.reconnect)el.reconnect();},1500);
     };
     ws.onerror=()=>{ message('无法连接本地游戏服务'); };
+    M.state=handle.state||M.state;
+    if(M.state&&M.state.you)M.id=M.state.you;
+    clearTimeout(M.reconnect);
+    $('entryOverlay').hidden=true;
+    render();
   }
   function receive(msg) {
-    if(msg.t==='rooms'&&M.leavePending){location.replace('./index.html');return;}
-    if(msg.t==='hello') { M.id=msg.youId || M.id; if(!msg.resumed){try{localStorage.removeItem(SESSION);}catch(_){}location.replace('./index.html');} }
-    else if(msg.t==='joined') { M.id=msg.youId; M.room=msg.roomId; if(msg.resumeToken)remember(msg.resumeToken,msg.roomId); M.state=msg.state; render(); }
-    else if(msg.t==='state') { M.state=msg.state; if(msg.state.you)M.id=msg.state.you; if(!driveSequence())render(); }
+    if(msg.t==='state') { M.state=msg.state; if(msg.state.you)M.id=msg.state.you; if(!driveSequence())render(); }
     else if(msg.t==='chat') { M.chat.push(msg); renderSidebar(); chatBubble(msg); }
     else if(msg.t==='error') { M.sequence=null;message(msg.error); $('selectedInfo').textContent=msg.error; render();$('selectedInfo').textContent=msg.error; }
   }
@@ -81,7 +82,6 @@
     const scroll=$('viewport').scrollTop;
     const sheetScroll=$('sheet').scrollTop;
     $('entryOverlay').hidden=true;
-    if(s.phase==='lobby'){location.replace('./index.html');return;}
     if(s.phase==='gameover'){renderOver(s);}else{$('overOverlay').hidden=true;}
     $('handSection').hidden=false;$('removedArea').hidden=false;
     const own=myPlayer(); const current=s.phase==='draft' ? s.draft?.currentPlayer : s.turn?.playerId;
@@ -585,9 +585,12 @@
     }
   });
   syncTheme();
-  const leaveToLobby=()=>{closeMenu();try{localStorage.removeItem(SESSION);}catch(_){}
-    if(M.room&&M.ws?.readyState===1){M.leavePending=true;send({t:'leaveRoom'});setTimeout(()=>{if(M.leavePending)location.replace('./index.html');},1500);}
-    else location.replace('./index.html');
+  const leaveToLobby=()=>{closeMenu();
+    if(M.ws&&M.ws.readyState===1)send({t:'leaveRoom'});
+    M.state=null; M.ws=null; M.leavePending=false;
+    const el=$('lobby');
+    // 交回组件：它重新接管 socket、清掉 session 并显示首页
+    if(el&&el.returnToHome)el.returnToHome(); else location.replace('./index.html');
   };
   $('menuNewGame').onclick=leaveToLobby;
   $('overExit').onclick=leaveToLobby;
@@ -595,5 +598,8 @@
   $('viewer').onclick=e=>{if(e.target.id==='viewer')closeViewer();};
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('eventOverlay')&&!$('eventOverlay').hidden){closeEvent();}else if($('viewer').classList.contains('show'))closeViewer();else if(M.stage){backStage();}else if(M.confirm){M.confirm=null;render();}else if(M.focus){M.focus=null;render();}else if(!$('referenceOverlay').hidden)closeReference();else if($('sheet').classList.contains('show'))closeSheet();else if(M.sidebar)hideSidebar();else closeMenu();}});
   setInterval(()=>{if(M.ws?.readyState===1)send({t:'heartbeat',ts:Date.now()});},5000);
-  connect();
+  // 把对局入口接到共享组件上：组件收到非大厅状态时调用它，把 socket 交给本页面
+  const lobbyEl=$('lobby');
+  if(lobbyEl&&customElements.get('c-citadels-lobby'))lobbyEl.onGameStart=adoptGame;
+  else message('界面组件加载失败，请刷新页面');
 })();

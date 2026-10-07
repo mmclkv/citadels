@@ -828,13 +828,6 @@
   }
 
   /* ============================== 联机驱动 ============================== */
-  function enterPrototypeMobileGame(state) {
-    if (!state || state.phase === 'lobby' ||
-        !window.matchMedia || !window.matchMedia('(max-width: 820px)').matches ||
-        new URLSearchParams(location.search).has('desktop')) return false;
-    location.replace(new URL('./mobile.html', location.href).href);
-    return true;
-  }
   const Net = {
     autoStart: false,
     ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
@@ -900,7 +893,6 @@
           this.myId = m.youId; this.roomId = m.roomId;
           if (m.resumeToken) saveNetSession(m.resumeToken, m.roomId, this.name);
           App.myId = m.youId;
-          if (enterPrototypeMobileGame(m.state)) break;
           App.botDebugEntries = [];
           if (App.botDebugOpen) renderBotDebug();
           // 大厅里加入 → 从 0 开始（后续事件全部提示）；中途加入 → 对齐进度，不回放历史
@@ -920,7 +912,6 @@
           if (App.leavingNetGame) break;
           App.state = m.state;
           if (m.state.you) App.myId = m.state.you;
-          if (enterPrototypeMobileGame(m.state)) break;
           if (m.state.phase === 'lobby' && App.localServerGame) {
             App.chatHistory = [];
             clearGameBoardView();
