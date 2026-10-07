@@ -152,10 +152,21 @@
 .row-bubble.tone-magic{border-color:rgba(190,140,255,.5);background:linear-gradient(180deg,rgba(38,20,62,.97),rgba(14,9,26,.97));color:#eddcff}
 .row-bubble.tone-warn{border-color:rgba(241,189,75,.5);background:linear-gradient(180deg,rgba(52,38,10,.97),rgba(22,16,5,.97));color:#ffeab8}
 .row-bubble.tone-danger{border-color:rgba(255,110,118,.5);background:linear-gradient(180deg,rgba(56,16,22,.97),rgba(24,7,11,.97));color:#ffd9dc}
-/* 聊天气泡参与面板布局，避免长发言遮住玩家信息或被面板裁切。 */
-.row-bubble.tone-chat{position:relative;left:auto;right:auto;bottom:auto;margin-top:5px;
-  max-height:120px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;
-  font-size:12px;font-weight:500;user-select:text;cursor:text}
+/* 聊天气泡：和「效果提示」气泡刻意区分——青绿色系 + 引号标记 + 不再带左下尖角，
+   参与面板布局（不像效果气泡那样贴行覆盖），长发言可滚动、可选中。 */
+.row-bubble.tone-chat{position:relative;left:auto;right:auto;bottom:auto;margin-top:9px;
+  padding:7px 10px 8px 22px;
+  border-color:rgba(94,231,193,.5);border-radius:13px;
+  background:linear-gradient(180deg,rgba(9,42,40,.97),rgba(4,24,23,.97));
+  color:#c8fff1;
+  box-shadow:0 8px 20px rgba(0,0,0,.5),inset 0 1px 0 rgba(150,255,225,.12);
+  max-height:120px;overflow:auto;scrollbar-width:none;
+  white-space:pre-wrap;overflow-wrap:anywhere;
+  font-size:12px;font-weight:500;line-height:1.45;user-select:text;cursor:text}
+.row-bubble.tone-chat::-webkit-scrollbar{width:0;height:0}
+.row-bubble.tone-chat::before{content:"“";position:absolute;left:7px;top:2px;
+  width:auto;height:auto;transform:none;background:none;border:0;border-radius:0;box-shadow:none;
+  color:rgba(94,231,193,.95);font-size:15px;font-weight:900;line-height:1}
 .row-bubble.enter{animation:bubbleIn .26s cubic-bezier(.2,.9,.3,1.2)}
 .row-bubble.fading{opacity:0;transform:translateY(5px) scale(.97)}
 @keyframes bubbleIn{from{opacity:0;transform:translateY(8px) scale(.9)}to{opacity:1;transform:none}}
