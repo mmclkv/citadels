@@ -434,6 +434,50 @@ class ServerArgumentTests(unittest.TestCase):
                 self.assertIn(target_phrase, log)
                 self.assertIn("7号", log)
 
+    def test_blackmailer_reveal_notifies_marked_player_for_real_and_fake_marks(self) -> None:
+        def states(signed: int, victim_gold: int, blackmailer_gold: int) -> tuple[dict, dict]:
+            previous = {
+                "noticeSeq": 4, "notices": [],
+                "turn": {"charId": "king", "playerIdx": 1,
+                         "pending": {"kind": "blackmailer_threat", "first": 4,
+                                     "signed": signed}},
+                "reaction": {"kind": "blackmailer", "playerIdx": 0},
+                "players": [
+                    {"id": "b", "name": "勒索者", "gold": blackmailer_gold},
+                    {"id": "v", "name": "被标记玩家", "gold": victim_gold},
+                ],
+            }
+            updated = {"noticeSeq": 4, "notices": [],
+                       "players": [
+                           {"id": "b", "name": "勒索者", "gold": blackmailer_gold +
+                            (victim_gold if signed else 0)},
+                           {"id": "v", "name": "被标记玩家", "gold": 0 if signed else victim_gold},
+                       ]}
+            return previous, updated
+
+        for signed, victim_gold, blackmailer_gold, expected_real, expected_amount in (
+                (1, 5, 2, True, 5), (0, 5, 2, False, 0)):
+            with self.subTest(signed=signed):
+                previous, updated = states(signed, victim_gold, blackmailer_gold)
+                PythonServer._append_blackmailer_reveal_notice(
+                    previous, updated, {"type": "reaction", "name": "use"})
+                notice = updated["notices"][0]
+                self.assertEqual(notice["kind"], "blackmailer_reveal")
+                self.assertEqual(notice["playerId"], "v")
+                self.assertEqual(notice["byId"], "b")
+                self.assertTrue(notice["revealed"])
+                self.assertEqual(notice["isReal"], expected_real)
+                self.assertEqual(notice["amount"], expected_amount)
+
+        previous, updated = states(1, 5, 2)
+        updated["players"][0]["gold"] = 2
+        updated["players"][1]["gold"] = 5
+        PythonServer._append_blackmailer_reveal_notice(
+            previous, updated, {"type": "reaction", "name": "skip"})
+        notice = updated["notices"][0]
+        self.assertFalse(notice["revealed"])
+        self.assertNotIn("isReal", notice)
+
     def test_called_assassinated_and_stolen_roles_are_reported_when_resolved(self) -> None:
         previous = {
             "callIdx": 0,
@@ -501,6 +545,29 @@ class ServerArgumentTests(unittest.TestCase):
 
         self.assertEqual(updated["notices"], [{"seq": 4, "kind": "prophet_collect",
                                                 "fromIdxs": [1, 2], "toIdx": 0}])
+
+    def test_prophet_return_notice_identifies_recipient_without_generic_gain(self) -> None:
+        previous = {
+            "noticeSeq": 8, "notices": [],
+            "turn": {"charId": "prophet", "playerIdx": 0,
+                     "pending": {"kind": "prophet_give", "targetIdx": 1}},
+            "players": [
+                {"id": "p0", "name": "预言家玩家", "hand": [{"uid": "taken"}]},
+                {"id": "p1", "name": "收到牌的玩家", "hand": []},
+            ],
+        }
+        updated = {"players": [
+            {"id": "p0", "name": "预言家玩家", "hand": []},
+            {"id": "p1", "name": "收到牌的玩家", "hand": [{"uid": "taken"}]},
+        ]}
+
+        PythonServer._append_gain_notices(previous, updated, {"type": "prophet_give"})
+
+        self.assertEqual(updated["notices"], [{
+            "seq": 9, "kind": "prophet_return", "fromIdx": 0, "toIdx": 1,
+            "byIdx": 0, "playerIdx": 1, "byId": "p0", "playerId": "p1",
+            "byName": "预言家玩家", "playerName": "收到牌的玩家", "amount": 1,
+        }])
 
     def test_deployment_environment_defaults_and_cli_precedence(self) -> None:
         with mock.patch.dict(os.environ, {"PORT": "9123", "HOST": "0.0.0.0",

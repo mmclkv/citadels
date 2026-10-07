@@ -757,15 +757,35 @@ class PythonServer:
                            isinstance(prophet_idx, int) and 0 <= prophet_idx < size and
                            hand_delta[prophet_idx] == len(prophet_sources) and
                            len(prophet_sources) >= 1)
+        prophet_return_idx = pending.get("targetIdx")
+        prophet_return = (action.get("type") == "prophet_give" and
+                          old_turn.get("charId") == "prophet" and
+                          pending.get("kind") == "prophet_give" and
+                          isinstance(prophet_idx, int) and 0 <= prophet_idx < size and
+                          isinstance(prophet_return_idx, int) and 0 <= prophet_return_idx < size and
+                          hand_delta[prophet_idx] == -1 and hand_delta[prophet_return_idx] == 1)
         for i, amount in enumerate(hand_delta):
             if amount > 0:
                 if not (prophet_collect and i == prophet_idx):
+                    if prophet_return and i == prophet_return_idx:
+                        continue
                     append("hand_gain", i, amount, source_for(hand_delta, i))
 
         if prophet_collect:
             seq += 1
             notices.append({"seq": seq, "kind": "prophet_collect",
                             "fromIdxs": prophet_sources, "toIdx": prophet_idx})
+
+        if prophet_return:
+            prophet = old_players[prophet_idx]
+            recipient = old_players[prophet_return_idx]
+            seq += 1
+            notices.append({"seq": seq, "kind": "prophet_return",
+                            "fromIdx": prophet_idx, "toIdx": prophet_return_idx,
+                            "byIdx": prophet_idx, "playerIdx": prophet_return_idx,
+                            "byId": prophet.get("id"), "playerId": recipient.get("id"),
+                            "byName": prophet.get("name") or "预言家",
+                            "playerName": recipient.get("name") or "玩家", "amount": 1})
 
         # The Magician redraw replaces cards one-for-one, so a player can gain
         # new cards with no net hand-size change. Emit the final redraw animation.

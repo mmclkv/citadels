@@ -536,6 +536,19 @@
           handTransferAnim(fromIdx, n.toIdx, 1, ''));
         return;
 
+      case 'prophet_return':
+        handTransferAnim(n.fromIdx, n.toIdx, n.amount || 1, '预言家归还手牌');
+        if (isMe) {
+          queueEvent({
+            tone: 'info', icon: '☉', title: '收到归还的手牌', hold: 4400,
+            text: '预言家 <b>' + escapeHtml(n.byName || '其他玩家') +
+                  '</b> 将 <b>1 张手牌</b>归还给你。'
+          });
+        } else {
+          toast('☉ 预言家将1张手牌归还给 ' + escapeHtml(n.playerName || '玩家'));
+        }
+        return;
+
       case 'destroyed':
         destroyAnim(n.playerIdx, n.uid, n.cardName);
         if (isMe) {
@@ -4508,6 +4521,14 @@
     }
 
     promptEl.innerHTML = escapeHtml(av.prompt || '请选择行动');
+    const turnPending = s.turn && s.turn.pending;
+    if (turnPending && turnPending.kind === 'prophet_give') {
+      const recipient = s.players[turnPending.targetIdx];
+      if (recipient) {
+        const seat = Number.isInteger(recipient.seat) ? '（座位 ' + (recipient.seat + 1) + '）' : '';
+        promptEl.textContent = '预言家：选择归还给 ' + recipient.name + seat + ' 的手牌';
+      }
+    }
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     const representedActions = new Set();
@@ -4752,7 +4773,9 @@
       : kind === 'draw_keep' ? '选择要保留的建筑牌'
       : kind === 'wizard_card' ? '法师：从目标玩家手牌中选择 1 张'
       : '选择一张卡牌';
-    $('#modal-title').textContent = title;
+    const recipient = kind === 'prophet_give' && s.players[pd.targetIdx];
+    $('#modal-title').textContent = recipient
+      ? '预言家：选择归还给 ' + recipient.name + ' 的手牌' : title;
     const body = $('#modal-body');
     body.innerHTML = '';
     const grid = el('div', 'pick-grid pick-grid-' + kind);

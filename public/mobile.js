@@ -183,6 +183,13 @@
     case 'prophet_collect':{const from=(n.fromIdxs||[]).map(i=>idxId(s,i));
       return {actor:idxId(s,n.toIdx),victim:hitsMe(from)?M.id:null,full:false,tone:'info',icon:'☉',title:'预言家收集手牌',
         text:`${seatName(s,n.toIdx)} 从其他玩家处各取走 1 张手牌`};}
+    case 'prophet_return':return {actor:idxId(s,n.fromIdx),victim:idxId(s,n.toIdx),full:false,tone:'info',icon:'☉',title:'收到归还的手牌',
+      text:`预言家将 1 张手牌归还给 ${seatName(s,n.toIdx)}`};
+    case 'blackmailer_reveal':{
+      const victim=seatName(s,n.fromIdx),actor=seatName(s,n.toIdx);
+      const result=n.revealed?(n.isReal?`真威胁标记生效，你失去了全部 ${n.amount||0} 枚金币。`:'虚惊一场：威胁标记是假的，你没有失去金币。'):'勒索者没有翻开威胁标记，本轮威胁作废。';
+      return {actor:idxId(s,n.toIdx),victim:idxId(s,n.fromIdx),full:false,tone:n.revealed&&n.isReal?'danger':'warn',icon:'†',title:n.revealed?(n.isReal?'金币被勒索':'威胁标记是假的'):'威胁已撤销',
+        text:`【勒索者】${actor} 对 ${victim}：${result}`};}
     default:return null;}}
   function noticeEvent(n,s){const ev=noticeView(n,s);if(!ev)return;
     if(n.kind==='role_effect'||n.kind==='role_effect_detail')M.effectFallback=null;
@@ -268,6 +275,11 @@
     const type=cardTypes.find(t=>a.some(x=>x.type===t));
     if(type){const pool=type==='prophet_give'?myPlayer()?.hand||[]:pending?.cards||pending?.hand||[];
       const cards=pool.length?pool:a.filter(x=>x.type===type).map(x=>[...(myPlayer()?.hand||[]),...(pending?.cards||[])].find(c=>c.uid===x.uid)).filter(Boolean);
+      if(type==='prophet_give'){
+        const recipient=Number.isInteger(pending?.targetIdx)?s.players[pending.targetIdx]:null;
+        const name=recipient?`${recipient.name}${Number.isInteger(recipient.seat)?`（座位 ${recipient.seat+1}）`:''}`:'目标玩家';
+        return {title:`预言家 · 归还给 ${name}`,hint:'请选择一张手牌归还给该玩家',kind:'district',items:cards,action:c=>a.find(x=>x.type===type&&x.uid===c.uid)};
+      }
       return {title:s.available?.prompt||'选择建筑牌',hint:'点击卡图查看并确认',kind:'district',items:cards,action:c=>a.find(x=>x.type===type&&x.uid===c.uid)};}
     if(pending?.kind==='wizard_choice'&&pending.card)return {title:'法师 · 选择卡牌去向',hint:'点击卡图查看，再从下方选择',kind:'district',items:[pending.card],action:()=>null};
     const roleTypes=['choose_char','magistrate_signed','magistrate_char','blackmailer_signed','blackmailer_char'];
