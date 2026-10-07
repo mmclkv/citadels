@@ -534,6 +534,26 @@ class PythonServer:
                     await client.send({"t": "state", "state": state})
                 except (ConnectionError, OSError):
                     pass
+                except Exception as exc:
+                    # One player's legal-action query must not abort the room-wide
+                    # broadcast. In particular, mobile clients otherwise remain on
+                    # the "entering game" overlay if another client's view fails.
+                    print(f"[room {room['id']}] state view failed for {client.id}: {exc}", flush=True)
+                    try:
+                        # The sanitized public state is still enough to transition
+                        # the client into the game UI; the error message makes the
+                        # missing actionable view visible instead of silently hanging.
+                        state = self._state_for(room, client.id)
+                        await client.send({"t": "state", "state": state})
+                        await client.send({"t": "error", "error": "无法准备你的合法行动列表，请刷新或重新连接后重试。"})
+                    except (ConnectionError, OSError):
+                        pass
+                    except Exception as fallback_exc:
+                        print(f"[room {room['id']}] fallback state failed for {client.id}: {fallback_exc}", flush=True)
+                        try:
+                            await client.send({"t": "error", "error": "服务器无法准备对局状态，请联系房主重试。"})
+                        except (ConnectionError, OSError):
+                            pass
 
     async def _send_room_notice(self, room: dict, notice: dict, excluded_id: str | None = None) -> None:
         payload = {"t": "roomNotice", "notice": notice}
