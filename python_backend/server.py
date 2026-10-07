@@ -108,10 +108,13 @@ async def _http_response(writer: asyncio.StreamWriter, code: int, body: bytes,
               429: "Too Many Requests",
               426: "Upgrade Required", 501: "Not Implemented", 503: "Service Unavailable",
               204: "No Content"}.get(code, "Error")
+    extra_headers = headers or {}
+    has_cache_policy = any(key.lower() == "cache-control" for key in extra_headers)
     header = (f"HTTP/1.1 {code} {reason}\r\nContent-Type: {content_type}\r\n"
-              f"Content-Length: {len(body)}\r\nCache-Control: {cache_control}\r\n"
+              f"Content-Length: {len(body)}\r\n" +
+              ("" if has_cache_policy else f"Cache-Control: {cache_control}\r\n") +
               "X-Content-Type-Options: nosniff\r\n" +
-              "".join(f"{key}: {value}\r\n" for key, value in (headers or {}).items()) +
+              "".join(f"{key}: {value}\r\n" for key, value in extra_headers.items()) +
               "Connection: close\r\n\r\n")
     writer.write(header.encode("ascii") + body)
     await writer.drain()
