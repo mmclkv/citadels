@@ -49,14 +49,51 @@ NativeGameState fixture(){
   s.deck=DeckMachine({card("deck1",1),card("deck2",6,"yellow")});
   return s;
 }
+void check_win_objective(){
+  NativeHeuristicAdapter search_rules;NativeGameAdapter shared_rules;
+  for(int count:{4,5,6,8}){
+    NativeGameState s;s.phase=NativePhase::Action;
+    for(int i=0;i<count;++i){
+      NativePlayer p;p.id="p"+std::to_string(i);
+      const int points=i==0?20:i==1?30:5;
+      const auto c=card(p.id+"-city",points);
+      p.city.push_back({c,c.name,"",{},false,false,1});s.players.push_back(p);
+    }
+    const auto before=NativeHeuristicEvaluator::static_value(s,0);
+    auto stop_leader=s;stop_leader.players[1].city[0].card.cost-=4;
+    stop_leader.players[1].city[0].card.score_value-=4;
+    auto hurt_trailer=s;hurt_trailer.players[2].city[0].card.cost-=4;
+    hurt_trailer.players[2].city[0].card.score_value-=4;
+    const auto leader_gain=NativeHeuristicEvaluator::static_value(stop_leader,0)[0]-before[0];
+    const auto trailer_gain=NativeHeuristicEvaluator::static_value(hurt_trailer,0)[0]-before[0];
+    require(leader_gain>5*trailer_gain,"catching leader diluted by trailing players");
+    auto tied=s;tied.players[0].city[0].card.score_value=30;
+    require(NativeHeuristicEvaluator::static_value(tied,0)[0]>before[0],"catching leader does not improve win estimate");
+    s.phase=NativePhase::GameOver;
+    const auto second=heuristic_terminal_reward_vector(s,0);
+    require(second[1]==1 && second[0]<-0.8f,"runner-up reward too close to winning");
+    // A 40% chance of first / 60% last must beat guaranteed second, even in
+    // eight-player games. The previous average-rank reward preferred safety.
+    require(0.4*second[1]+0.6*(-1)>second[0],"search prefers safe second to a real winning chance");
+    require(search_rules.terminal_value_vector(s,0)==second && search_rules.terminal_value(s,0)==second[0],
+            "search terminal backup uses the rank objective");
+    require(shared_rules.terminal_value_vector(s,0)==native_terminal_reward_vector(s,0) &&
+            shared_rules.terminal_value(s,0)>0,"shared training rank objective changed");
+    const auto rotated=heuristic_terminal_reward_vector(s,1);
+    for(int i=0;i<count;++i)require(rotated[i]==second[(i+1)%count],"terminal reward seat order changed");
+    tied.phase=NativePhase::GameOver;
+    require(heuristic_terminal_reward_vector(tied,0)[0]==1 && heuristic_terminal_reward_vector(tied,0)[1]==1,
+            "tied winners do not receive first-place reward");
+  }
+}
 int main(){
+  check_win_objective();
   NativeGameAdapter rules;NativeHeuristicEvaluator evaluator;auto s=fixture();
   auto legal=rules.legal_actions(s,0);auto e=evaluator.evaluate(s,0,legal);
   require(e.has_value_vector && e.priors.size()==legal.size(),"bad heuristic evaluation shape");
   float total=0;for(float p:e.priors){require(p>0 && std::isfinite(p),"lost action exploration floor");total+=p;}
   require(std::abs(total-1)<1e-5,"priors not normalized");
-  float value_sum=0;for(size_t i=0;i<s.players.size();++i){require(std::isfinite(e.value_vector[i]) && std::abs(e.value_vector[i])<=1,"invalid multiplayer value");value_sum+=e.value_vector[i];}
-  require(std::abs(value_sum)<1e-5,"expected rank values not zero-sum");
+  for(size_t i=0;i<s.players.size();++i)require(std::isfinite(e.value_vector[i]) && std::abs(e.value_vector[i])<=1,"invalid multiplayer value");
   auto hoard=s;hoard.players[0].hand.assign(6,card("quality",4));
   const double capped=NativeNpcPolicy::search_strength(hoard,0,0);
   hoard.players[0].hand.assign(60,card("quality",4));
@@ -144,8 +181,8 @@ int main(){
   arrest.reaction_build=true;arrest.reaction_uid=arrest.players[1].hand[0].uid;
   for(int i=0;i<8;++i){const auto world=determinize_native_state(arrest,0,100+i,true);
     require(world.players[1].hand[0].uid==arrest.reaction_uid,"announced construction disappeared from reaction particle");}
-  require(evaluator.evaluate(terminal,0,{}).value_vector==native_terminal_reward_vector(terminal,0),"terminal heuristic differs from true reward");
-  require(rollout.evaluate(terminal,0,{}).value_vector==native_terminal_reward_vector(terminal,0),"terminal rollout evaluation was blended with a nonterminal estimate");
+  require(evaluator.evaluate(terminal,0,{}).value_vector==heuristic_terminal_reward_vector(terminal,0),"terminal heuristic differs from win reward");
+  require(rollout.evaluate(terminal,0,{}).value_vector==heuristic_terminal_reward_vector(terminal,0),"terminal rollout evaluation was blended with a nonterminal estimate");
   SlowEvaluator slow;Mcts<NativeGameState,NativeSearchAction>::Config deadline;
   deadline.simulations=1000;deadline.max_depth=3;deadline.time_budget_ms=1;
   const auto limited=Mcts<NativeGameState,NativeSearchAction>(rules,slow,deadline).search(fixture(),0);

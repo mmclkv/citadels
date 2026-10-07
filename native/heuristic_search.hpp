@@ -8,6 +8,21 @@
 
 namespace citadels::native {
 
+// The heuristic opponent pursues first place. Keep a small rank component to
+// distinguish losing positions without making a safe second place attractive.
+inline constexpr double kHeuristicWinWeight = 0.9;
+inline std::array<float,kValueSlots> heuristic_terminal_reward_vector(
+    const NativeGameState& s,int player) {
+  auto values=native_terminal_reward_vector(s,player);
+  if(player<0 || player>=static_cast<int>(s.players.size()))return values;
+  for(size_t r=0;r<s.players.size() && r<kValueSlots;++r) {
+    // The shared rank reward is exactly 1 for every tied first-place player.
+    const double win=values[r]==1.0f?1.0:-1.0;
+    values[r]=static_cast<float>(kHeuristicWinWeight*win+(1-kHeuristicWinWeight)*values[r]);
+  }
+  return values;
+}
+
 // Reuse needs exact identity beyond the fixed-size neural feature slots.
 // Never include opponents' hidden card/role identities or deck order.
 class NativeHeuristicAdapter final : public GameAdapter<NativeGameState,NativeSearchAction> {
@@ -17,8 +32,8 @@ class NativeHeuristicAdapter final : public GameAdapter<NativeGameState,NativeSe
   bool apply(NativeGameState& s,int p,const NativeSearchAction& a) const override {return rules_.apply(s,p,a);}
   int next_player(const NativeGameState& s) const override {return rules_.next_player(s);}
   bool terminal(const NativeGameState& s) const override {return rules_.terminal(s);}
-  float terminal_value(const NativeGameState& s,int p) const override {return rules_.terminal_value(s,p);}
-  std::array<float,kValueSlots> terminal_value_vector(const NativeGameState& s,int p) const override {return rules_.terminal_value_vector(s,p);}
+  float terminal_value(const NativeGameState& s,int p) const override {return heuristic_terminal_reward_vector(s,p)[0];}
+  std::array<float,kValueSlots> terminal_value_vector(const NativeGameState& s,int p) const override {return heuristic_terminal_reward_vector(s,p);}
   InformationSetKey information_set_hash(const NativeGameState& s,int player) const override {
     InformationSetKeyBuilder b;const auto base=rules_.information_set_hash(s,player);
     b.u64(base.lo);b.u64(base.hi);b.i32(s.round);b.i32(s.end_districts);
@@ -98,16 +113,24 @@ class NativeHeuristicEvaluator final : public Evaluator<NativeGameState,NativeSe
   }
 
   static std::array<float,kValueSlots> static_value(const NativeGameState& s,int player) {
-    if(s.phase==NativePhase::GameOver)return native_terminal_reward_vector(s,player);
+    if(s.phase==NativePhase::GameOver)return heuristic_terminal_reward_vector(s,player);
     std::array<float,kValueSlots> values{};
     if(player<0 || player>=static_cast<int>(s.players.size()))return values;
     std::vector<double> strength;
     for(size_t i=0;i<s.players.size();++i)strength.push_back(NativeNpcPolicy::search_strength(s,static_cast<int>(i),player));
+    // A softmax models one winner rather than averaging independent pairwise
+    // ranks. Strong rivals dominate its denominator; weaker seats cannot dilute
+    // the value of catching the leader. Subtract the maximum for stability.
+    const double strongest=*std::max_element(strength.begin(),strength.end());
+    std::vector<double> win_mass;double total_mass=0;
+    for(double v:strength){win_mass.push_back(std::exp((v-strongest)/6.0));total_mass+=win_mass.back();}
     for(size_t r=0;r<s.players.size() && r<kValueSlots;++r) {
       const size_t own=(player+r)%s.players.size();double expected_rank=0;
       for(size_t other=0;other<s.players.size();++other)if(other!=own)
         expected_rank+=1/(1+std::exp(std::clamp((strength[own]-strength[other])/6.0,-20.0,20.0)));
-      values[r]=s.players.size()==1?1:static_cast<float>(1-2*expected_rank/(s.players.size()-1));
+      const double rank=s.players.size()==1?1:1-2*expected_rank/(s.players.size()-1);
+      const double win=2*win_mass[own]/total_mass-1;
+      values[r]=static_cast<float>(kHeuristicWinWeight*win+(1-kHeuristicWinWeight)*rank);
     }
     return values;
   }

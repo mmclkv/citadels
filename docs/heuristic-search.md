@@ -1,7 +1,7 @@
 # Heuristic difficulty: standalone ISMCTS
 
 Hard NPCs use the same serial ISMCTS core as neural search, with a pure C++
-heuristic prior and multiplayer expected-rank evaluator. No neural weights or
+heuristic prior and multiplayer win-focused evaluator. No neural weights or
 LibTorch are needed. Both the `npc` and `advance_npcs` game-engine requests use
 `choose_native_npc`. Easy/normal NPCs, single legal actions and round confirmations
 use the fast heuristic policy. The neural worker's simulation heuristic does not
@@ -10,9 +10,17 @@ start another search.
 Leaves now combine static evaluation (40%) and bounded heuristic rollouts (60%).
 Each rollout copies its determinized world and uses a cheap greedy heuristic,
 without the bounded turn planner or nested MCTS. At the action horizon it uses
-static expected-rank values; terminal rollout outcomes use exact terminal rewards.
+static win-focused values; terminal rollout outcomes use the heuristic terminal rewards.
 The value vector always remains in the original leaf player's seat order even
 when other actors move. Rollout work stops when the search deadline is reached.
+
+The hard heuristic search uses 90% first-place utility and 10% normalized rank
+utility. Nonterminal first-place chances are estimated with a stable softmax of
+public-material strength (temperature 6), so strong rivals matter more than weak
+ones. Terminal first place, including tied first place, scores 1; losing positions
+score between -1 and -0.8 with a small preference for higher rank. The evaluator,
+rollout tails and MCTS terminal backups all use this same objective. The shared
+game adapter, neural/CFR training rank rewards and easy/normal policies are unchanged.
 
 Search statistics survive consecutive compatible actions in a game-local session.
 After an actual action, the matching action/information-set child becomes the new
