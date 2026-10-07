@@ -1204,6 +1204,28 @@ class PythonServer:
         return entries
 
     @staticmethod
+    def _emperor_take_text(state: dict, action: dict, updated: dict | None = None) -> str:
+        turn = state.get("turn") or {}
+        target_idx = (turn.get("pending") or {}).get("targetIdx")
+        # Match native decoding: legacy actions use name, mobile actions use mode.
+        mode = action.get("name") or action.get("mode")
+        players = state.get("players") or []
+        target = players[target_idx] if isinstance(target_idx, int) and 0 <= target_idx < len(players) else {}
+        amount = min(1, max(0, int(target.get("gold", 1)))) if mode == "gold" else min(1, len(target.get("hand", [None])))
+        actor_idx = turn.get("playerIdx")
+        after = (updated or {}).get("players") or []
+        if (updated is not None and isinstance(actor_idx, int) and
+                0 <= actor_idx < len(players) and actor_idx < len(after)):
+            before_actor, after_actor = players[actor_idx], after[actor_idx]
+            amount = max(0, (int(after_actor.get("gold", 0)) - int(before_actor.get("gold", 0)))
+                         if mode == "gold" else len(after_actor.get("hand") or []) - len(before_actor.get("hand") or []))
+        resource = f"{amount}枚金币" if mode == "gold" else f"{amount}张建筑牌"
+        target_name = PythonServer._player_label(state, target_idx)
+        if not amount:
+            return f"皇帝从新皇冠持有者{target_name}处选择拿取{'金币' if mode == 'gold' else '手牌'}；实际获得{resource}"
+        return f"皇帝从新皇冠持有者{target_name}处取得{resource}"
+
+    @staticmethod
     def _game_action_log_text(state: dict, action: dict,
                               updated: dict | None = None) -> str:
         """Readable public log text; never expose hidden cards or secret role marks."""
@@ -1226,28 +1248,6 @@ class PythonServer:
                           else reaction.get("targetIdx", turn.get("playerIdx")))
             target = PythonServer._player_label(state, target_idx)
             owner = PythonServer._player_label(state, reaction.get("playerIdx"))
-    @staticmethod
-    def _emperor_take_text(state: dict, action: dict, updated: dict | None = None) -> str:
-        turn = state.get("turn") or {}
-        target_idx = (turn.get("pending") or {}).get("targetIdx")
-        # Match native decoding: legacy actions use name, mobile actions use mode.
-        mode = action.get("name") or action.get("mode")
-        players = state.get("players") or []
-        target = players[target_idx] if isinstance(target_idx, int) and 0 <= target_idx < len(players) else {}
-        amount = min(1, max(0, int(target.get("gold", 1)))) if mode == "gold" else min(1, len(target.get("hand", [None])))
-        actor_idx = turn.get("playerIdx")
-        after = (updated or {}).get("players") or []
-        if (updated is not None and isinstance(actor_idx, int) and
-                0 <= actor_idx < len(players) and actor_idx < len(after)):
-            before_actor, after_actor = players[actor_idx], after[actor_idx]
-            amount = max(0, (int(after_actor.get("gold", 0)) - int(before_actor.get("gold", 0)))
-                         if mode == "gold" else len(after_actor.get("hand") or []) - len(before_actor.get("hand") or []))
-        resource = f"{amount}枚金币" if mode == "gold" else f"{amount}张建筑牌"
-        target_name = PythonServer._player_label(state, target_idx)
-        if not amount:
-            return f"皇帝从新皇冠持有者{target_name}处选择拿取{'金币' if mode == 'gold' else '手牌'}；实际获得{resource}"
-        return f"皇帝从新皇冠持有者{target_name}处取得{resource}"
-
             revealed = PythonServer._reaction_used(action)
             if not revealed:
                 return f"【勒索者】放弃对{target}发动勒索，不翻开威胁标记；该标记本轮作废。"
