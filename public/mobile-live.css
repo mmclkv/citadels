@@ -1,6 +1,13 @@
 /* The game board above comes directly from the V12 prototype. These rules only
    cover live-game controls and small corrections discovered during comparison. */
 .phone{isolation:isolate}
+/* Keep the mobile viewport and its card controls bounded even when Safari's
+   visual viewport is narrower than the layout viewport (page zoom / safe area). */
+html,body{width:100%;max-width:100%;overflow-x:hidden}
+.shell,.phone-wrap,.phone,.viewport,.section{min-width:0;max-width:100%}
+.thumb-grid{display:flex;flex-wrap:wrap;justify-content:flex-start;align-content:flex-start;align-items:flex-start;gap:7px 5px;min-width:0;overflow:hidden}
+.small-card-btn{box-sizing:border-box;flex:0 0 clamp(56px,15vw,64px);width:clamp(56px,15vw,64px);min-width:0;max-width:64px;height:clamp(84px,22.5vw,96px);min-height:0;max-height:96px}
+.small-card-btn img{position:absolute;inset:0;width:100%;height:100%;min-width:0;max-width:100%;min-height:0;max-height:100%;object-fit:contain}
 .sidebar-toggle{justify-self:end;width:36px;min-width:36px;font-size:26px;line-height:1}
 .entry-overlay,.menu-overlay,.reference-overlay{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(2,7,14,.94)}
 .entry-overlay[hidden],.menu-overlay[hidden],.reference-overlay[hidden]{display:none}
@@ -47,9 +54,7 @@
 .action-list .btn{width:100%}
 .reference-overlay~.viewer,.viewer{z-index:50}
 .sidebar-tabs:has(#sidebarVoiceTab:not([hidden])){grid-template-columns:repeat(3,minmax(0,1fr))}.sidebar-tabs button[hidden]{display:none}.voice-action{width:100%;height:39px;margin:6px 0;border:1px solid #318cfa;border-radius:9px;background:#1651b9;color:#fff;font-weight:900}.voice-action.secondary{background:#0b2a42;border-color:#376487}
-/* 展开态卡牌：等距紧凑排列，卡片随可用宽度铺满 */
-.thumb-grid{grid-template-columns:repeat(auto-fill,minmax(64px,1fr));justify-content:start;gap:6px}
-.thumb-grid .small-card-btn{width:100%;height:auto;aspect-ratio:2/3}
+/* 展开态卡牌保持定宽换行；不能让卡片按整行宽度拉伸。 */
 /* 战报：原样沿用 PC 端 .log（style.css:176-185 + 霓虹 themes/neon/theme.css:222-256）
    霓虹下 PC 把战报做成浅色纸面板 + 深色高对比正文，标签和聊天保持浅色文字 */
 .log-list{display:block;margin:2px 4px 8px;padding:10px 14px;border-radius:10px;font-size:12.5px;line-height:1.65;
