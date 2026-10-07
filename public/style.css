@@ -1753,6 +1753,20 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
 .mobile-phase-status,.mobile-public-heading,.mobile-hand-toggle,.mobile-hand-summary,.mobile-draft-toggle,
 .mobile-draft-summary,.mobile-removed{display:none}
 @media (max-width:820px){
+  /* 移动端侧栏收起时只保留独立展开按钮，不让 collapsed aside
+     继续参与 flex 布局，否则会在右侧形成一条黑色空栏。 */
+  html,body{width:100%;max-width:100%;overflow-x:hidden}
+  #screen-game{width:100%;min-width:0;max-width:100%;background:var(--bg)}
+  #screen-game .mobile-fit-root{width:100%;min-width:0;max-width:100%;overflow-x:hidden}
+  #screen-game .board{width:100%;min-width:0;overflow:hidden}
+  #screen-game .board-main{width:100%;min-width:0;overflow-x:hidden}
+  #screen-game .actionbar{width:100%;min-width:0}
+  #screen-game .side-panel.show.collapsed{display:none!important;flex:none!important;width:0!important}
+  #screen-game .mobile-side-expand{position:fixed;right:8px;top:calc(8px + env(safe-area-inset-top));z-index:80;
+    width:38px;height:38px;padding:0;border:1px solid var(--line2);border-radius:10px;
+    background:var(--paper);color:var(--ink);box-shadow:var(--shadow2);font-size:20px;line-height:1}
+  #screen-game .mobile-side-expand[hidden]{display:none!important}
+
   #screen-game #opponents[data-layout="mobile-grid"]{
     position:relative!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));
     gap:8px!important;height:auto!important;min-height:0!important;overflow:visible!important;
@@ -1901,7 +1915,15 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
     border:1px solid var(--line2);border-radius:99px;font-size:9px;font-weight:850}
   #screen-game .mobile-hand-summary{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));
     gap:2px;padding:5px 6px}
-  #screen-game .mobile-hand-summary .mobile-hand-chip{width:100%;cursor:pointer;text-align:left}
+  #screen-game .mobile-hand-summary .mobile-hand-chip{position:relative;width:100%;min-width:0;aspect-ratio:2/3;
+    padding:0;border:1px solid var(--line2);border-radius:6px;background:var(--bg2);cursor:pointer;
+    overflow:hidden;text-align:left;box-shadow:0 2px 5px rgba(0,0,0,.28)}
+  #screen-game .mobile-hand-summary .mobile-hand-thumb{display:block;width:100%;height:100%;object-fit:contain}
+  #screen-game .mobile-hand-summary .mobile-hand-cost{position:absolute;top:2px;left:2px;display:grid;place-items:center;
+    width:15px;height:15px;border-radius:50%;background:var(--gold);color:#251a06;font-size:9px;line-height:1;
+    box-shadow:0 1px 3px rgba(0,0,0,.45)}
+  #screen-game .mobile-hand-summary .mobile-hand-chip>span{display:block;padding:4px 2px;color:var(--ink);
+    font-size:9px;font-weight:800;line-height:1.2;text-align:center;overflow:hidden}
   #screen-game #me-area.mobile-hand-expanded .mobile-hand-summary{display:none}
   #screen-game #my-hand,#screen-game.draft-phase #my-hand{
     display:none;min-height:0!important;max-height:none!important;height:auto!important;

@@ -4228,7 +4228,17 @@
         chip.type = 'button';
         chip.style.setProperty('--district-color', mobileDistrictColor(card.color));
         chip.title = card.name + ' · 费用 ' + card.cost;
-        chip.innerHTML = '<b>' + card.cost + '</b><span>' + escapeHtml(mobileDistrictName(card.name)) + '</span>';
+        const art = Theme.is && Theme.districtAsset ? Theme.districtAsset(card, 'thumb') : null;
+        if (art) {
+          const image = el('img', 'mobile-hand-thumb');
+          image.src = art;
+          image.alt = card.name;
+          image.decoding = 'async';
+          chip.appendChild(image);
+          chip.appendChild(el('b', 'mobile-hand-cost', String(card.cost)));
+        } else {
+          chip.innerHTML = '<b>' + card.cost + '</b><span>' + escapeHtml(mobileDistrictName(card.name)) + '</span>';
+        }
         const buildAction = availableMobileActions().find(a => a.type === 'build' && a.uid === card.uid);
         onTap(chip, () => mobilePreview(card, buildAction, 'district'));
         summary.appendChild(chip);
