@@ -316,6 +316,9 @@
   }
   const STAGED_ROLES=new Set(['magician','assassin','thief','witch','spy','wizard','emperor','navigator','warlord','marshal','diplomat','artist','magistrate','blackmailer']);
   const COLORS=['yellow','blue','green','red','purple'];
+  function blackmailerRoles(roles){const effects=M.state?.effects||{};
+    return roles.filter(x=>x.value>1&&x.value!==Number(effects.assassinated)&&x.value!==Number(effects.bewitched)&&
+      !(effects.magistrate?.nums||[]).some(n=>Number(n)===x.value));}
   function stageOptions(){const st=M.stage,s=M.state,step=st.step,used=new Set(st.picks.map(x=>x.value));
     const people=s.players.filter(p=>p.id!==M.id).map(p=>({value:p.id,label:`${p.name} · ${p.handCount} 张手牌`,surface:'player',player:p}));
     const roles=(s.charDeck||[]).filter(c=>c.num!==role(s.turn?.charId).num&&!(s.removed?.faceUp||[]).some(x=>x.num===c.num)).sort((a,b)=>a.num-b.num).map(c=>({value:c.num,label:`${c.num} · ${c.name}`,surface:'role',card:c}));
@@ -332,7 +335,7 @@
       case 'diplomat':return step===0?cities(s.players.filter(p=>p.id===M.id)):cities(s.players.filter(p=>p.id!==M.id));
       case 'artist':return cities(s.players.filter(p=>p.id===M.id)).filter(x=>!x.card.beautified);
       case 'magistrate':return roles.filter(x=>!used.has(x.value));
-      case 'blackmailer':return step<2?roles.filter(x=>!used.has(x.value)):st.picks.slice(0,2);
+      case 'blackmailer':return step<2?blackmailerRoles(roles).filter(x=>!used.has(x.value)):st.picks.slice(0,2);
       default:return [];
     }
   }
@@ -348,7 +351,14 @@
   // Reuses the board / role-area / hand highlights already styled for engine-driven picks.
   const stageCls = (surface,uid) => { const st=stageStep(); if(!st||st.surface!==surface||stageIndexOf(uid)<0) return '';
     return st.multi&&stagePicked(uid)?' selected':' buildable'; };
-  function startStage(){const roleId=M.state?.turn?.charId;if(!STAGED_ROLES.has(roleId))return false;M.stage={role:roleId,step:0,picks:[],selected:new Set(),ready:false};render();return true;}
+  function startStage(){const roleId=M.state?.turn?.charId;if(!STAGED_ROLES.has(roleId))return false;
+    // With zero or one eligible role the engine resolves the ability directly.
+    if(roleId==='blackmailer'){
+      const roles=(M.state.charDeck||[]).filter(c=>c.num!==role(roleId).num&&
+        !(M.state.removed?.faceUp||[]).some(x=>x.num===c.num)).map(c=>({value:c.num}));
+      if(blackmailerRoles(roles).length<2)return false;
+    }
+    M.stage={role:roleId,step:0,picks:[],selected:new Set(),ready:false};render();return true;}
   function chooseStageOption(index){const st=M.stage;if(!st)return;const option=stageOptions()[index];if(!option)return;
     const multi=stageMulti(st);
     if(multi){const v=String(option.value);st.selected.has(v)?st.selected.delete(v):st.selected.add(v);if(st.role==='artist'&&st.selected.size>2)st.selected.delete(v);}
