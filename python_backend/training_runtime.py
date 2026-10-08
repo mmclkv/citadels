@@ -27,6 +27,7 @@ from .native_worker import NativeMctsWorker
 from .game_engine_worker import GameEngineWorker
 from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
 from .training_config import sanitize_config
+from .historical_policy_pool import HistoricalPolicyPool, assign_seat_policies
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = ROOT / "training"
@@ -380,7 +381,11 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     if stop_event.is_set():
         return None
     worker = _native_worker(config)
-    model_path = str(config["nativeModelPath"])
+    seat_policies = assign_seat_policies(config, network_seats,
+                                       (game_number - 1) % player_count,
+                                       np.random.default_rng(seed ^ 0xA511E9B3))
+    current_network_seats = {seat for seat, policy in seat_policies.items()
+                             if not policy["historical"]}
     game_worker = _game_worker(config)
     game_id = f"training-{os.getpid()}-{game_number}-{seed}"
     state = game_worker.create_game(
@@ -388,7 +393,6 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                   "charSetMode": config["charSet"], "initialCrownSeat": 0,
                   "startingHand": 4, "startingGold": 2, "seats": seats,
                   "catalog": cards._catalog}, game_id)
-    model_version = Path(model_path).stat().st_mtime_ns % 2_000_000_000
     network_ids = {seats[index]["id"] for index in network_seats}
     rows = []
     steps = rounds = 0
@@ -429,6 +433,9 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
             decision = game_worker.decision(game_id)
             state = decision["state"]
             actor_id = decision["playerId"]
+            actor_seat = next(index for index, seat in enumerate(seats) if seat["id"] == actor_id)
+            actor_policy = seat_policies[actor_seat]
+            historical = actor_policy["historical"]
             actions = decision.get("actions") or []
             if not actions:
                 raise RuntimeError(f"游戏主进程返回空合法动作：phase={state.get('phase')} player={actor_id}")
@@ -443,28 +450,29 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
             search_result = worker.search(
                 state=particles[0], particles=particles[1:], root_player_id=actor_id,
                 legal_actions=actions, particle_weights=particle_weights,
-                model_path=model_path, model_version=model_version, profile=config["profile"],
+                model_path=actor_policy["modelPath"], model_version=actor_policy["modelVersion"], profile=config["profile"],
                 architecture=config["networkArchitecture"], device=config["device"],
                 simulations=(1 if len(actions) == 1 else config["mctsSimulations"]),
                 max_depth=config["mctsMaxDepth"],
-                c_puct=config["mctsC_puct"], dirichlet_alpha=config["mctsDirichletAlpha"],
-                dirichlet_epsilon=config["mctsDirichletEpsilon"], seed=seed + steps,
+                c_puct=config["mctsC_puct"], dirichlet_alpha=(0 if historical else config["mctsDirichletAlpha"]),
+                dirichlet_epsilon=(0 if historical else config["mctsDirichletEpsilon"]), seed=seed + steps,
                 batch_size=config.get("mctsBatchSize", 32),
-                action_encoding_version=MODEL_CONTRACTS[config["networkArchitecture"]]["action"],
-                include_training_features=True)
+                action_encoding_version=actor_policy["actionEncodingVersion"],
+                include_training_features=not historical)
             policy = np.asarray(search_result["policy"], dtype=np.float32)
             inference_ms += float(search_result.get("inferenceMs") or
                                   (time.perf_counter() - search_started) * 1000)
             inference_searches += 1
             state_features = search_result.get("stateFeatures")
             action_features = search_result.get("actionFeatures")
-            if state_features is None or action_features is None:
+            if not historical and (state_features is None or action_features is None):
                 raise RuntimeError("MCTS 未返回训练所需的状态/动作特征")
-            rows.append({"playerId": actor_id,
-                         "state": np.asarray(state_features, dtype=np.float32),
-                         "actions": np.asarray(action_features, dtype=np.float32),
-                         "pi": policy, "reward": None, "valueMask": None})
-            probs = _temperature_policy(policy, training_temperature)
+            if not historical:
+                rows.append({"playerId": actor_id,
+                             "state": np.asarray(state_features, dtype=np.float32),
+                             "actions": np.asarray(action_features, dtype=np.float32),
+                             "pi": policy, "reward": None, "valueMask": None})
+            probs = _temperature_policy(policy, 1.0 if historical else training_temperature)
             action = actions[int(rng.choice(len(actions), p=probs))]
             game_worker.apply(game_id=game_id, player_id=actor_id, action=action,
                               return_state=False)
@@ -508,7 +516,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
         scores.append(base + bonus)
     highest = max(scores, default=0)
     winners = [i for i, score in enumerate(scores) if score == highest] if completed else []
-    network_indices = sorted(network_seats)
+    network_indices = sorted(current_network_seats)
     network_reward = (float(np.mean([current["rewards"][i] for i in network_indices]))
                       if completed else None)
     network_win = (sum(i in winners for i in network_indices) / max(1, len(network_indices))
@@ -516,7 +524,11 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     network_score = (float(np.mean([scores[i] for i in network_indices])) if scores and completed else None)
     native_result = {"rows": rows, "steps": steps, "rounds": rounds,
                      "playerCount": player_count, "gameNumber": game_number,
-                     "networkPlayerCount": network_count, "completed": completed,
+                     "networkPlayerCount": len(current_network_seats), "completed": completed,
+                     "totalNetworkPlayerCount": network_count,
+                     "historicalPlayers": network_count - len(current_network_seats),
+                     "historicalCheckpoints": [seat_policies[i]["checkpoint"] for i in sorted(network_seats)
+                                               if seat_policies[i]["historical"]],
                      "temperature": training_temperature,
                      "inferenceMs": inference_ms, "inferenceSearches": inference_searches,
                      "networkReward": network_reward, "networkWin": network_win,
@@ -811,6 +823,12 @@ class TrainingManager:
             config["gameEnginePath"] = str(getattr(self.game_worker, "executable", "") or default_game)
             config["nativeModelPath"] = str(Path(native_model_dir.name) / "model.bin")
             self._model.save_flat(config["nativeModelPath"])
+            historical_pool = HistoricalPolicyPool(
+                self.data_dir, Path(native_model_dir.name),
+                config["historicalPoolSize"] if config["historicalOpponentProbability"] > 0 else 0,
+                config["profile"], sum(parameter.numel() for parameter in self._model.parameters()), self._log)
+            historical_pool.refresh()
+            config["historicalPoolManifest"] = str(historical_pool.manifest)
             action_version = MODEL_CONTRACTS[architecture]["action"]
             self._check_entity_forward_parity(
                 torch, architecture, config["profile"], self._device,
@@ -910,7 +928,11 @@ class TrainingManager:
                         self._status["point"] = {"game": games, "networkReward": result["networkReward"],
                             "networkWinRate": result["networkWin"], "networkScore": result["networkScore"],
                             "networkByPlayers": recent_network_metrics.snapshot(),
-                            "networkPlayers": result["networkPlayerCount"],
+                            "networkPlayers": result["totalNetworkPlayerCount"],
+                            "currentNetworkPlayers": result["networkPlayerCount"],
+                            "historicalPlayers": result["historicalPlayers"],
+                            "historicalCheckpoints": result["historicalCheckpoints"],
+                            "historicalPoolCount": len(historical_pool.entries),
                             "temperature": result["temperature"],
                             "steps": totals["steps"],
                             "avgGameMs": totals["gameMs"] / finished_games if finished_games else None,
@@ -969,6 +991,10 @@ class TrainingManager:
                                    config["targetGames"], self._stop.is_set()):
                     self._log(f"正在保存 checkpoint（{games} 局）…")
                     self._save_checkpoint(config, games)
+                    historical_pool.refresh()
+                    with self._lock:
+                        if self._status.get("point") is not None:
+                            self._status["point"]["historicalPoolCount"] = len(historical_pool.entries)
                     saved_game = games
             if games and saved_game != games:
                 self._save_checkpoint(config, games)

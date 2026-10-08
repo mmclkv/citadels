@@ -102,6 +102,17 @@ class PythonTrainingConfigTests(unittest.TestCase):
     def test_replay_buffer_can_be_disabled(self):
         self.assertEqual(sanitize_config({"replayBufferGames": 0})["replayBufferGames"], 0)
 
+    def test_historical_pool_defaults_and_disable(self):
+        self.assertEqual(sanitize_config({})["historicalPoolSize"], 8)
+        self.assertEqual(sanitize_config({})["historicalOpponentProbability"], 0.5)
+        result = sanitize_config({"historicalPoolSize": 0, "historicalOpponentProbability": 0})
+        self.assertEqual(result["historicalPoolSize"], 0)
+        self.assertEqual(result["historicalOpponentProbability"], 0)
+        result = sanitize_config({"historicalPoolSize": -2, "historicalOpponentProbability": 4})
+        self.assertEqual(result["historicalPoolSize"], 0)
+        self.assertEqual(result["historicalOpponentProbability"], 1)
+        self.assertNotIn("historicalPoolManifest", sanitize_config({"historicalPoolManifest": "unsafe"}))
+
     def test_cpp_rules_engine_is_canonical(self):
         self.assertEqual(sanitize_config({"rulesEngine": "cpp"})["rulesEngine"], "cpp")
 

@@ -65,12 +65,13 @@ class TrainingRuntimeTests(unittest.TestCase):
                       "device": "cpu", "backend": "cpu", "mctsSimulations": 1,
                       "mctsParticles": 1, "mctsMaxDepth": 12,
                       "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
-                      "checkpointEvery": 1, "maxRounds": 1, "seed": 8162}
+                      "checkpointEvery": 1, "maxRounds": 30, "seed": 8162}
             self.assertTrue(manager.start(config)["running"])
             status = self._wait(manager)
             self.assertEqual(status["state"], "completed", status)
             self.assertEqual(status["completedGames"], 1)
             self.assertEqual(status["point"]["fallbacks"], 0)
+            self.assertEqual(status["point"]["finishedGames"], 1)
             self.assertGreater(status["point"]["policySamples"], 0)
 
     def test_one_native_selfplay_game_trains_and_saves_checkpoint(self):
@@ -125,12 +126,13 @@ class TrainingRuntimeTests(unittest.TestCase):
                       "device": "cpu", "backend": "cpu", "mctsSimulations": 2,
                       "mctsParticles": 1, "mctsMaxDepth": 10,
                       "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
-                      "checkpointEvery": 1, "maxRounds": 1, "seed": 8130}
+                      "checkpointEvery": 1, "maxRounds": 30, "seed": 8130}
             self.assertTrue(manager.start(config)["running"])
             status = self._wait(manager)
             self.assertEqual(status["state"], "completed", status.get("error"))
             self.assertTrue(status["checkpoint"])
             self.assertTrue(any("ISMCTS=2" in line["text"] for line in status["logs"]))
+            self.assertEqual(status["point"]["finishedGames"], 1)
             self.assertGreater(status["point"]["policySamples"], 0)
 
     def test_configured_workers_sample_games_in_separate_processes(self):

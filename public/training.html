@@ -14,7 +14,7 @@
 
   <main>
     <section class="panel controls">
-      <div class="section-title"><div><h2>训练任务</h2><p>所有座位共享同一神经网络，仅使用各自可见状态进行自对弈。</p></div></div>
+      <div class="section-title"><div><h2>训练任务</h2><p>当前模型可与历史版本及启发式玩家对弈，各座位只使用自己可见的信息。</p></div></div>
       <form id="train-form">
         <label><span>目标对局数</span><input id="target-games" type="number" min="1" value="200000"></label>
         <label><span>最少玩家</span><select id="min-players"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
@@ -59,6 +59,8 @@
             <option value="normal">标准</option><option value="easy">简单</option>
             <option value="hard">困难</option><option value="random" selected>每局随机</option>
           </select></label>
+          <label><span>历史策略池容量</span><input id="historical-pool-size" type="number" min="0" value="8"><small>从兼容存档中保留较早与近期版本；0 = 关闭</small></label>
+          <label><span>历史对手比例</span><input id="historical-opponent-probability" type="number" min="0" max="1" step="0.05" value="0.5"><small>保留一个当前模型席位，其他网络席位按此概率抽取历史版本；单网络席位时不生效</small></label>
           <label><span>课程起始网络玩家数</span><input id="curriculum-start-players" type="number" min="1" max="8" value="1"></label>
           <label><span>课程目标网络玩家数</span><input id="curriculum-end-players" type="number" min="0" max="8" value="0"><small>0 = 随当前局人数达到全员</small></label>
           <label><span>课程每阶段局数</span><input id="curriculum-step-games" type="number" min="1" value="20000"><small>每经过此数量的对局增加 1 名策略网络玩家</small></label>
@@ -118,6 +120,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=28"></script>
+  <script src="./training.js?v=29"></script>
 </body>
 </html>
