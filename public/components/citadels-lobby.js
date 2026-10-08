@@ -639,11 +639,11 @@
           }, 5000);
         },
         stopHeartbeat() { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; },
-        connect(cb) {
+        connect(cb, options = {}) {
           let endpoint;
           try { endpoint = gameServerBase().replace(/^http/, 'ws'); }
           catch (e) { this.afterHello = null; toast(e.message); return; }
-          if (this.ws && this.ws.readyState === 1 && this.ws.url.replace(/\/$/, '') === endpoint) return cb && cb();
+          if (options.resume !== false && this.ws && this.ws.readyState === 1 && this.ws.url.replace(/\/$/, '') === endpoint) return cb && cb();
           if (this.ws) {
             this.ws.onclose = null; this.ws.onmessage = null;
             this.stopHeartbeat(); this.ws.close();
@@ -655,7 +655,7 @@
             this.reconnectTimer = null;
             this.reconnectDelay = 1000;
             this.startHeartbeat();
-            const saved = loadNetSession();
+            const saved = options.resume === false ? null : loadNetSession();
             this.send({ t: 'hello', name: this.name,
               resumeToken: saved && saved.token, roomId: saved && saved.roomId });
           };
@@ -1050,7 +1050,7 @@
         App.leavingNetGame = false;
         App.localServerGame = false;
         Net.name = ($('#net-name').value || '观众').trim();
-        Net.connect(() => Net.send({ t:'spectateRoom', roomId:code, name:Net.name }));
+        Net.connect(() => Net.send({ t:'spectateRoom', roomId:code, name:Net.name }), {resume:false});
         App.mode = 'net';
       };
       $('#btn-leave').onclick = () => {

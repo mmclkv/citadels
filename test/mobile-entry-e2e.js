@@ -73,7 +73,7 @@ async function main() {
       assert.equal(await page.locator('#players .player-row').count(), 2);
     }
     console.log('PASS: host and guest enter the mobile game');
-    for (const route of ['mobile.html', 'index.html']) {
+    for (const [route, entry] of [['mobile.html','btn-join'], ['index.html','btn-join'], ['mobile.html','btn-spectate'], ['index.html','btn-spectate']]) {
       const context = await browser.newContext({viewport:{width:route==='mobile.html'?390:1280,height:844}});
       const watcher = await context.newPage();
       watcher.on('pageerror', error => errors.push(route + ': ' + error.message));
@@ -94,13 +94,20 @@ async function main() {
       // Same name as the host must still get an independent spectator identity.
       await watcher.locator('#net-name').fill('host');
       await watcher.locator('#net-code').fill(roomId);
-      await watcher.locator('#btn-spectate').click();
+      const originalSession = await host.evaluate(() => JSON.parse(localStorage.getItem('citadels.net.session')));
+      if (entry === 'btn-spectate') {
+        // An explicit watch request must not be overridden by an old player session.
+        await watcher.evaluate(saved => localStorage.setItem('citadels.net.session', JSON.stringify(saved)), originalSession);
+      }
+      await watcher.locator('#'+entry).click();
       const selector = watcher.getByLabel('观战视角');
       await selector.waitFor();
       await watcher.waitForFunction(() => window.spectatorState?.spectating);
       const initial = await watcher.evaluate(() => window.spectatorState);
       assert.equal(initial.players.length, 2);
       assert.equal(initial.available.actions.length, 0);
+      const observerSession = await watcher.evaluate(() => JSON.parse(localStorage.getItem('citadels.net.session')));
+      assert.notEqual(observerSession.token, originalSession.token, 'Joining under the same nickname must not receive the host resume token');
       const target = initial.players.find(p => p.id !== initial.viewPlayerId);
       await selector.selectOption(target.id);
       await watcher.waitForFunction(id => window.spectatorState.viewPlayerId === id, target.id);
@@ -137,7 +144,7 @@ async function main() {
       await watcher.locator('#btn-online').waitFor();
       assert.equal(await watcher.evaluate(() => localStorage.getItem('citadels.net.session')), null);
       await context.close();
-      console.log('PASS: '+route+' spectator joins a full room, switches perspective, and resumes');
+      console.log('PASS: '+route+' '+entry+' joins as spectator, switches perspective, and resumes');
     }
     await guest.locator('#menuButton').click();
     await guest.locator('#menuAutoHost').waitFor();

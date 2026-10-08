@@ -788,7 +788,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         await self.app._cleanup_rooms()
         self.assertIn(room["id"], self.app.rooms.rooms)
         room["state"]["players"][0]["isBot"] = True
-        await self.app._handle_message(client, {"t": "joinRoom", "roomId": room["id"], "name": seat["name"]})
+        await self.app._handle_message(client, {"t": "hello", "resumeToken": seat["resumeToken"], "roomId": room["id"]})
         self.assertFalse(room["state"]["players"][0]["isBot"])
 
     async def test_cleanup_waits_for_inflight_native_creation(self):
@@ -838,7 +838,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             await self.app._handle_message(viewer, {"t": "spectateRoom", "roomId": room["id"]})
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         self.app.clients.add(viewer)
-        await self.app._handle_message(viewer, {"t": "spectateRoom", "roomId": room["id"].lower()})
+        await self.app._handle_message(viewer, {"t": "joinRoom", "roomId": room["id"].lower()})
         joined = next(m for m in viewer.messages if m["t"] == "joined")
         self.assertNotIn(viewer.id, [p["id"] for p in state["players"]])
         self.assertEqual(len(room["seats"]), 2)
@@ -1115,15 +1115,26 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status["completedGames"], 1)
             self.assertTrue((Path(directory) / status["checkpoint"]).is_file())
 
-    async def test_same_name_can_rejoin_an_active_game(self) -> None:
+    async def test_same_name_join_cannot_claim_player_seat(self) -> None:
         rooms = RoomRegistry()
         room = rooms.create_room("Host", {"playerCount": 2})
         _, guest = rooms.join_room(room["id"], "Guest")
         _start_reference_room(rooms, room["id"])
-        same_room, host = rooms.join_room(room["id"], "Host")
+        same_room, observer = rooms.join_room(room["id"], "Host")
         self.assertIs(same_room, room)
-        self.assertEqual(host["id"], room["seats"][0]["id"])
+        self.assertTrue(observer["spectating"])
+        self.assertNotEqual(observer["id"], room["seats"][0]["id"])
+        self.assertNotEqual(observer["resumeToken"], room["seats"][0]["resumeToken"])
+        self.assertEqual(rooms.resume_room(room["seats"][0]["resumeToken"], room["id"])[1]["id"], room["seats"][0]["id"])
         self.assertEqual(guest["name"], "Guest")
+        for phase in ("draft", "action", "roundConfirm", "gameover"):
+            room["state"]["phase"] = phase
+            for nickname in ("Host", "Guest", "New viewer"):
+                with self.subTest(phase=phase, nickname=nickname):
+                    _, spectator = rooms.join_room(room["id"], nickname)
+                    self.assertTrue(spectator["spectating"])
+                    self.assertNotIn(spectator["id"], [p["id"] for p in room["seats"]])
+                    self.assertNotIn(spectator["resumeToken"], [p.get("resumeToken") for p in room["seats"]])
 
     async def test_leaving_lobby_sends_room_notice_before_room_refresh(self) -> None:
         class StubClient:

@@ -130,13 +130,10 @@ class RoomRegistry:
         room = self.rooms.get(room_id)
         if not room or room.get("closed"):
             raise ValueError("房间不存在")
-        if room["state"] and room["state"]["phase"] != "gameover":
-            seat = next((seat for seat in room["seats"]
-                         if seat["name"] == (name or "玩家") and not seat["isBot"]
-                         and not seat.get("left")), None)
-            if seat:
-                return room, seat
-            raise ValueError("该房间已开局")
+        if room["state"]:
+            # Display names are not credentials. Only resume_room may recover
+            # an existing player identity, after verifying its secret token.
+            return self.spectate_room(room_id, name)
         for index, seat in enumerate(room["seats"]):
             if not seat["taken"]:
                 room["seats"][index] = _human_seat(name or "玩家")
