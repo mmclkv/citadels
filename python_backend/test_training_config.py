@@ -123,6 +123,11 @@ class PythonTrainingConfigTests(unittest.TestCase):
         self.assertEqual(sanitize_config({"weaknessEvaluationPairs": -5})["weaknessEvaluationPairs"], 1)
         self.assertNotIn("weaknessRun", sanitize_config({"weaknessRun": {"targetSeat": 0}}))
 
+    def test_random_batch_is_default_and_internal_plan_cannot_be_supplied(self):
+        self.assertEqual(sanitize_config({})["selfPlayMode"], "random-batch")
+        self.assertEqual(sanitize_config({"selfPlayMode": "random-batch"})["selfPlayMode"], "random-batch")
+        self.assertNotIn("batchComposition", sanitize_config({"batchComposition": {"main": 0}}))
+
     def test_cpp_rules_engine_is_canonical(self):
         self.assertEqual(sanitize_config({"rulesEngine": "cpp"})["rulesEngine"], "cpp")
 

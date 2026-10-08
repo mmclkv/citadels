@@ -29,6 +29,7 @@ from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
 from .training_config import sanitize_config
 from .historical_policy_pool import HistoricalPolicyPool, assign_seat_policies
 from .weakness_search import WeaknessSearch, discovery_due
+from .batch_composition import random_batch_composition
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = ROOT / "training"
@@ -292,7 +293,7 @@ def _entity_parameter_count(profile: str) -> int:
 
 def _network_count(config: dict, game_number: int, player_count: int) -> int:
     mode = config["selfPlayMode"]
-    if mode == "all-network":
+    if mode in ("all-network", "random-batch"):
         return player_count
     if mode == "network-vs-heuristic":
         return max(1, min(player_count, config["networkPlayerCount"] or 1))
@@ -372,13 +373,22 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     rng = np.random.default_rng(seed)
     player_count = int(rng.integers(int(config["minPlayers"]), int(config["maxPlayers"]) + 1))
     discovery = config.get("weaknessRun") or {}
+    composition = config.get("batchComposition") if not discovery else None
+    if composition:
+        player_count = composition["players"]
     player_count = discovery.get("playerCount", player_count)
     network_count = _network_count(config, game_number, player_count)
+    if composition:
+        network_count = composition["main"] + composition["historical"]
     temperature_progress = (game_number - 1) / max(1, int(config["targetGames"]) - 1)
     training_temperature = (float(config["temperatureStart"]) + temperature_progress *
                            (float(config["temperatureEnd"]) - float(config["temperatureStart"])))
     network_seats = set((game_number - 1 + offset) % player_count for offset in range(network_count))
     learner_seat = discovery.get("learnerSeat", (game_number - 1) % player_count)
+    if composition:
+        other_seats = [seat for seat in range(player_count) if seat != learner_seat]
+        shuffled = np.random.default_rng(seed ^ 0x68E31DA4).permutation(other_seats)
+        network_seats = {learner_seat, *(int(seat) for seat in shuffled[:network_count - 1])}
     seats = [{"id": f"train-{game_number}-{i}", "name": f"玩家 {i + 1}", "isBot": True,
               "botType": "neural" if i in network_seats else "npc",
               "botLevel": config["heuristicDifficulty"]} for i in range(player_count)]
@@ -540,6 +550,8 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                      "networkPlayerCount": len(current_network_seats), "completed": completed,
                      "totalNetworkPlayerCount": network_count,
                      "historicalPlayers": network_count - len(current_network_seats),
+                     "heuristicPlayers": player_count - network_count,
+                     "batchComposition": composition,
                      "historicalCheckpoints": [seat_policies[i]["checkpoint"] for i in sorted(network_seats)
                                                if seat_policies[i]["historical"]],
                      "temperature": training_temperature,
@@ -563,10 +575,12 @@ def _initialize_sampler(config: dict, stop_event) -> None:
     _SAMPLER_STOP = stop_event
 
 
-def _sample_game_in_worker(game_number: int):
+def _sample_game_in_worker(task):
     if _SAMPLER_CONFIG is None or _SAMPLER_STOP is None:
         raise RuntimeError("自对弈进程尚未初始化")
-    return _sample_game(_SAMPLER_CONFIG, int(game_number), _SAMPLER_STOP)
+    game_number, composition = task if isinstance(task, tuple) else (task, None)
+    config = {**_SAMPLER_CONFIG, "batchComposition": composition}
+    return _sample_game(config, int(game_number), _SAMPLER_STOP)
 
 
 def _training_data(torch, rows: list[dict]) -> dict:
@@ -739,6 +753,7 @@ class TrainingManager:
                                  "startedAt": datetime.now(timezone.utc).isoformat(), "endedAt": None,
                                  "point": None, "history": [], "checkpoint": "", "error": "",
                                  "weaknessSearch": None,
+                                 "batchComposition": None,
                                  "logs": [], "config": config})
             self._thread = threading.Thread(target=self._run, args=(config,),
                                             name="citadels-python-training", daemon=True)
@@ -902,10 +917,18 @@ class TrainingManager:
                 batch_results = []
                 batch_count = int(min(config["batchGames"], config["targetGames"] - games))
                 game_numbers = [games + offset + 1 for offset in range(batch_count)]
+                composition = random_batch_composition(config, game_numbers[0], bool(historical_pool.entries))
+                batch_config = {**config, "batchComposition": composition}
+                if composition:
+                    self._log(f"批次随机阵容：{composition['players']} 人；当前模型 {composition['main']}，"
+                              f"历史策略 {composition['historical']}，启发式 {composition['heuristic']}")
+                with self._lock:
+                    self._status["batchComposition"] = composition
                 self._log(f"开始采样批次：第 {game_numbers[0]}–{game_numbers[-1]} 局（共 {batch_count} 局）…")
                 if sampler_pool:
                     self._model.save_flat(config["nativeModelPath"])
-                    sampled_games = sampler_pool.imap_unordered(_sample_game_in_worker, game_numbers, chunksize=1)
+                    sampled_games = sampler_pool.imap_unordered(
+                        _sample_game_in_worker, [(number, composition) for number in game_numbers], chunksize=1)
                 else:
                     def serial_samples():
                         self._model.save_flat(config["nativeModelPath"])
@@ -913,7 +936,7 @@ class TrainingManager:
                             if self._stop.is_set():
                                 break
                             self._log(f"正在采样第 {game_number}/{config['targetGames']} 局…")
-                            yield _sample_game(config, game_number, self._stop)
+                            yield _sample_game(batch_config, game_number, self._stop)
                     sampled_games = serial_samples()
                 sampler_pids = set()
                 for result in sampled_games:
@@ -956,6 +979,8 @@ class TrainingManager:
                             "networkPlayers": result["totalNetworkPlayerCount"],
                             "currentNetworkPlayers": result["networkPlayerCount"],
                             "historicalPlayers": result["historicalPlayers"],
+                            "heuristicPlayers": result["heuristicPlayers"],
+                            "batchComposition": result["batchComposition"],
                             "historicalCheckpoints": result["historicalCheckpoints"],
                             "historicalPoolCount": len(historical_pool.entries),
                             "temperature": result["temperature"],

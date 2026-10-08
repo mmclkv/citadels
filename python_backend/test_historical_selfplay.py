@@ -41,6 +41,7 @@ class HistoricalSelfPlayTests(unittest.TestCase):
     def test_parallel_samplers_refresh_pool_and_resume_against_frozen_versions(self):
         with tempfile.TemporaryDirectory() as directory:
             config = {"targetGames": 2, "minPlayers": 2, "maxPlayers": 2,
+                      "selfPlayMode": "all-network",
                       "charSet": "base", "profile": "fast", "device": "cpu",
                       "mctsSimulations": 1, "mctsParticles": 1, "mctsMaxDepth": 10,
                       "workers": 2, "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
@@ -107,6 +108,32 @@ class HistoricalSelfPlayTests(unittest.TestCase):
             reports = list((Path(directory) / "weakness-search").glob("*.json"))
             self.assertEqual(len(reports), 1)
             self.assertEqual(json.loads(reports[0].read_text(encoding="utf-8"))["completePairs"], 1)
+
+    def test_random_batch_counts_reach_parallel_native_games(self):
+        from python_backend.batch_composition import random_batch_composition
+        from python_backend.training_config import sanitize_config
+        with tempfile.TemporaryDirectory() as directory:
+            manager = TrainingManager(directory, self.native.worker, self.native.game_worker)
+            config = {"targetGames": 4, "minPlayers": 4, "maxPlayers": 4,
+                      "selfPlayMode": "random-batch", "charSet": "base", "profile": "fast",
+                      "device": "cpu", "mctsSimulations": 1, "mctsParticles": 1,
+                      "mctsMaxDepth": 10, "workers": 2, "batchGames": 2,
+                      "trainingEpochs": 1, "miniBatch": 32, "checkpointEvery": 2,
+                      "maxRounds": 100, "endDistricts": 7, "weaknessSearchEvery": 0, "seed": 7}
+            manager.start(config)
+            status = self.wait(manager)
+            self.assertEqual(status["completedGames"], 4)
+            self.assertEqual(status["point"]["finishedGames"], 4)
+            expected = random_batch_composition(sanitize_config(config), 3, True)
+            self.assertEqual(status["batchComposition"], expected)
+            self.assertEqual(status["point"]["currentNetworkPlayers"], expected["main"])
+            self.assertEqual(status["point"]["historicalPlayers"], expected["historical"])
+            self.assertEqual(status["point"]["heuristicPlayers"], expected["heuristic"])
+            self.assertEqual(status["point"]["fallbacks"], 0)
+            self.assertEqual(len(status["history"]), 2)
+            first = random_batch_composition(sanitize_config(config), 1, False)
+            self.assertEqual(status["history"][0]["batchComposition"], first)
+            self.assertEqual(status["history"][1]["batchComposition"], expected)
 
 
 if __name__ == "__main__":

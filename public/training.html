@@ -50,17 +50,18 @@
         <h2>自对弈阵容与课程训练</h2>
         <form id="composition-form" class="mcts-form">
           <label><span>自对弈阵容</span><select id="self-play-mode">
+            <option value="random-batch" selected>每批随机混合</option>
             <option value="all-network">全策略网络</option>
             <option value="network-vs-heuristic">策略网络 + 启发式</option>
-            <option value="curriculum" selected>课程式递增</option>
-          </select><small>决定每局由策略网络和启发式玩家组成的比例</small></label>
+            <option value="curriculum">课程式递增</option>
+          </select><small>随机模式每批确定人数及当前、历史、启发式数量，各局轮换席位</small></label>
           <label><span>策略网络玩家数</span><input id="network-player-count" type="number" min="1" max="8" value="1"><small>混合模式生效；全策略网络模式自动使用全部玩家</small></label>
           <label><span>启发式难度</span><select id="heuristic-difficulty">
             <option value="normal">标准</option><option value="easy">简单</option>
             <option value="hard">困难</option><option value="random" selected>每局随机</option>
           </select></label>
           <label><span>历史策略池容量</span><input id="historical-pool-size" type="number" min="0" value="8"><small>从兼容存档中保留较早与近期版本；0 = 关闭</small></label>
-          <label><span>历史对手比例</span><input id="historical-opponent-probability" type="number" min="0" max="1" step="0.05" value="0.5"><small>保留一个当前模型席位，其他网络席位按此概率抽取历史版本；单网络席位时不生效</small></label>
+          <label><span>历史对手比例</span><input id="historical-opponent-probability" type="number" min="0" max="1" step="0.05" value="0.5"><small>其他阵容模式按此概率抽取；随机批次直接设定数量，0 = 停用历史对手</small></label>
           <label><span>寻找弱点的间隔</span><input id="weakness-search-every" type="number" min="0" value="2000"><small>每隔多少主训练对局训练针对性对手；0 = 关闭，需启用历史池</small></label>
           <label><span>每次对手训练局数</span><input id="weakness-training-games" type="number" min="1" value="64"><small>独立训练对手争第一，主模型保持冻结；会增加训练耗时</small></label>
           <label><span>对手验证对数</span><input id="weakness-evaluation-pairs" type="number" min="1" value="32"><small>每对使用相同初始局面比较训练前后；通过验证才入池</small></label>
@@ -123,6 +124,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=30"></script>
+  <script src="./training.js?v=31"></script>
 </body>
 </html>

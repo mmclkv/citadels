@@ -137,6 +137,15 @@ def assign_seat_policies(config: dict, network_seats: set[int], learner_seat: in
                 result[seat] = {**discovery["targetPolicy"], "historical": True}
         return result
     result = {}
+    composition = config.get("batchComposition")
+    if composition:
+        others = sorted(network_seats - {learner_seat})
+        amount = min(int(composition["historical"]), len(others)) if policies else 0
+        history_seats = set(rng.choice(others, size=amount, replace=False)) if amount else set()
+        for seat in sorted(network_seats):
+            result[seat] = ({**policies[int(rng.integers(len(policies)))], "historical": True}
+                            if seat in history_seats else dict(current))
+        return result
     for seat in sorted(network_seats):
         if policies and seat != learner_seat and rng.random() < probability:
             result[seat] = {**policies[int(rng.integers(len(policies)))], "historical": True}

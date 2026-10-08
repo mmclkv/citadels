@@ -96,7 +96,7 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "mctsParticles": finite_integer("mctsParticles", 1, math.inf, 4),
         "mctsBelief": raw.get("mctsBelief") is not False,
         "selfPlayMode": ("network-vs-heuristic" if raw.get("selfPlayMode") == "network-vs-cfr" else
-                         raw.get("selfPlayMode") if raw.get("selfPlayMode") in ("all-network", "network-vs-heuristic", "curriculum") else "all-network"),
+                         raw.get("selfPlayMode") if raw.get("selfPlayMode") in ("random-batch", "all-network", "network-vs-heuristic", "curriculum") else "random-batch"),
         "networkPlayerCount": finite_integer("networkPlayerCount", 0, max_players, 0),
         "heuristicDifficulty": raw.get("heuristicDifficulty") if raw.get("heuristicDifficulty") in ("easy", "normal", "hard", "random") else "normal",
         "curriculumStartPlayers": finite_integer("curriculumStartPlayers", 1, max_players, 1),
