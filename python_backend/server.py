@@ -2351,14 +2351,15 @@ class PythonServer:
                 or "application/octet-stream"
             if mime.startswith("text/") or mime in ("application/javascript", "application/json"):
                 mime += "; charset=utf-8"
-            # 静态资源不再一律 no-store：带 ?v= 的 URL 内容由版本号决定，可以长缓存；
-            # 其余（入口 HTML / 无版本号的 js、css、卡图）用 no-cache 每次回源校验，
-            # 命中就回 304，既不会拿到旧文件，也不用重传 body。
+            # 代码和入口文件即使带版本号也需校验，避免漏更新版本号后长期缓存旧逻辑。
+            # ETag 命中时返回 304；带版本号的图片等资源仍可长期缓存。
             stat = candidate.stat()
             etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
             versioned = any(part.split("=", 1)[0] == "v"
                             for part in urlsplit(target).query.split("&") if part)
-            cache_control = "public, max-age=31536000, immutable" if versioned else "no-cache"
+            mutable_asset = candidate.suffix.lower() in (".js", ".mjs", ".css", ".html", ".json")
+            cache_control = "public, max-age=31536000, immutable" \
+                if versioned and not mutable_asset else "no-cache"
             if headers.get("if-none-match") == etag:
                 await _http_response(writer, 304, b"", mime, {"ETag": etag}, cache_control)
                 return

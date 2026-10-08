@@ -985,6 +985,30 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(_static_path("/src/../python_backend/server.py"))
         self.assertIsNone(_static_path("/%2e%2e/python_backend/server.py"))
 
+    async def test_versioned_code_and_entry_assets_revalidate(self) -> None:
+        for path in ("/mobile.js?v=10", "/app.js?v=95",
+                     "/components/citadels-spectator.js?v=2", "/style.css?v=68",
+                     "/mobile.html?v=1", "/manifest.json?v=1"):
+            with self.subTest(path=path):
+                headers: dict[str, str] = {}
+                code, body = await _request(self.port, path, response_headers=headers)
+                self.assertEqual(code, 200)
+                self.assertTrue(body)
+                self.assertEqual(headers.get("cache-control"), "no-cache")
+                etag = headers["etag"]
+                revalidated_headers: dict[str, str] = {}
+                code, body = await _request(self.port, path,
+                    extra_headers={"If-None-Match": etag}, response_headers=revalidated_headers)
+                self.assertEqual((code, body), (304, b""))
+                self.assertEqual(revalidated_headers.get("etag"), etag)
+                self.assertEqual(revalidated_headers.get("cache-control"), "no-cache")
+        headers = {}
+        code, body = await _request(self.port, "/img/cards/district_tavern.png?v=1",
+                                    response_headers=headers)
+        self.assertEqual(code, 200)
+        self.assertTrue(body)
+        self.assertEqual(headers.get("cache-control"), "public, max-age=31536000, immutable")
+
     async def test_admin_server_status_auth_and_console_cors(self) -> None:
         self.app.admin_credentials = ("admin", "correct horse battery staple")
         self.app.console_origins = ["https://console.example"]
