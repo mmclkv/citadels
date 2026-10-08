@@ -28,6 +28,7 @@ from .game_engine_worker import GameEngineWorker
 from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
 from .training_config import sanitize_config
 from .historical_policy_pool import HistoricalPolicyPool, assign_seat_policies
+from .weakness_search import WeaknessSearch, discovery_due
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = ROOT / "training"
@@ -370,11 +371,14 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     seed = (int(config["seed"]) + game_number * 0x9E3779B1) & 0xFFFFFFFF
     rng = np.random.default_rng(seed)
     player_count = int(rng.integers(int(config["minPlayers"]), int(config["maxPlayers"]) + 1))
+    discovery = config.get("weaknessRun") or {}
+    player_count = discovery.get("playerCount", player_count)
     network_count = _network_count(config, game_number, player_count)
     temperature_progress = (game_number - 1) / max(1, int(config["targetGames"]) - 1)
     training_temperature = (float(config["temperatureStart"]) + temperature_progress *
                            (float(config["temperatureEnd"]) - float(config["temperatureStart"])))
     network_seats = set((game_number - 1 + offset) % player_count for offset in range(network_count))
+    learner_seat = discovery.get("learnerSeat", (game_number - 1) % player_count)
     seats = [{"id": f"train-{game_number}-{i}", "name": f"玩家 {i + 1}", "isBot": True,
               "botType": "neural" if i in network_seats else "npc",
               "botLevel": config["heuristicDifficulty"]} for i in range(player_count)]
@@ -382,7 +386,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
         return None
     worker = _native_worker(config)
     seat_policies = assign_seat_policies(config, network_seats,
-                                       (game_number - 1) % player_count,
+                                       learner_seat,
                                        np.random.default_rng(seed ^ 0xA511E9B3))
     current_network_seats = {seat for seat, policy in seat_policies.items()
                              if not policy["historical"]}
@@ -390,7 +394,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     game_id = f"training-{os.getpid()}-{game_number}-{seed}"
     state = game_worker.create_game(
         {"seed": int(rng.integers(1, 2**32)), "endDistricts": config["endDistricts"],
-                  "charSetMode": config["charSet"], "initialCrownSeat": 0,
+                  "charSetMode": config["charSet"], "initialCrownSeat": discovery.get("crownSeat", 0),
                   "startingHand": 4, "startingGold": 2, "seats": seats,
                   "catalog": cards._catalog}, game_id)
     network_ids = {seats[index]["id"] for index in network_seats}
@@ -436,6 +440,9 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
             actor_seat = next(index for index, seat in enumerate(seats) if seat["id"] == actor_id)
             actor_policy = seat_policies[actor_seat]
             historical = actor_policy["historical"]
+            evaluation = discovery.get("evaluation", False)
+            direct_training = discovery.get("directTraining", False) and not historical
+            collect = not historical and not evaluation
             actions = decision.get("actions") or []
             if not actions:
                 raise RuntimeError(f"游戏主进程返回空合法动作：phase={state.get('phase')} player={actor_id}")
@@ -454,26 +461,32 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                 architecture=config["networkArchitecture"], device=config["device"],
                 simulations=(1 if len(actions) == 1 else config["mctsSimulations"]),
                 max_depth=config["mctsMaxDepth"],
-                c_puct=config["mctsC_puct"], dirichlet_alpha=(0 if historical else config["mctsDirichletAlpha"]),
-                dirichlet_epsilon=(0 if historical else config["mctsDirichletEpsilon"]), seed=seed + steps,
+                c_puct=config["mctsC_puct"], dirichlet_alpha=(0 if historical or discovery else config["mctsDirichletAlpha"]),
+                dirichlet_epsilon=(0 if historical or discovery else config["mctsDirichletEpsilon"]), seed=seed + steps,
                 batch_size=config.get("mctsBatchSize", 32),
                 action_encoding_version=actor_policy["actionEncodingVersion"],
-                include_training_features=not historical)
+                include_training_features=collect, policy_only=direct_training)
             policy = np.asarray(search_result["policy"], dtype=np.float32)
             inference_ms += float(search_result.get("inferenceMs") or
                                   (time.perf_counter() - search_started) * 1000)
             inference_searches += 1
             state_features = search_result.get("stateFeatures")
             action_features = search_result.get("actionFeatures")
-            if not historical and (state_features is None or action_features is None):
+            if collect and (state_features is None or action_features is None):
                 raise RuntimeError("MCTS 未返回训练所需的状态/动作特征")
-            if not historical:
+            if collect:
                 rows.append({"playerId": actor_id,
                              "state": np.asarray(state_features, dtype=np.float32),
                              "actions": np.asarray(action_features, dtype=np.float32),
                              "pi": policy, "reward": None, "valueMask": None})
-            probs = _temperature_policy(policy, 1.0 if historical else training_temperature)
-            action = actions[int(rng.choice(len(actions), p=probs))]
+            probs = _temperature_policy(policy, 1.0 if historical or discovery else training_temperature)
+            # Held-out opponents use the same clean, stochastic policy as pool
+            # opponents; matched seeds make baseline/candidate cases reproducible.
+            choice = int(rng.choice(len(actions), p=probs))
+            if collect and direct_training:
+                rows[-1]["chosenAction"] = choice
+                rows[-1]["behaviorProbability"] = float(probs[choice])
+            action = actions[choice]
             game_worker.apply(game_id=game_id, player_id=actor_id, action=action,
                               return_state=False)
             steps += 1
@@ -534,6 +547,9 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                      "networkReward": network_reward, "networkWin": network_win,
                      "networkScore": network_score, "winners": winners,
                      "scores": scores}
+    if discovery:
+        native_result["targetFirst"] = discovery["targetSeat"] in winners if completed else None
+        native_result["challengerFirst"] = learner_seat in winners if completed else None
     native_result.update({"samplerPid": os.getpid(), "fallbacks": 0,
                           "gameMs": (time.perf_counter() - game_started) * 1000,
                           "inferenceMs": native_result.get("inferenceMs", 0.0)})
@@ -722,6 +738,7 @@ class TrainingManager:
                                  "targetGames": int(config["targetGames"]),
                                  "startedAt": datetime.now(timezone.utc).isoformat(), "endedAt": None,
                                  "point": None, "history": [], "checkpoint": "", "error": "",
+                                 "weaknessSearch": None,
                                  "logs": [], "config": config})
             self._thread = threading.Thread(target=self._run, args=(config,),
                                             name="citadels-python-training", daemon=True)
@@ -739,6 +756,7 @@ class TrainingManager:
     def _run(self, config: dict) -> None:
         games = 0
         saved_game = 0
+        last_weakness_search = 0
         sampler_pool = None
         native_model_dir = None
         replay_buffer = RecentReplayBuffer(max_games=config["replayBufferGames"])
@@ -785,6 +803,7 @@ class TrainingManager:
                     model_path.unlink(missing_ok=True)
                 games = int(checkpoint.get("game") or 0)
                 saved_game = games
+                last_weakness_search = games
                 with self._lock:
                     self._status["completedGames"] = games
                 self._log(f"从 checkpoint 续训：{resume_path.name}（{games} 局）")
@@ -829,6 +848,12 @@ class TrainingManager:
                 config["profile"], sum(parameter.numel() for parameter in self._model.parameters()), self._log)
             historical_pool.refresh()
             config["historicalPoolManifest"] = str(historical_pool.manifest)
+            def weakness_progress(state):
+                with self._lock:
+                    self._status["weaknessSearch"] = state
+            weakness_search = WeaknessSearch(
+                torch, trainer, self._device, config, self.data_dir, Path(native_model_dir.name),
+                _sample_game, _training_data, self._stop, self._log, weakness_progress)
             action_version = MODEL_CONTRACTS[architecture]["action"]
             self._check_entity_forward_parity(
                 torch, architecture, config["profile"], self._device,
@@ -987,6 +1012,10 @@ class TrainingManager:
                         self._status["point"] = {**(self._status.get("point") or {}), **batch_metrics}
                         self._status["history"].append(copy.deepcopy(self._status["point"]))
                         self._status["history"] = self._status["history"][-400:]
+                if not self._stop.is_set() and discovery_due(games, last_weakness_search, config):
+                    weakness_search.run(self._model, games, list(historical_pool.entries.values()))
+                    last_weakness_search = games
+                    historical_pool.refresh()
                 if _checkpoint_due(games, saved_game, config["checkpointEvery"],
                                    config["targetGames"], self._stop.is_set()):
                     self._log(f"正在保存 checkpoint（{games} 局）…")
@@ -1049,6 +1078,8 @@ class TrainingManager:
                                  "actionSize": ACTION_SIZE, "parameterCount": len(weights),
                                  "encodingVersion": state_version, "flat": weights.tolist()},
                        "history": self._status.get("history", [])[-400:]}
+            if self._status.get("weaknessSearch"):
+                payload["weaknessSearchStatus"] = self._status["weaknessSearch"]
             compressed = gzip.compress(json.dumps(payload, separators=(",", ":"),
                                        ensure_ascii=False).encode("utf-8"), compresslevel=6)
             path = self.data_dir / name

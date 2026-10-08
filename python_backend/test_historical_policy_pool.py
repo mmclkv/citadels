@@ -70,6 +70,28 @@ class HistoricalPolicyPoolTests(unittest.TestCase):
             self.assertEqual({e["checkpoint"] for e in entries},
                              {"checkpoint-000001-test.json.gz", "checkpoint-000008-test.json.gz"})
 
+    def test_verified_specialists_get_reserved_pool_slots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = self.checkpoint(root, 1)
+            with gzip.open(original, "rt", encoding="utf-8") as handle:
+                data = json.load(handle)
+            original.unlink()
+            data["weaknessSearch"] = {"accepted": True}
+            specialist = root / "checkpoint-000001-opponent-7.json.gz"
+            specialist.write_bytes(gzip.compress(json.dumps(data).encode()))
+            os.utime(specialist, ns=(1_000_000_000, 1_000_000_000))
+            data["weaknessSearch"] = {"accepted": False}
+            (root / "checkpoint-000002-opponent-8.json.gz").write_bytes(gzip.compress(json.dumps(data).encode()))
+            for number in range(3, 15):
+                self.checkpoint(root, number)
+            pool = HistoricalPolicyPool(root, root / "runtime", 4, "fast", 4)
+            entries = pool.refresh()
+            self.assertEqual(len(entries), 4)
+            self.assertIn(specialist.name, [entry["checkpoint"] for entry in entries])
+            self.assertEqual(next(e for e in entries if e["checkpoint"] == specialist.name)["kind"], "weakness-opponent")
+            self.assertNotIn("checkpoint-000002-opponent-8.json.gz", [e["checkpoint"] for e in entries])
+
     def test_assignments_reserve_learner_rotate_seats_and_refresh_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

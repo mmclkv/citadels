@@ -71,6 +71,43 @@ class HistoricalSelfPlayTests(unittest.TestCase):
             self.assertGreater(continued["point"]["policySamples"], 0)
             self.assertEqual((Path(directory) / old_checkpoint).read_bytes(), old_bytes)
 
+    def test_native_weakness_training_and_heldout_screening(self):
+        import json
+        from unittest.mock import patch
+        import torch
+        from python_backend.weakness_search import WeaknessSearch
+        original = WeaknessSearch.run
+        checked = []
+        def isolated_run(search, incumbent, games, backgrounds):
+            before = {name: value.detach().clone() for name, value in incumbent.state_dict().items()}
+            result = original(search, incumbent, games, backgrounds)
+            checked.append(all(torch.equal(before[name], value) for name, value in incumbent.state_dict().items()))
+            return result
+        with tempfile.TemporaryDirectory() as directory:
+            manager = TrainingManager(directory, self.native.worker, self.native.game_worker)
+            config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
+                      "charSet": "base", "profile": "fast", "device": "cpu",
+                      "mctsSimulations": 1, "mctsParticles": 1, "mctsMaxDepth": 10,
+                      "workers": 1, "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
+                      "checkpointEvery": 1, "maxRounds": 30, "endDistricts": 7,
+                      "weaknessSearchEvery": 1, "weaknessTrainingGames": 1,
+                      "weaknessEvaluationPairs": 1, "seed": 8127}
+            config["maxRounds"] = 100
+            with patch.object(WeaknessSearch, "run", isolated_run):
+                manager.start(config)
+                status = self.wait(manager)
+            report = status["weaknessSearch"]
+            self.assertEqual(checked, [True], "opponent learning must not update incumbent weights")
+            self.assertEqual(report["trainingCompletedGames"], 1)
+            self.assertGreater(report["updates"], 0)
+            self.assertEqual(report["completePairs"], 1, report["pairs"])
+            self.assertFalse(report["accepted"], "one pair cannot pass the significance gate")
+            self.assertEqual(status["completedGames"], 1, "discovery games are separate from main training")
+            self.assertEqual(len(list(Path(directory).glob("checkpoint-*.json.gz"))), 1)
+            reports = list((Path(directory) / "weakness-search").glob("*.json"))
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(json.loads(reports[0].read_text(encoding="utf-8"))["completePairs"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

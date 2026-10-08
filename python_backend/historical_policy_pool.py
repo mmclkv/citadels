@@ -44,6 +44,10 @@ class HistoricalPolicyPool:
             raise ValueError("网络规模不匹配")
         if metadata.get("valueObjective") != "win-first-v1":
             raise ValueError("价值目标不是争第一")
+        specialist = "-opponent-" in path.name
+        admission = checkpoint.get("weaknessSearch")
+        if specialist and (not isinstance(admission, dict) or admission.get("accepted") is not True):
+            raise ValueError("针对性对手未通过入池验证")
         values = np.asarray(metadata.get("flat") or [], dtype="<f4")
         if (values.ndim != 1 or values.size != self.parameter_count or
                 metadata.get("parameterCount") != self.parameter_count or
@@ -53,7 +57,8 @@ class HistoricalPolicyPool:
         target = self.directory / f"policy-{self.revision}.bin"
         values.tofile(target)
         return {"checkpoint": path.name, "modelPath": str(target),
-                "modelVersion": self.revision, "actionEncodingVersion": contract["action"]}
+                "modelVersion": self.revision, "actionEncodingVersion": contract["action"],
+                "kind": "weakness-opponent" if specialist else "historical"}
 
     def refresh(self) -> list[dict]:
         paths = [path for path in self.checkpoint_dir.glob("checkpoint-*.json.gz")
@@ -61,22 +66,31 @@ class HistoricalPolicyPool:
         paths.sort(key=lambda path: (path.stat().st_mtime_ns, path.name))
         # Half recent snapshots, half spaced across the older history. Invalid
         # selections are backfilled, so incompatible imports cannot crowd out peers.
-        recent = (self.capacity + 1) // 2
-        older = paths[:-recent] if recent else []
-        archive = self.capacity - recent
+        specialists = [path for path in paths if "-opponent-" in path.name]
+        ordinary = [path for path in paths if "-opponent-" not in path.name]
+        reserved = min(len(specialists), max(1, self.capacity // 4), self.capacity)
+        history_capacity = self.capacity - reserved
+        recent = (history_capacity + 1) // 2
+        older = ordinary[:-recent] if recent else ordinary
+        archive = history_capacity - recent
         spaced = ([older[int(index)] for index in np.linspace(0, len(older) - 1,
                                                             min(archive, len(older)))]
                   if archive and older else [])
-        preferred = list(reversed(paths[-recent:])) if recent else []
-        preferred += spaced + list(reversed(paths))
+        preferred = list(reversed(specialists)) if reserved else []
+        preferred += list(reversed(ordinary[-recent:])) if recent else []
+        preferred += spaced + list(reversed(ordinary))
         selected = {}
+        admitted_specialists = 0
         for path in preferred:
             if len(selected) >= self.capacity:
                 break
             if path.name in selected or path.name in self.rejected:
                 continue
+            if "-opponent-" in path.name and admitted_specialists >= reserved:
+                continue
             try:
                 selected[path.name] = self.entries.get(path.name) or self._load(path)
+                admitted_specialists += int(selected[path.name]["kind"] == "weakness-opponent")
             except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
                 self.rejected.add(path.name)
                 self.log(f"历史池跳过 {path.name}：{exc}")
@@ -107,6 +121,21 @@ def assign_seat_policies(config: dict, network_seats: set[int], learner_seat: in
     probability = config.get("historicalOpponentProbability", 0.5)
     if config.get("historicalPoolSize", 8) and probability > 0 and config.get("historicalPoolManifest"):
         policies = json.loads(Path(config["historicalPoolManifest"]).read_text(encoding="utf-8"))["policies"]
+    discovery = config.get("weaknessRun")
+    if discovery:
+        target = discovery["targetSeat"]
+        policies = discovery["backgroundPolicies"]
+        result = {}
+        for seat in sorted(network_seats):
+            if seat == learner_seat:
+                result[seat] = dict(current)
+            elif seat == target:
+                result[seat] = {**discovery["targetPolicy"], "historical": True}
+            elif policies and rng.random() < 0.5:
+                result[seat] = {**policies[int(rng.integers(len(policies)))], "historical": True}
+            else:
+                result[seat] = {**discovery["targetPolicy"], "historical": True}
+        return result
     result = {}
     for seat in sorted(network_seats):
         if policies and seat != learner_seat and rng.random() < probability:

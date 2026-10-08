@@ -113,6 +113,16 @@ class PythonTrainingConfigTests(unittest.TestCase):
         self.assertEqual(result["historicalOpponentProbability"], 1)
         self.assertNotIn("historicalPoolManifest", sanitize_config({"historicalPoolManifest": "unsafe"}))
 
+    def test_weakness_search_budgets_and_internal_plan_are_sanitized(self):
+        config = sanitize_config({})
+        self.assertEqual(config["weaknessSearchEvery"], 2000)
+        self.assertEqual(config["weaknessTrainingGames"], 64)
+        self.assertEqual(config["weaknessEvaluationPairs"], 32)
+        self.assertEqual(sanitize_config({"weaknessSearchEvery": 0})["weaknessSearchEvery"], 0)
+        self.assertEqual(sanitize_config({"weaknessTrainingGames": 0})["weaknessTrainingGames"], 1)
+        self.assertEqual(sanitize_config({"weaknessEvaluationPairs": -5})["weaknessEvaluationPairs"], 1)
+        self.assertNotIn("weaknessRun", sanitize_config({"weaknessRun": {"targetSeat": 0}}))
+
     def test_cpp_rules_engine_is_canonical(self):
         self.assertEqual(sanitize_config({"rulesEngine": "cpp"})["rulesEngine"], "cpp")
 
