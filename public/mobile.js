@@ -43,7 +43,7 @@
   const hand = n => `<span class="hand-stat"><i class="hand-back"></i><span class="stat-value">×${esc(n)}</span></span>`;
   function message(text) { $('entryMessage').textContent = text || ''; }
   function send(payload) { if (M.ws && M.ws.readyState===1) M.ws.send(JSON.stringify(payload)); else message('正在重新连接服务器'); }
-  function action(a) { if (!a) return; send({t:'action',action:a}); M.targetType=null; M.selection=null; M.focus=null; M.confirm=null; closeViewer(); closeSheet(); }
+  function action(a) { if (!a || M.state?.spectating) return; send({t:'action',action:a}); M.targetType=null; M.selection=null; M.focus=null; M.confirm=null; closeViewer(); closeSheet(); }
   // 选目标类动作共用：点亮目标所在区域并把视口挪过去。
   const focusEl = area => area==='players'?$('players').closest('section'):area==='hand'?$('handSection'):area==='roles'?$('roleArea'):null;
   const surfaceFocus = surface => surface==='player'||surface==='district'?'players':surface==='hand'?'hand':surface==='role'?'roles':null;
@@ -79,6 +79,16 @@
   }
   function render() {
     const s=M.state;if(!s)return;
+    if(s.phase==='lobby'){
+      const el=$('lobby');
+      if(el&&el.returnToLobby)el.returnToLobby(s);
+      return;
+    }
+    let spectator=$('spectator-control');
+    if(!spectator){spectator=document.createElement('c-citadels-spectator');spectator.id='spectator-control';$('viewport').prepend(spectator);}
+    spectator.update(s,send);
+    $('overAgain').hidden=!!s.spectating;
+    $('menuSpeed').hidden=!!s.spectating;
     const scroll=$('viewport').scrollTop;
     const sheetScroll=$('sheet').scrollTop;
     $('entryOverlay').hidden=true;
@@ -86,11 +96,11 @@
     $('handSection').hidden=false;$('removedArea').hidden=false;
     const own=myPlayer(); const current=s.phase==='draft' ? s.draft?.currentPlayer : s.turn?.playerId;
     const phase=s.phase==='draft'?'选角阶段':s.phase==='gameover'?'游戏结束':'行动阶段';
-    $('phase').innerHTML=`第 ${esc(s.round)} 轮 · ${phase}<small>${s.players.length} 人局 · ${current===M.id?'轮到你':'公开局面按顺时针排列'}</small>`;
+    $('phase').innerHTML=`第 ${esc(s.round)} 轮 · ${phase}<small>${s.players.length} 人局 · ${s.spectating?'观战中':current===M.id?'轮到你':'公开局面按顺时针排列'}</small>`;
     $('playerCount').textContent=s.players.length+' 人局';
     const voiceAvailable=s.voiceReady!==false&&s.voiceEnabled!==false&&s.config?.voice!==false;
     $('menuVoice').hidden=!voiceAvailable;$('sidebarVoiceTab').hidden=!voiceAvailable;
-    const canControlHosting=s.phase!=='lobby'&&s.phase!=='gameover'&&!!myPlayer()&&!myPlayer().isBot;
+    const canControlHosting=!s.spectating&&s.phase!=='lobby'&&s.phase!=='gameover'&&!!myPlayer()&&!myPlayer().isBot;
     $('menuAutoHost').hidden=!canControlHosting;
     const autoHostEnabled=s.autoHostEnabled??(s.config?.autoHost!==false);
     $('menuAutoHost').textContent='断线/离开后托管我 · '+(autoHostEnabled?'开启':'关闭');
@@ -379,6 +389,7 @@
   }
   const actionsClass = n => 'actions count-'+Math.min(6,n)+(n===1?' one':'');
   function renderFooter(){const s=M.state,all=legal(),choice=choiceItems();
+    if(s.spectating){M.actions=[];$('selectedInfo').textContent='观战中 · '+(myPlayer()?.name||'')+' 的视角';$('actions').replaceChildren();return;}
     if(M.stage){const st=stageStep();const buttons=st.surface==='button'?st.options.map((o,i)=>`<button class="btn primary" type="button" data-stage-option="${i}" title="${esc(o.label)}">${esc(o.label)}</button>`):[];
       const multiPick=st.multi&&M.stage.selected.size>0;
       buttons.push(`<button class="btn ghost" type="button" id="stageBack">${multiPick?'返回重选':M.stage.step>0?'返回上一步':M.stage.ready?'返回重选':'返回'}</button>`);
@@ -542,7 +553,7 @@
       $('sidebarChatForm').hidden=true;return;
     }
     $('sidebarContent').innerHTML=rows.join('')||'<div class="sidebar-empty">'+(M.sidebarTab==='log'?'暂无战报':'还没有人发言')+'</div>';
-    $('sidebarChatForm').hidden=M.sidebarTab!=='chat'||M.state?.phase==='gameover';
+    $('sidebarChatForm').hidden=!!M.state?.spectating||M.sidebarTab!=='chat'||M.state?.phase==='gameover';
     $('sidebarContent').scrollTop=$('sidebarContent').scrollHeight;
   }
   $('sidebarToggle').onclick=()=>M.sidebar?hideSidebar():showSidebar();$('sidebarClose').onclick=hideSidebar;$('sidebarMask').onclick=hideSidebar;
@@ -603,7 +614,6 @@
   });
   syncTheme();
   const leaveToLobby=()=>{closeMenu();
-    if(M.ws&&M.ws.readyState===1)send({t:'leaveRoom'});
     M.state=null; M.ws=null; M.leavePending=false;
     const el=$('lobby');
     // 交回组件：它重新接管 socket、清掉 session 并显示首页

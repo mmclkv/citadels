@@ -418,19 +418,29 @@ class PythonServer:
                 "encodingCompatible": _encoding_compatible(state_version, action_version)}
 
     def _state_for(self, room: dict, player_id: str | None) -> dict:
+        spectator = room.get("spectators", {}).get(player_id)
         if not room["state"]:
             view = lobby_view(room)
-            view["voiceReady"] = self.voice.configured
+            view["voiceReady"] = self.voice.configured and not spectator
+            view["spectating"] = bool(spectator)
+            if spectator:
+                view["you"] = player_id
             return view
         manager = self.native_worker_manager
         native_live = bool(manager and manager.running)
         if not native_live:
             raise RuntimeError("C++ 游戏引擎不可用，无法生成游戏视图")
-        view = sanitize(room["state"], player_id,
+        perspective_id = spectator["viewPlayerId"] if spectator else player_id
+        if spectator and not any(p["id"] == perspective_id for p in room["state"]["players"]):
+            perspective_id = room["state"]["players"][0]["id"]
+            spectator["viewPlayerId"] = perspective_id
+        view = sanitize(room["state"], perspective_id,
                         legal_actions=[])
+        view.update({"spectating": bool(spectator),
+                     "viewPlayerId": perspective_id if spectator else None})
         view.update({"roomId": room["id"], "roomName": room["name"],
                      "hostId": room["seats"][0]["id"], "agentStatus": room.get("agentStatus"),
-                     "voiceReady": self.voice.configured,
+                     "voiceReady": self.voice.configured and not spectator,
                      "voiceEnabled": room["config"].get("voice") is not False})
         seat = next((seat for seat in room["seats"] if seat["id"] == player_id), None)
         if seat:
@@ -458,6 +468,10 @@ class PythonServer:
         if not worker:
             if room.get("state"):
                 raise RuntimeError("C++ 游戏引擎不可用，无法准备客户端游戏状态")
+            return view
+        if room.get("spectators", {}).get(player_id):
+            if room.get("state"):
+                view["available"] = {"actions": [], "prompt": "观战中，仅可查看局面"}
             return view
         if not player_id or not room.get("state"):
             return view
@@ -1646,9 +1660,10 @@ class PythonServer:
                                "state": await self._state_for_client(room, client.id)})
             await self._broadcast_state(room)
             return
-        if kind == "joinRoom":
-            room, seat = self.rooms.join_room(str(message.get("roomId") or "").upper(),
-                                              str(message.get("name") or client.name or "玩家"))
+        if kind in ("joinRoom", "spectateRoom"):
+            join = self.rooms.spectate_room if kind == "spectateRoom" else self.rooms.join_room
+            room, seat = join(str(message.get("roomId") or "").upper(),
+                              str(message.get("name") or client.name or "玩家"))
             client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
             await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
                                "resumeToken": seat["resumeToken"],
@@ -1658,6 +1673,22 @@ class PythonServer:
         room = self.rooms.rooms.get(client.room_id or "")
         if not room or not client.id:
             raise ValueError("尚未加入房间")
+        spectator = room.get("spectators", {}).get(client.id)
+        if spectator:
+            if kind == "spectatePlayer":
+                target = message.get("playerId")
+                if not room["state"] or not any(p["id"] == target for p in room["state"]["players"]):
+                    raise ValueError("观战视角不存在")
+                spectator["viewPlayerId"] = target
+                await client.send({"t": "state", "state": await self._state_for_client(room, client.id)})
+                return
+            if kind == "leaveRoom":
+                room["spectators"].pop(client.id, None)
+                client.room_id = None
+                await client.send({"t": "rooms", "rooms": [public_room(item)
+                                                           for item in self.rooms.rooms.values()]})
+                return
+            raise ValueError("观战模式不能执行游戏或房间操作")
         if kind == "botDebugSubscribe":
             await client.send({"t": "botDebugHistory", "entries": room["botDebug"]})
             return
@@ -2089,9 +2120,9 @@ class PythonServer:
                                          headers=cors)
                     return
                 room, seat = resumed
-                if seat["isBot"]:
+                if seat["isBot"] or seat.get("spectating"):
                     await _http_response(writer, 403,
-                                         _json_bytes({"error": "电脑座位不能加入语音"}), headers=cors)
+                                         _json_bytes({"error": "仅真人玩家座位可加入语音"}), headers=cors)
                     return
                 if room["config"].get("voice") is False:
                     await _http_response(writer, 403,

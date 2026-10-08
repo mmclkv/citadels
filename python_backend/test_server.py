@@ -644,6 +644,75 @@ async def _recv_json(reader: asyncio.StreamReader) -> dict:
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_spectator_views_resume_and_read_only_permissions(self):
+        class Viewer:
+            id = None
+            room_id = None
+            name = "Host"
+
+            def __init__(self):
+                self.messages = []
+
+            async def send(self, payload):
+                self.messages.append(payload)
+
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        _, guest = self.app.rooms.join_room(room["id"], "Guest")
+        viewer = Viewer()
+        with self.assertRaisesRegex(ValueError, "尚未开始"):
+            await self.app._handle_message(viewer, {"t": "spectateRoom", "roomId": room["id"]})
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        self.app.clients.add(viewer)
+        await self.app._handle_message(viewer, {"t": "spectateRoom", "roomId": room["id"].lower()})
+        joined = next(m for m in viewer.messages if m["t"] == "joined")
+        self.assertNotIn(viewer.id, [p["id"] for p in state["players"]])
+        self.assertEqual(len(room["seats"]), 2)
+        first = joined["state"]
+        self.assertTrue(first["spectating"])
+        self.assertEqual(first["you"], state["players"][0]["id"])
+        self.assertEqual(first["available"]["actions"], [])
+        self.assertTrue(first["players"][0]["hand"])
+        self.assertNotIn("hand", first["players"][1])
+        self.assertFalse(first["voiceReady"])
+        self.assertTrue(first["draft"]["pool"])
+        await self.app._handle_message(viewer, {"t": "spectatePlayer", "playerId": guest["id"]})
+        switched = viewer.messages[-1]["state"]
+        self.assertEqual(switched["you"], guest["id"])
+        self.assertTrue(switched["players"][1]["hand"])
+        self.assertNotIn("hand", switched["players"][0])
+        self.assertEqual(switched["draft"]["pool"], [])
+        state["round"] += 1
+        with mock.patch.object(self.app, "_bot_available_actions", side_effect=AssertionError("spectators have no legal actions")):
+            await self.app._broadcast_state(room)
+        self.assertEqual(viewer.messages[-1]["state"]["round"], state["round"])
+        self.assertEqual(viewer.messages[-1]["state"]["viewPlayerId"], guest["id"])
+        other = Viewer()
+        await self.app._handle_message(other, {"t": "spectateRoom", "roomId": room["id"]})
+        self.assertEqual(room["spectators"][other.id]["viewPlayerId"], state["players"][0]["id"])
+        for kind in ("action", "startGame", "restart", "setPace", "setAutoHost", "config", "chat", "botDebugSubscribe"):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "观战模式"):
+                await self.app._handle_message(viewer, {"t": kind, "action": {"type": "end_turn"}})
+        with self.assertRaisesRegex(ValueError, "视角不存在"):
+            await self.app._handle_message(viewer, {"t": "spectatePlayer", "playerId": "missing"})
+        resumed = Viewer()
+        await self.app._handle_message(resumed, {"t": "hello", "resumeToken": joined["resumeToken"], "roomId": room["id"]})
+        self.assertEqual(resumed.id, viewer.id)
+        self.assertEqual(next(m for m in resumed.messages if m["t"] == "joined")["state"]["viewPlayerId"], guest["id"])
+        room["state"] = None
+        lobby = await self.app._state_for_client(room, viewer.id)
+        self.assertEqual(lobby["you"], viewer.id)
+        self.assertTrue(lobby["spectating"])
+        restarted = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        restarted["phase"] = "gameover"
+        finished = await self.app._state_for_client(room, viewer.id)
+        self.assertTrue(finished["spectating"])
+        self.assertEqual(finished["viewPlayerId"], guest["id"])
+        await self.app._handle_message(viewer, {"t": "leaveRoom"})
+        self.assertIsNone(viewer.room_id)
+        self.assertNotIn(viewer.id, room["spectators"])
+        self.assertIsNone(self.app.rooms.resume_room(joined["resumeToken"], room["id"]))
+        self.assertFalse(room["seats"][0]["left"])
+
     async def asyncSetUp(self) -> None:
         self.admin_temp = tempfile.TemporaryDirectory()
         previous_admin_file = os.environ.get("CITADELS_ADMIN_FILE")

@@ -73,6 +73,72 @@ async function main() {
       assert.equal(await page.locator('#players .player-row').count(), 2);
     }
     console.log('PASS: host and guest enter the mobile game');
+    for (const route of ['mobile.html', 'index.html']) {
+      const context = await browser.newContext({viewport:{width:route==='mobile.html'?390:1280,height:844}});
+      const watcher = await context.newPage();
+      watcher.on('pageerror', error => errors.push(route + ': ' + error.message));
+      await watcher.addInitScript(() => {
+        const NativeSocket = window.WebSocket;
+        window.WebSocket = class extends NativeSocket {
+          constructor(...args) {
+            super(...args);
+            this.addEventListener('message', event => {
+              const msg = JSON.parse(event.data);
+              if (msg.state) window.spectatorState = msg.state;
+            });
+          }
+        };
+      });
+      await watcher.goto(`http://127.0.0.1:${port}/${route}`);
+      await watcher.locator('#btn-online').click();
+      // Same name as the host must still get an independent spectator identity.
+      await watcher.locator('#net-name').fill('host');
+      await watcher.locator('#net-code').fill(roomId);
+      await watcher.locator('#btn-spectate').click();
+      const selector = watcher.getByLabel('观战视角');
+      await selector.waitFor();
+      await watcher.waitForFunction(() => window.spectatorState?.spectating);
+      const initial = await watcher.evaluate(() => window.spectatorState);
+      assert.equal(initial.players.length, 2);
+      assert.equal(initial.available.actions.length, 0);
+      const target = initial.players.find(p => p.id !== initial.viewPlayerId);
+      await selector.selectOption(target.id);
+      await watcher.waitForFunction(id => window.spectatorState.viewPlayerId === id, target.id);
+      assert.equal(await selector.inputValue(), target.id);
+      const switched = await watcher.evaluate(() => window.spectatorState);
+      assert.equal(switched.you, target.id);
+      assert.ok(switched.players.find(p=>p.id===target.id).hand.length);
+      assert.equal(switched.players.find(p=>p.id!==target.id).hand, undefined);
+      await watcher.reload();
+      await selector.waitFor();
+      assert.equal(await selector.inputValue(), target.id);
+      if (route === 'mobile.html') {
+        assert.equal(await watcher.locator('#actions button').count(), 0);
+        await watcher.locator('#menuButton').click();
+        assert.equal(await watcher.locator('#menuAutoHost').isHidden(), true);
+        assert.equal(await watcher.locator('#menuSpeed').isHidden(), true);
+        await watcher.locator('#menuClose').click();
+      } else {
+        await watcher.locator('#mobile-menu-toggle').click();
+        assert.equal(await watcher.locator('#btn-chat').isHidden(), true);
+        assert.equal(await watcher.locator('#btn-speed').isHidden(), true);
+      }
+      assert.equal(await selector.evaluate(node => {
+        const r=node.getBoundingClientRect();
+        return r.width>0 && r.left>=0 && r.right<=innerWidth;
+      }), true, 'Perspective selector must fit the viewport');
+      if (route === 'mobile.html') {
+        await watcher.locator('#menuButton').click();
+        await watcher.locator('#menuNewGame').click();
+      } else {
+        watcher.once('dialog', dialog => dialog.accept());
+        await watcher.locator('#btn-back-home').click();
+      }
+      await watcher.locator('#btn-online').waitFor();
+      assert.equal(await watcher.evaluate(() => localStorage.getItem('citadels.net.session')), null);
+      await context.close();
+      console.log('PASS: '+route+' spectator joins a full room, switches perspective, and resumes');
+    }
     await guest.locator('#menuButton').click();
     await guest.locator('#menuAutoHost').waitFor();
     const before = await guest.locator('#menuAutoHost').textContent();

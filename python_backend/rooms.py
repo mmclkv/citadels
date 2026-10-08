@@ -120,7 +120,7 @@ class RoomRegistry:
                        "voice": config.get("voice") is not False,
                        "autoHost": config.get("autoHost") is not False},
             "state": None, "createdAt": int(time.time() * 1000),
-            "botDebug": [], "closed": False,
+            "botDebug": [], "closed": False, "spectators": {},
         }
         self.rooms[room_id] = room
         return room
@@ -142,12 +142,24 @@ class RoomRegistry:
                 return room, room["seats"][index]
         raise ValueError("房间已满")
 
+    def spectate_room(self, room_id: str, name: str) -> tuple[dict, dict]:
+        room = self.rooms.get(room_id)
+        if not room:
+            raise ValueError("房间不存在")
+        if not room["state"]:
+            raise ValueError("房间尚未开始游戏")
+        spectator = _human_seat(name or "观众")
+        spectator["spectating"] = True
+        spectator["viewPlayerId"] = room["state"]["players"][0]["id"]
+        room.setdefault("spectators", {})[spectator["id"]] = spectator
+        return room, spectator
+
     def resume_room(self, token: str, room_id: str | None = None) -> tuple[dict, dict] | None:
         if not token:
             return None
         search = [self.rooms[room_id]] if room_id and room_id in self.rooms else self.rooms.values()
         for room in search:
-            for seat in room["seats"]:
+            for seat in [*room["seats"], *room.get("spectators", {}).values()]:
                 if seat["taken"] and seat.get("resumeToken") and secrets.compare_digest(seat["resumeToken"], token):
                     return room, seat
         return None

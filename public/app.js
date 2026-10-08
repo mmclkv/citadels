@@ -731,6 +731,7 @@
   }
   function isMyTurn() {
     const s = App.state; if (!s) return false;
+    if (s.spectating) return false;
     const av = s.available;
     if (!av) return false;
     if (s.reaction) return s.reaction.playerId === App.myId;
@@ -1235,6 +1236,7 @@
   }
 
   function send(action) {
+    if (App.state?.spectating) return;
     if (App.buildingAnimPaused) return;
     // 选角牌的点击可能在状态广播与 DOM 重绘之间落后一个瞬间。
     // 如果选角已经结束，丢弃这次陈旧点击，避免把 draft_pick 发到行动阶段。
@@ -2377,7 +2379,7 @@
   function syncChatControl() {
     const button = $('#btn-chat');
     if (!button) return;
-    button.hidden = !(App.mode === 'net' && App.state && App.state.phase !== 'gameover');
+    button.hidden = !(App.mode === 'net' && App.state && !App.state.spectating && App.state.phase !== 'gameover');
     if (button.hidden) closeChatComposer();
   }
 
@@ -2792,6 +2794,9 @@
     // cannot leave every opponent filtered or the local panel unresolved.
     const viewerId = viewerIdForState(s);
     if (viewerId != null) App.myId = viewerId;
+    $('#spectator-control').update(s, payload => Net.send(payload));
+    $('#btn-speed').hidden = !!s.spectating;
+    $('#btn-again').hidden = !!s.spectating;
     // 记录滚动位置，渲染完恢复（避免每次行动后画面跳动）
     const _scrollSnap = snapshotScroll();
 
@@ -2880,6 +2885,7 @@
 
   /** 抽牌保留 / 学者选牌 / 预言家归还：自动弹出卡牌选择窗 */
   function autoOpenPick(s) {
+    if (s.spectating) return;
     if (isMobileGameUI()) return;
     const t = s.turn;
     if (!t || !t.pending || t.playerId !== App.myId) { App.pickKey = null; return; }
@@ -2934,6 +2940,7 @@
       onTap(btn, () => send({ type: 'confirm_round' }));
     }
     box.appendChild(btn);
+    if (s.spectating) { btn.disabled = true; btn.textContent = '观战中，等待玩家确认（' + done + '/' + total + '）'; }
   }
 
   function renderTurnBanner(s) {
@@ -4340,7 +4347,7 @@
       s.available.actions.some(a => a.type === 'draft_pick' || a.type === 'draft_discard'));
     // 以状态里的 you / available 为准，避免重连或本地状态切换时 App.myId 短暂滞后。
     const isPicker = d.currentPlayer === viewerId || hasDraftAction;
-    $('#draft-title').textContent = isPicker ? (d.sub === 'discard' ? '暗置弃掉一张角色牌' : '选择你的角色')
+    $('#draft-title').textContent = s.spectating ? '观战 · 选角阶段' : isPicker ? (d.sub === 'discard' ? '暗置弃掉一张角色牌' : '选择你的角色')
       : '等待其他玩家选角…';
     const cur = s.players.find(p => p.id === d.currentPlayer);
     const allChosen = s.players.every(p => p.hasChosen);
@@ -4362,7 +4369,7 @@
         const chip = el('button', 'mobile-role-summary');
         chip.type = 'button';
         chip.innerHTML = '<b>' + c.num + '</b><span>' + escapeHtml(c.name) + '</span>';
-        onTap(chip, () => mobilePreview(c, { type: d.sub === 'discard' ? 'draft_discard' : 'draft_pick', charId: c.id }, 'role'));
+        onTap(chip, () => mobilePreview(c, s.spectating ? null : { type: d.sub === 'discard' ? 'draft_discard' : 'draft_pick', charId: c.id }, 'role'));
         summary.appendChild(chip);
       });
       summary.hidden = !mobileDraft || App.mobileDraftExpanded;
@@ -4377,7 +4384,8 @@
       pool.appendChild(el('div', 'empty-hint', '只有当前选角的玩家可以看到牌池内容'));
     } else {
       d.pool.forEach(c => {
-        const n = charNode(c, { clickable: true });
+        const n = charNode(c, { clickable: !s.spectating });
+        if (s.spectating) { pool.appendChild(n); return; }
         if (mobileDraft) {
           n.__noZoom = true;
           n.setAttribute('role', 'button'); n.tabIndex = 0;
@@ -4501,6 +4509,7 @@
     const promptEl = $('#prompt');
     const actionsEl = $('#actions');
     actionsEl.innerHTML = '';
+    if (s.spectating) { promptEl.textContent = '观战中，仅可查看局面'; return; }
     if (renderAgentStatus(s)) return;
     if (!av) { promptEl.textContent = ''; return; }
 

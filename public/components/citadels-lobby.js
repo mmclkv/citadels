@@ -204,6 +204,7 @@
           <h3>加入房间</h3>
           <label class="field"><span>房间编号</span><input id="net-code" type="text" placeholder="4 位房号" maxlength="4" autocomplete="off"></label>
           <button class="btn primary block" id="btn-join">加入</button>
+          <button class="btn ghost block" id="btn-spectate">观战已开始的房间</button>
           <button class="btn ghost block" id="btn-refresh">刷新房间列表</button>
           <div class="room-list" id="room-list"><div class="dim">加载中…</div></div>
         </div>
@@ -743,6 +744,16 @@
             '<div class="ri-info">' + escapeHtml(r.name) + ' · ' + r.playerCount + ' 人 · ' +
             (r.phase === 'lobby' ? '等待中' : '进行中') + '</div></div>';
           d.onclick = () => { $('#net-code').value = r.id; };
+          if (r.phase !== 'lobby') {
+            const watch = el('button', 'btn tiny', '观战');
+            watch.type = 'button';
+            watch.onclick = e => {
+              e.stopPropagation();
+              $('#net-code').value = r.id;
+              $('#btn-spectate').click();
+            };
+            d.appendChild(watch);
+          }
           box.appendChild(d);
         });
       }
@@ -1033,6 +1044,15 @@
         App.mode = 'net';
       };
       $('#btn-refresh').onclick = () => Net.send({ t: 'listRooms' });
+      $('#btn-spectate').onclick = () => {
+        const code = ($('#net-code').value || '').trim().toUpperCase();
+        if (code.length !== 4) { toast('请输入 4 位房间号'); return; }
+        App.leavingNetGame = false;
+        App.localServerGame = false;
+        Net.name = ($('#net-name').value || '观众').trim();
+        Net.connect(() => Net.send({ t:'spectateRoom', roomId:code, name:Net.name }));
+        App.mode = 'net';
+      };
       $('#btn-leave').onclick = () => {
         App.lobbyState = null;
         Net.send({ t: 'leaveRoom' });
