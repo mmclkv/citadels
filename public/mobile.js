@@ -17,7 +17,8 @@
   const attr = esc;
   const cardKey = card => card && (card.uid || card.id || card.name);
   const myPlayer = () => M.state && M.state.players && M.state.players.find(p => p.id === M.id);
-  const legal = () => (M.state && M.state.available && M.state.available.actions || []).filter(a=>!a.disabled);
+  const perspectiveSubject = () => M.state?.spectating ? (myPlayer()?.name||'被观战玩家') : '你';
+  const legal = () => M.state?.spectating ? [] : (M.state && M.state.available && M.state.available.actions || []).filter(a=>!a.disabled);
   // Cards the current multi-select may use, taken straight from the engine's legal actions.
   const selectionAllowed = type => { const a = legal();
     if (type === 'choose_cards') return new Set(a.filter(x => x.type === 'choose_cards' && Array.isArray(x.uids)).flatMap(x => x.uids));
@@ -73,12 +74,15 @@
     render();
   }
   function receive(msg) {
-    if(msg.t==='state') { M.state=msg.state; if(msg.state.you)M.id=msg.state.you; if(!driveSequence())render(); }
+    if(msg.t==='state') { const previousView=M.state?.viewPlayerId;M.state=msg.state; if(msg.state.you)M.id=msg.state.you;
+      if(msg.state.spectating){if(previousView!==msg.state.viewPlayerId)closeViewer();render();}else if(!driveSequence())render(); }
     else if(msg.t==='chat') { M.chat.push(msg); renderSidebar(); chatBubble(msg); }
     else if(msg.t==='error') { M.sequence=null;message(msg.error); $('selectedInfo').textContent=msg.error; render();$('selectedInfo').textContent=msg.error; }
   }
   function render() {
     const s=M.state;if(!s)return;
+    $('phone').classList.toggle('spectating',!!s.spectating);
+    if(s.spectating){M.stage=null;M.sequence=null;M.selection=null;M.targetType=null;M.confirm=null;M.focus=null;}
     if(s.phase==='lobby'){
       const el=$('lobby');
       if(el&&el.returnToLobby)el.returnToLobby(s);
@@ -96,7 +100,7 @@
     $('handSection').hidden=false;$('removedArea').hidden=false;
     const own=myPlayer(); const current=s.phase==='draft' ? s.draft?.currentPlayer : s.turn?.playerId;
     const phase=s.phase==='draft'?'选角阶段':s.phase==='gameover'?'游戏结束':'行动阶段';
-    $('phase').innerHTML=`第 ${esc(s.round)} 轮 · ${phase}<small>${s.players.length} 人局 · ${s.spectating?'观战中':current===M.id?'轮到你':'公开局面按顺时针排列'}</small>`;
+    $('phase').innerHTML=`第 ${esc(s.round)} 轮 · ${phase}<small>${s.players.length} 人局 · ${s.spectating?esc(spectatorStatus(s)):current===M.id?'轮到你':'公开局面按顺时针排列'}</small>`;
     $('playerCount').textContent=s.players.length+' 人局';
     const voiceAvailable=s.voiceReady!==false&&s.voiceEnabled!==false&&s.config?.voice!==false;
     $('menuVoice').hidden=!voiceAvailable;$('sidebarVoiceTab').hidden=!voiceAvailable;
@@ -106,7 +110,7 @@
     $('menuAutoHost').textContent='断线/离开后托管我 · '+(autoHostEnabled?'开启':'关闭');
     const targetActions=legal().filter(a=>['choose_player','spy_target','wizard_target','emperor_crown','choose_district'].includes(a.type));
     M.targetType=targetActions[0]?.type||null;
-    if(s.turn?.pending?.kind==='bishop_repay'&&!M.selection){M.selection={type:'choose_cards',uids:new Set()};M.handOpen=true;M.focus='hand';}
+    if(!s.spectating&&s.turn?.pending?.kind==='bishop_repay'&&!M.selection){M.selection={type:'choose_cards',uids:new Set()};M.handOpen=true;M.focus='hand';}
     if(M.selection?.type==='choose_cards'&&s.turn?.pending?.kind!=='bishop_repay')M.selection=null;
     const stage=stageStep();
     if(stage&&M.stage){if(stage.surface==='hand')M.handOpen=true;if(stage.surface==='role')M.roleOpen=true;
@@ -181,11 +185,11 @@
       const nums=[...String(desc).matchAll(/(\d+)\s*号/g)].map(m=>Number(m[1]));
       const targeted=hitsMe(victims,nums.length&&myHeldNums(s).some(x=>nums.includes(x))?[M.id]:[]);
       return {actor,victim:targeted?M.id:null,full,tone:full?'magic':'info',icon:full?'✦':'·',
-        title:targeted?`${n.roleName||'角色'}效果 · 目标是你`:`${n.roleName||'角色'}效果`,
+        title:targeted?`${n.roleName||'角色'}效果 · 目标是${perspectiveSubject()}`:`${n.roleName||'角色'}效果`,
         text:`${n.playerName||seatName(s,n.playerIdx)}：${desc}`};}
     case 'magistrate_declare':{const list=(n.targets&&n.targets.length?n.targets:(n.nums||[]).map(num=>({num,name:`${num} 号角色`}))).slice().sort((a,b)=>Number(a.num)-Number(b.num));
       const mine=list.some(t=>myHeldNums(s).includes(Number(t.num)));
-      return {actor:n.byId,victim:mine?M.id:null,full:true,tone:'magic',icon:'§',title:mine?'你收到了逮捕令':'行政官发出逮捕令',
+      return {actor:n.byId,victim:mine?M.id:null,full:true,tone:'magic',icon:'§',title:mine?perspectiveSubject()+'收到了逮捕令':'行政官发出逮捕令',
         text:`${n.byName||''} 把 3 张逮捕令发给了 ${list.map(t=>`${t.num} 号·${t.name}`).join('、')}`,
         detail:'其中只有一张是真的，被真逮捕令命中的玩家建造时建筑会被没收。'};}
     case 'magistrate_confiscate':return {actor:n.byId,victim:n.playerId,full:n.playerId===M.id,tone:'danger',icon:'§',title:'建筑被没收',
@@ -201,7 +205,8 @@
       text:`预言家将 1 张手牌归还给 ${seatName(s,n.toIdx)}`};
     case 'blackmailer_reveal':{
       const victim=seatName(s,n.fromIdx),actor=seatName(s,n.toIdx);
-      const result=n.revealed?(n.isReal?`真威胁标记生效，你失去了全部 ${n.amount||0} 枚金币。`:'虚惊一场：威胁标记是假的，你没有失去金币。'):'勒索者没有翻开威胁标记，本轮威胁作废。';
+      const subject=s.spectating?victim:'你';
+      const result=n.revealed?(n.isReal?`真威胁标记生效，${subject}失去了全部 ${n.amount||0} 枚金币。`:`虚惊一场：威胁标记是假的，${subject}没有失去金币。`):'勒索者没有翻开威胁标记，本轮威胁作废。';
       return {actor:idxId(s,n.toIdx),victim:idxId(s,n.fromIdx),full:false,tone:n.revealed&&n.isReal?'danger':'warn',icon:'†',title:n.revealed?(n.isReal?'金币被勒索':'威胁标记是假的'):'威胁已撤销',
         text:`【勒索者】${actor} 对 ${victim}：${result}`};}
     default:return null;}}
@@ -254,7 +259,7 @@
     $('scoreTable').innerHTML='<tr><th>玩家</th><th>城区</th><th>建筑分</th><th>奖励</th><th>总分</th></tr>'+
       rows.map(r=>{const me=(s.players[r.playerIdx]||{}).id===M.id,
           bonus=(r.detail||[]).filter(d=>d.label!=='建筑总分');
-        return `<tr class="${s.winner===r.playerIdx?'win':''}"><td>${esc(r.name)}${me?' · 你':''}</td><td>${esc(r.cityCount)}</td><td>${esc(r.base)}</td><td>+${esc(r.bonus)}</td><td class="total">${esc(r.total)}</td></tr>`+
+        return `<tr class="${s.winner===r.playerIdx?'win':''}"><td>${esc(r.name)}${me?(s.spectating?' · 观战视角':' · 你'):''}</td><td>${esc(r.cityCount)}</td><td>${esc(r.base)}</td><td>+${esc(r.bonus)}</td><td class="total">${esc(r.total)}</td></tr>`+
           `<tr class="detail-row"><td colspan="5">${bonus.map(d=>`${esc(d.label)} +${esc(d.value)}`).join('，')||'无奖励分'}</td></tr>`;}).join('');
     box.hidden=false;}
   function orderedPlayers(players){if(players.length<=2)return players;const out=[players[0],players[1]];for(let lo=2,hi=players.length-1;lo<=hi;lo++,hi--){out.push(players[hi]);if(lo!==hi)out.push(players[lo]);}return out;}
@@ -267,7 +272,7 @@
       const isTarget=stagePlayers?stagePlayers.has(String(p.id)):targetIds.has(p.id);
       const bub=bubbleFor(p.id);
       return `<article class="player-row ${p.id===M.id?'self ':''}${p.id===active?'active-turn ':''}${p.threat?'threat ':''}${M.targetType||stagePlayers?(isTarget?'target-selectable':'target-ineligible'):''}" data-player="${attr(p.id)}">
-        <div class="player-meta"><div class="player-headline"><div class="pname">${esc(p.name)}</div>${p.id===M.id?'<span class="you-chip">你</span>':''}${p.hasCrown?'<i class="crown-icon">♛</i>':''}
+        <div class="player-meta"><div class="player-headline"><div class="pname">${esc(p.name)}</div>${p.id===M.id?`<span class="you-chip">${s.spectating?'视角':'你'}</span>`:''}${p.hasCrown?'<i class="crown-icon">♛</i>':''}
         ${ch?`<span class="public-role-inline"><button class="public-role-btn" type="button" data-kind="role" data-key="${attr(ch.id)}"><span class="role-no">${esc(ch.num)}</span><span>${esc(ch.name)}</span></button></span>`
           :(s.phase==='draft'&&p.hasChosen)?'<span class="draft-chosen">已选择</span>':''}
         <div class="p-stats">${coin(p.gold)}${points(score(p).total)}${hand(p.handCount)}</div></div></div>
@@ -278,6 +283,7 @@
     M.bubbles.forEach(b=>{b.fresh=false;});
   }
   function renderHand(own){const cards=own?.hand||[];const section=$('handSection');section.classList.toggle('collapsed',!M.handOpen);
+    section.querySelector('strong').textContent=M.state.spectating?(own?.name||'玩家')+'的手牌':'我的手牌';
     section.querySelector('.sub').textContent=cards.length+' 张';section.querySelector('.fold-toggle').textContent=M.handOpen?'收起':'展开';
     $('handSummary').style.setProperty('--summary-count',String(Math.max(1,cards.length)));
     $('handSummary').innerHTML=cards.map(mini).join('')||'<span class="choice-help">暂无手牌</span>';
@@ -285,8 +291,16 @@
   }
   function draftStatus(s){const name=s.players.find(p=>p.id===s.draft?.currentPlayer)?.name||'玩家';
     return name+(s.draft?.sub==='discard'?'正在弃置角色牌':'正在选角');}
+  function spectatorStatus(s){if(s.phase==='draft')return draftStatus(s);
+    if(s.phase==='gameover')return '对局已结束';
+    if(s.phase==='roundConfirm')return '等待玩家确认下一轮';
+    const name=s.players.find(p=>p.id===s.turn?.playerId)?.name;
+    return name?name+'正在行动':'等待对局继续';}
   function choiceItems(){const s=M.state,a=legal(),pending=s.turn?.pending;
-    if(s.phase==='draft'&&s.draft?.pool?.length)return {title:s.spectating?draftStatus(s):s.draft.sub==='discard'?'暗置弃掉一张角色牌':'请选择一个角色',hint:`进度 ${s.draft.stepIdx+1} / ${s.draft.totalSteps} · ${s.spectating?'点击卡图查看':'点击卡图查看 / 选择'}`,kind:'role',items:s.draft.pool,action:c=>s.spectating?null:a.find(x=>(x.type==='draft_pick'||x.type==='draft_discard')&&x.charId===c.id)};
+    if(s.spectating){if(s.phase!=='draft')return null;
+      const items=s.draft?.pool||[];
+      return {title:draftStatus(s),hint:items.length?'点击卡图查看 · 仅观战':'等待该玩家完成选角 · 仅观战',kind:'role',items,action:()=>null};}
+    if(s.phase==='draft'&&s.draft?.pool?.length)return {title:s.draft.sub==='discard'?'暗置弃掉一张角色牌':'请选择一个角色',hint:`进度 ${s.draft.stepIdx+1} / ${s.draft.totalSteps} · 点击卡图查看 / 选择`,kind:'role',items:s.draft.pool,action:c=>a.find(x=>(x.type==='draft_pick'||x.type==='draft_discard')&&x.charId===c.id)};
     const cardTypes=['draw_keep','scholar_pick','wizard_card','prophet_give'];
     const type=cardTypes.find(t=>a.some(x=>x.type===t));
     if(type){const pool=type==='prophet_give'?myPlayer()?.hand||[]:pending?.cards||pending?.hand||[];
@@ -311,7 +325,7 @@
     area.querySelector('.sub').textContent=choice.hint;area.querySelector('.fold-toggle').textContent=M.roleOpen?'收起':'展开';
     $('roleSummary').style.setProperty('--summary-count',String(Math.max(1,choice.items.length)));
     $('roleSummary').innerHTML=choice.kind==='role'?choice.items.map(c=>roleTag(c)).join(''):choice.items.map(mini).join('');
-    $('roles').innerHTML=choice.items.map(c=>thumb(c,choice.kind)).join('');
+    $('roles').innerHTML=choice.items.map(c=>thumb(c,choice.kind)).join('')||(M.state.spectating?'<span class="choice-help">该玩家的选角牌池暂不可见</span>':'');
   }
   function renderRemoved(){const removed=M.state.removed||{faceUp:[],faceDownCount:0};
     $('removedRoles').innerHTML=`<span class="removed-label">弃置</span><div class="removed-cards">${(removed.faceUp||[]).map(c=>roleTag(c)).join('')}${Array.from({length:removed.faceDownCount||0},()=>'<button class="removed-back" data-kind="back" type="button" aria-label="暗置角色牌"></button>').join('')}</div><span class="removed-count">${(removed.faceUp||[]).length+(removed.faceDownCount||0)}</span><span class="removed-note">暗置身份不可见</span>`;
@@ -401,7 +415,10 @@
   }
   const actionsClass = n => 'actions count-'+Math.min(6,n)+(n===1?' one':'');
   function renderFooter(){const s=M.state,all=legal(),choice=choiceItems();
-    if(s.spectating){M.actions=[];$('selectedInfo').textContent=s.phase==='draft'?draftStatus(s):'观战中 · '+(myPlayer()?.name||'')+' 的视角';$('actions').replaceChildren();return;}
+    $('spectatorInfo').hidden=!s.spectating;
+    $('actions').hidden=!!s.spectating;
+    if(s.spectating){M.actions=[];$('selectedInfo').textContent=spectatorStatus(s);
+      $('spectatorInfo').textContent='仅查看 · '+(myPlayer()?.name||'玩家')+' 的视角';$('actions').replaceChildren();return;}
     if(M.stage){const st=stageStep();const buttons=st.surface==='button'?st.options.map((o,i)=>`<button class="btn primary" type="button" data-stage-option="${i}" title="${esc(o.label)}">${esc(o.label)}</button>`):[];
       const multiPick=st.multi&&M.stage.selected.size>0;
       buttons.push(`<button class="btn ghost" type="button" id="stageBack">${multiPick?'返回重选':M.stage.step>0?'返回上一步':M.stage.ready?'返回重选':'返回'}</button>`);
@@ -469,7 +486,7 @@
     M.sheetPlayer=playerId;const s=score(p),ch=p.revealedCharId&&!(M.state.phase==='draft'&&p.id!==M.id)?role(p.revealedCharId):null;
     const st=stageStep(),staging=!!M.stage&&(st.surface==='player'||st.surface==='district');
     const target=staging?st.options.filter(o=>st.surface==='player'?String(o.value)===String(p.id):String(o.target)===String(p.id)):legal().filter(a=>a.type===M.targetType&&a.target===p.id);
-    $('sheetTitle').textContent=(target.length?'选择目标 · ':'')+p.name+(p.id===M.id?' · 你':'');
+    $('sheetTitle').textContent=(target.length?'选择目标 · ':'')+p.name+(p.id===M.id?(M.state.spectating?' · 当前视角':' · 你'):'');
     const rewards=(s.detail||[]).filter(d=>d.label!=='建筑总分');
     const roleBlock=ch?`<div class="detail-role-card"><button class="detail-role-thumb" type="button" data-kind="role" data-key="${attr(ch.id)}"><img src="${attr(roleImg(ch))}" alt="${attr(ch.name)}"></button><div class="detail-role-caption">${esc(ch.num)} · ${esc(ch.name)}</div></div>`:'';
     const scoreBlock=`<div class="score-compact"><div class="score-left-stack"><div class="score-kpi"><span>建筑分</span><b>${esc(s.base)}</b></div><div class="score-kpi total"><span>总分</span><b>${esc(s.total)}</b></div></div><div class="score-reward-card"><div class="score-reward-head"><span>奖励分</span><b>+${esc(s.bonus)}</b></div>${rewards.length?`<ul class="score-reward-detail">${rewards.map(d=>`<li class="score-reward-row"><span>${esc(d.label)}</span><strong>${d.value>=0?'+':''}${esc(d.value)}</strong></li>`).join('')}</ul>`:'<div class="score-reward-empty">暂无奖励分</div>'}</div></div>`;

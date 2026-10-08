@@ -69,6 +69,18 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 @media(min-width:861px){body{padding:0}.shell{max-width:none;margin:0;display:block}.phone-wrap{display:block}.phone{width:100%;height:100dvh;min-height:0;border:0;border-radius:0;box-shadow:none}.city-compact{grid-template-columns:repeat(auto-fill,minmax(76px,1fr))}}
 @media(max-width:395px){.players{padding-left:3px;padding-right:3px;gap:3px}.player-row{padding:3px;min-height:73px}.player-headline{gap:2px}.pname{font-size:9.9px;max-width:46px}.public-role-btn{font-size:8.8px;padding:0 3px 0 1px;gap:1px}.public-role-btn .role-no{font-size:8.8px}.p-stats{gap:2px}.p-stats .stat-value{font-size:7.6px}.city-compact{gap:1px}.city-mini{padding:0 1px;border-left-width:2px}.mini-name{font-size:9px;letter-spacing:-.6px}.mini-cost{font-size:8.5px}.thumb-grid{grid-template-columns:repeat(5,60px);gap:6px 4px}.small-card-btn{width:60px;height:90px}.summary-role .role-mini-name{font-size:8.6px}}
 @media(max-height:760px){.player-row{min-height:70px}.city-mini{height:20px}.district-card{height:83px}.district-card.hand{height:89px}.viewport{padding-bottom:170px}.roles{gap:4px}.bottom{padding-top:4px}.btn{height:41px}}
+.phone.spectating .bottom{position:relative;flex:none;box-shadow:none;background:#071421}
+.phone.spectating .viewport{padding-bottom:7px}
+.phone.spectating .selected-info{height:auto;min-height:30px;padding:4px 8px;font-size:13px;font-weight:800;color:var(--cyan);overflow-wrap:anywhere}
+.spectator-info{text-align:center;color:var(--muted);font-size:11px;padding:0 8px 4px;overflow-wrap:anywhere}
+.phone.spectating .fold-title-left{flex-wrap:wrap;gap:3px 7px}
+.phone.spectating .fold-title-left strong{overflow-wrap:anywhere}
+.phone.spectating .phase small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phone.spectating .role-area{border-color:var(--line2)}
+.phone.spectating .role-area .section-title{background:#071d32;color:var(--ink)}
+.phone.spectating .thumb-grid{grid-template-columns:repeat(auto-fit,minmax(60px,1fr));justify-items:start}
+.phone.spectating .choice-help{grid-column:1/-1}
+.actions[hidden],.spectator-info[hidden]{display:none}
 </style>
 <link rel="stylesheet" href="./mobile-live.css?v=32"/>
 <link rel="stylesheet" href="./themes/classic/mobile.css?v=4"/>
@@ -101,7 +113,7 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 
         <section class="section fold-section role-area" id="roleArea">
           <div class="section-title">
-            <div class="fold-title-left"><strong>请选择一个角色</strong><span class="sub">点击卡图查看 / 选择</span></div>
+            <div class="fold-title-left"><strong>角色牌</strong><span class="sub">点击卡图查看</span></div>
             <button class="fold-toggle" type="button" data-fold="roleArea">收起</button>
           </div>
           <div class="fold-summary"><div class="fold-summary-grid" id="roleSummary"></div></div>
@@ -129,6 +141,7 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 
       <footer class="bottom">
         <div class="selected-info" id="selectedInfo">正在连接游戏服务</div>
+        <div class="spectator-info" id="spectatorInfo" hidden></div>
         <div class="actions one" id="actions"></div>
       </footer>
       <section class="over-overlay" id="overOverlay" hidden><div class="over-card">
@@ -176,6 +189,6 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 <script src="./mobile-theme.js?v=1"></script>
 <script src="./components/citadels-lobby.js?v=6"></script>
 <script src="./components/citadels-spectator.js?v=2"></script>
-<script src="./mobile.js?v=10"></script>
+<script src="./mobile.js?v=11"></script>
 </body>
 </html>

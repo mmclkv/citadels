@@ -82,6 +82,7 @@ async function main() {
         window.WebSocket = class extends NativeSocket {
           constructor(...args) {
             super(...args);
+            window.testSocket = this;
             this.addEventListener('message', event => {
               const msg = JSON.parse(event.data);
               if (msg.state) window.spectatorState = msg.state;
@@ -108,7 +109,13 @@ async function main() {
       assert.equal(initial.available.actions.length, 0);
       if (route === 'mobile.html') {
         const choosing = initial.players.find(p => p.id === initial.draft.currentPlayer);
+        const viewed = initial.players.find(p => p.id === initial.viewPlayerId);
         assert.equal(await watcher.locator('#selectedInfo').textContent(), choosing.name+'正在选角');
+        assert.equal(await watcher.locator('#phase small').textContent(), '2 人局 · '+choosing.name+'正在选角');
+        assert.equal(await watcher.locator('#handSection strong').textContent(), viewed.name+'的手牌');
+        assert.equal(await watcher.locator('#players .you-chip').textContent(), '视角');
+        assert.equal(await watcher.locator('#spectatorInfo').textContent(), '仅查看 · '+viewed.name+' 的视角');
+        assert.equal(await watcher.locator('#actions').isHidden(), true);
         assert.equal(await watcher.locator('#chooseTarget').count(), 0);
         if (initial.draft.pool.length) {
           assert.equal(await watcher.locator('#roleArea strong').textContent(), choosing.name+'正在选角');
@@ -117,6 +124,38 @@ async function main() {
           assert.equal(await watcher.locator('#viewerConfirm').count(), 0);
           await watcher.locator('#viewerBack').click();
         }
+        // A different player's private pool may be absent; keep the draft status visible.
+        const waiting = structuredClone(initial);
+        waiting.draft.pool = [];
+        waiting.draft.sub = 'discard';
+        waiting.players.find(p => p.id === waiting.draft.currentPlayer).name = '正在选角的长名字玩家';
+        await watcher.evaluate(state => window.testSocket.dispatchEvent(new MessageEvent('message', {
+          data: JSON.stringify({t:'state',state})
+        })), waiting);
+        await watcher.setViewportSize({width:320,height:640});
+        assert.equal(await watcher.locator('#selectedInfo').textContent(), '正在选角的长名字玩家正在弃置角色牌');
+        assert.equal(await watcher.locator('#roleArea').isVisible(), true);
+        assert.equal(await watcher.locator('#roleArea strong').textContent(), '正在选角的长名字玩家正在弃置角色牌');
+        assert.equal(await watcher.locator('#actions button').count(), 0);
+        assert.equal(await watcher.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        const footer = await watcher.locator('.bottom').boundingBox();
+        const viewport = await watcher.locator('#viewport').boundingBox();
+        assert.ok(viewport.y + viewport.height <= footer.y + 1, 'Spectator footer must not cover the board');
+        const acting = structuredClone(initial);
+        acting.phase = 'action';
+        acting.turn = {playerId:initial.viewPlayerId,pending:{kind:'bishop_repay',amount:1}};
+        await watcher.evaluate(state => window.testSocket.dispatchEvent(new MessageEvent('message', {
+          data: JSON.stringify({t:'state',state})
+        })), acting);
+        assert.equal(await watcher.locator('#selectedInfo').textContent(), viewed.name+'正在行动');
+        assert.equal(await watcher.locator('#roleArea').isHidden(), true);
+        assert.equal(await watcher.locator('#actions button').count(), 0);
+        assert.equal(await watcher.locator('#handSection.focus-glow').count(), 0);
+        await watcher.evaluate(state => window.testSocket.dispatchEvent(new MessageEvent('message', {
+          data: JSON.stringify({t:'state',state})
+        })), initial);
+        if(entry==='btn-join')await watcher.screenshot({path:path.join(root,'tmp','mobile-spectator-ui.png')});
+        await watcher.setViewportSize({width:390,height:844});
       }
       const observerSession = await watcher.evaluate(() => JSON.parse(localStorage.getItem('citadels.net.session')));
       assert.notEqual(observerSession.token, originalSession.token, 'Joining under the same nickname must not receive the host resume token');
@@ -128,6 +167,10 @@ async function main() {
       assert.equal(switched.you, target.id);
       assert.ok(switched.players.find(p=>p.id===target.id).hand.length);
       assert.equal(switched.players.find(p=>p.id!==target.id).hand, undefined);
+      if(route==='mobile.html'){
+        assert.equal(await watcher.locator('#handSection strong').textContent(), target.name+'的手牌');
+        assert.equal(await watcher.locator('#spectatorInfo').textContent(), '仅查看 · '+target.name+' 的视角');
+      }
       const first = initial.players.find(p => p.id === initial.viewPlayerId);
       const firstButton = watcher.getByRole('button', {name:`观战 ${first.name} 的视角`,exact:true});
       await firstButton.click();
