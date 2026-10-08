@@ -60,6 +60,9 @@ class _ReferenceRulesWorker:
             actor = None
         return {"playerId": actor, "gameOver": state["phase"] == "gameover", "rewards": []}
 
+    def close_game(self, game_id: str) -> None:
+        self.games.pop(game_id, None)
+
     def legal_actions(self, *, player_id: str, state: dict | None = None, game_id: str | None = None) -> dict:
         state = self._state(game_id, state)
         result = get_available_actions(state, player_id)
@@ -644,6 +647,178 @@ async def _recv_json(reader: asyncio.StreamReader) -> dict:
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_rooms_expire_in_every_phase_and_release_native_games(self):
+        for phase in ("lobby", "draft", "action", "gameover"):
+            with self.subTest(phase=phase):
+                room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1, "autoHost": False})
+                token = room["seats"][0]["resumeToken"]
+                if phase != "lobby":
+                    state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+                    state["phase"] = phase
+                    # A human being auto-hosted by a bot is still a reconnectable seat.
+                    state["players"][0]["isBot"] = True
+                room["emptySince"] = 100
+                await self.app._cleanup_rooms(now=279)
+                self.assertIn(room["id"], self.app.rooms.rooms)
+                await self.app._cleanup_rooms(now=280)
+                self.assertNotIn(room["id"], self.app.rooms.rooms)
+                self.assertNotIn(room["id"], self.app.native_worker_manager.game_worker.games)
+                self.assertIsNone(self.app.rooms.resume_room(token, room["id"]))
+
+    async def test_live_players_and_spectators_reset_empty_room_grace(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        _, spectator = self.app.rooms.spectate_room(room["id"], "Viewer")
+        for member in (room["seats"][0], spectator):
+            with self.subTest(member=member["name"]):
+                client = Client(mock.Mock())
+                client.writer.is_closing.return_value = False
+                client.id, client.room_id, client.last_seen = member["id"], room["id"], 1000
+                room["emptySince"] = 100
+                self.app.clients.add(client)
+                await self.app._cleanup_rooms(now=1000)
+                self.assertIn(room["id"], self.app.rooms.rooms)
+                self.assertIsNone(room["emptySince"])
+                self.app.clients.remove(client)
+                await self.app._cleanup_rooms(now=1001)
+                self.assertEqual(room["emptySince"], 1001)
+                await self.app._cleanup_rooms(now=1180)
+                self.assertIn(room["id"], self.app.rooms.rooms)
+        await self.app._cleanup_rooms(now=1181)
+        self.assertNotIn(room["id"], self.app.rooms.rooms)
+
+    async def test_stale_sockets_and_nonmembers_do_not_keep_rooms_alive(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        room["emptySince"] = 100
+        client = Client(mock.Mock())
+        client.writer.is_closing.return_value = False
+        client.id, client.room_id, client.last_seen = room["seats"][0]["id"], room["id"], 100
+        self.app.clients.add(client)
+        stranger = Client(mock.Mock())
+        stranger.writer.is_closing.return_value = False
+        stranger.id, stranger.room_id, stranger.last_seen = "not-a-member", room["id"], 280
+        self.app.clients.add(stranger)
+        await self.app._cleanup_rooms(now=280)
+        self.assertNotIn(room["id"], self.app.rooms.rooms)
+        self.assertIsNone(client.room_id)
+        self.assertIsNone(stranger.room_id)
+
+    async def test_last_explicit_departure_cleans_tasks_but_preserves_live_spectator(self):
+        class Member:
+            def __init__(self, identity, room_id):
+                self.id, self.room_id, self.messages = identity, room_id, []
+            async def send(self, payload):
+                self.messages.append(payload)
+
+        room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1})
+        _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        _, spectator = self.app.rooms.spectate_room(room["id"], "Viewer")
+        host = Member(room["seats"][0]["id"], room["id"])
+        observer = Member(spectator["id"], room["id"])
+        self.app.clients.update((host, observer))
+        await self.app._handle_message(host, {"t": "leaveRoom"})
+        self.assertIn(room["id"], self.app.rooms.rooms)
+        bot_task = room.get("botTask")
+        takeover = asyncio.create_task(asyncio.sleep(3600))
+        room["takeoverTasks"][host.id] = takeover
+        await self.app._handle_message(observer, {"t": "leaveRoom"})
+        await asyncio.gather(*[t for t in (bot_task, takeover) if t], return_exceptions=True)
+        self.assertTrue(takeover.cancelled())
+        self.assertNotIn(room["id"], self.app.rooms.rooms)
+        self.assertNotIn(room["id"], self.app.native_worker_manager.game_worker.games)
+        self.assertEqual(observer.messages[-1]["rooms"], [])
+
+    async def test_cleanup_failure_hides_room_and_retries_native_release(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        room["emptySince"] = 100
+        worker = self.app.native_worker_manager.game_worker
+        with mock.patch.object(worker, "close_game", side_effect=RuntimeError("test release failure")):
+            await self.app._cleanup_rooms(now=280)
+        self.assertTrue(room["closed"])
+        self.assertEqual(self.app._public_rooms(), [])
+        self.assertIsNone(self.app.rooms.resume_room(room["seats"][0]["resumeToken"], room["id"]))
+        with self.assertRaisesRegex(ValueError, "不存在"):
+            self.app.rooms.join_room(room["id"], "Guest")
+        await self.app._cleanup_rooms(now=281)
+        self.assertNotIn(room["id"], self.app.rooms.rooms)
+
+    async def test_room_list_reads_cleanup_abandoned_rooms(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        room["emptySince"] = time.monotonic() - 181
+        code, body = await _request(self.port, "/api/rooms")
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(body)["rooms"], [])
+        self.assertNotIn(room["id"], self.app.rooms.rooms)
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        room["emptySince"] = time.monotonic() - 181
+        class Browser:
+            id = None
+            room_id = None
+            async def send(self, payload):
+                self.payload = payload
+        client = Browser()
+        await self.app._handle_message(client, {"t": "listRooms"})
+        self.assertEqual(client.payload["rooms"], [])
+
+    async def test_housekeeping_cleans_without_room_list_requests(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        room["emptySince"] = time.monotonic() - 181
+        with mock.patch("python_backend.server.asyncio.sleep", side_effect=asyncio.CancelledError) as sleep:
+            with self.assertRaises(asyncio.CancelledError):
+                await self.app._room_housekeeping()
+            sleep.assert_awaited_once_with(30)
+        self.assertNotIn(room["id"], self.app.rooms.rooms)
+
+    async def test_resume_cancels_takeover_and_resets_empty_grace(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        seat = room["seats"][0]
+        seat["disconnected"] = True
+        room["emptySince"] = time.monotonic() - 170
+        takeover = asyncio.create_task(asyncio.sleep(3600))
+        room["takeoverTasks"][seat["id"]] = takeover
+        client = Client(None)
+        client.send = mock.AsyncMock()
+        self.app.clients.add(client)
+        await self.app._handle_message(client, {"t": "hello", "resumeToken": seat["resumeToken"], "roomId": room["id"]})
+        await asyncio.gather(takeover, return_exceptions=True)
+        self.assertTrue(takeover.cancelled())
+        self.assertFalse(seat["disconnected"])
+        self.assertIsNone(room["emptySince"])
+        await self.app._cleanup_rooms()
+        self.assertIn(room["id"], self.app.rooms.rooms)
+        room["state"]["players"][0]["isBot"] = True
+        await self.app._handle_message(client, {"t": "joinRoom", "roomId": room["id"], "name": seat["name"]})
+        self.assertFalse(room["state"]["players"][0]["isBot"])
+
+    async def test_cleanup_waits_for_inflight_native_creation(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        room["emptySince"] = time.monotonic() - 181
+        started, release = asyncio.Event(), asyncio.Event()
+        worker = self.app.native_worker_manager.game_worker
+        calls = []
+        async def creating(_fn, *args):
+            calls.append("create")
+            started.set()
+            await release.wait()
+            return {}
+        async def closing(_fn, *args):
+            calls.append("close")
+        with mock.patch("python_backend.server.asyncio.to_thread", side_effect=creating):
+            create = asyncio.create_task(self.app._create_room_game(room, {}))
+            await started.wait()
+        with mock.patch("python_backend.server.asyncio.to_thread", side_effect=closing):
+            cleanup = asyncio.create_task(self.app._cleanup_rooms())
+            await asyncio.sleep(0)
+            self.assertTrue(room["closed"])
+            self.assertFalse(cleanup.done())
+            release.set()
+            with self.assertRaisesRegex(ValueError, "已关闭"):
+                await create
+            await cleanup
+        self.assertEqual(calls, ["create", "close"])
+        self.assertNotIn(room["id"], self.app.rooms.rooms)
+
     async def test_spectator_views_resume_and_read_only_permissions(self):
         class Viewer:
             id = None
@@ -1146,6 +1321,9 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.app.agent = StubAgent(fail=True)
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
                                                      "botType": "agent", "botPace": 0})
+        # Room configuration normalizes zero to the default pace; this test
+        # exercises decisions and fallback rather than the UI pacing delay.
+        room["config"]["botPace"] = 0
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         self.app._schedule_bot(room)
         for _ in range(30):

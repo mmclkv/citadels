@@ -121,13 +121,14 @@ class RoomRegistry:
                        "autoHost": config.get("autoHost") is not False},
             "state": None, "createdAt": int(time.time() * 1000),
             "botDebug": [], "closed": False, "spectators": {},
+            "emptySince": time.monotonic(), "takeoverTasks": {},
         }
         self.rooms[room_id] = room
         return room
 
     def join_room(self, room_id: str, name: str) -> tuple[dict, dict]:
         room = self.rooms.get(room_id)
-        if not room:
+        if not room or room.get("closed"):
             raise ValueError("房间不存在")
         if room["state"] and room["state"]["phase"] != "gameover":
             seat = next((seat for seat in room["seats"]
@@ -144,7 +145,7 @@ class RoomRegistry:
 
     def spectate_room(self, room_id: str, name: str) -> tuple[dict, dict]:
         room = self.rooms.get(room_id)
-        if not room:
+        if not room or room.get("closed"):
             raise ValueError("房间不存在")
         if not room["state"]:
             raise ValueError("房间尚未开始游戏")
@@ -159,6 +160,8 @@ class RoomRegistry:
             return None
         search = [self.rooms[room_id]] if room_id and room_id in self.rooms else self.rooms.values()
         for room in search:
+            if room.get("closed"):
+                continue
             for seat in [*room["seats"], *room.get("spectators", {}).values()]:
                 if seat["taken"] and seat.get("resumeToken") and secrets.compare_digest(seat["resumeToken"], token):
                     return room, seat

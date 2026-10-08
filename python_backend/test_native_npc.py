@@ -6,6 +6,7 @@ import io
 import json
 import threading
 import unittest
+from unittest import mock
 
 from python_backend.game_engine_worker import GameEngineWorker
 
@@ -21,6 +22,14 @@ class _FakeProcess:
 
 
 class NativeNpcBridgeTests(unittest.TestCase):
+    def test_game_release_is_idempotent_but_preserves_other_errors(self):
+        worker = GameEngineWorker.__new__(GameEngineWorker)
+        with mock.patch.object(worker, "_request", side_effect=RuntimeError("C++ 游戏主进程拒绝请求：未知 gameId")):
+            worker.close_game("missing")
+        with mock.patch.object(worker, "_request", side_effect=RuntimeError("worker exited")):
+            with self.assertRaisesRegex(RuntimeError, "worker exited"):
+                worker.close_game("existing")
+
     def test_npc_request_returns_canonical_native_action(self) -> None:
         worker = GameEngineWorker.__new__(GameEngineWorker)
         worker.process = _FakeProcess()

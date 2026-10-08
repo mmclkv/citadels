@@ -44,6 +44,8 @@ MAX_FRAME_BYTES = 1_048_576
 MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
 WEBSOCKET_IDLE_TIMEOUT = 15
 AUTO_HOST_GRACE_SECONDS = 180
+ROOM_EMPTY_GRACE_SECONDS = 180
+ROOM_CLEANUP_INTERVAL_SECONDS = 30
 _ENTITY_V6_CONTRACT = MODEL_CONTRACTS["entity-v6"]
 STATE_ENCODING_VERSION = _ENTITY_V6_CONTRACT["state"]
 ACTION_ENCODING_VERSION = _ENTITY_V6_CONTRACT["action"]
@@ -200,6 +202,7 @@ class PythonServer:
     def __init__(self, native_worker_manager: NativeWorkerManager | None = None) -> None:
         self.rooms = RoomRegistry()
         self.clients: set[Client] = set()
+        self._room_cleanup_lock = asyncio.Lock()
         external_agent_requested = any(os.environ.get(key) for key in
             ("CITADELS_AGENT_BASE_URL", "CITADELS_AGENT_MODEL", "CITADELS_AGENT_API_KEY"))
         self.local_codex = detect_codex()
@@ -417,6 +420,72 @@ class PythonServer:
                 "encodingVersion": state_version, "actionEncodingVersion": action_version,
                 "encodingCompatible": _encoding_compatible(state_version, action_version)}
 
+    def _public_rooms(self) -> list[dict]:
+        return [public_room(room) for room in self.rooms.rooms.values() if not room.get("closed")]
+
+    def _update_room_presence(self, room: dict, now: float | None = None) -> bool:
+        """Only live human/observer sockets count; NPC turns never extend retention."""
+        now = time.monotonic() if now is None else now
+        members = {seat["id"] for seat in room["seats"]
+                   if seat["taken"] and not seat["isBot"] and not seat.get("left")}
+        members.update(room.get("spectators", {}))
+        for client in self.clients:
+            if client.room_id != room["id"] or client.id not in members:
+                continue
+            writer = getattr(client, "writer", None)
+            if writer is not None and writer.is_closing():
+                continue
+            if now - getattr(client, "last_seen", now) > WEBSOCKET_IDLE_TIMEOUT:
+                continue
+            room["emptySince"] = None
+            return True
+        if room.get("emptySince") is None:
+            room["emptySince"] = now
+        return False
+
+    async def _cleanup_rooms(self, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        async with self._room_cleanup_lock:
+            for room in list(self.rooms.rooms.values()):
+                if not room.get("closed"):
+                    if self._update_room_presence(room, now):
+                        continue
+                    # Explicit departures do not need a reconnect grace period.
+                    waiting_for_reconnect = any(seat["taken"] and not seat["isBot"] and not seat.get("left")
+                                                for seat in room["seats"])
+                    waiting_for_reconnect = waiting_for_reconnect or bool(room.get("spectators"))
+                    if waiting_for_reconnect and now - room["emptySince"] < ROOM_EMPTY_GRACE_SECONDS:
+                        continue
+                    room["closed"] = True
+                    room["state"] = None
+                    tasks = [room.get("botTask"), *room.get("takeoverTasks", {}).values()]
+                    for task in tasks:
+                        if task and not task.done():
+                            task.cancel()
+                    room["botTask"] = None
+                    room.get("takeoverTasks", {}).clear()
+                # Reserve the closed ID until native release succeeds, so a new
+                # room cannot reuse its ID while an old close request is pending.
+                manager = self.native_worker_manager
+                worker = manager.game_worker if manager and manager.running else None
+                try:
+                    if worker:
+                        async with self._native_action_lock:
+                            await asyncio.to_thread(worker.close_game, str(room["id"]))
+                except Exception as exc:
+                    print(f"[room {room['id']}] native cleanup failed, will retry: {exc}", flush=True)
+                    continue
+                self.rooms.rooms.pop(room["id"], None)
+                room.get("spectators", {}).clear()
+                for client in self.clients:
+                    if client.room_id == room["id"]:
+                        client.room_id = None
+
+    async def _room_housekeeping(self) -> None:
+        while True:
+            await self._cleanup_rooms()
+            await asyncio.sleep(ROOM_CLEANUP_INTERVAL_SECONDS)
+
     def _state_for(self, room: dict, player_id: str | None) -> dict:
         spectator = room.get("spectators", {}).get(player_id)
         if not room["state"]:
@@ -486,6 +555,18 @@ class PythonServer:
                     card["canBuild"] = card.get("uid") in build_uids
         return view
 
+    async def _create_room_game(self, room: dict, new_game: dict) -> dict:
+        # Creation and release must be ordered even if the last participant
+        # leaves while the native worker is creating the initial state.
+        async with self._native_action_lock:
+            if room.get("closed"):
+                raise ValueError("房间已关闭")
+            state = await asyncio.to_thread(self.native_worker_manager.game_worker.create_game,
+                                            new_game, str(room["id"]))
+            if room.get("closed"):
+                raise ValueError("房间已关闭")
+            return state
+
     async def _apply_game_action(self, room: dict, player_id: str, action: dict) -> dict:
         """Apply live rules through the authoritative C++ game engine."""
         manager = self.native_worker_manager
@@ -493,6 +574,8 @@ class PythonServer:
         if worker is None:
             return {"ok": False, "error": "C++ 游戏引擎不可用，拒绝处理游戏行动"}
         async with self._native_action_lock:
+            if room.get("closed"):
+                return {"ok": False, "error": "房间已关闭"}
             current = room.get("state")
             if not current:
                 return {"ok": False, "error": "尚未开局"}
@@ -541,6 +624,8 @@ class PythonServer:
             return {"ok": True}
 
     async def _broadcast_state(self, room: dict) -> None:
+        if room.get("closed"):
+            return
         for client in list(self.clients):
             if client.room_id == room["id"] and client.id:
                 try:
@@ -1514,6 +1599,8 @@ class PythonServer:
         return prompts.get(pending.get("kind"), "请选择行动")
 
     def _schedule_bot(self, room: dict) -> None:
+        if room.get("closed"):
+            return
         old_task = room.get("botTask")
         if old_task and not old_task.done():
             return
@@ -1611,6 +1698,12 @@ class PythonServer:
 
     async def _handle_message(self, client: Client, message: dict) -> None:
         kind = message.get("t")
+        client.last_seen = time.monotonic()
+        if kind in ("hello", "listRooms", "createRoom", "joinRoom", "spectateRoom"):
+            await self._cleanup_rooms()
+        current_room = self.rooms.rooms.get(client.room_id or "")
+        if current_room and not current_room.get("closed"):
+            self._update_room_presence(current_room)
         if kind == "hello":
             client.id = client.id or "p" + secrets.token_hex(3)
             client.name = str(message.get("name") or "玩家")
@@ -1620,6 +1713,10 @@ class PythonServer:
                 room, seat = resumed
                 seat["disconnected"] = seat["left"] = False
                 client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
+                task = room.get("takeoverTasks", {}).pop(seat["id"], None)
+                if task:
+                    task.cancel()
+                self._update_room_presence(room)
                 if room["state"]:
                     player = next((p for p in room["state"]["players"] if p["id"] == seat["id"]), None)
                     if player:
@@ -1632,15 +1729,13 @@ class PythonServer:
                 await self._broadcast_state(room)
                 self._schedule_bot(room)
             else:
-                await client.send({"t": "rooms", "rooms": [public_room(room)
-                                                          for room in self.rooms.rooms.values()]})
+                await client.send({"t": "rooms", "rooms": self._public_rooms()})
             return
         if kind == "heartbeat":
             await client.send({"t": "heartbeat", "ts": message.get("ts") or int(time.time() * 1000)})
             return
         if kind == "listRooms":
-            await client.send({"t": "rooms", "rooms": [public_room(room)
-                                                       for room in self.rooms.rooms.values()]})
+            await client.send({"t": "rooms", "rooms": self._public_rooms()})
             return
         if kind == "createRoom":
             config = message.get("config") or {}
@@ -1655,6 +1750,7 @@ class PythonServer:
             room = self.rooms.create_room(str(message.get("name") or client.name or "房主"), config)
             seat = room["seats"][0]
             client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
+            self._update_room_presence(room)
             await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
                                "resumeToken": seat["resumeToken"],
                                "state": await self._state_for_client(room, client.id)})
@@ -1665,13 +1761,22 @@ class PythonServer:
             room, seat = join(str(message.get("roomId") or "").upper(),
                               str(message.get("name") or client.name or "玩家"))
             client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
+            seat["disconnected"] = seat["left"] = False
+            if room["state"] and not seat.get("spectating"):
+                player = next((p for p in room["state"]["players"] if p["id"] == seat["id"]), None)
+                if player:
+                    player["isBot"] = False
+            task = room.get("takeoverTasks", {}).pop(seat["id"], None)
+            if task:
+                task.cancel()
+            self._update_room_presence(room)
             await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
                                "resumeToken": seat["resumeToken"],
                                "state": await self._state_for_client(room, client.id)})
             await self._broadcast_state(room)
             return
         room = self.rooms.rooms.get(client.room_id or "")
-        if not room or not client.id:
+        if not room or room.get("closed") or not client.id:
             raise ValueError("尚未加入房间")
         spectator = room.get("spectators", {}).get(client.id)
         if spectator:
@@ -1685,8 +1790,8 @@ class PythonServer:
             if kind == "leaveRoom":
                 room["spectators"].pop(client.id, None)
                 client.room_id = None
-                await client.send({"t": "rooms", "rooms": [public_room(item)
-                                                           for item in self.rooms.rooms.values()]})
+                await self._cleanup_rooms()
+                await client.send({"t": "rooms", "rooms": self._public_rooms()})
                 return
             raise ValueError("观战模式不能执行游戏或房间操作")
         if kind == "botDebugSubscribe":
@@ -1713,16 +1818,11 @@ class PythonServer:
                     await self._send_room_notice(room, {"kind": "player_left",
                                                         "playerName": leaving_name}, client.id)
             client.room_id = None
-            if not any(seat["taken"] and not seat["isBot"] for seat in room["seats"]):
-                task = room.get("botTask")
-                if task and not task.done():
-                    task.cancel()
-                self.rooms.rooms.pop(room["id"], None)
-            else:
+            await self._cleanup_rooms()
+            if not room.get("closed"):
                 await self._broadcast_state(room)
                 self._schedule_bot(room)
-            await client.send({"t": "rooms", "rooms": [public_room(item)
-                                                       for item in self.rooms.rooms.values()]})
+            await client.send({"t": "rooms", "rooms": self._public_rooms()})
             return
         if kind == "config":
             if room["state"]:
@@ -1821,14 +1921,13 @@ class PythonServer:
             if self.native_worker_manager and self.native_worker_manager.running:
                 start_room, seats = self.rooms.prepare_start_room(room["id"])
                 config = start_room["config"]
-                native_state = await asyncio.to_thread(
-                    self.native_worker_manager.game_worker.create_game,
+                native_state = await self._create_room_game(room,
                     {"seed": secrets.randbits(32), "endDistricts": config["endDistricts"],
                      "charSetMode": config["charSetMode"], "initialCrownSeat": 0,
                      "startingHand": 4, "startingGold": 2,
                      "seats": [{key: seat.get(key) for key in
                                 ("id", "name", "isBot", "botType", "botLevel")} for seat in seats],
-                     "catalog": cards._catalog}, str(room["id"]))
+                     "catalog": cards._catalog})
                 for player in native_state["players"]:
                     seat = next(item for item in seats if item["id"] == player["id"])
                     player["botLevel"] = seat.get("botLevel") or "hard"
@@ -1973,7 +2072,9 @@ class PythonServer:
         finally:
             self.clients.discard(client)
             room = self.rooms.rooms.get(client.room_id or "")
-            if room and client.id and not any(
+            if room and not room.get("closed"):
+                self._update_room_presence(room)
+            if room and not room.get("closed") and client.id and not any(
                     other.id == client.id and other.room_id == room["id"] for other in self.clients):
                 seat = next((seat for seat in room["seats"] if seat["id"] == client.id), None)
                 if seat:
@@ -1989,7 +2090,7 @@ class PythonServer:
                         remaining = max(0, AUTO_HOST_GRACE_SECONDS -
                                         (time.monotonic() - client.last_seen))
                         await asyncio.sleep(remaining)
-                        if (not self._auto_host_enabled(room, seat) or not seat.get("disconnected")
+                        if (room.get("closed") or not self._auto_host_enabled(room, seat) or not seat.get("disconnected")
                                 or seat.get("left") or not room.get("state")):
                             return
                         if any(other.id == seat["id"] and other.room_id == room["id"]
@@ -2003,7 +2104,10 @@ class PythonServer:
                             _append_game_log(room["state"], seat["name"] + " 断连满 3 分钟，由电脑托管。", "sys")
                             await self._broadcast_state(room)
                             self._schedule_bot(room)
-                    asyncio.create_task(takeover_after_grace())
+                    previous = room.setdefault("takeoverTasks", {}).pop(seat["id"], None)
+                    if previous:
+                        previous.cancel()
+                    room["takeoverTasks"][seat["id"]] = asyncio.create_task(takeover_after_grace())
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -2225,8 +2329,8 @@ class PythonServer:
                     await _http_response(writer, 400, _json_bytes({"error": str(exc)}))
                 return
             if route == "/api/rooms":
-                await _http_response(writer, 200, _json_bytes({"rooms": [
-                    public_room(room) for room in self.rooms.rooms.values()]}))
+                await self._cleanup_rooms()
+                await _http_response(writer, 200, _json_bytes({"rooms": self._public_rooms()}))
                 return
             if route.startswith("/api/"):
                 await _http_response(writer, 501, _json_bytes({"error": "Python 接口尚未迁移：" + route}))
@@ -2283,6 +2387,7 @@ async def serve(host: str, port: int, *, skip_neural_policy: bool = False) -> No
     await asyncio.to_thread(native_worker.start, skip_neural_policy=skip_neural_policy)
     try:
         app = PythonServer(native_worker)
+        housekeeping = asyncio.create_task(app._room_housekeeping())
         server = await asyncio.start_server(app.handle, host, port, limit=MAX_HEADER_BYTES)
         app.listening = True
         app.port = server.sockets[0].getsockname()[1] if server.sockets else port
@@ -2305,6 +2410,8 @@ async def serve(host: str, port: int, *, skip_neural_policy: bool = False) -> No
     finally:
         if "app" in locals():
             app.listening = False
+            housekeeping.cancel()
+            await asyncio.gather(housekeeping, return_exceptions=True)
             await app.frp.close()
         await asyncio.to_thread(native_worker.close)
 

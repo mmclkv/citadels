@@ -84,7 +84,13 @@ class GameEngineWorker:
         return result.get("state") if return_state else result
 
     def close_game(self, game_id: str) -> None:
-        self._request("close", gameId=game_id)
+        try:
+            self._request("close", gameId=game_id)
+        except RuntimeError as exc:
+            # Lobby rooms have no native game, and release retries may arrive
+            # after a previous close succeeded. Both are already cleaned up.
+            if str(exc) != "C++ 游戏主进程拒绝请求：未知 gameId":
+                raise
 
     def close(self) -> None:
         process = self.process
