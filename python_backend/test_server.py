@@ -647,6 +647,26 @@ async def _recv_json(reader: asyncio.StreamReader) -> dict:
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_spectator_can_switch_to_every_human_and_bot(self):
+        room = self.app.rooms.create_room("Host", {"playerCount":4, "bots":3})
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        client = Client(None)
+        client.send = mock.AsyncMock()
+        self.app.clients.add(client)
+        await self.app._handle_message(client, {"t":"joinRoom", "roomId":room["id"]})
+        observer_id = client.id
+        token = room["spectators"][observer_id]["resumeToken"]
+        for player in [*state["players"], *reversed(state["players"])]:
+            await self.app._handle_message(client, {"t":"spectatePlayer", "playerId":player["id"]})
+            view = client.send.call_args.args[0]["state"]
+            self.assertEqual(view["viewPlayerId"], player["id"])
+            self.assertEqual(view["you"], player["id"])
+            self.assertEqual(view["available"]["actions"], [])
+            self.assertEqual(client.id, observer_id)
+            self.assertEqual(room["spectators"][observer_id]["resumeToken"], token)
+            for row in view["players"]:
+                self.assertEqual("hand" in row, row["id"] == player["id"])
+
     async def test_empty_rooms_expire_in_every_phase_and_release_native_games(self):
         for phase in ("lobby", "draft", "action", "gameover"):
             with self.subTest(phase=phase):

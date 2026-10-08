@@ -85,7 +85,7 @@
       return;
     }
     let spectator=$('spectator-control');
-    if(!spectator){spectator=document.createElement('c-citadels-spectator');spectator.id='spectator-control';$('viewport').prepend(spectator);}
+    if(!spectator){spectator=document.createElement('c-citadels-spectator');spectator.id='spectator-control';$('viewport').before(spectator);}
     spectator.update(s,send);
     $('overAgain').hidden=!!s.spectating;
     $('menuSpeed').hidden=!!s.spectating;
@@ -472,7 +472,7 @@
     const roleBlock=ch?`<div class="detail-role-card"><button class="detail-role-thumb" type="button" data-kind="role" data-key="${attr(ch.id)}"><img src="${attr(roleImg(ch))}" alt="${attr(ch.name)}"></button><div class="detail-role-caption">${esc(ch.num)} · ${esc(ch.name)}</div></div>`:'';
     const scoreBlock=`<div class="score-compact"><div class="score-left-stack"><div class="score-kpi"><span>建筑分</span><b>${esc(s.base)}</b></div><div class="score-kpi total"><span>总分</span><b>${esc(s.total)}</b></div></div><div class="score-reward-card"><div class="score-reward-head"><span>奖励分</span><b>+${esc(s.bonus)}</b></div>${rewards.length?`<ul class="score-reward-detail">${rewards.map(d=>`<li class="score-reward-row"><span>${esc(d.label)}</span><strong>${d.value>=0?'+':''}${esc(d.value)}</strong></li>`).join('')}</ul>`:'<div class="score-reward-empty">暂无奖励分</div>'}</div></div>`;
     const cardActions=staging?(st.surface==='district'?target:[]):target.filter(a=>a.type==='choose_district');
-    $('sheetBody').innerHTML=`${target.length?`<div class="target-context">已选择玩家 <b>${esc(p.name)}</b>。${staging?(st.surface==='district'?'请在下方城区选择目标建筑。':'确认后才记入能力选择，仍可返回重选。'):cardActions.length?'请在下方城区选择目标建筑。':'确认后发动效果。'}</div>`:''}
+    $('sheetBody').innerHTML=`${M.state.spectating?`<button class="btn gold" id="detailSpectate" type="button" ${p.id===M.id?'disabled':''}>${p.id===M.id?'当前观战视角':'切换到 '+esc(p.name)+' 的视角'}</button>`:''}${target.length?`<div class="target-context">已选择玩家 <b>${esc(p.name)}</b>。${staging?(st.surface==='district'?'请在下方城区选择目标建筑。':'确认后才记入能力选择，仍可返回重选。'):cardActions.length?'请在下方城区选择目标建筑。':'确认后发动效果。'}</div>`:''}
       <div class="detail-summary"><div class="detail-stat"><span>金币</span><div class="detail-stat-line"><i class="coin-icon"></i><b>${esc(p.gold)}</b></div></div><div class="detail-stat"><span>当前得分</span><div class="detail-stat-line"><i class="score-icon"></i><b>${esc(s.total)}</b></div></div><div class="detail-stat"><span>城区</span><b>${(p.city||[]).length}</b></div><div class="detail-stat"><span>手牌</span><div class="detail-stat-line"><i class="hand-back"></i><b>×${esc(p.handCount)}</b></div></div></div>
       <div class="detail-role-score ${ch?'':'no-role'}">${roleBlock}${scoreBlock}</div>
       <div class="detail-block"><div class="detail-block-title"><span>${cardActions.length?'选择建筑':'公开城区'} · ${(p.city||[]).length} 栋</span><span>${cardActions.length?'点小卡继续':'点击小卡查看高清'}</span></div><div class="detail-cards">${(p.city||[]).map(c=>`<button class="detail-card-btn ${cardActions.some(a=>String(a.uid||a.value)===String(c.uid))?'targetable':''}${staging&&st.multi&&stagePicked(c.uid)?' selected':''}" type="button" data-detail-card="${attr(c.uid)}"><img src="${attr(districtImg(c))}" alt="${attr(c.name)}"><div class="detail-card-name">${esc(c.name)} · ${esc(c.cost)}</div></button>`).join('')}</div></div>
@@ -542,6 +542,7 @@
     const button=e.target.closest('[data-action-index]');if(button){handleGeneric(M.actions[Number(button.dataset.actionIndex)]);return;}
     if(e.target.id==='viewerConfirm'){const v=M.viewer;if(v?.stageOption>=0){closeViewer();chooseStageOption(v.stageOption);}else if(v?.confirm)action(v.confirm);return;}
     if(e.target.id==='viewerBack'||e.target.id==='viewerClose'){closeViewer();return;}
+    if(e.target.id==='detailSpectate'&&M.state?.spectating){const playerId=M.sheetPlayer;closeViewer();closeSheet();send({t:'spectatePlayer',playerId});return;}
     if(e.target.id==='detailConfirm'){const a=legal().find(x=>x.type===M.targetType&&x.target===M.sheetPlayer);if(a)action(a);return;}
     if(e.target.id==='detailBack'||e.target.id==='closeSheet'||e.target.id==='mask'){closeSheet();return;}
     if(e.target.id==='confirmSelection'){confirmSelection();return;}

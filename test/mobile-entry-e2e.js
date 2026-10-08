@@ -116,6 +116,24 @@ async function main() {
       assert.equal(switched.you, target.id);
       assert.ok(switched.players.find(p=>p.id===target.id).hand.length);
       assert.equal(switched.players.find(p=>p.id!==target.id).hand, undefined);
+      const first = initial.players.find(p => p.id === initial.viewPlayerId);
+      const firstButton = watcher.getByRole('button', {name:`观战 ${first.name} 的视角`,exact:true});
+      await firstButton.click();
+      await watcher.waitForFunction(id => window.spectatorState.viewPlayerId === id, first.id);
+      assert.equal(await firstButton.getAttribute('aria-pressed'), 'true');
+      if (route === 'mobile.html') {
+        const before = await selector.boundingBox();
+        await watcher.locator('#viewport').evaluate(node => {node.scrollTop=node.scrollHeight;});
+        const after = await selector.boundingBox();
+        assert.equal(after.y, before.y, 'Mobile perspective controls must remain visible when the board scrolls');
+        await watcher.locator(`#players [data-player="${target.id}"]`).click();
+        await watcher.locator('#detailSpectate').click();
+      } else {
+        await watcher.getByRole('button', {name:`观战 ${target.name} 的视角`,exact:true}).click();
+      }
+      await watcher.waitForFunction(id => window.spectatorState.viewPlayerId === id, target.id);
+      assert.equal(await selector.inputValue(), target.id);
+      assert.equal(await watcher.evaluate(() => JSON.parse(localStorage.getItem('citadels.net.session')).token), observerSession.token);
       await watcher.reload();
       await selector.waitFor();
       assert.equal(await selector.inputValue(), target.id);
