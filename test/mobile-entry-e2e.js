@@ -106,6 +106,18 @@ async function main() {
       const initial = await watcher.evaluate(() => window.spectatorState);
       assert.equal(initial.players.length, 2);
       assert.equal(initial.available.actions.length, 0);
+      if (route === 'mobile.html') {
+        const choosing = initial.players.find(p => p.id === initial.draft.currentPlayer);
+        assert.equal(await watcher.locator('#selectedInfo').textContent(), choosing.name+'正在选角');
+        assert.equal(await watcher.locator('#chooseTarget').count(), 0);
+        if (initial.draft.pool.length) {
+          assert.equal(await watcher.locator('#roleArea strong').textContent(), choosing.name+'正在选角');
+          assert.equal((await watcher.locator('#roleArea .sub').textContent()).includes('/ 选择'), false);
+          await watcher.locator('#roles [data-kind="role"]').first().click();
+          assert.equal(await watcher.locator('#viewerConfirm').count(), 0);
+          await watcher.locator('#viewerBack').click();
+        }
+      }
       const observerSession = await watcher.evaluate(() => JSON.parse(localStorage.getItem('citadels.net.session')));
       assert.notEqual(observerSession.token, originalSession.token, 'Joining under the same nickname must not receive the host resume token');
       const target = initial.players.find(p => p.id !== initial.viewPlayerId);

@@ -112,7 +112,7 @@
     if(stage&&M.stage){if(stage.surface==='hand')M.handOpen=true;if(stage.surface==='role')M.roleOpen=true;
       $('publicSub').textContent=stage.surface==='player'||stage.surface==='district'?stageTitle():'顺时针排列';}
     else $('publicSub').textContent=M.targetType?'点击目标玩家':'顺时针排列';
-    const wantFocus=current!==M.id||M.confirm?null:M.stage?surfaceFocus(stageStep()?.surface):choiceItems()?'roles':M.targetType?'players':M.selection?'hand':canBuildAny()?'hand':null;
+    const wantFocus=s.spectating||current!==M.id||M.confirm?null:M.stage?surfaceFocus(stageStep()?.surface):choiceItems()?'roles':M.targetType?'players':M.selection?'hand':canBuildAny()?'hand':null;
     const focusMoved=wantFocus!==M.autoFocus;M.autoFocus=wantFocus;
     if(focusMoved&&wantFocus){M.focus=wantFocus;if(wantFocus==='hand')M.handOpen=true;if(wantFocus==='roles')M.roleOpen=true;}
     if(!wantFocus)M.focus=null;
@@ -283,8 +283,10 @@
     $('handSummary').innerHTML=cards.map(mini).join('')||'<span class="choice-help">暂无手牌</span>';
     $('myHand').innerHTML=cards.map(c=>thumb(c,'district')).join('')||'<span class="choice-help">暂无手牌</span>';
   }
+  function draftStatus(s){const name=s.players.find(p=>p.id===s.draft?.currentPlayer)?.name||'玩家';
+    return name+(s.draft?.sub==='discard'?'正在弃置角色牌':'正在选角');}
   function choiceItems(){const s=M.state,a=legal(),pending=s.turn?.pending;
-    if(s.phase==='draft'&&s.draft?.pool?.length)return {title:s.draft.sub==='discard'?'暗置弃掉一张角色牌':'请选择一个角色',hint:`进度 ${s.draft.stepIdx+1} / ${s.draft.totalSteps} · 点击卡图查看 / 选择`,kind:'role',items:s.draft.pool,action:c=>a.find(x=>(x.type==='draft_pick'||x.type==='draft_discard')&&x.charId===c.id)};
+    if(s.phase==='draft'&&s.draft?.pool?.length)return {title:s.spectating?draftStatus(s):s.draft.sub==='discard'?'暗置弃掉一张角色牌':'请选择一个角色',hint:`进度 ${s.draft.stepIdx+1} / ${s.draft.totalSteps} · ${s.spectating?'点击卡图查看':'点击卡图查看 / 选择'}`,kind:'role',items:s.draft.pool,action:c=>s.spectating?null:a.find(x=>(x.type==='draft_pick'||x.type==='draft_discard')&&x.charId===c.id)};
     const cardTypes=['draw_keep','scholar_pick','wizard_card','prophet_give'];
     const type=cardTypes.find(t=>a.some(x=>x.type===t));
     if(type){const pool=type==='prophet_give'?myPlayer()?.hand||[]:pending?.cards||pending?.hand||[];
@@ -399,7 +401,7 @@
   }
   const actionsClass = n => 'actions count-'+Math.min(6,n)+(n===1?' one':'');
   function renderFooter(){const s=M.state,all=legal(),choice=choiceItems();
-    if(s.spectating){M.actions=[];$('selectedInfo').textContent='观战中 · '+(myPlayer()?.name||'')+' 的视角';$('actions').replaceChildren();return;}
+    if(s.spectating){M.actions=[];$('selectedInfo').textContent=s.phase==='draft'?draftStatus(s):'观战中 · '+(myPlayer()?.name||'')+' 的视角';$('actions').replaceChildren();return;}
     if(M.stage){const st=stageStep();const buttons=st.surface==='button'?st.options.map((o,i)=>`<button class="btn primary" type="button" data-stage-option="${i}" title="${esc(o.label)}">${esc(o.label)}</button>`):[];
       const multiPick=st.multi&&M.stage.selected.size>0;
       buttons.push(`<button class="btn ghost" type="button" id="stageBack">${multiPick?'返回重选':M.stage.step>0?'返回上一步':M.stage.ready?'返回重选':'返回'}</button>`);
