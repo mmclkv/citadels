@@ -114,12 +114,12 @@
         </select>
       </label>
       <label class="field neural-only" hidden>
-        <span>MCTS 模拟次数（0 = 关闭）</span>
-        <input id="cfg-mcts-sims" type="number" min="0" step="50" value="500" inputmode="numeric">
+        <span>MCTS 模拟次数</span>
+        <input id="cfg-mcts-sims" type="number" min="0" step="50" value="5000" inputmode="numeric">
       </label>
       <label class="field neural-only" hidden>
-        <span>MCTS 最大搜索深度（0 = 自动 700）</span>
-        <input id="cfg-mcts-depth" type="number" min="0" step="10" value="700" inputmode="numeric">
+        <span>MCTS 最大搜索深度</span>
+        <input id="cfg-mcts-depth" type="number" min="0" step="10" value="2000" inputmode="numeric">
       </label>
       <label class="field neural-only" hidden>
         <span>MCTS 隐藏信息粒子数</span>
@@ -563,7 +563,7 @@
           return false;
         } finally { clearTimeout(timer); }
       }
-      const DEFAULT_MCTS_CONFIG = { simulations: 500, maxDepth: 700, particles: 4 };
+      const DEFAULT_MCTS_CONFIG = { simulations: 5000, maxDepth: 2000, particles: 4 };
       function readMctsConfig(simsId, depthId, particlesId) {
         const valueOrDefault = (id, fallback) => {
           const node = $(id);
@@ -800,8 +800,8 @@
                 const box = el('div', 'seat-mcts');
                 box.innerHTML = '<span class="seat-mcts-title">MCTS 参数</span>';
                 const fields = [
-                  ['模拟次数', 'simulations', 500, 0, 50],
-                  ['最大深度', 'maxDepth', 700, 0, 10],
+                  ['模拟次数', 'simulations', 5000, 0, 50],
+                  ['最大深度', 'maxDepth', 2000, 0, 10],
                   ['粒子数', 'particles', 4, 1, 1]
                 ];
                 fields.forEach(([label, key, fallback, min, step]) => {
@@ -814,8 +814,8 @@
                   input.onchange = () => {
                     const current = s.mcts || {};
                     Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value, mcts: {
-                      simulations: key === 'simulations' ? input.value : current.simulations == null ? 500 : current.simulations,
-                      maxDepth: key === 'maxDepth' ? input.value : current.maxDepth == null ? 700 : current.maxDepth,
+                      simulations: key === 'simulations' ? input.value : current.simulations == null ? 5000 : current.simulations,
+                      maxDepth: key === 'maxDepth' ? input.value : current.maxDepth == null ? 2000 : current.maxDepth,
                       particles: key === 'particles' ? input.value : current.particles == null ? 4 : current.particles
                     }});
                   };

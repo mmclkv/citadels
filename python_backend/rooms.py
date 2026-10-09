@@ -20,8 +20,8 @@ def _int_at_least(value, default: int, low: int) -> int:
 def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
     value = value or {}
     fallback = fallback or {}
-    return {"simulations": _int_at_least(value.get("simulations", fallback.get("mctsSimulations")), 500, 0),
-            "maxDepth": _int_at_least(value.get("maxDepth", fallback.get("mctsMaxDepth")), 700, 0),
+    return {"simulations": _int_at_least(value.get("simulations", fallback.get("mctsSimulations")), 5000, 0),
+            "maxDepth": _int_at_least(value.get("maxDepth", fallback.get("mctsMaxDepth")), 2000, 0),
             "particles": _int_at_least(value.get("particles", fallback.get("mctsParticles")), 4, 1)}
 
 
@@ -113,8 +113,8 @@ class RoomRegistry:
                        "charSetMode": config.get("charSetMode") or "base",
                        "botLevel": seat_config["botLevel"], "botType": seat_config["botType"],
                        "botPace": config.get("botPace") or 430,
-                       "mctsSimulations": _int_at_least(config.get("mctsSimulations"), 500, 0),
-                       "mctsMaxDepth": _int_at_least(config.get("mctsMaxDepth"), 700, 0),
+                       "mctsSimulations": _int_at_least(config.get("mctsSimulations"), 5000, 0),
+                       "mctsMaxDepth": _int_at_least(config.get("mctsMaxDepth"), 2000, 0),
                        "mctsParticles": _int_at_least(config.get("mctsParticles"), 4, 1),
                        "mctsBelief": config.get("mctsBelief") is not False,
                        "voice": config.get("voice") is not False,
