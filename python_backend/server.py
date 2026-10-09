@@ -1598,6 +1598,29 @@ class PythonServer:
                    "diplomat_theirs": "选择对方的建筑"}
         return prompts.get(pending.get("kind"), "请选择行动")
 
+    async def _record_bot_debug(self, room: dict, actor: dict, kind: str, **details) -> None:
+        if room.get("closed"):
+            return
+        state = room.get("state") or {}
+        entry = {"at": int(time.time() * 1000), "kind": kind,
+                 "playerId": actor["id"], "playerName": actor.get("name") or actor["id"],
+                 "botType": actor.get("botType") or "npc",
+                 "phase": state.get("phase"), "round": state.get("round", 0), **details}
+        if actor.get("botType") == "neural":
+            entry["checkpoint"] = Path(self.neural.checkpoint).name
+        # Shared debug history must not expose chosen roles, hand UIDs or targets.
+        if entry.get("action"):
+            entry["action"] = {"type": entry["action"].get("type")}
+        history = room.setdefault("botDebug", [])
+        history.append(entry)
+        del history[:-300]
+        for client in list(self.clients):
+            if client.room_id == room["id"] and client.id:
+                try:
+                    await client.send({"t": "botDebug", "entry": entry})
+                except (ConnectionError, OSError):
+                    pass
+
     def _schedule_bot(self, room: dict) -> None:
         if room.get("closed"):
             return
@@ -1622,13 +1645,23 @@ class PythonServer:
                         not state.get("roundConfirm")):
                     break
                 await asyncio.sleep(max(0, int(room["config"].get("botPace") or 0)) / 1000)
-                available = await self._bot_available_actions(state, actor_now["id"])
+                started = time.perf_counter()
+                await self._record_bot_debug(room, actor_now, "decision_start")
+                inference = {"method": "round-confirm" if state.get("roundConfirm") else actor_now.get("botType", "npc")}
+                try:
+                    available = await self._bot_available_actions(state, actor_now["id"])
+                except Exception as exc:
+                    await self._record_bot_debug(room, actor_now, "decision_error", error=str(exc))
+                    room["agentStatus"] = {"playerId": actor_now["id"], "state": "error", "message": str(exc)}
+                    await self._broadcast_state(room)
+                    break
                 if state.get("roundConfirm"):
                     action = next((item for item in available.get("actions", [])
                                    if item.get("type") == "confirm_round" and
                                    not item.get("disabled")), None)
                 elif actor_now.get("botType", "npc") == "agent":
                     if not self._agent_status()["configured"]:
+                        await self._record_bot_debug(room, actor_now, "decision_error", error=self._agent_status()["message"])
                         room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
                                                 "model": self._agent_status().get("model", ""),
                                                 "message": self._agent_status()["message"]}
@@ -1642,6 +1675,7 @@ class PythonServer:
                         decision = await asyncio.to_thread(self.agent.decide, state,
                                                            actor_now["id"], available)
                     except AgentError as exc:
+                        await self._record_bot_debug(room, actor_now, "decision_error", error=str(exc))
                         if room.get("state") is state and state == before:
                             room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
                                                     "model": self._agent_status()["model"],
@@ -1654,6 +1688,7 @@ class PythonServer:
                 elif actor_now.get("botType", "npc") == "neural":
                     status = self.neural.status()
                     if not status["configured"]:
+                        await self._record_bot_debug(room, actor_now, "decision_error", error=status["message"])
                         room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
                                                 "model": status["checkpoint"], "message": status["message"]}
                         await self._broadcast_state(room)
@@ -1662,8 +1697,9 @@ class PythonServer:
                         mcts_config = dict(actor_now.get("mcts") or {})
                         mcts_config["belief"] = room["config"].get("mctsBelief") is not False
                         action = await asyncio.to_thread(self.neural.decide, state, actor_now["id"],
-                                                         available, mcts_config)
+                                                         available, mcts_config, diagnostics=inference)
                     except Exception as exc:
+                        await self._record_bot_debug(room, actor_now, "decision_error", error=str(exc))
                         room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
                                                 "model": status["checkpoint"], "message": str(exc)}
                         await self._broadcast_state(room)
@@ -1671,16 +1707,26 @@ class PythonServer:
                 else:
                     worker = (self.native_worker_manager.game_worker
                               if self.native_worker_manager and self.native_worker_manager.running else None)
-                    if worker is None:
-                        raise RuntimeError("NPC 策略需要运行中的 C++ 游戏引擎")
-                    action = await asyncio.to_thread(
-                        worker.decide_npc, game_id=str(room["id"]), player_id=actor_now["id"],
-                        seed=secrets.randbits(32),
-                        heuristic_mcts=actor_now.get("heuristicMcts"))
+                    try:
+                        if worker is None:
+                            raise RuntimeError("NPC 策略需要运行中的 C++ 游戏引擎")
+                        action = await asyncio.to_thread(
+                            worker.decide_npc, game_id=str(room["id"]), player_id=actor_now["id"],
+                            seed=secrets.randbits(32),
+                            heuristic_mcts=actor_now.get("heuristicMcts"))
+                    except Exception as exc:
+                        await self._record_bot_debug(room, actor_now, "decision_error", error=str(exc))
+                        room["agentStatus"] = {"playerId": actor_now["id"], "state": "error", "message": str(exc)}
+                        await self._broadcast_state(room)
+                        break
+                inference["durationMs"] = (time.perf_counter() - started) * 1000
+                await self._record_bot_debug(room, actor_now, "decision_detail", action=action,
+                    inference=inference, mcts=dict(inference.get("mcts") or {}))
                 if action is None:
                     break
                 result = await self._apply_game_action(room, actor_now["id"], action)
                 if not result.get("ok"):
+                    await self._record_bot_debug(room, actor_now, "decision_error", error=result.get("error") or "行动未通过规则校验", action=action)
                     if actor_now.get("botType") in ("agent", "neural"):
                         room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
                                                 "model": self._agent_status()["model"],
@@ -1691,6 +1737,9 @@ class PythonServer:
                                      if not item.get("disabled")), None)
                     if not fallback or not (await self._apply_game_action(room, actor_now["id"], fallback)).get("ok"):
                         break
+                    action = fallback
+                    await self._record_bot_debug(room, actor_now, "fallback_action", action=action)
+                await self._record_bot_debug(room, actor_now, "action_apply", action=action)
                 room["agentStatus"] = None
                 await self._broadcast_state(room)
 
@@ -1778,6 +1827,9 @@ class PythonServer:
         room = self.rooms.rooms.get(client.room_id or "")
         if not room or room.get("closed") or not client.id:
             raise ValueError("尚未加入房间")
+        if kind == "botDebugSubscribe":
+            await client.send({"t": "botDebugHistory", "entries": room["botDebug"]})
+            return
         spectator = room.get("spectators", {}).get(client.id)
         if spectator:
             if kind == "spectatePlayer":
@@ -1794,9 +1846,6 @@ class PythonServer:
                 await client.send({"t": "rooms", "rooms": self._public_rooms()})
                 return
             raise ValueError("观战模式不能执行游戏或房间操作")
-        if kind == "botDebugSubscribe":
-            await client.send({"t": "botDebugHistory", "entries": room["botDebug"]})
-            return
         if kind == "leaveRoom":
             seat = next((seat for seat in room["seats"] if seat["id"] == client.id), None)
             if seat:

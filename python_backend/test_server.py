@@ -884,9 +884,11 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         other = Viewer()
         await self.app._handle_message(other, {"t": "spectateRoom", "roomId": room["id"]})
         self.assertEqual(room["spectators"][other.id]["viewPlayerId"], state["players"][0]["id"])
-        for kind in ("action", "startGame", "restart", "setPace", "setAutoHost", "config", "chat", "botDebugSubscribe"):
+        for kind in ("action", "startGame", "restart", "setPace", "setAutoHost", "config", "chat"):
             with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "观战模式"):
                 await self.app._handle_message(viewer, {"t": kind, "action": {"type": "end_turn"}})
+        await self.app._handle_message(viewer, {"t": "botDebugSubscribe"})
+        self.assertEqual(viewer.messages[-1], {"t": "botDebugHistory", "entries": room["botDebug"]})
         with self.assertRaisesRegex(ValueError, "视角不存在"):
             await self.app._handle_message(viewer, {"t": "spectatePlayer", "playerId": "missing"})
         resumed = Viewer()
@@ -1308,9 +1310,83 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seat["botLevel"], "hard")
         self.assertEqual(seat["heuristicMcts"], {"timeBudgetMs": 350})
 
+    async def test_bot_debug_reaches_websocket_and_replays_history(self) -> None:
+        reader, writer = await _open_ws(self.port)
+        try:
+            await _send_json(writer, {"t": "hello", "name": "Debug"})
+            await _send_json(writer, {"t": "createRoom", "config": {
+                "playerCount": 2, "bots": 1, "botPace": 1, "autoHost": False}})
+            room_id = None
+            entries = []
+            while room_id is None:
+                message = await asyncio.wait_for(_recv_json(reader), 2)
+                if message["t"] == "joined":
+                    room_id = message["roomId"]
+            await _send_json(writer, {"t": "startGame"})
+            sent_steps = set()
+            for _ in range(40):
+                message = await asyncio.wait_for(_recv_json(reader), 2)
+                self.assertNotEqual(message["t"], "error", message)
+                if message["t"] == "botDebug":
+                    entries.append(message["entry"])
+                    if message["entry"]["kind"] == "action_apply":
+                        break
+                elif message["t"] == "state":
+                    state = message["state"]
+                    actions = (state.get("available") or {}).get("actions") or []
+                    if state.get("phase") == "draft" and actions:
+                        step = state["draft"].get("stepIdx")
+                        if step not in sent_steps:
+                            sent_steps.add(step)
+                            await _send_json(writer, {"t": "action", "action": actions[0]})
+            self.assertEqual([entry["kind"] for entry in entries[:3]],
+                             ["decision_start", "decision_detail", "action_apply"])
+            self.assertGreaterEqual(entries[1]["inference"]["durationMs"], 0)
+            for entry in entries:
+                if entry.get("action"):
+                    self.assertEqual(set(entry["action"]), {"type"})
+            await _send_json(writer, {"t": "botDebugSubscribe"})
+            while True:
+                message = await asyncio.wait_for(_recv_json(reader), 2)
+                if message["t"] == "botDebugHistory":
+                    self.assertEqual(message["entries"][:3], entries[:3])
+                    break
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def test_bot_debug_history_is_bounded_and_redacts_private_actions(self):
+        room = self.app.rooms.create_room("Debug", {"playerCount": 2, "bots": 1})
+        actor = room["seats"][1]
+        for index in range(305):
+            await self.app._record_bot_debug(room, actor, "decision_detail",
+                action={"type": "choose_role", "role": "assassin", "uid": 99},
+                inference={"durationMs": index})
+        self.assertEqual(len(room["botDebug"]), 300)
+        self.assertEqual(room["botDebug"][0]["inference"]["durationMs"], 5)
+        self.assertEqual(room["botDebug"][-1]["action"], {"type": "choose_role"})
+
+    async def test_bot_debug_records_neural_configuration_error(self):
+        room = self.app.rooms.create_room("Debug", {"playerCount": 2, "bots": 1, "botPace": 1})
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        host = state["players"][0]
+        options = get_available_actions(state, host["id"])["actions"]
+        self.assertTrue(apply_action(state, host["id"], options[0])["ok"])
+        actor_id = self.app._bot_actor(state)
+        actor = next(p for p in state["players"] if p["id"] == actor_id)
+        actor["botType"] = "neural"
+        with mock.patch.object(self.app.neural, "status", return_value={
+                "configured": False, "checkpoint": "missing", "message": "weight missing"}):
+            self.app._schedule_bot(room)
+            await asyncio.wait_for(room["botTask"], 2)
+        self.assertEqual([entry["kind"] for entry in room["botDebug"]],
+                         ["decision_start", "decision_error"])
+        self.assertEqual(room["botDebug"][-1]["error"], "weight missing")
+        self.assertEqual(room["agentStatus"]["state"], "error")
+
     async def test_python_npc_driver_takes_a_legal_draft_action(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
-                                                     "botPace": 0, "seed": 91})
+                                                     "botPace": 1, "seed": 91})
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         original_step = state["draft"]["stepIdx"]
         self.app._schedule_bot(room)

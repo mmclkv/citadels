@@ -103,7 +103,7 @@ class NeuralPolicy:
                                        seed=seed, belief=belief)
 
     def decide(self, state: dict, player_id: str, available: dict | None = None,
-               mcts: dict | None = None) -> dict:
+               mcts: dict | None = None, *, diagnostics: dict | None = None) -> dict:
         if not self.worker or not self.model_path:
             raise RuntimeError(self.error or "策略网络未加载")
         if not isinstance(available, dict):
@@ -139,8 +139,14 @@ class NeuralPolicy:
             raise RuntimeError("C++ MCTS 返回了无效策略分布")
         selection = options.get("selection", "sample")
         selected = select_search_action(policy, rng, selection)
-        self._last_mcts = {"determinizations": result.get("particlesUsed", len(particles)),
-                           "beliefDecay": decay, "visits": result.get("visits", 0),
-                           "expansions": result.get("expansions", 0),
-                           "simulations": simulations, "maxDepth": max_depth, "selection": selection}
+        mcts_stats = {"determinizations": result.get("particlesUsed", len(particles)),
+                      "beliefDecay": decay, "visits": result.get("visits", 0),
+                      "expansions": result.get("expansions", 0),
+                      "simulations": simulations, "maxDepth": max_depth, "selection": selection}
+        self._last_mcts = mcts_stats
+        if diagnostics is not None:
+            diagnostics.update({"method": "native-mcts", "profile": self.profile,
+                                "architecture": self.architecture, "device": self.device_name,
+                                "actionEncodingVersion": self.action_version,
+                                "mcts": dict(mcts_stats)})
         return candidates[selected]
