@@ -49,8 +49,8 @@ Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\pyth
 ```
 
 按 Ctrl+C 会请求优雅停止并保存 checkpoint。
-- 默认模型文件是早期架构的归档权重，已不受支持，不能用于策略神经网络对局或续训。当前只接受带明确状态/动作编码元数据的 Entity Transformer v6 checkpoint；因此需要先训练或导入 v6 权重，才能启用神经网络玩家。部署权重只保留架构、profile 和模型参数；`.optimizer.pt` 是 GPU 续训状态，不用于推理。
-- Entity Transformer v6 使用 1790 维状态、256 维动作和 v14/v9 编码，扩展城市建筑槽位并编码建筑特殊状态、反应与待处理选择，同时用 UID 字节特征区分动作。旧版本架构不再加载或续训。
+- 仓库默认权重为 `models/policy-default.json.gz`：Entity Transformer v6 / fast，来自第 12,047 局训练存档，使用争第一优先的价值目标，保留完整参数精度。未设置 `CITADELS_NEURAL_CHECKPOINT` 时，策略神经网络自动加载此文件；设置该环境变量可使用其他兼容存档。来源、编码版本和 SHA256 记录在 `models/policy-default.meta.json`。部署文件不包含训练历史或 optimizer；`.optimizer.pt` 只用于 GPU 续训。
+- Entity Transformer v6 使用 1790 维状态、256 维动作和 v14/v10 编码（兼容 v9 动作权重），扩展城市建筑槽位并编码建筑特殊状态、反应与待处理选择，同时用 UID 字节特征区分动作。旧版本架构不再加载或续训。
 - 开局面板把电脑类型选成「策略神经网络」时，会额外出现两项 MCTS 设置（模拟次数 / 最大搜索深度），默认都是 0 = 关闭。关闭时电脑按策略网络的 TTA 投票走子；打开后服务器先把隐藏信息（对手手牌、牌库与弃牌堆顺序、对手未打出的角色牌、真逮捕令）换成 4 份随机猜测，在每份猜测上做确定化 MCTS，再平均根节点访问分布选动作 —— 电脑不会因此偷看到真牌。模拟次数上限 2000、深度上限 200，超范围由服务器截断。
 - GPU optimizer 状态保存在同编号的 `.optimizer.pt` 文件中；旧 JavaScript checkpoint 可以直接迁移到 GPU 训练。
 
