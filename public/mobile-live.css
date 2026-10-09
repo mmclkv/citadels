@@ -147,19 +147,19 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
 .player-row{position:relative}
 .row-bubble{position:absolute;left:5px;right:5px;bottom:5px;z-index:5;padding:5px 9px 6px;
   border:1px solid rgba(90,165,220,.55);border-radius:11px 11px 11px 3px;
-  background:linear-gradient(180deg,rgba(20,63,99,.9),rgba(8,38,64,.9));
+  background:linear-gradient(180deg,rgba(20,63,99,.6),rgba(8,38,64,.6));
   color:#e3f3ff;font-size:10.5px;font-weight:700;line-height:1.4;letter-spacing:.2px;
   box-shadow:0 8px 22px rgba(0,0,0,.6),inset 0 1px 0 rgba(140,205,255,.14);
   opacity:1;transition:opacity .6s ease,transform .6s ease}
-.row-bubble.tone-magic{border-color:rgba(190,140,255,.5);background:linear-gradient(180deg,rgba(58,33,96,.9),rgba(21,12,38,.9));color:#eddcff}
-.row-bubble.tone-warn{border-color:rgba(241,189,75,.5);background:linear-gradient(180deg,rgba(79,58,16,.9),rgba(34,23,6,.9));color:#ffeab8}
-.row-bubble.tone-danger{border-color:rgba(255,110,118,.5);background:linear-gradient(180deg,rgba(87,23,34,.9),rgba(37,7,11,.9));color:#ffd9dc}
+.row-bubble.tone-magic{border-color:rgba(190,140,255,.5);background:linear-gradient(180deg,rgba(58,33,96,.6),rgba(21,12,38,.6));color:#eddcff}
+.row-bubble.tone-warn{border-color:rgba(241,189,75,.5);background:linear-gradient(180deg,rgba(79,58,16,.6),rgba(34,23,6,.6));color:#ffeab8}
+.row-bubble.tone-danger{border-color:rgba(255,110,118,.5);background:linear-gradient(180deg,rgba(87,23,34,.6),rgba(37,7,11,.6));color:#ffd9dc}
 /* 聊天气泡：同样是一整块圆角（左上角小尖朝上指向发言者），改用较浅的蓝色与动作气泡区分；
    参与面板布局（不像动作气泡那样贴行覆盖），长发言可滚动、可选中 */
 .row-bubble.tone-chat{position:relative;left:auto;right:auto;bottom:auto;margin-top:9px;
   padding:6px 10px 7px;
   border-color:rgba(122,175,222,.7);border-radius:3px 11px 11px 11px;
-  background:linear-gradient(180deg,rgba(227,239,252,.9),rgba(198,220,244,.9));
+  background:linear-gradient(180deg,rgba(227,239,252,.6),rgba(198,220,244,.6));
   color:#16344f;
   box-shadow:0 8px 20px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.6);
   max-height:120px;overflow:auto;scrollbar-width:none;
@@ -217,3 +217,7 @@ html[data-lobby-screen]:not([data-lobby-screen="game"]) .shell{display:none}
   background:linear-gradient(180deg,#ffd96a,#e0a01c);color:#2a1b03;
   font-size:8.5px;font-weight:950;line-height:1;font-variant-numeric:tabular-nums;
   box-shadow:0 0 0 1px #7a4f05,0 0 7px #f1bd4bb0,inset 0 1px 0 #fff8}
+/* 艺术家美化过的建筑：标签底部一条静态的彩色渐变底纹（一体贴在标签下沿，随圆角裁切） */
+.city-mini.beautified::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;pointer-events:none;
+  background:linear-gradient(90deg,#ff6b6b,#ffd166,#7cf0b8,#5bc8ff,#b98cff);
+  box-shadow:0 0 6px rgba(255,214,120,.75)}
