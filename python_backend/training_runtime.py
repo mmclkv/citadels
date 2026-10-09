@@ -451,13 +451,17 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
             actor_policy = seat_policies[actor_seat]
             historical = actor_policy["historical"]
             evaluation = discovery.get("evaluation", False)
-            direct_training = discovery.get("directTraining", False) and not historical
-            collect = not historical and not evaluation
+            is_learner = actor_seat == learner_seat
+            direct_training = discovery.get("directTraining", False) and is_learner
+            # Normal self-play searches only the rotating learner. Held-out weakness
+            # screening keeps its full-search protocol; response learning uses PG.
+            policy_only = direct_training or (not discovery and not is_learner)
+            collect = is_learner and not historical and not evaluation
             actions = decision.get("actions") or []
             if not actions:
                 raise RuntimeError(f"游戏主进程返回空合法动作：phase={state.get('phase')} player={actor_id}")
             particle_result = worker.determinize(
-                state=state, player_id=actor_id, count=config["mctsParticles"],
+                state=state, player_id=actor_id, count=1 if policy_only else config["mctsParticles"],
                 seed=int(rng.integers(1, 2**32)), belief=config.get("mctsBelief", True))
             particles = particle_result["particles"]
             particle_weights = particle_result["weights"]
@@ -469,13 +473,13 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                 legal_actions=actions, particle_weights=particle_weights,
                 model_path=actor_policy["modelPath"], model_version=actor_policy["modelVersion"], profile=config["profile"],
                 architecture=config["networkArchitecture"], device=config["device"],
-                simulations=(1 if len(actions) == 1 else config["mctsSimulations"]),
+                simulations=(1 if policy_only or len(actions) == 1 else config["mctsSimulations"]),
                 max_depth=config["mctsMaxDepth"],
-                c_puct=config["mctsC_puct"], dirichlet_alpha=(0 if historical or discovery else config["mctsDirichletAlpha"]),
-                dirichlet_epsilon=(0 if historical or discovery else config["mctsDirichletEpsilon"]), seed=seed + steps,
+                c_puct=config["mctsC_puct"], dirichlet_alpha=(0 if policy_only or historical or discovery else config["mctsDirichletAlpha"]),
+                dirichlet_epsilon=(0 if policy_only or historical or discovery else config["mctsDirichletEpsilon"]), seed=seed + steps,
                 batch_size=config.get("mctsBatchSize", 32),
                 action_encoding_version=actor_policy["actionEncodingVersion"],
-                include_training_features=collect, policy_only=direct_training)
+                include_training_features=collect, policy_only=policy_only)
             policy = np.asarray(search_result["policy"], dtype=np.float32)
             inference_ms += float(search_result.get("inferenceMs") or
                                   (time.perf_counter() - search_started) * 1000)
@@ -489,7 +493,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                              "state": np.asarray(state_features, dtype=np.float32),
                              "actions": np.asarray(action_features, dtype=np.float32),
                              "pi": policy, "reward": None, "valueMask": None})
-            probs = _temperature_policy(policy, 1.0 if historical or discovery else training_temperature)
+            probs = _temperature_policy(policy, 1.0 if policy_only or historical or discovery else training_temperature)
             # Held-out opponents use the same clean, stochastic policy as pool
             # opponents; matched seeds make baseline/candidate cases reproducible.
             choice = int(rng.choice(len(actions), p=probs))
@@ -539,7 +543,8 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
         scores.append(base + bonus)
     highest = max(scores, default=0)
     winners = [i for i, score in enumerate(scores) if score == highest] if completed else []
-    network_indices = sorted(current_network_seats)
+    # Measure the learner's strength, rather than averaging in direct-policy peers.
+    network_indices = [learner_seat]
     network_reward = (float(np.mean([current["rewards"][i] for i in network_indices]))
                       if completed else None)
     network_win = (sum(i in winners for i in network_indices) / max(1, len(network_indices))
@@ -900,6 +905,8 @@ class TrainingManager:
                       f"训练温度={config['temperatureStart']}→{config['temperatureEnd']}，" +
                       f"c_puct={config['mctsC_puct']}，Dirichlet α={config['mctsDirichletAlpha']} " +
                       f"ε={config['mctsDirichletEpsilon']}；LibTorch 前向推理")
+            self._log("每局仅轮换训练席位使用完整 MCTS；其余当前/历史网络对手直接推理，"
+                      "不生成策略教师样本；战力指标统计训练席位。")
             self._log(f"Replay buffer：最近最多 {replay_buffer.max_games} 局；无固定字节上限，"
                       "内存用量随样本大小增长；每批最多按新样本数等量抽取旧样本")
             totals = {"steps": 0, "gameMs": 0.0, "inferenceMs": 0.0,

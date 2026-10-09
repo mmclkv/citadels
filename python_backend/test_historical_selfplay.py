@@ -135,6 +135,64 @@ class HistoricalSelfPlayTests(unittest.TestCase):
             self.assertEqual(status["history"][0]["batchComposition"], first)
             self.assertEqual(status["history"][1]["batchComposition"], expected)
 
+    def test_only_rotating_learner_searches_and_supplies_policy_targets(self):
+        from unittest.mock import patch
+        from python_backend import training_runtime as runtime
+        original_sample = runtime._sample_game
+        original_search = self.native.worker.search
+        checked = []
+
+        def composition(config, first_game, history_available):
+            return {"firstGame": first_game, "players": 4,
+                    "main": 2 if history_available else 3,
+                    "historical": 1 if history_available else 0, "heuristic": 1}
+
+        def sample(config, number, stop):
+            learner_id = f"train-{number}-{(number - 1) % 4}"
+            kinds = set()
+
+            def search(**kwargs):
+                result = original_search(**kwargs)
+                if kwargs["root_player_id"] == learner_id:
+                    self.assertFalse(kwargs["policy_only"])
+                    self.assertTrue(kwargs["include_training_features"])
+                    kinds.add("learner")
+                else:
+                    self.assertTrue(kwargs["policy_only"])
+                    self.assertFalse(kwargs["include_training_features"])
+                    self.assertEqual(kwargs["dirichlet_epsilon"], 0)
+                    self.assertEqual(result["visits"], 0)
+                    self.assertEqual(result["expansions"], 0)
+                    kinds.add("current" if kwargs["model_path"] == config["nativeModelPath"] else "historical")
+                return result
+
+            with patch.object(runtime, "_native_worker", return_value=self.native.worker), \
+                    patch.object(self.native.worker, "search", search):
+                result = original_sample(config, number, stop)
+            self.assertTrue(result["completed"])
+            policy_rows = [row for row in result["rows"] if len(row["pi"])]
+            self.assertTrue(policy_rows)
+            self.assertEqual({row["playerId"] for row in policy_rows}, {learner_id})
+            checked.append(kinds)
+            return result
+
+        with tempfile.TemporaryDirectory() as directory:
+            manager = TrainingManager(directory, self.native.worker, self.native.game_worker)
+            config = {"targetGames": 2, "minPlayers": 4, "maxPlayers": 4,
+                      "selfPlayMode": "random-batch", "charSet": "base", "profile": "fast",
+                      "device": "cpu", "mctsSimulations": 4, "mctsParticles": 2,
+                      "mctsMaxDepth": 20, "workers": 1, "batchGames": 1,
+                      "trainingEpochs": 1, "miniBatch": 32, "checkpointEvery": 1,
+                      "historicalPoolSize": 2, "historicalOpponentProbability": 1,
+                      "maxRounds": 100, "endDistricts": 7, "weaknessSearchEvery": 0, "seed": 7}
+            with patch.object(runtime, "_sample_game", sample), \
+                    patch.object(runtime, "random_batch_composition", composition):
+                manager.start(config)
+                status = self.wait(manager)
+            self.assertEqual(status["completedGames"], 2)
+            self.assertEqual(checked[0], {"learner", "current"})
+            self.assertEqual(checked[1], {"learner", "current", "historical"})
+
 
 if __name__ == "__main__":
     unittest.main()
