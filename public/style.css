@@ -1882,6 +1882,9 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
   #screen-game .mobile-role-tag{flex:0 0 auto;max-width:75px;padding:2px 3px;border:1px solid var(--gold-l);
     border-radius:5px;background:rgba(73,49,11,.42);color:var(--gold-d);font-size:9px;font-weight:900;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #screen-game .mobile-draft-chosen{display:inline-flex;align-items:center;flex:0 0 auto;
+    height:14px;padding:0 3px;border:1px solid #2f7a52;border-radius:4px;
+    background:#0e2b1e;color:#84e7b0;font-size:7px;font-weight:900;white-space:nowrap}
   #screen-game .mobile-player-stats{margin-left:auto;display:flex;align-items:center;gap:3px;
     flex:0 0 auto;font-size:8px;font-weight:800;white-space:nowrap}
   #screen-game .mobile-player-stats>span{display:inline-flex;align-items:center;gap:2px}
