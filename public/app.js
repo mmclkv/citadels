@@ -4348,7 +4348,13 @@
     sp.classList.toggle('collapsed', collapsed);
     const sideToggle = $('#btn-side-panel-toggle');
     const mobileSideToggle = $('#btn-side-panel-mobile-toggle');
-    if (mobileSideToggle) mobileSideToggle.hidden = !(isMobileGameUI() && collapsed);
+    if (mobileSideToggle) {
+      mobileSideToggle.hidden = !(isMobileGameUI() && any);
+      mobileSideToggle.setAttribute('aria-expanded', String(any && !collapsed));
+      mobileSideToggle.setAttribute('aria-label', collapsed ? '展开右侧边栏' : '收起右侧边栏');
+      mobileSideToggle.title = collapsed ? '展开右侧边栏' : '收起右侧边栏';
+      mobileSideToggle.textContent = collapsed ? '‹' : '›';
+    }
     if (sideToggle) {
       sideToggle.setAttribute('aria-expanded', String(!collapsed));
       sideToggle.setAttribute('aria-label', collapsed ? '展开右侧边栏' : '收起右侧边栏');

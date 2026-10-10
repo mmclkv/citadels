@@ -1775,6 +1775,7 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
     width:38px;height:38px;padding:0;border:1px solid var(--line2);border-radius:10px;
     background:var(--paper);color:var(--ink);box-shadow:var(--shadow2);font-size:20px;line-height:1}
   #screen-game .mobile-side-expand[hidden]{display:none!important}
+  #screen-game #btn-side-panel-toggle{display:none}
 
   #screen-game #opponents[data-layout="mobile-grid"]{
     position:relative!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));
