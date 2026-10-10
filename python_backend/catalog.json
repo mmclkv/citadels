@@ -923,5 +923,223 @@
       "desc": "其他玩家建造建筑后若仍有金币，向税务官标记放置一枚金币。你的回合中可收取标记上的全部金币。",
       "hint": "收取建筑税"
     }
+  ],
+  "scenarios": [
+    {
+      "id": "classic",
+      "name": "经典组合",
+      "characters": [
+        "assassin",
+        "thief",
+        "magician",
+        "king",
+        "abbot",
+        "merchant",
+        "architect",
+        "warlord"
+      ],
+      "districts": [
+        "Dragon Gate",
+        "Factory",
+        "Ghost Town",
+        "Imperial Treasury",
+        "Keep",
+        "Laboratory",
+        "Library",
+        "Map Room",
+        "Quarry",
+        "School of Magic",
+        "Smithy",
+        "Statue",
+        "Thieves’ Den",
+        "Wishing Well"
+      ]
+    },
+    {
+      "id": "ambitious",
+      "name": "野心勃勃",
+      "characters": [
+        "magistrate",
+        "thief",
+        "wizard",
+        "noble",
+        "abbot",
+        "businessman",
+        "architect",
+        "marshal",
+        "queen"
+      ],
+      "districts": [
+        "Capitol",
+        "Factory",
+        "Framework",
+        "Great Wall",
+        "Ghost Town",
+        "Keep",
+        "Necropolis",
+        "Park",
+        "Poor House",
+        "Quarry",
+        "School of Magic",
+        "Stables",
+        "Statue",
+        "Thieves’ Den"
+      ]
+    },
+    {
+      "id": "cunning",
+      "name": "尔虞我诈",
+      "characters": [
+        "witch",
+        "blackmailer",
+        "magician",
+        "emperor",
+        "monk",
+        "alchemist",
+        "architect",
+        "warlord",
+        "tax_collector"
+      ],
+      "districts": [
+        "Armory",
+        "Basilica",
+        "Dragon Gate",
+        "Gold Mine",
+        "Keep",
+        "Monument",
+        "Museum",
+        "Necropolis",
+        "Park",
+        "Poor House",
+        "Quarry",
+        "Secret Vault",
+        "Smithy",
+        "Theater"
+      ]
+    },
+    {
+      "id": "illustrious",
+      "name": "名声显赫",
+      "characters": [
+        "witch",
+        "spy",
+        "prophet",
+        "emperor",
+        "abbot",
+        "merchant",
+        "scholar",
+        "diplomat",
+        "artist"
+      ],
+      "districts": [
+        "Factory",
+        "Framework",
+        "Great Wall",
+        "Ghost Town",
+        "Ivory Tower",
+        "Keep",
+        "Library",
+        "Museum",
+        "Observatory",
+        "Park",
+        "Poor House",
+        "Quarry",
+        "School of Magic",
+        "Smithy"
+      ]
+    },
+    {
+      "id": "devious",
+      "name": "上流社会",
+      "characters": [
+        "magistrate",
+        "blackmailer",
+        "wizard",
+        "king",
+        "monk",
+        "alchemist",
+        "navigator",
+        "marshal",
+        "queen"
+      ],
+      "districts": [
+        "Dragon Gate",
+        "Factory",
+        "Framework",
+        "Ghost Town",
+        "Laboratory",
+        "Necropolis",
+        "Park",
+        "Poor House",
+        "Secret Vault",
+        "Smithy",
+        "Stables",
+        "Theater",
+        "Thieves’ Den",
+        "Wishing Well"
+      ]
+    },
+    {
+      "id": "tenacious",
+      "name": "加乘效果",
+      "characters": [
+        "assassin",
+        "spy",
+        "prophet",
+        "king",
+        "bishop",
+        "businessman",
+        "scholar",
+        "diplomat",
+        "artist"
+      ],
+      "districts": [
+        "Basilica",
+        "Capitol",
+        "Ghost Town",
+        "Imperial Treasury",
+        "Laboratory",
+        "Library",
+        "Map Room",
+        "Observatory",
+        "School of Magic",
+        "Secret Vault",
+        "Smithy",
+        "Stables",
+        "Statue",
+        "Wishing Well"
+      ]
+    },
+    {
+      "id": "vicious",
+      "name": "心狠手辣",
+      "characters": [
+        "assassin",
+        "thief",
+        "magician",
+        "noble",
+        "bishop",
+        "merchant",
+        "navigator",
+        "warlord",
+        "tax_collector"
+      ],
+      "districts": [
+        "Armory",
+        "Basilica",
+        "Dragon Gate",
+        "Gold Mine",
+        "Imperial Treasury",
+        "Ivory Tower",
+        "Laboratory",
+        "Map Room",
+        "Monument",
+        "Museum",
+        "School of Magic",
+        "Statue",
+        "Thieves’ Den",
+        "Wishing Well"
+      ]
+    }
   ]
 }

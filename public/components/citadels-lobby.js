@@ -24,6 +24,9 @@
   'use strict';
 
   const NET_SESSION_KEY = 'citadels.net.session';
+  const SCENARIOS = (window.CitCards && window.CitCards.SCENARIOS) || [];
+  const SCENARIO_OPTIONS = '<option value="">不使用剧本</option>' +
+    SCENARIOS.map(s => '<option value="' + s.id + '">' + s.name + '</option>').join('');
 
   /* 标记：完整照搬 index.html 第 19–223 行的三段 <section>，只补了 3 个
      data-desktop-only（见下方 CSS 注释）。 */
@@ -150,6 +153,10 @@
         </select>
       </label>
       <label class="field">
+        <span>剧本</span><select id="cfg-scenario">${SCENARIO_OPTIONS}</select>
+      </label>
+      <p class="dim small" id="cfg-scenario-hint">选择剧本后，角色组设置不生效。</p>
+      <label class="field">
         <span>你的名字</span>
         <input id="cfg-name" type="text" value="我" maxlength="10">
       </label>
@@ -197,6 +204,8 @@
           <label class="field voice-capable" hidden><span>房间语音</span>
             <select id="net-voice"><option value="on" selected>开启</option><option value="off">关闭</option></select>
           </label>
+          <label class="field"><span>剧本</span><select id="net-scenario">${SCENARIO_OPTIONS}</select></label>
+          <p class="dim small" id="net-scenario-hint">选择剧本后，角色组设置不生效。</p>
           <p class="dim small voice-capable" hidden>语音由 LiveKit 转发音频，真人座位之间可实时通话；电脑座位不参与语音。</p>
           <button class="btn primary block" id="btn-create">创建房间</button>
         </div>
@@ -225,9 +234,11 @@
             <select id="r-chars"><option value="base" selected>基本版</option><option value="dark">黑暗扩充</option><option value="mixed">混合</option></select></label>
           <label class="field inline voice-capable" hidden><span>语音</span>
             <select id="r-voice"><option value="on" selected>开</option><option value="off">关</option></select></label>
+          <label class="field inline"><span>剧本</span><select id="r-scenario">${SCENARIO_OPTIONS}</select></label>
         </div>
       </div>
       <div class="seat-grid" id="seat-grid"></div>
+      <p class="dim small" id="r-scenario-hint">选择剧本后，角色组设置不生效。</p>
       <p class="dim small">把房间号告诉朋友即可加入；房主可以在每个座位卡片内设置电脑类型和策略网络参数。</p>
       <div class="btn-row">
         <button class="btn ghost" id="btn-leave">离开房间</button>
@@ -621,7 +632,7 @@
           Net.autoStart = true;
           Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
             playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
-            endDistricts: cfg.end, charSetMode: cfg.chars, botPace: pace().act, voice: false
+            endDistricts: cfg.end, charSetMode: cfg.chars, scenario: cfg.scenario, botPace: pace().act, voice: false
           }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth', '#cfg-mcts-particles')) });
         });
       }
@@ -758,6 +769,17 @@
         });
       }
 
+      function syncScenarioChoice(prefix, canEdit = true) {
+        const selected = $('#' + prefix + '-scenario');
+        const chars = $('#' + prefix + '-chars');
+        const hint = $('#' + prefix + '-scenario-hint');
+        if (!selected || !chars) return;
+        const scenario = SCENARIOS.find(s => s.id === selected.value);
+        selected.disabled = !canEdit;
+        chars.disabled = !!scenario || !canEdit;
+        if (hint) hint.textContent = scenario ? scenario.name + '：使用固定角色和 14 张独特建筑，角色组设置不生效。两人皇帝改为国王；少于五人皇后改为艺术家；三人、八人经典组合加入艺术家。'
+          : '未使用剧本：按角色组选择角色，所有建筑加入牌堆。';
+      }
       function renderLobbyRoom(st) {
         App.lobbyState = st;
         $('#lobby-pre').hidden = true;
@@ -768,6 +790,7 @@
           $('#r-players').value = String(st.config.playerCount || 4);
           $('#r-end').value = String(st.config.endDistricts || 8);
           $('#r-chars').value = st.config.charSetMode || 'base';
+          $('#r-scenario').value = st.config.scenario || '';
           $('#r-voice').value = st.config.voice === false ? 'off' : 'on';
         }
         voiceSync();
@@ -775,6 +798,7 @@
         grid.innerHTML = '';
         const seats = st.seats || [];
         const amHost = seats.length && seats[0].id === App.myId;
+        syncScenarioChoice('r', amHost);
         seats.forEach((s, i) => {
           const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
           const heuristicLabel = s.botLevel === 'easy' ? '启发式电脑 · 简单' : s.botLevel === 'hard' ? '启发式电脑 · 困难' : '启发式电脑 · 普通';
@@ -1006,6 +1030,7 @@
           botType: botSelection.botType,
           end: Number($('#cfg-end').value),
           chars: $('#cfg-chars').value,
+          scenario: $('#cfg-scenario').value,
           name: ($('#cfg-name').value || '我').trim()
         };
         if ($('#cfg-speed') && PACE[$('#cfg-speed').value]) {
@@ -1026,6 +1051,7 @@
               playerCount: Number($('#net-players').value),
               endDistricts: Number($('#net-end').value),
               charSetMode: $('#net-chars').value,
+              scenario: $('#net-scenario').value,
               autoHost: $('#net-auto-host').value === 'on',
               botPace: pace().act,
               voice: $('#net-voice').value === 'on'
@@ -1063,7 +1089,11 @@
       };
       $('#btn-net-start').onclick = () => Net.send({ t: 'startGame' });
       $('#btn-net-shuffle').onclick = () => Net.send({ t: 'shuffleSeats' });
-      ['r-players', 'r-end', 'r-chars', 'r-voice'].forEach(id => {
+      ['cfg', 'net'].forEach(prefix => {
+        $('#' + prefix + '-scenario').onchange = () => syncScenarioChoice(prefix);
+        syncScenarioChoice(prefix);
+      });
+      ['r-players', 'r-end', 'r-chars', 'r-voice', 'r-scenario'].forEach(id => {
         const node = $('#' + id);
         if (!node) return;
         node.onchange = () => {
@@ -1072,6 +1102,7 @@
               playerCount: Number($('#r-players').value),
               endDistricts: Number($('#r-end').value),
               charSetMode: $('#r-chars').value,
+              scenario: $('#r-scenario').value,
               voice: $('#r-voice').value === 'on'
             }
           });

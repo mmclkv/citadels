@@ -294,6 +294,12 @@ struct NativeGameState {
     const auto& step = draft_steps[draft_step];
     if (step.discard > 0 && draft_sub == "pick") { draft_sub = "discard"; return true; }
     ++draft_step; draft_sub = "pick";
+    // 三人九角色：第一轮选完三张后，再随机暗置一张，再选第二角色。
+    if (players.size() == 3 && char_deck.size() == 9 && draft_step == 3 && !draft_pool.empty()) {
+      const size_t picked = static_cast<size_t>(rng.next() * draft_pool.size());
+      draft_face_down.push_back(draft_pool[picked]);
+      draft_pool.erase(draft_pool.begin() + picked);
+    }
     if (draft_step >= static_cast<int>(draft_steps.size())) {
       phase = NativePhase::Action;
       call_queue.clear();

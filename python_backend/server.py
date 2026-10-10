@@ -1950,6 +1950,7 @@ class PythonServer:
             updates = message.get("config") or {}
             if not isinstance(updates, dict):
                 raise ValueError("房间配置必须是对象")
+            scenario = cards.normalize_scenario(updates.get("scenario")) if "scenario" in updates else None
             if updates.get("botType") == "neural":
                 status = self.neural.status()
                 if not status["configured"]:
@@ -1959,6 +1960,8 @@ class PythonServer:
             for key in ("endDistricts", "charSetMode", "botType", "botLevel"):
                 if updates.get(key):
                     room["config"][key] = updates[key]
+            if scenario is not None:
+                room["config"]["scenario"] = scenario
             if updates.get("botPace"):
                 room["config"]["botPace"] = int(updates["botPace"])
             for key in ("mctsSimulations", "mctsMaxDepth", "mctsParticles"):
@@ -2042,6 +2045,7 @@ class PythonServer:
                 native_state = await self._create_room_game(room,
                     {"seed": secrets.randbits(32), "endDistricts": config["endDistricts"],
                      "charSetMode": config["charSetMode"], "initialCrownSeat": 0,
+                     "scenario": config.get("scenario", ""),
                      "startingHand": 4, "startingGold": 2,
                      "seats": [{key: seat.get(key) for key in
                                 ("id", "name", "isBot", "botType", "botLevel")} for seat in seats],

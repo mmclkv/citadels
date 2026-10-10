@@ -647,6 +647,28 @@ async def _recv_json(reader: asyncio.StreamReader) -> dict:
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_scenario_updates_clear_and_reach_native_setup(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2, "charSetMode": "dark"})
+        client = Client(None)
+        client.id, client.room_id = room["seats"][0]["id"], room["id"]
+        client.send = mock.AsyncMock()
+        self.app.clients.add(client)
+        await self.app._handle_message(client, {"t": "config", "config": {"scenario": "cunning"}})
+        self.assertEqual(room["config"]["scenario"], "cunning")
+        with self.assertRaisesRegex(ValueError, "剧本"):
+            await self.app._handle_message(client, {"t": "config", "config": {"scenario": "invalid", "charSetMode": "base"}})
+        self.assertEqual(room["config"]["charSetMode"], "dark")
+        await self.app._handle_message(client, {"t": "config", "config": {"scenario": ""}})
+        self.assertEqual(room["config"]["scenario"], "")
+        await self.app._handle_message(client, {"t": "config", "config": {"scenario": "tenacious"}})
+        worker = self.app.native_worker_manager.game_worker
+        with mock.patch.object(worker, "create_game", wraps=worker.create_game) as create, \
+             mock.patch.object(self.app, "_schedule_bot"):
+            await self.app._handle_message(client, {"t": "startGame"})
+        self.assertEqual(create.call_args.args[0]["scenario"], "tenacious")
+        self.assertEqual(create.call_args.args[0]["charSetMode"], "dark")
+        self.assertEqual(room["state"]["config"]["scenario"], "tenacious")
+
     async def test_spectator_can_switch_to_every_human_and_bot(self):
         room = self.app.rooms.create_room("Host", {"playerCount":4, "bots":3})
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)

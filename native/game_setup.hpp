@@ -119,14 +119,39 @@ inline NativeGameState create_native_game(const JsonValue& request) {
   }
   const int crown = std::clamp(int_field(request, "initialCrownSeat", 0), 0, player_count - 1);
   state.players[crown].has_crown = true;
-  state.char_deck = select_character_ids(catalog, player_count,
-      string_field(request, "charSetMode", "base"), state.rng);
+  const auto scenario_id = string_field(request, "scenario");
+  const JsonValue* scenario = nullptr;
+  if (!scenario_id.empty()) {
+    const auto& scenarios = required_field(catalog, "scenarios");
+    for (const auto& item : scenarios.as_array())
+      if (string_field(item, "id") == scenario_id) { scenario = &item; break; }
+    if (!scenario) throw std::runtime_error("Unknown scenario: " + scenario_id);
+  }
+  std::unordered_set<std::string> scenario_districts;
+  if (scenario) {
+    for (const auto& value : required_field(*scenario, "characters").as_array()) {
+      std::string id = value.as_string();
+      if (player_count == 2 && NativeGameState::role_number(id) == 9) continue;
+      if (player_count == 2 && id == "emperor") id = "king";
+      if (player_count < 5 && id == "queen") id = "artist";
+      state.char_deck.push_back(id);
+    }
+    if ((player_count == 3 || player_count == 8) && state.char_deck.size() == 8)
+      state.char_deck.push_back("artist");
+    for (const auto& value : required_field(*scenario, "districts").as_array())
+      scenario_districts.insert(value.as_string());
+  } else {
+    state.char_deck = select_character_ids(catalog, player_count,
+        string_field(request, "charSetMode", "base"), state.rng);
+  }
 
   const auto& district_definitions = required_field(catalog, "districts");
   if (!district_definitions.is_array()) throw std::runtime_error("catalog.districts 必须是数组");
   std::vector<DistrictCard> deck;
   for (const auto& definition : district_definitions.as_array()) {
-    const int count = std::max(0, int_field(definition, "count"));
+    const bool purple = string_field(definition, "color") == "purple";
+    if (scenario && purple && !scenario_districts.count(string_field(definition, "en"))) continue;
+    const int count = scenario && purple ? 1 : std::max(0, int_field(definition, "count"));
     for (int i = 0; i < count; ++i) {
       DistrictCard card;
       card.uid = "d" + std::to_string(deck.size());
