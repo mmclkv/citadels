@@ -9,12 +9,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
+from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract, config_contract
 
 
 class HistoricalPolicyPool:
     def __init__(self, checkpoint_dir: Path, runtime_dir: Path, capacity: int,
-                 profile: str, parameter_count: int, log=lambda message: None):
+                 profile: str, parameter_count: int, log=lambda message: None, *, target_contract=None):
         self.checkpoint_dir = Path(checkpoint_dir)
         self.directory = Path(runtime_dir) / "historical"
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -22,6 +22,7 @@ class HistoricalPolicyPool:
         self.capacity = max(0, int(capacity))
         self.profile = profile
         self.parameter_count = parameter_count
+        self.target_contract = target_contract or MODEL_CONTRACTS["entity-v6"]
         self.log = log
         self.entries: dict[str, dict] = {}
         self.rejected: set[str] = set()
@@ -40,8 +41,8 @@ class HistoricalPolicyPool:
             raise ValueError("编码格式无效")
         metadata = checkpoint.get("model") or {}
         contract = validate_checkpoint_contract(checkpoint, "entity-v6")
-        if contract != MODEL_CONTRACTS["entity-v6"]:
-            raise ValueError("旧建筑编码需先迁移，不能加入新编码训练的历史池")
+        if contract != self.target_contract:
+            raise ValueError("编码不匹配需先迁移，不能加入当前编码训练的历史池")
         if metadata.get("profile") != self.profile:
             raise ValueError("网络规模不匹配")
         if metadata.get("valueObjective") != "win-first-v1":
@@ -117,7 +118,7 @@ def assign_seat_policies(config: dict, network_seats: set[int], learner_seat: in
     """Keep one rotating learner; sample and freeze other seats for the whole game."""
     current = {"modelPath": str(config["nativeModelPath"]),
                "modelVersion": Path(config["nativeModelPath"]).stat().st_mtime_ns % 2_000_000_000,
-               "actionEncodingVersion": MODEL_CONTRACTS[config["networkArchitecture"]]["action"],
+               "actionEncodingVersion": config_contract(config)["action"],
                "checkpoint": "", "historical": False}
     policies = []
     probability = config.get("historicalOpponentProbability", 0.5)

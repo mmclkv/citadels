@@ -53,7 +53,7 @@ Windows 推荐双击 `start-server.bat`：它优先使用仓库内 `.python\pyth
 
 按 Ctrl+C 会请求优雅停止并保存 checkpoint。
 - 仓库默认权重为 `models/policy-default.json.gz`：Entity Transformer v6 / fast，来自第 12,047 局训练存档，使用争第一优先的价值目标，保留完整参数精度。未设置 `CITADELS_NEURAL_CHECKPOINT` 时，策略神经网络自动加载此文件；设置该环境变量可使用其他兼容存档。来源、编码版本和 SHA256 记录在 `models/policy-default.meta.json`。部署文件不包含训练历史或 optimizer；`.optimizer.pt` 只用于 GPU 续训。
-- Entity Transformer v6 新训练使用 2054 维状态、448 维动作和 v15/v11 编码，覆盖全部 54 种建筑的城市、手牌、反应、待处理选择及特殊建造状态。旧 v14/v9、v14/v10 权重仍按原 1790/256 布局推理；用于新编码训练前必须显式迁移。
+- Entity Transformer v6 默认新训练使用 2054 维状态、448 维动作和 v15/v11 编码，覆盖全部 54 种建筑。训练控制台可显式选择状态和动作编码，并检查续训权重的版本、维度与网络规模，自动决定直接恢复或参数迁移；旧 v14/v9、v14/v10 权重仍可按原 1790/256 布局推理或续训。迁移规则见 [权重编码迁移](docs/neural-weight-migration.md)。
 - 开局面板把电脑类型选成「策略神经网络」时，可以设置 MCTS 模拟次数与最大搜索深度，默认分别为 5000、2000，并使用 4 份隐藏信息确定化样本。真实对局选择 MCTS 访问概率最大的合法动作，概率并列时选择合法动作列表中靠前的一项；训练仍保留探索采样。搜索基于隐藏信息的随机猜测，不使用对手真实隐藏信息。
 - GPU optimizer 状态保存在同编号的 `.optimizer.pt` 文件中；旧 JavaScript checkpoint 可以直接迁移到 GPU 训练。
 

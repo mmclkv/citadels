@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 from pathlib import Path
+from .model_contract import config_contract
 
 PROFILES = {"fast", "balanced", "large"}
 ARCHITECTURES = {"entity-v6"}
@@ -39,6 +40,7 @@ def _clamp_integer(value, low: int, high: int, fallback: int) -> int | float:
 
 def sanitize_config(raw: dict | None = None) -> dict:
     raw = raw if isinstance(raw, dict) else {}
+    contract = config_contract(raw)
     requested_architecture = raw.get("networkArchitecture")
     if requested_architecture not in (None, "", "entity-v6"):
         raise ValueError(f"仅支持 entity-v6 网络架构，当前配置为：{requested_architecture}")
@@ -66,6 +68,7 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "endDistricts": int(_number(raw.get("endDistricts"))) if _number(raw.get("endDistricts")) in (7, 8) else 8,
         "profile": raw.get("profile") if raw.get("profile") in PROFILES else "balanced",
         "networkArchitecture": "entity-v6",
+        "stateEncodingVersion": contract["state"], "actionEncodingVersion": contract["action"],
         "rulesEngine": "cpp", "mctsEngine": "cpp",
         "neuralNetworkFramework": "libtorch", "backend": "python",
         "device": raw.get("device") if raw.get("device") in ("cuda", "cpu") else ("cpu" if raw.get("backend") == "cpu" else "cuda"),

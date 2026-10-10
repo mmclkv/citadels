@@ -32,7 +32,7 @@ from .agent import AgentClient, AgentError, config_from_env
 from .voice import VoiceService
 from .neural import NeuralPolicy
 from .training_runtime import TrainingManager
-from .model_contract import MODEL_CONTRACTS
+from .model_contract import MODEL_CONTRACTS, ENCODING_CONTRACTS, checkpoint_resume_plan
 from .frp import FrpManager
 from .codex_gateway import CodexGateway, detect_codex
 from .native_worker_manager import NativeWorkerManager
@@ -375,14 +375,7 @@ class PythonServer:
             raise ValueError("存档无法解析（可能已损坏或不是本项目的 checkpoint）：" + str(exc)) from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("config"), dict):
             raise ValueError("该存档没有记录训练配置（可能是早期版本产物），无法读取参数")
-        encoding = payload.get("encoding") or {}
-        model = payload.get("model") or {}
-        state_version = _positive_int(encoding.get("state")) or _positive_int(model.get("encodingVersion"))
-        action_version = _positive_int(encoding.get("action"))
-        return {"name": name, "game": _positive_int(payload.get("game")) or 0,
-                "createdAt": payload.get("createdAt") or "", "config": payload["config"],
-                "encodingVersion": state_version, "actionEncodingVersion": action_version,
-                "encodingCompatible": _encoding_compatible(state_version, action_version)}
+        return {**self._checkpoint_metadata(name, payload), "config": payload["config"]}
 
     def _import_checkpoint(self, original_name: str, body: bytes) -> dict:
         if not body:
@@ -416,14 +409,22 @@ class PythonServer:
 
     @staticmethod
     def _checkpoint_metadata(name: str, payload: dict) -> dict:
-        encoding = payload.get("encoding") or {}
-        model = payload.get("model") or {}
+        encoding = payload.get("encoding") if isinstance(payload.get("encoding"), dict) else {}
+        model = payload.get("model") if isinstance(payload.get("model"), dict) else {}
         state_version = _positive_int(encoding.get("state")) or _positive_int(model.get("encodingVersion"))
         action_version = _positive_int(encoding.get("action"))
+        plans = {}
+        for state, action in ENCODING_CONTRACTS:
+            try:
+                plans[f"{state}/{action}"] = checkpoint_resume_plan(payload, state, action)
+            except ValueError as error:
+                plans[f"{state}/{action}"] = {"supported": False, "message": str(error)}
         return {"name": name, "game": _positive_int(payload.get("game")) or 0,
                 "createdAt": payload.get("createdAt") or "",
                 "encodingVersion": state_version, "actionEncodingVersion": action_version,
-                "encodingCompatible": _encoding_compatible(state_version, action_version)}
+                "profile": model.get("profile"), "networkArchitecture": model.get("architecture"),
+                "stateSize": model.get("stateSize"), "actionSize": model.get("actionSize"),
+                "resumePlans": plans, "encodingCompatible": plans["15/11"]["supported"]}
 
     def _public_rooms(self) -> list[dict]:
         return [public_room(room) for room in self.rooms.rooms.values() if not room.get("closed")]

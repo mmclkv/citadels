@@ -64,9 +64,9 @@ native mcts_worker 的 GPU evaluator 有三种模式：
 不足 8 人的槽位为无效 mask。mcts_worker 返回 `valueVector`，同时保留
 `value = valueVector[0]` 供旧客户端兼容；GPU batch 协议也返回 8 个 float 的向量。
 
-## Entity Transformer v6 输入编码：状态 v14 / 动作 v9
+## Entity Transformer v6 输入编码：状态 v15 / 动作 v11
 
-`native/state_features.hpp` 实现 Entity Transformer v6 的状态 v15／动作 v11：2054 维状态、448 维动作。状态包含 32 维全局信息、8 个各 184 维的相对玩家槽、54 维本人手牌及 496 维上下文；城市建筑 ID 经 55×8 embedding 表。上下文覆盖新建筑待处理选择、支付方式和钟楼等状态；动作包含主要／次要建筑、特殊效果及所选牌身份。对手手牌只用公开张数，法师目标手牌和灯塔牌堆仅向规则允许的观察者编码。旧 v14/v9、v14/v10 权重通过明确的 1790／256 维兼容布局推理，不可直接用于新编码训练。`state_features_probe` 和
+`native/state_features.hpp` 实现 Entity Transformer v6 的状态 v15／动作 v11：2054 维状态、448 维动作。状态包含 32 维全局信息、8 个各 184 维的相对玩家槽、54 维本人手牌及 496 维上下文；城市建筑 ID 经 55×8 embedding 表。上下文覆盖新建筑待处理选择、支付方式和钟楼等状态；动作包含主要／次要建筑、特殊效果及所选牌身份。对手手牌只用公开张数，法师目标手牌和灯塔牌堆仅向规则允许的观察者编码。旧 v14/v9、v14/v10 权重通过明确的 1790／256 维兼容布局推理；训练控制台可选择保留旧编码，或自动迁移参数后使用新编码续训。NPC 价值样本也使用本次训练所选状态编码。`state_features_probe` 和
 `action_features_probe` 用于逐元素跨语言回归检查。
 
 ## 搜索根的隐藏信息约定（确定化由调用方负责）

@@ -63,11 +63,11 @@ class GameEngineWorker:
         return self._request("decision", gameId=game_id)
 
     def advance_npcs(self, *, game_id: str, network_player_ids: list[str],
-                     seed: int, max_steps: int, max_rounds: int) -> dict:
+                     seed: int, max_steps: int, max_rounds: int, state_encoding_version: int = 15) -> dict:
         return self._request("advance_npcs", gameId=game_id,
                              networkPlayerIds=network_player_ids, seed=int(seed),
                              maxSteps=int(max_steps), maxRounds=int(max_rounds),
-                             includeTrainingFeatures=True)
+                             includeTrainingFeatures=True, stateEncodingVersion=state_encoding_version)
 
     def legal_actions(self, *, game_id: str, player_id: str) -> dict:
         return self._request("actions", gameId=game_id, playerId=player_id)

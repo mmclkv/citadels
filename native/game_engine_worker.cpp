@@ -170,6 +170,9 @@ int main() {
         }
         std::cout << "]}\n" << std::flush;
       } else if (mode == "advance_npcs") {
+        const int state_encoding_version = int_field(request, "stateEncodingVersion", kStateEncodingVersion);
+        if (state_encoding_version != 14 && state_encoding_version != 15)
+          throw std::runtime_error("unsupported training state encoding version");
         std::unordered_set<std::string> network_players;
         for (const auto& player : string_array_field(request, "networkPlayerIds"))
           network_players.insert(player);
@@ -210,7 +213,7 @@ int main() {
           if (include_training_features && state.players[actor].is_bot &&
               state.players[actor].bot_type != "neural") {
             training_samples.emplace_back(state.players[actor].id,
-                encode_features(state, actor, 8));
+                encode_features(state, actor, 8, state_encoding_version));
           }
           std::optional<NativeGameState> previous;
           if(!heuristic_sessions[game_id].tree.empty())previous=state;

@@ -25,7 +25,7 @@ import numpy as np
 from . import cards
 from .native_worker import NativeMctsWorker
 from .game_engine_worker import GameEngineWorker
-from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
+from .model_contract import MODEL_CONTRACTS, config_contract, checkpoint_resume_plan
 from .training_config import sanitize_config
 from .historical_policy_pool import HistoricalPolicyPool, assign_seat_policies
 from .weakness_search import WeaknessSearch, discovery_due
@@ -43,6 +43,22 @@ _SERVER_GAME_WORKER = None
 REPLAY_MAX_GAMES = 128
 NETWORK_METRIC_WINDOW = 50
 VALUE_OBJECTIVE = "win-first-v1"
+
+
+def _read_training_checkpoint(directory, name):
+    if not re.fullmatch(r"checkpoint-[\w-]+\.json\.gz", name):
+        raise ValueError("续训 checkpoint 名称不合法")
+    path = Path(directory) / name
+    if not path.is_file():
+        raise ValueError("续训 checkpoint 不存在：" + name)
+    with gzip.open(path, "rb") as handle:
+        raw = handle.read(512 * 1024 * 1024 + 1)
+    if len(raw) > 512 * 1024 * 1024:
+        raise ValueError("续训 checkpoint 解压后超过 512 MB")
+    checkpoint = json.loads(raw.decode("utf-8"))
+    if not isinstance(checkpoint, dict):
+        raise ValueError("续训 checkpoint 格式无效")
+    return path, checkpoint
 
 
 def _terminal_value_targets(outcome: dict, player_index: int, count: int):
@@ -282,7 +298,7 @@ def _load_trainer():
     return torch, gpu_trainer
 
 
-def _entity_parameter_count(profile: str) -> int:
+def _entity_parameter_count(profile: str, state_version: int = 15) -> int:
     model_dim, _heads, layers, ff_dim, action_hidden = {
         "fast": (128, 4, 2, 256, 128),
         "balanced": (192, 4, 3, 384, 192),
@@ -290,10 +306,10 @@ def _entity_parameter_count(profile: str) -> int:
     }[profile]
     dense = lambda inputs, outputs: inputs * outputs + outputs
     player_input = 56 + 16 * (7 + 8)
-    global_input = 32 + 496
+    global_input = 32 + (496 if state_version == 15 else 256)
     total = dense(global_input, model_dim) + dense(player_input, model_dim)
-    total += 55 * 8 + dense(player_input + 54, model_dim)
-    total += dense(ACTION_SIZE, model_dim)
+    total += (55 if state_version == 15 else 31) * 8 + dense(player_input + (54 if state_version == 15 else 30), model_dim)
+    total += dense(ACTION_SIZE if state_version == 15 else 256, model_dim)
     total += layers * (4 * dense(model_dim, model_dim) + dense(model_dim, ff_dim) +
                        dense(ff_dim, model_dim) + 4 * model_dim)
     total += dense(model_dim * 2, action_hidden) + dense(action_hidden, 1) + dense(model_dim, 1)
@@ -377,6 +393,8 @@ def _game_worker(config: dict):
 
 
 def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
+    contract = config_contract(config)
+    action_size = contract["actionSize"]
     game_started = time.perf_counter()
     seed = (int(config["seed"]) + game_number * 0x9E3779B1) & 0xFFFFFFFF
     rng = np.random.default_rng(seed)
@@ -438,11 +456,11 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                 advanced = game_worker.advance_npcs(
                     game_id=game_id, network_player_ids=sorted(network_ids), seed=seed + steps,
                     max_steps=int(config["maxSteps"]) - steps,
-                    max_rounds=int(config["maxRounds"]))
+                    max_rounds=int(config["maxRounds"]), state_encoding_version=contract["state"])
                 for sample in advanced.get("trainingSamples") or []:
                     rows.append({"playerId": sample["playerId"],
                                  "state": np.asarray(sample["state"], dtype=np.float32),
-                                 "actions": np.zeros((0, ACTION_SIZE), dtype=np.float32),
+                                 "actions": np.zeros((0, action_size), dtype=np.float32),
                                  "pi": np.zeros(0, dtype=np.float32),
                                  "reward": None, "valueMask": None})
                 advanced_state = advanced.get("state") or {}
@@ -582,17 +600,19 @@ def _sample_game_in_worker(task):
     return _sample_game(config, int(game_number), _SAMPLER_STOP)
 
 
-def _training_data(torch, rows: list[dict]) -> dict:
+def _training_data(torch, rows: list[dict], contract=None) -> dict:
+    contract = contract or MODEL_CONTRACTS["entity-v6"]
+    action_size = contract["actionSize"]
     if not rows:
-        return {"states": torch.zeros((0, MODEL_CONTRACTS["entity-v6"]["stateSize"])), "rewards": torch.zeros((0, 8)),
-                "value_masks": torch.zeros((0, 8)), "actions_flat": np.zeros((0, ACTION_SIZE), np.float32),
+        return {"states": torch.zeros((0, contract["stateSize"])), "rewards": torch.zeros((0, 8)),
+                "value_masks": torch.zeros((0, 8)), "actions_flat": np.zeros((0, action_size), np.float32),
                 "lengths": np.zeros(0, np.int64), "offsets": np.zeros(1, np.int64),
-                "action_width": ACTION_SIZE, "pi_flat": np.zeros(0, np.float32),
+                "action_width": action_size, "pi_flat": np.zeros(0, np.float32),
                 "pi_offsets": np.zeros(1, np.int64), "pi_lengths": np.zeros(0, np.int64)}
     for row in rows:
-        if (row["state"].shape != (MODEL_CONTRACTS["entity-v6"]["stateSize"],) or
-                row["actions"].ndim != 2 or row["actions"].shape[1] != ACTION_SIZE):
-            raise ValueError("训练样本必须使用状态 v15 / 动作 v11 的编码宽度")
+        if (row["state"].shape != (contract["stateSize"],) or
+                row["actions"].ndim != 2 or row["actions"].shape[1] != action_size):
+            raise ValueError(f"训练样本必须使用状态 v{contract['state']} / 动作 v{contract['action']} 的编码宽度")
     lengths = np.asarray([len(row["actions"]) for row in rows], dtype=np.int64)
     offsets = np.zeros(len(rows) + 1, dtype=np.int64)
     np.cumsum(lengths, out=offsets[1:])
@@ -604,7 +624,7 @@ def _training_data(torch, rows: list[dict]) -> dict:
             "rewards": torch.from_numpy(np.stack([row["reward"] for row in rows]).astype(np.float32)),
             "value_masks": torch.from_numpy(np.stack([row["valueMask"] for row in rows]).astype(np.float32)),
             "actions_flat": np.concatenate([row["actions"] for row in rows], axis=0).astype(np.float32),
-            "lengths": lengths, "offsets": offsets, "action_width": ACTION_SIZE,
+            "lengths": lengths, "offsets": offsets, "action_width": action_size,
             "pi_flat": pi_flat, "pi_offsets": pi_offsets, "pi_lengths": pi_lengths}
 
 
@@ -650,7 +670,7 @@ class TrainingManager:
         if architecture != "entity-v6":
             raise ValueError("训练只支持 entity-v6，拒绝运行未经校验的架构")
         model = self._model
-        cases = _entity_forward_probe_inputs()
+        cases = _entity_forward_probe_inputs(model.encoding_version)
         state_size = int(cases[0][0].size)
         device_name = "cuda" if getattr(device, "type", "cpu") == "cuda" else "cpu"
         worker = self.native_worker
@@ -727,8 +747,10 @@ class TrainingManager:
             result["pid"] = os.getpid() if result["running"] else None
             config = result.get("config") or {}
             profile = config.get("profile", "balanced")
-            result["profiles"] = {name: _entity_parameter_count(name)
+            result["profiles"] = {name: _entity_parameter_count(name, config.get("stateEncodingVersion", 15))
                                   for name in ("fast", "balanced", "large")}
+            result["encodingProfiles"] = {str(version): {name: _entity_parameter_count(name, version)
+                                          for name in ("fast", "balanced", "large")} for version in (14, 15)}
             result["parameterCount"] = int(result.get("parameterCount") or
                                            result["profiles"].get(profile, 0))
             result["checkpoints"] = self._checkpoint_list()
@@ -747,6 +769,11 @@ class TrainingManager:
         with self._lock:
             if self._thread and self._thread.is_alive():
                 raise ValueError("训练任务已经在运行")
+            if config["resumeCheckpoint"]:
+                _, checkpoint = _read_training_checkpoint(self.data_dir, config["resumeCheckpoint"])
+                plan = checkpoint_resume_plan(checkpoint, config["stateEncodingVersion"],
+                                              config["actionEncodingVersion"], config["profile"])
+                config["weightMigration"] = {**plan, "checkpoint": config["resumeCheckpoint"]}
             self._stop.clear()
             self._worker_stop.clear()
             config.update({"rulesEngine": "cpp", "mctsEngine": "cpp",
@@ -773,6 +800,8 @@ class TrainingManager:
             return self.status()
 
     def _run(self, config: dict) -> None:
+        contract = config_contract(config)
+        migration_plan = None
         games = 0
         saved_game = 0
         last_weakness_search = 0
@@ -791,35 +820,35 @@ class TrainingManager:
             self._device = torch.device("cuda" if config["device"] == "cuda" else "cpu")
             architecture = config["networkArchitecture"]
             self._log(f"正在创建网络：架构={architecture}，profile={config['profile']}…")
-            self._model = trainer.create_model(architecture, config["profile"]).to(self._device)
+            self._model = trainer.create_model(architecture, config["profile"], contract["state"]).to(self._device)
             with self._lock:
                 self._status["parameterCount"] = sum(parameter.numel() for parameter in self._model.parameters())
             resume_path = None
             if config["resumeCheckpoint"]:
-                resume_path = self.data_dir / config["resumeCheckpoint"]
-                if not resume_path.is_file():
-                    raise ValueError("续训 checkpoint 不存在：" + config["resumeCheckpoint"])
-                if not re.fullmatch(r"checkpoint-[\w-]+\.json\.gz", resume_path.name):
-                    raise ValueError("续训 checkpoint 名称不合法")
-                with gzip.open(resume_path, "rb") as handle:
-                    raw = handle.read(512 * 1024 * 1024 + 1)
-                if len(raw) > 512 * 1024 * 1024:
-                    raise ValueError("续训 checkpoint 解压后超过 512 MB")
-                checkpoint = json.loads(raw.decode("utf-8"))
+                resume_path, checkpoint = _read_training_checkpoint(self.data_dir, config["resumeCheckpoint"])
                 metadata = checkpoint.get("model") or {}
                 if metadata.get("architecture") != architecture or metadata.get("profile") != config["profile"]:
                     raise ValueError("续训 checkpoint 的网络架构/profile 与本次配置不一致")
-                resume_contract = validate_checkpoint_contract(checkpoint, architecture)
-                if resume_contract != MODEL_CONTRACTS[architecture]:
-                    raise ValueError("旧建筑编码 checkpoint 需先迁移到状态 v15 / 动作 v11，不能直接续训")
+                migration_plan = checkpoint_resume_plan(checkpoint, contract["state"], contract["action"], config["profile"])
+                resume_contract = migration_plan["source"]
+                config["weightMigration"] = {**migration_plan, "checkpoint": resume_path.name}
+                self._log(f"权重编码检查：v{resume_contract['state']}/v{resume_contract['action']} → "
+                          f"v{contract['state']}/v{contract['action']}；{migration_plan['message']}")
                 values = np.asarray(metadata.get("flat") or [], dtype="<f4")
-                if values.size != metadata.get("parameterCount"):
+                if values.size != metadata.get("parameterCount") or not np.isfinite(values).all():
                     raise ValueError("续训 checkpoint 权重数量不匹配")
                 with tempfile.NamedTemporaryFile(prefix="citadels-resume-", suffix=".bin", delete=False) as handle:
                     values.tofile(handle)
                     model_path = Path(handle.name)
                 try:
-                    self._model.load_flat(str(model_path))
+                    if migration_plan["mode"] == "direct":
+                        self._model.load_flat(str(model_path))
+                    else:
+                        source_model = trainer.create_model(architecture, config["profile"], resume_contract["state"])
+                        source_model.load_flat(str(model_path))
+                        trainer.migrate_model_weights(source_model, self._model, resume_contract["action"], contract["action"])
+                        del source_model
+                        self._log("权重迁移完成；新增参数可正常训练，使用新的优化器状态和新版规则样本。")
                 finally:
                     model_path.unlink(missing_ok=True)
                 games = int(checkpoint.get("game") or 0)
@@ -833,7 +862,7 @@ class TrainingManager:
             self._log("价值训练目标：90% 夺冠 + 10% 名次（win-first-v1）")
             self._model.eval()
             self._optimizer = torch.optim.Adam(self._model.parameters(), lr=config["learningRate"])
-            if resume_path:
+            if resume_path and not migration_plan["resetOptimizer"]:
                 optimizer_path = resume_path.with_name(resume_path.name.replace(".json.gz", ".optimizer.pt"))
                 if optimizer_path.is_file():
                     self._optimizer.load_state_dict(torch.load(optimizer_path, map_location=self._device,
@@ -863,7 +892,8 @@ class TrainingManager:
             historical_pool = HistoricalPolicyPool(
                 self.data_dir, Path(native_model_dir.name),
                 config["historicalPoolSize"] if config["historicalOpponentProbability"] > 0 else 0,
-                config["profile"], sum(parameter.numel() for parameter in self._model.parameters()), self._log)
+                config["profile"], sum(parameter.numel() for parameter in self._model.parameters()), self._log,
+                target_contract=contract)
             historical_pool.refresh()
             config["historicalPoolManifest"] = str(historical_pool.manifest)
             def weakness_progress(state):
@@ -871,8 +901,8 @@ class TrainingManager:
                     self._status["weaknessSearch"] = state
             weakness_search = WeaknessSearch(
                 torch, trainer, self._device, config, self.data_dir, Path(native_model_dir.name),
-                _sample_game, _training_data, self._stop, self._log, weakness_progress)
-            action_version = MODEL_CONTRACTS[architecture]["action"]
+                _sample_game, lambda torch, rows: _training_data(torch, rows, contract), self._stop, self._log, weakness_progress)
+            action_version = contract["action"]
             self._check_entity_forward_parity(
                 torch, architecture, config["profile"], self._device,
                 config["nativeModelPath"], action_version, worker_path)
@@ -1024,7 +1054,7 @@ class TrainingManager:
                         f"采样批次完成：新样本 {len(rows)} 条 + replay {len(replay_rows)} 条；"
                         f"buffer {replay_buffer.game_count} 局 / {replay_buffer.samples} 条 / "
                         f"{replay_buffer.bytes / (1024 * 1024):.1f} MiB，正在更新…")
-                    data = _training_data(torch, training_rows)
+                    data = _training_data(torch, training_rows, contract)
                     self._model.train()
                     batch_metrics = trainer.train_mcts_distillation(
                         self._model, self._optimizer, self._device, data,
@@ -1096,7 +1126,7 @@ class TrainingManager:
             weights = array.array("f")
             with temp_path.open("rb") as handle:
                 weights.fromfile(handle, temp_path.stat().st_size // weights.itemsize)
-            contract = MODEL_CONTRACTS[architecture]
+            contract = config_contract(config)
             state_version = contract["state"]
             action_version = contract["action"]
             payload = {"createdAt": datetime.now(timezone.utc).isoformat(), "game": game_number,
@@ -1105,7 +1135,7 @@ class TrainingManager:
                                  "valueObjective": VALUE_OBJECTIVE,
                                  "profile": config["profile"], "stateSize": int(self._model.state_size)
                                  if hasattr(self._model, "state_size") else 672,
-                                 "actionSize": ACTION_SIZE, "parameterCount": len(weights),
+                                 "actionSize": contract["actionSize"], "parameterCount": len(weights),
                                  "encodingVersion": state_version, "flat": weights.tolist()},
                        "history": self._status.get("history", [])[-400:]}
             if self._status.get("weaknessSearch"):

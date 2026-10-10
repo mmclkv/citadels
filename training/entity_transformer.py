@@ -43,6 +43,44 @@ def migrate_action_encoding(model, optimizer, source_version):
     return True
 
 
+def migrate_model_weights(source, target, source_action_version, target_action_version):
+    """Copy parameters by meaning; preserve legacy outputs on expanded inputs."""
+    source_pair = (source.encoding_version, source_action_version)
+    target_pair = (target.encoding_version, target_action_version)
+    supported = {(14, 9), (14, 10), (15, 11)}
+    if source_pair not in supported or target_pair not in supported:
+        raise ValueError("unsupported model encoding pair")
+    if source.profile != target.profile or source.architecture != target.architecture:
+        raise ValueError("weight migration requires matching architecture/profile")
+    if source_pair != target_pair and not (source_pair == (14, 9) and target_pair == (14, 10) or
+                                         source.encoding_version == 14 and target_pair == (15, 11)):
+        raise ValueError("encoding downgrade is not supported")
+    old = dict(source.named_parameters())
+    expanded = source.encoding_version == 14 and target.encoding_version == 15
+    special = {"global_embed.weight", "global_embed.bias", "city_embed.weight",
+               "self_embed.weight", "action_embed.weight"} if expanded else set()
+    with torch.no_grad():
+        for name, parameter in target.named_parameters():
+            if name not in special:
+                if parameter.shape != old[name].shape:
+                    raise ValueError(f"unmapped parameter shape: {name}")
+                parameter.copy_(old[name])
+        if expanded:
+            target.global_embed.weight.zero_()
+            target.global_embed.weight[:, :source.global_embed.in_features].copy_(source.global_embed.weight)
+            # State header changes from 14 to 15. Offset its constant contribution.
+            target.global_embed.bias.copy_(source.global_embed.bias - source.global_embed.weight[:, 0])
+            target.city_embed.weight.zero_()
+            target.city_embed.weight[:source.card_features + 1].copy_(source.city_embed.weight)
+            target.self_embed.weight.zero_()
+            target.self_embed.weight[:, :source.self_embed.in_features].copy_(source.self_embed.weight)
+            target.action_embed.weight.zero_()
+            target.action_embed.weight[:, :source.action_size].copy_(source.action_embed.weight)
+        if source_action_version == 9 and target_action_version != 9:
+            # v9 did not train any suffix feature, including district effects.
+            target.action_embed.weight[:, 182:].zero_()
+
+
 class EntityTransformerBlock(nn.Module):
     def __init__(self, dim, heads, ff_dim):
         super().__init__()

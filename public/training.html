@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=12">
+  <link rel="stylesheet" href="./training.css?v=13">
 </head>
 <body>
   <header class="train-header">
@@ -22,6 +22,8 @@
         <label><span>角色组</span><select id="char-set"><option value="random" selected>随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
         <label><span>网络规模</span><select id="profile"><option value="fast" selected>快速</option><option value="balanced">均衡</option><option value="large">增强</option></select><small id="parameter-preview">—</small></label>
         <label><span>网络架构</span><strong class="fixed-setting">Entity Transformer v6</strong><small>当前唯一支持的策略网络架构</small><input id="network-architecture" type="hidden" value="entity-v6"></label>
+        <label><span>目标状态编码</span><select id="state-encoding"><option value="15" selected>v15 · 54 种建筑 · 2054 维</option><option value="14">v14 · 旧建筑编码 · 1790 维</option></select></label>
+        <label><span>目标动作编码</span><select id="action-encoding"><option value="11" selected>v11 · 448 维</option><option value="10">v10 · 256 维</option><option value="9">v9 · 256 维</option></select><small id="encoding-hint">v15 需搭配 v11；v14 可搭配 v9 或 v10。</small></label>
         <label><span>规则引擎</span><strong class="fixed-setting">C++</strong><small>自对弈与实时对局由原生 C++ 游戏引擎推进</small></label>
         <label><span>MCTS 引擎</span><strong class="fixed-setting">C++ ISMCTS</strong><small>原生搜索 worker 生成访问分布作为策略训练目标</small></label>
         <label><span>神经网络框架</span><strong class="fixed-setting">LibTorch</strong><small id="neural-framework-hint">C++ worker 在所选设备上批量执行网络前向</small></label>
@@ -45,6 +47,7 @@
           <button type="button" id="load-checkpoint-config">从权重读取参数</button>
           <small id="checkpoint-load-message">读取权重兼容所需的网络规模；并行进程数、GPU 小批量、MCTS 等参数以本页设置为准（不改动上方所选权重）</small>
         </div>
+        <small id="checkpoint-migration-message" class="checkpoint-migration" role="status" aria-live="polite">未选择续训权重，将按目标编码从头训练。</small>
       </form>
       <section class="composition-section">
         <h2>自对弈阵容与课程训练</h2>
@@ -124,6 +127,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=32"></script>
+  <script src="./training.js?v=33"></script>
 </body>
 </html>

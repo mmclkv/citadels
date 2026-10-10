@@ -12,8 +12,7 @@ let logErrorEl = null;
 let logErrorText = '';
 let resumeCheckpointCompatible = null;
 let resumeCheckpointCheckedName = '';
-const CURRENT_STATE_ENCODING_VERSION = 15;
-const CURRENT_ACTION_ENCODING_VERSION = 11;
+let resumeCheckpointData = null;
 
 function num(value, digits = 2) { return value == null || value === '' ? '—' : Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
 function integer(value) { return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('zh-CN') : '0'; }
@@ -36,6 +35,7 @@ function formConfig() {
     targetGames: +$('target-games').value, minPlayers: +$('min-players').value,
     maxPlayers: +$('max-players').value, charSet: $('char-set').value,
     profile: $('profile').value, networkArchitecture: $('network-architecture').value,
+    stateEncodingVersion: +$('state-encoding').value, actionEncodingVersion: +$('action-encoding').value,
     rulesEngine: 'cpp', mctsEngine: 'cpp', neuralNetworkFramework: 'libtorch',
     backend: 'python', device: $('device').value,
     endDistricts: +$('end-districts').value, maxSteps: +$('max-steps').value,
@@ -75,6 +75,8 @@ const CONFIG_FIELDS = [
   ['maxPlayers', 'max-players', 'select'],
   ['charSet', 'char-set', 'select'],
   ['profile', 'profile', 'select'],
+  ['stateEncodingVersion', 'state-encoding', 'select'],
+  ['actionEncodingVersion', 'action-encoding', 'select'],
   ['device', 'device', 'select'],
   ['endDistricts', 'end-districts', 'select'],
   ['maxSteps', 'max-steps', 'number'],
@@ -148,6 +150,40 @@ function resumeCheckpointName() {
   return value === 'upload' ? $('resume-checkpoint-name').value : '';
 }
 
+function updateResumePlan() {
+  const out = $('checkpoint-migration-message');
+  const name = resumeCheckpointName();
+  const state = $('state-encoding').value, action = $('action-encoding').value;
+  if (!name) {
+    resumeCheckpointCompatible = null;
+    out.textContent = '未选择续训权重，将按状态 v' + state + ' / 动作 v' + action + ' 从头训练。';
+    return;
+  }
+  if (!resumeCheckpointData || resumeCheckpointData.name !== name) {
+    out.textContent = resumeCheckpointCompatible === false && resumeCheckpointCheckedName === name
+      ? $('checkpoint-load-message').textContent : '正在检查所选权重的状态编码、动作编码与网络规模…';
+    return;
+  }
+  const data = resumeCheckpointData;
+  const plan = data.resumePlans && data.resumePlans[state + '/' + action];
+  resumeCheckpointCompatible = !!(plan && plan.supported && data.profile === $('profile').value);
+  out.textContent = '权重：状态 v' + (data.encodingVersion || '未知') + ' / 动作 v' + (data.actionEncodingVersion || '未知') +
+    '（' + (data.stateSize || '?') + ' / ' + (data.actionSize || '?') + ' 维）；目标：状态 v' + state + ' / 动作 v' + action + '。' +
+    (!plan ? '训练服务尚未提供自动迁移检查，请更新并重启训练服务。' : !plan.supported ? plan.message :
+      data.profile !== $('profile').value ? '网络规模不匹配：权重为 ' + data.profile + '，请点击“从权重读取参数”或选择相同规模。' : plan.message);
+}
+
+function updateEncodingUI() {
+  const state = $('state-encoding').value;
+  const action = $('action-encoding');
+  Array.from(action.options).forEach(option => {
+    option.disabled = state === '15' ? option.value !== '11' : option.value === '11';
+  });
+  if (action.selectedOptions[0].disabled) action.value = state === '15' ? '11' : '10';
+  $('encoding-hint').textContent = state === '15' ? '54 种建筑完整编码；需搭配动作 v11。' : '旧建筑编码；可搭配动作 v9 或 v10，新建筑信息不完整。';
+  updateResumePlan();
+}
+
 // 状态轮询会带回服务器上的训练存档；保留当前选择，避免每秒刷新时打断操作。
 function updateResumeOptions(checkpoints) {
   const select = $('resume-checkpoint');
@@ -186,6 +222,7 @@ function syncResumeUI() {
     else label.textContent = name ? '本机上传后已存入服务器：' + name : '请选择本机权重文件';
   }
   syncCheckpointLoadButton();
+  updateResumePlan();
 }
 
 // 没有选中权重或训练正在跑时，按钮不可用（训练中面板整体只读）
@@ -197,16 +234,16 @@ function syncCheckpointLoadButton() {
 async function inspectResumeCheckpoint(name) {
   resumeCheckpointCompatible = null;
   resumeCheckpointCheckedName = '';
+  resumeCheckpointData = null;
   $('checkpoint-load-message').textContent = '正在检查服务器存档 ' + name + '…';
   try {
     const data = await api('./api/training/checkpoint?name=' + encodeURIComponent(name));
     if (resumeCheckpointName() !== name) return;
-    resumeCheckpointCompatible = data.encodingCompatible === true;
+    resumeCheckpointData = data;
     resumeCheckpointCheckedName = name;
-    $('checkpoint-load-message').textContent = '已选择服务器存档 ' + data.name + '（已训练 ' +
-      integer(data.game) + ' 局）；' + (resumeCheckpointCompatible ? '状态编码兼容。' :
-        '状态编码 v' + (data.encodingVersion || '未知') + ' 与当前版本不兼容，不能续训。') +
-      '可点击“从权重读取参数”导入该存档配置。';
+    $('checkpoint-load-message').textContent = '已选择服务器存档 ' + data.name + '（已训练 ' + integer(data.game) +
+      ' 局）。可点击“从权重读取参数”导入网络规模；目标编码保持当前选择。';
+    updateResumePlan();
   } catch (error) {
     if (resumeCheckpointName() !== name) return;
     resumeCheckpointCompatible = false;
@@ -236,19 +273,19 @@ async function uploadCheckpointFile(file) {
       body: file
     });
     $('resume-checkpoint-name').value = data.name;
-    resumeCheckpointCompatible = data.encodingCompatible === true;
+    resumeCheckpointData = data;
     resumeCheckpointCheckedName = data.name;
     out.textContent = '已加载 ' + data.name + '（该文件已训练 ' + integer(data.game) + ' 局）；' +
       (data.renamed ? '原文件名不符合存档命名，已改名为上述名称。' : '') +
-      (resumeCheckpointCompatible ? '状态编码 v' + data.encodingVersion + ' 兼容。' :
-        '警告：状态编码 v' + (data.encodingVersion || '未知') + ' 与当前 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，不能续训。') +
-      '可点左侧按钮把它的超参数读回面板。';
+      '可点击“从权重读取参数”导入网络规模；目标编码保持当前选择。';
+    updateResumePlan();
   } catch (error) {
     // 上传失败就退回从头训练，别留下一个指向不存在存档的配置
     $('resume-checkpoint').value = '';
     $('resume-checkpoint-name').value = '';
     resumeCheckpointCompatible = null;
     resumeCheckpointCheckedName = '';
+    resumeCheckpointData = null;
     out.textContent = '加载失败：' + error.message;
   }
   syncResumeUI();
@@ -281,6 +318,7 @@ function setControls(status) {
   document.querySelectorAll('#train-form input,#train-form select').forEach(el => { el.disabled = running; });
   document.querySelectorAll('#mcts-form input').forEach(el => { el.disabled = running; });
   syncCheckpointLoadButton();
+  updateEncodingUI();
 }
 
 function stateLabel(state) {
@@ -330,7 +368,7 @@ function render(status) {
   $('approx-kl-now').textContent = 'KL ' + num(point.approxKl, 5);
   $('speed-now').textContent = num(avgGameSeconds, 2) + ' 秒/局';
   $('control-message').textContent = status.error || (status.checkpoint ? '最近存档：' + status.checkpoint : '');
-  const profiles = status.profiles || {};
+  const profiles = status.encodingProfiles && status.encodingProfiles[$('state-encoding').value] || status.profiles || {};
   $('parameter-preview').textContent = profiles[$('profile').value] ? integer(profiles[$('profile').value]) + ' 个参数' : '—';
   renderRuntime(status);
   renderCheckpoints(status.checkpoints || []);
@@ -389,7 +427,8 @@ function renderRuntime(status) {
     ['自对弈阵容', c.selfPlayMode === 'random-batch' ? '每批随机混合' : c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
     ['本批阵容', status.batchComposition ? status.batchComposition.players + ' 人：当前 ' + status.batchComposition.main + '，历史 ' + status.batchComposition.historical + '，启发式 ' + status.batchComposition.heuristic : '—'],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
-    ['状态 / 动作编码', 'v15 / v11（entity-v6，54 种建筑）'],
+    ['状态 / 动作编码', 'v' + (c.stateEncodingVersion || $('state-encoding').value) + ' / v' + (c.actionEncodingVersion || $('action-encoding').value) + '（entity-v6）'],
+    ['权重恢复方式', c.weightMigration ? c.weightMigration.message : '从头训练'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['本局当前 / 历史模型', status.point && status.point.currentNetworkPlayers != null ? status.point.currentNetworkPlayers + ' / ' + status.point.historicalPlayers + ' 人' : '—'],
     ['历史策略池', status.point && status.point.historicalPoolCount != null ? status.point.historicalPoolCount + ' / ' + c.historicalPoolSize + ' 个版本' : '—'],
@@ -701,13 +740,18 @@ async function refresh() {
 }
 
 $('start-training').onclick = async () => {
+  updateResumePlan();
+  if (!latest || !latest.encodingProfiles) {
+    $('control-message').textContent = '训练服务尚未支持显式编码配置，请更新并重启训练服务。';
+    return;
+  }
   const selectedCheckpoint = resumeCheckpointName();
   if (selectedCheckpoint && resumeCheckpointCheckedName !== selectedCheckpoint) {
     $('control-message').textContent = '正在检查所选服务器权重，请稍候后再开始训练';
     return;
   }
   if (resumeCheckpointName() && resumeCheckpointCompatible === false) {
-    $('control-message').textContent = '当前权重需先迁移到状态 v15 / 动作 v11，或选择兼容的新权重';
+    $('control-message').textContent = $('checkpoint-migration-message').textContent;
     return;
   }
   $('control-message').textContent = '正在启动…';
@@ -728,12 +772,12 @@ $('load-checkpoint-config').onclick = async () => {
   out.textContent = '正在读取 ' + name + ' …';
   try {
     const data = await api('./api/training/checkpoint?name=' + encodeURIComponent(name));
-    resumeCheckpointCompatible = data.encodingCompatible === true;
+    resumeCheckpointData = data;
+    resumeCheckpointCheckedName = name;
     const result = applyCheckpointConfig(data.config || {});
     if (latest) render(latest);
-    out.textContent = (resumeCheckpointCompatible ? '已从 ' : '警告：已从 ') + data.name + '（已训 ' + integer(data.game) + ' 局）读入 ' + result.applied + ' 项网络架构参数；' +
-      (resumeCheckpointCompatible ? '状态编码兼容。' : '状态编码 v' + (data.encodingVersion || '未知') + ' 与当前 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，不能续训。') +
-      '；' + result.preserved + ' 项运行参数保留页面当前值，可继续修改。' +
+    out.textContent = '已从 ' + data.name + '（已训 ' + integer(data.game) + ' 局）读入 ' + result.applied + ' 项网络架构参数；' +
+      '目标状态／动作编码及 ' + result.preserved + ' 项运行参数保留页面当前值，可继续修改。' +
       (result.skipped.length ? '另有 ' + result.skipped.length + ' 项网络参数未记录或面板无此选项。' : '');
   } catch (error) {
     out.textContent = error.message;
@@ -745,6 +789,7 @@ $('resume-checkpoint').addEventListener('change', () => {
   $('resume-checkpoint-name').value = '';
   resumeCheckpointCompatible = null;
   resumeCheckpointCheckedName = '';
+  resumeCheckpointData = null;
   if (value.startsWith('server:')) inspectResumeCheckpoint(value.slice(7));
   else if (value === 'upload') requestCheckpointFile();
   else $('checkpoint-load-message').textContent = '读取权重兼容所需的网络规模；并行进程数、GPU 小批量、MCTS 等参数以本页设置为准';
@@ -762,7 +807,10 @@ $('resume-checkpoint-file').oncancel = () => {
   resumeCheckpointCheckedName = '';
   syncResumeUI();
 };
-$('profile').onchange = () => { if (latest) render(latest); };
+$('profile').onchange = () => { updateResumePlan(); if (latest) render(latest); };
+['state-encoding', 'action-encoding'].forEach(id => {
+  $(id).onchange = () => { updateEncodingUI(); if (latest) render(latest); };
+});
 $('char-set').onchange = updateMctsHint;
 $('device').onchange = updateMctsHint;
 function updateCompositionUI() {
@@ -779,5 +827,6 @@ updateMctsHint();
 updateCompositionUI();
 updateResumeOptions([]);
 syncCheckpointLoadButton();
+updateEncodingUI();
 window.addEventListener('resize', () => { if (latest) render(latest); });
 refresh(); setInterval(refresh, 1000);

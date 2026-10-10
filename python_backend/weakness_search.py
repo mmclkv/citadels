@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .model_contract import MODEL_CONTRACTS
+from .model_contract import config_contract
 
 
 def discovery_due(games: int, last_search: int, config: dict) -> bool:
@@ -127,7 +127,7 @@ class WeaknessSearch:
         target_path = directory / "target.bin"
         baseline_path, candidate_path = directory / "baseline.bin", directory / "candidate.bin"
         incumbent.save_flat(str(target_path))
-        contract = MODEL_CONTRACTS[self.config["networkArchitecture"]]
+        contract = config_contract(self.config)
         target = {"modelPath": str(target_path), "modelVersion": main_games,
                   "checkpoint": f"frozen-main-{main_games}", "actionEncodingVersion": contract["action"]}
         report = {"mainGames": main_games, "seed": seed, "accepted": False,
