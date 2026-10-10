@@ -842,6 +842,9 @@ html[data-theme="neon"] .mobile-hand-back{border-color:#9a58c4;
 /* margin:auto 安全居中：内容不超出时垂直居中，超出时退回顶部对齐、可正常滚动
    （避免 align-content:center 在溢出时把顶部裁掉且无法滚动的问题） */
 .pick-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center;margin:auto}
+.pick-grid-lighthouse{max-width:100%;gap:12px}
+.lighthouse-pager{display:flex;align-items:center;justify-content:center;gap:12px;margin:10px auto}
+.lighthouse-pager .small{min-width:110px;text-align:center}
 /* 桌面端「抽 2 张建筑牌保留 1 张」：卡牌需要足够大，方便辨认卡面文字和插画。 */
 @media (min-width:821px){
   .pick-grid-draw_keep{gap:18px}

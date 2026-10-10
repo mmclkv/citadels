@@ -4605,6 +4605,63 @@
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     const representedActions = new Set();
     if (isMobileGameUI()) av.actions.filter(a => a.type === 'build').forEach(a => representedActions.add(a));
+    const lighthouseActions = av.actions.filter(a => a.type === 'district_effect' &&
+      (a.name === 'lighthouse_pick' || a.name === 'lighthouse_skip'));
+    lighthouseActions.forEach(a => representedActions.add(a));
+    const lighthousePicks = lighthouseActions.filter(a => a.name === 'lighthouse_pick');
+    const lighthouseSkip = lighthouseActions.find(a => a.name === 'lighthouse_skip');
+    if (lighthousePicks.length) {
+      const button = el('button', 'act main', '发动灯塔效果 · 选择建筑牌');
+      onTap(button, () => { App.lighthousePage = 0; openLighthouseModal(); });
+      actionsEl.appendChild(button);
+    } else if (lighthouseSkip) {
+      actionsEl.appendChild(actionBtn(lighthouseSkip));
+    }
+    // Armory actions already contain all legal player/building pairs. Keep them
+    // native, but expose them as a three-step frontend flow.
+    const armoryGroups = new Map();
+    av.actions.filter(a => a.type === 'district_effect' && a.name === 'armory').forEach(a => {
+      representedActions.add(a);
+      if (!armoryGroups.has(a.uid)) armoryGroups.set(a.uid, []);
+      armoryGroups.get(a.uid).push(a);
+    });
+    if (App.sel && App.sel.kind === 'armory') {
+      const actions = App.sel.actions || [];
+      const cancel = el('button', 'act', App.sel.targetId == null ? '取消发动' : '返回玩家选择');
+      onTap(cancel, () => {
+        if (App.sel.targetId != null) App.sel.targetId = null;
+        else App.sel = null;
+        render();
+      });
+      if (App.sel.targetId == null) {
+        promptEl.textContent = '军械库：选择要发动效果的目标玩家';
+        const targets = [...new Set(actions.map(a => a.target))];
+        targets.forEach(id => {
+          const player = s.players.find(p => p.id === id);
+          const button = el('button', 'act main', player ? player.name : '目标玩家');
+          onTap(button, () => { App.sel.targetId = id; render(); });
+          actionsEl.appendChild(button);
+        });
+      } else {
+        const player = s.players.find(p => p.id === App.sel.targetId);
+        promptEl.textContent = '军械库：选择摧毁 ' + (player ? player.name : '目标玩家') + ' 的一栋建筑';
+        actions.filter(a => a.target === App.sel.targetId).forEach(a => {
+          const district = player && (player.city || []).find(c => c.uid === a.secondaryUid);
+          const button = el('button', 'act danger', district ? '摧毁『' + district.name + '』' : '摧毁目标建筑');
+          onTap(button, () => { App.sel = null; send(a); });
+          actionsEl.appendChild(button);
+        });
+      }
+      actionsEl.appendChild(cancel);
+      return;
+    }
+    armoryGroups.forEach((actions, buildingUid) => {
+      const me = s.players.find(p => p.id === App.myId);
+      const building = me && (me.city || []).find(c => c.uid === buildingUid);
+      const button = el('button', 'act main', building ? '发动军械库效果（' + building.name + '）' : '发动军械库效果');
+      onTap(button, () => { App.sel = { kind: 'armory', buildingUid, actions }; render(); });
+      actionsEl.appendChild(button);
+    });
     // Keep the native action schema unchanged: group its existing lab choices
     // into a front-end-only activation step followed by card selection.
     const labGroups = new Map();
@@ -4871,6 +4928,47 @@
       });
     }
     body.appendChild(grid);
+    $('#modal').hidden = false;
+  }
+  function openLighthouseModal() {
+    const s = App.state;
+    const pending = s && s.turn && s.turn.pending;
+    if (!pending || pending.kind !== 'lighthouse') return;
+    const actions = availableMobileActions();
+    const picks = actions.filter(a => a.type === 'district_effect' && a.name === 'lighthouse_pick');
+    const skip = actions.find(a => a.type === 'district_effect' && a.name === 'lighthouse_skip');
+    const cards = pending.cards || [];
+    const pageSize = 4;
+    const pageCount = Math.max(1, Math.ceil(cards.length / pageSize));
+    App.lighthousePage = Math.max(0, Math.min(App.lighthousePage || 0, pageCount - 1));
+    $('#modal-title').textContent = '灯塔：从牌堆选择一张建筑牌';
+    const body = $('#modal-body');
+    body.innerHTML = '';
+    const grid = el('div', 'pick-grid pick-grid-lighthouse');
+    const start = App.lighthousePage * pageSize;
+    cards.slice(start, start + pageSize).forEach(card => {
+      const action = picks.find(a => String(a.uid) === String(card.uid));
+      if (!action) return;
+      const node = cardNode(card, { clickable: true });
+      bindCardAction(node, () => { closeModal(); send(action); }, true);
+      grid.appendChild(node);
+    });
+    body.appendChild(grid);
+    const controls = el('div', 'lighthouse-pager');
+    const prev = el('button', 'btn ghost', '← 上一页');
+    prev.disabled = App.lighthousePage <= 0;
+    onTap(prev, () => { App.lighthousePage--; openLighthouseModal(); });
+    const count = el('span', 'small', (App.lighthousePage + 1) + ' / ' + pageCount + ' 页 · 共 ' + cards.length + ' 张');
+    const next = el('button', 'btn ghost', '下一页 →');
+    next.disabled = App.lighthousePage >= pageCount - 1;
+    onTap(next, () => { App.lighthousePage++; openLighthouseModal(); });
+    controls.append(prev, count, next);
+    body.appendChild(controls);
+    if (skip) {
+      const skipButton = el('button', 'btn ghost', '跳过选牌并洗牌');
+      onTap(skipButton, () => { closeModal(); send(skip); });
+      body.appendChild(skipButton);
+    }
     $('#modal').hidden = false;
   }
   let serverConsoleTimer = null;
