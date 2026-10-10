@@ -942,6 +942,11 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   .panel h2{font-size:17px;margin-bottom:13px}
   .btn-row{position:sticky;bottom:0;background:var(--paper);
     padding:10px 0 2px;margin-top:14px}
+  #screen-setup.active{overflow-x:hidden;overflow-y:auto}
+  #screen-setup .wide-panel{width:100%;max-width:100%;min-width:0;flex-shrink:0}
+  #screen-setup .setup-grid{grid-template-columns:minmax(0,1fr)}
+  #screen-setup .field,#screen-setup input,#screen-setup select{min-width:0;max-width:100%}
+  #screen-setup .field>span,#screen-setup .dim{overflow-wrap:anywhere}
   .setup-grid{grid-template-columns:1fr;gap:0}
   .lobby-cols{grid-template-columns:1fr;gap:13px}
 
