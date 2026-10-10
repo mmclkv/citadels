@@ -1255,6 +1255,10 @@
   }
 
   /* ============================== 卡牌渲染 ============================== */
+  function districtCardAsset(card, variant) {
+    const asset = Theme.districtAsset && Theme.districtAsset(card, variant);
+    return asset && ((Theme.is && Theme.is('neon')) || asset.startsWith('data:')) ? asset : null;
+  }
   function cardClassOf(c, opts) {
     opts = opts || {};
     const neon = Theme.is && Theme.is('neon');
@@ -1270,8 +1274,8 @@
     d.dataset.uid = c.uid;
     d.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
       ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
-    const art = neon && Theme.districtAsset ? Theme.districtAsset(c, 'thumb') : null;
-    const full = neon && Theme.districtAsset ? Theme.districtAsset(c, 'full') : null;
+    const art = districtCardAsset(c, 'thumb');
+    const full = districtCardAsset(c, 'full');
     if (art) {
       const img = el('img', 'card-art');
       img.src = art;
@@ -3372,7 +3376,7 @@
       title.textContent = (preview.action ? '确认目标 · ' : '查看卡牌 · ') + (card.name || '卡牌');
       const stage = el('div', 'mobile-detail-preview');
       const imageSrc = preview.kind === 'role' ? roleFull(card) :
-        (Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(card, 'full') : null);
+        districtCardAsset(card, 'full');
       if (imageSrc) {
         const image = el('img'); image.src = imageSrc; image.alt = card.name || '卡牌';
         stage.appendChild(image);
@@ -5090,8 +5094,8 @@
       const grp = el('div', 'char-grid');
       Cards.DISTRICTS.filter(d => d.color === k).sort((a, b) => a.cost - b.cost).forEach(d => {
         const e = el('div', 'ref-card c-' + k);
-        const thumb = Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(d, 'thumb') : null;
-        const full = Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(d, 'full') : null;
+        const thumb = districtCardAsset(d, 'thumb');
+        const full = districtCardAsset(d, 'full');
         const art = thumb
           ? '<img class="rc-art district-ref-art" src="' + thumb + '" alt="' + escapeHtml(d.name) + '" loading="lazy" decoding="async">'
           : '';

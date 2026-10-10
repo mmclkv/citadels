@@ -9,6 +9,43 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class MobileThemeTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node.js required")
+    def test_missing_buildings_generate_complete_text_cards(self):
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const ctx=vm.createContext({window:null,CitCards:require('./src/cards.js'),
+ localStorage:{getItem:()=>null,setItem(){}},
+ document:{documentElement:{setAttribute(){}},querySelectorAll:()=>[]}});
+ctx.window=ctx;
+for(const file of ['public/themes/neon/manifest.js','public/themes/theme-manager.js','public/mobile-theme.js'])
+ vm.runInContext(fs.readFileSync(file,'utf8'),ctx);
+const T=ctx.CitadelThemeManager;
+let missing=0;
+for(const card of ctx.CitCards.DISTRICTS){
+ const snapshot=JSON.stringify(card),hasArt=!!T.info('neon').cards.districts[T.districtKey(card)];
+ for(const variant of ['thumb','full']){
+  const asset=T.districtAsset(card,variant);
+  if(hasArt){assert(!asset.startsWith('data:'));continue;}
+  const svg=decodeURIComponent(asset.split(',').slice(1).join(','));
+  const text=[...svg.matchAll(/<text[^>]*>(.*?)<\/text>/gs)].map(m=>m[1]).join('');
+  assert(text.includes(card.name));assert(text.includes(card.desc),card.name);
+  assert(text.includes('建造费用 '+card.cost+' 金币'));
+  assert.strictEqual(ctx.CitadelMobileTheme.cardAsset('district',card,variant),asset);
+  assert.strictEqual(T.districtAsset({...card},variant),asset);
+ }
+ if(!hasArt)missing++;
+ assert.strictEqual(JSON.stringify(card),snapshot);
+}
+assert.strictEqual(missing,24);
+const unsafe={name:'<script>&"',color:'purple',cost:0,desc:'测试 < & > 尾部说明'};
+const svg=decodeURIComponent(T.districtTextAsset(unsafe).split(',').slice(1).join(','));
+assert(svg.includes('&lt;script&gt;&amp;&quot;'));assert(!svg.includes('<script>'));
+assert(svg.includes('测试 &lt; &amp; &gt; 尾部说明'));
+'''
+        result = subprocess.run([shutil.which("node"), "-e", script], cwd=ROOT,
+                                capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js required")
     def test_card_art_and_saved_theme(self):
         script = r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert');

@@ -8,6 +8,7 @@
   const xml = value => String(value ?? '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
   function classicAsset(kind, card, variant) {
+    if (kind === 'district' && T.districtTextAsset) return T.districtTextAsset(card);
     // Supplement visible card metadata with the existing rules reference only.
     // Hidden backs never consult a role or display a role's identity.
     const data = window.CitCards || {};
