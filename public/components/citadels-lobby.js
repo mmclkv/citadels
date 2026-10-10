@@ -41,6 +41,7 @@
       <div class="crown">冠</div>
       <h1>富饶之城</h1>
       <p class="sub">荣耀之城 · Citadels</p>
+      <p class="home-version" id="home-version" aria-live="polite">版本信息加载中…</p>
     </div>
     <p class="home-desc">
       你是中世纪的一城之主。每轮秘密选择一名角色，运用其能力赚取金币、夺取资源、大兴土木。
@@ -323,6 +324,7 @@
 :host([data-theme="neon"]) .mode-tip { color:var(--dim); }
 :host([data-theme="neon"]) .home-foot { color:var(--dim); text-align:left; }
 :host([data-theme="neon"]) .home-foot a { color:var(--ui-cyan); }
+.home-version{margin:6px 0 0;font-size:12px;line-height:1.5;color:var(--dim);overflow-wrap:anywhere}
 
 /* 面板、输入框、按钮 */
 :host([data-theme="neon"]) .panel,
@@ -413,6 +415,30 @@
       /* ============================ Shadow 作用域工具 ============================ */
       const $ = s => root.querySelector(s);
       const $$ = s => Array.from(root.querySelectorAll(s));
+      async function loadHomeVersion() {
+        const label = $('#home-version');
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+          // Live servers expose their startup identity; Pages releases ship version.json.
+          for (const path of ['./api/version', './version.json']) {
+            try {
+              const response = await fetch(new URL(path, document.baseURI), {
+                cache: 'no-store', signal: controller.signal
+              });
+              if (!response.ok) continue;
+              const release = await response.json();
+              if (!release || typeof release.version !== 'string' || !release.version) continue;
+              const channel = release.channel === 'stable' ? '稳定版' :
+                release.channel === 'development' ? '开发版' : '';
+              label.textContent = '版本：' + release.version + (channel ? ' · ' + channel : '');
+              if (typeof release.commit === 'string') label.title = '提交：' + release.commit;
+              return;
+            } catch (_) { /* Try the static release identity when no live endpoint exists. */ }
+          }
+          label.textContent = '版本信息暂不可用';
+        } finally { clearTimeout(timeout); }
+      }
       function el(tag, cls, html) {
         const e = document.createElement(tag);
         if (cls) e.className = cls;
@@ -1082,6 +1108,7 @@
       syncHostTheme();
       syncThemeOptions();
       showScreen('home');
+      loadHomeVersion();
 
       const savedNetSession = loadNetSession();
       if (savedNetSession) {
