@@ -44,9 +44,10 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
                                      bool positional_encoding = true,
                                      int action_encoding_version = kActionEncodingVersion)
       : device_name_(std::move(device)), action_encoding_version_(action_encoding_version) {
-    if (profile == "fast") model_ = EntityTransformerNet(128, 4, 2, 256, 128, positional_encoding);
-    else if (profile == "large") model_ = EntityTransformerNet(256, 4, 3, 512, 256, positional_encoding);
-    else model_ = EntityTransformerNet(192, 4, 3, 384, 192, positional_encoding);
+    const int state_version = state_version_for_action(action_encoding_version_);
+    if (profile == "fast") model_ = EntityTransformerNet(128, 4, 2, 256, 128, positional_encoding, state_version);
+    else if (profile == "large") model_ = EntityTransformerNet(256, 4, 3, 512, 256, positional_encoding, state_version);
+    else model_ = EntityTransformerNet(192, 4, 3, 384, 192, positional_encoding, state_version);
     if (device_name_ == "cuda") {
       bool available = false;
       try {
@@ -76,22 +77,24 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
     for (const auto& group : actions) maximum = std::max(maximum, group.size());
     std::vector<float> flat_states, flat_actions;
     std::vector<uint8_t> flat_mask(states.size() * maximum, 0);
-    constexpr size_t state_size = kEntityV6StateFeatureSize;
-    flat_states.reserve(states.size() * state_size); flat_actions.assign(states.size() * maximum * 256, 0.0f);
+    const size_t state_size = state_feature_size(state_version_for_action(action_encoding_version_));
+    const size_t action_size = action_feature_size(action_encoding_version_);
+    flat_states.reserve(states.size() * state_size); flat_actions.assign(states.size() * maximum * action_size, 0.0f);
     for (size_t i = 0; i < states.size(); ++i) {
-      auto encoded = encode_network_state(states[i], i < players.size() ? players[i] : -1);
+      auto encoded = encode_network_state(states[i], i < players.size() ? players[i] : -1,
+        state_version_for_action(action_encoding_version_));
       if (encoded.size() != state_size) throw std::runtime_error("Entity Transformer 状态特征维度错误");
       flat_states.insert(flat_states.end(), encoded.begin(), encoded.end());
       for (size_t j = 0; j < actions[i].size(); ++j) {
         auto a = encode_network_action(actions[i][j], &states[i],
           i < players.size() ? players[i] : -1, action_encoding_version_);
-        std::copy(a.begin(), a.end(), flat_actions.begin() + (i * maximum + j) * 256);
+        std::copy(a.begin(), a.end(), flat_actions.begin() + (i * maximum + j) * action_size);
         flat_mask[i * maximum + j] = 1;
       }
     }
     auto opts = torch::TensorOptions().dtype(torch::kFloat32);
     auto state_tensor = torch::from_blob(flat_states.data(), {static_cast<int64_t>(states.size()), static_cast<int64_t>(state_size)}, opts).clone().to(device_);
-    auto action_tensor = torch::from_blob(flat_actions.data(), {static_cast<int64_t>(states.size()), static_cast<int64_t>(maximum), 256}, opts).clone().to(device_);
+    auto action_tensor = torch::from_blob(flat_actions.data(), {static_cast<int64_t>(states.size()), static_cast<int64_t>(maximum), static_cast<int64_t>(action_size)}, opts).clone().to(device_);
     auto mask_tensor = torch::from_blob(flat_mask.data(), {static_cast<int64_t>(states.size()), static_cast<int64_t>(maximum)}, torch::TensorOptions().dtype(torch::kBool)).clone().to(device_);
     torch::InferenceMode guard;
     auto outputs = model_->forward(state_tensor, action_tensor, mask_tensor);
@@ -110,19 +113,20 @@ class LibTorchEntityTransformerEvaluator final : public DirectNeuralEvaluator {
   std::pair<std::vector<float>, std::vector<float>> forward_encoded(
       const std::vector<float>& state_features,
       const std::vector<std::vector<float>>& action_features) {
-    constexpr size_t expected_state_size = kEntityV6StateFeatureSize;
+    const size_t expected_state_size = state_feature_size(state_version_for_action(action_encoding_version_));
+    const size_t action_size = action_feature_size(action_encoding_version_);
     if (state_features.size() != expected_state_size || action_features.empty())
       throw std::runtime_error("forward_probe 输入的状态宽度或动作数量无效");
     for (const auto& action : action_features)
-      if (action.size() != 256) throw std::runtime_error("forward_probe 动作特征宽度必须为 256");
+      if (action.size() != action_size) throw std::runtime_error("forward_probe 动作特征宽度不匹配");
     auto options = torch::TensorOptions().dtype(torch::kFloat32);
     auto state_tensor = torch::from_blob(const_cast<float*>(state_features.data()),
       {1, static_cast<int64_t>(expected_state_size)}, options).clone().to(device_);
     std::vector<float> flat_actions;
-    flat_actions.reserve(action_features.size() * 256);
+    flat_actions.reserve(action_features.size() * action_size);
     for (const auto& action : action_features) flat_actions.insert(flat_actions.end(), action.begin(), action.end());
     auto action_tensor = torch::from_blob(flat_actions.data(),
-      {1, static_cast<int64_t>(action_features.size()), 256}, options).clone().to(device_);
+      {1, static_cast<int64_t>(action_features.size()), static_cast<int64_t>(action_size)}, options).clone().to(device_);
     auto mask_tensor = torch::ones({1, static_cast<int64_t>(action_features.size())},
       torch::TensorOptions().dtype(torch::kBool)).to(device_);
     torch::InferenceMode guard;

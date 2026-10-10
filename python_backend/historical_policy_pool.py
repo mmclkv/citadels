@@ -40,6 +40,8 @@ class HistoricalPolicyPool:
             raise ValueError("编码格式无效")
         metadata = checkpoint.get("model") or {}
         contract = validate_checkpoint_contract(checkpoint, "entity-v6")
+        if contract != MODEL_CONTRACTS["entity-v6"]:
+            raise ValueError("旧建筑编码需先迁移，不能加入新编码训练的历史池")
         if metadata.get("profile") != self.profile:
             raise ValueError("网络规模不匹配")
         if metadata.get("valueObjective") != "win-first-v1":

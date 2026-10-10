@@ -41,7 +41,7 @@ class ActionInstanceTests(unittest.TestCase):
             checkpoint = {"model": {"architecture": "entity-v6", "stateSize": 1790, "actionSize": 256},
                           "encoding": {"state": 14, "action": version}}
             self.assertEqual(validate_checkpoint_contract(checkpoint, "entity-v6")["action"], version)
-        self.assertEqual(MODEL_CONTRACTS["entity-v6"]["action"], 10)
+        self.assertEqual(MODEL_CONTRACTS["entity-v6"]["action"], 11)
         checkpoint["encoding"]["action"] = 11
         with self.assertRaises(ValueError):
             validate_checkpoint_contract(checkpoint, "entity-v6")
@@ -51,7 +51,7 @@ class ActionInstanceTests(unittest.TestCase):
         from training.entity_transformer import EntityTransformerNet, migrate_action_encoding
         torch.set_num_threads(1)
         torch.manual_seed(71)
-        model = EntityTransformerNet("fast").eval()
+        model = EntityTransformerNet("fast", encoding_version=14).eval()
         optimizer = torch.optim.Adam(model.parameters())
         weight = model.action_embed.weight
         optimizer.state[weight] = {"step": torch.tensor(1.), "exp_avg": torch.ones_like(weight),

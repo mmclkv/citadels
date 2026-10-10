@@ -53,14 +53,16 @@ TORCH_MODULE(EntityTransformerBlock);
 
 struct EntityTransformerNetImpl : torch::nn::Module {
   EntityTransformerNetImpl(int model_dim, int heads, int layers, int ff_dim, int action_hidden,
-                          bool positional_encoding = true)
+                          bool positional_encoding = true, int encoding_version = kStateEncodingVersion)
       : model_dim_(model_dim), heads_(heads), positional_encoding_(positional_encoding),
-        global_embed(register_module("global_embed", torch::nn::Linear(32 + kEntityV6PublicContextSize, model_dim))),
+        card_features_(encoding_version >= 15 ? kCityCardFeatureSize : 30),
+        base_size_(32 + 8 * kEntityV6PlayerFeatureSize + card_features_),
+        global_embed(register_module("global_embed", torch::nn::Linear(32 + (encoding_version >= 15 ? kEntityV6PublicContextSize : 256), model_dim))),
         player_embed(register_module("player_embed", torch::nn::Linear(kEntityV6PlayerEmbedFeatureSize, model_dim))),
-        self_embed(register_module("self_embed", torch::nn::Linear(kEntityV6PlayerEmbedFeatureSize + 30, model_dim))),
+        self_embed(register_module("self_embed", torch::nn::Linear(kEntityV6PlayerEmbedFeatureSize + card_features_, model_dim))),
         city_embed(register_module("city_embed", torch::nn::Embedding(
-          torch::nn::EmbeddingOptions(kCityCardFeatureSize + 1, kCityCardEmbeddingSize).padding_idx(0)))),
-        action_embed(register_module("action_embed", torch::nn::Linear(256, model_dim))),
+          torch::nn::EmbeddingOptions(card_features_ + 1, kCityCardEmbeddingSize).padding_idx(0)))),
+        action_embed(register_module("action_embed", torch::nn::Linear(encoding_version >= 15 ? kActionFeatureSize : 256, model_dim))),
         action1(register_module("action1", torch::nn::Linear(model_dim * 2, action_hidden))),
         action_out(register_module("action_out", torch::nn::Linear(action_hidden, 1))),
         value_out(register_module("value_out", torch::nn::Linear(model_dim, 1))) {
@@ -75,13 +77,13 @@ struct EntityTransformerNetImpl : torch::nn::Module {
       const torch::Tensor& states, const torch::Tensor& actions,
       const torch::Tensor& mask) {
     auto global_features = torch::cat({states.slice(-1, 0, 32),
-      states.slice(-1, kEntityV6BaseFeatureSize, kEntityV6StateFeatureSize)}, -1);
+      states.slice(-1, base_size_, states.size(-1))}, -1);
     auto global = global_embed->forward(global_features).unsqueeze(1);
     const int player_width = kEntityV6PlayerFeatureSize;
     auto players = states.slice(-1, 32, 32 + 8 * player_width).view({states.size(0), 8, player_width});
     {
       auto city = players.slice(-1, 56, player_width).view({states.size(0), 8, kEntityV6CitySlots, kEntityV6CitySlotSize});
-      auto ids = city.select(-1, 3).to(torch::kLong).clamp(0, kCityCardFeatureSize);
+      auto ids = city.select(-1, 3).to(torch::kLong).clamp(0, card_features_);
       auto ids_embed = city_embed->forward(ids).flatten(-2, -1);
       auto city_props = city.slice(-1, 0, 3).flatten(-2, -1);
       auto extra_props = city.slice(-1, 4, 8).flatten(-2, -1);
@@ -89,7 +91,7 @@ struct EntityTransformerNetImpl : torch::nn::Module {
     }
     auto player_tokens = player_embed->forward(players);
     const int hand_start = 32 + 8 * player_width;
-    auto self_features = torch::cat({players.select(1, 0), states.slice(-1, hand_start, hand_start + 30)}, -1);
+    auto self_features = torch::cat({players.select(1, 0), states.slice(-1, hand_start, base_size_)}, -1);
     auto self_token = self_embed->forward(self_features).unsqueeze(1);
     player_tokens = torch::cat({self_token, player_tokens.slice(1, 1, 8)}, 1);
     auto tokens = torch::cat({global, player_tokens}, 1);
@@ -124,6 +126,7 @@ struct EntityTransformerNetImpl : torch::nn::Module {
 
   int model_dim_, heads_;
   bool positional_encoding_;
+  int card_features_, base_size_;
   torch::nn::Linear global_embed{nullptr}, player_embed{nullptr}, self_embed{nullptr};
   torch::nn::Embedding city_embed{nullptr};
   torch::nn::Linear action_embed{nullptr}, action1{nullptr}, action_out{nullptr}, value_out{nullptr};

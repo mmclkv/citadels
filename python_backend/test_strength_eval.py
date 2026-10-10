@@ -40,17 +40,17 @@ class ArenaTests(unittest.TestCase):
                     self.assertIsNotNone(result['networkEntropy'])
                     if selection == 'direct':
                         self.assertAlmostEqual(result['networkEntropy'], result['searchEntropy'], places=6)
-            # Same weights and encoded inputs, both implementations, v10 suffix included.
+            # Same weights and declared encoding in both implementations.
             import torch
             from python_backend.training_runtime import _entity_forward_probe_inputs
             from training.entity_transformer import EntityTransformerNet
             torch.set_num_threads(1)
-            model = EntityTransformerNet(policy.profile).eval()
+            model = EntityTransformerNet(policy.profile, encoding_version=policy.state_version).eval()
             model.load_flat(policy.model_path)
-            cases = _entity_forward_probe_inputs()
+            cases = _entity_forward_probe_inputs(policy.state_version)
             outputs = worker.forward_probe(probes=[{'stateFeatures': s.tolist(), 'actionFeatures': a.tolist()}
                                                    for s, a in cases], model_path=policy.model_path,
-                profile=policy.profile, architecture=policy.architecture, device='cpu', action_encoding_version=10)
+                profile=policy.profile, architecture=policy.architecture, device='cpu', action_encoding_version=policy.action_version)
             self.assertEqual(len(outputs['results']), len(cases))
             with torch.inference_mode():
                 for (state, actions), output in zip(cases, outputs['results']):
@@ -58,7 +58,6 @@ class ArenaTests(unittest.TestCase):
                     torch.testing.assert_close(logits[0], torch.tensor(output['logits']), rtol=5e-4, atol=5e-4)
                     torch.testing.assert_close(values[0], torch.tensor(output['values']), rtol=5e-4, atol=5e-4)
             # New search encoding is explicitly confirmed by the isolated worker.
-            policy.action_version = 10
             result = run_game(engine, worker, policy, schedule(config)[0], 'argmax', config)
             self.assertEqual(result['failure'], 'step/round limit', result)
         finally:

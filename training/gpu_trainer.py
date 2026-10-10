@@ -18,13 +18,11 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 try:
-    from entity_transformer import EntityTransformerNet, migrate_action_encoding
+    from entity_transformer import EntityTransformerNet, migrate_action_encoding, ACTION_SIZE
 except ImportError as error:
     EntityTransformerNet = None
     ENTITY_TRANSFORMER_IMPORT_ERROR = error
 
-
-ACTION_SIZE = 256
 
 BINARY_MAGIC = 0x31425443  # "CTB1" little-endian.
 BINARY_BATCH_EVAL = 1
@@ -163,12 +161,12 @@ def run_binary_protocol(model, device):
         write_binary_frame(output, response)
 
 
-def create_model(architecture, profile):
+def create_model(architecture, profile, encoding_version=15):
     if architecture == "entity-v6":
         if EntityTransformerNet is None:
             detail = str(ENTITY_TRANSFORMER_IMPORT_ERROR)
             raise RuntimeError("无法加载 entity_transformer.py" + (f": {detail}" if detail else ""))
-        return EntityTransformerNet(profile, architecture=architecture)
+        return EntityTransformerNet(profile, architecture=architecture, encoding_version=encoding_version)
     raise ValueError("仅支持 entity-v6 网络架构")
 
 
@@ -296,7 +294,8 @@ def main():
                 if requested == "cuda" and not use_cuda:
                     raise RuntimeError("已要求 CUDA，但 PyTorch 无法访问 CUDA")
                 device = torch.device("cuda" if use_cuda else "cpu")
-                model = create_model(command.get("architecture", "entity-v6"), command["profile"])
+                model = create_model(command.get("architecture", "entity-v6"), command["profile"],
+                                     command.get("stateEncodingVersion", 15))
                 model.load_flat(command["modelPath"])
                 model.to(device)
                 model.eval()
@@ -325,7 +324,7 @@ def main():
                 padded_actions = []
                 masks = []
                 for group in action_groups:
-                    padded = list(group) + [[0.0] * ACTION_SIZE for _ in range(maximum - len(group))]
+                    padded = list(group) + [[0.0] * model.action_size for _ in range(maximum - len(group))]
                     padded_actions.append(padded)
                     masks.append([True] * len(group) + [False] * (maximum - len(group)))
                 states = torch.tensor(state_vectors, dtype=torch.float32, device=device)

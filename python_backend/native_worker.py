@@ -65,7 +65,7 @@ class NativeMctsWorker:
                model_path: str, model_version: int, profile: str, architecture: str,
                device: str, simulations: int, max_depth: int, c_puct: float,
                dirichlet_alpha: float, dirichlet_epsilon: float, seed: int,
-               batch_size: int = 32, action_encoding_version: int = 10,
+               batch_size: int = 32, action_encoding_version: int = 11,
                include_training_features: bool = False, policy_only: bool = False,
                include_root_diagnostics: bool = False) -> dict:
         with self._lock:
@@ -155,6 +155,8 @@ class NativeMctsWorker:
             return
         if returned != requested or not isinstance(supported, int) or supported < requested:
             raise RuntimeError("C++ MCTS worker 动作编码版本不匹配；请重新编译 worker 后再启动新训练")
+        if requested >= 11 and result.get("stateEncodingVersion") != 15:
+            raise RuntimeError("C++ MCTS worker 状态编码版本不匹配；请重新编译 worker")
 
     def determinize(self, *, state: dict, player_id: str, count: int,
                     seed: int, belief: bool = True) -> dict:

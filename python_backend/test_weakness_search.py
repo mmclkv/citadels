@@ -60,7 +60,7 @@ class WeaknessSearchTests(unittest.TestCase):
             def save_flat(self, path):
                 torch.cat([self.policy, self.value]).detach().numpy().astype("<f4").tofile(path)
         def row():
-            return {"state": np.zeros(1790, np.float32), "actions": np.zeros((2, 256), np.float32),
+            return {"state": np.zeros(2054, np.float32), "actions": np.zeros((2, 448), np.float32),
                     "pi": np.array([.5, .5], np.float32), "reward": np.array([1., -1.] + [0.] * 6, np.float32),
                     "valueMask": np.array([1., 1.] + [0.] * 6, np.float32),
                     "chosenAction": 0, "behaviorProbability": .5}

@@ -17,13 +17,13 @@ class Probe(torch.nn.Module):
 
 
 def row(count, reward=0):
-    actions = np.zeros((count, 256), np.float32)
+    actions = np.zeros((count, 448), np.float32)
     if count:
         actions[:, 0] = np.arange(count)
     pi = np.zeros(count, np.float32)
     if count:
         pi[0] = 1
-    return {"state": np.zeros(1790, np.float32), "actions": actions, "pi": pi,
+    return {"state": np.zeros(2054, np.float32), "actions": actions, "pi": pi,
             "reward": np.full(8, reward, np.float32), "valueMask": np.ones(8, np.float32)}
 
 

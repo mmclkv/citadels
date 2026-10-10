@@ -30,6 +30,7 @@ class NeuralPolicy:
         if self.device_name == "auto":
             self.device_name = "cuda"
         self.architecture = "entity-v6"
+        self.state_version = MODEL_CONTRACTS["entity-v6"]["state"]
         self.action_version = MODEL_CONTRACTS["entity-v6"]["action"]
         self.worker = worker
         self.model_path = ""
@@ -69,6 +70,7 @@ class NeuralPolicy:
                         f"指定的 profile={profile} 与 checkpoint profile={checkpoint_profile} 不匹配")
                 self.profile = checkpoint_profile
                 self.action_version = contract["action"]
+                self.state_version = contract["state"]
                 weights = metadata.get("flat") or []
                 if len(weights) != metadata.get("parameterCount"):
                     raise ValueError("checkpoint 参数数量与元数据不符")
@@ -90,6 +92,7 @@ class NeuralPolicy:
     def status(self) -> dict:
         return {"configured": bool(self.worker and self.model_path), "checkpoint": self.checkpoint,
                 "architecture": self.architecture, "profile": self.profile,
+                "stateEncodingVersion": self.state_version, "actionEncodingVersion": self.action_version,
                 "device": self.device_name,
                 "game": 0, "message": "策略网络已就绪" if self.worker and self.model_path else self.error,
                 "tta": {"variants": 0, "maxInferenceMs": 0, "lastInference": None},

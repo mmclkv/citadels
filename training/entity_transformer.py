@@ -15,16 +15,16 @@ ENTITY_PROFILES = {
     "large": (256, 4, 3, 512, 256),
 }
 VALUE_SLOTS = 8
-CITY_CARD_FEATURES = 30
+CITY_CARD_FEATURES = 54
 CITY_EMBEDDING_DIM = 8
 ENTITY_V6_CITY_SLOTS = 16
 ENTITY_V6_CITY_SLOT_SIZE = 8
 ENTITY_V6_PLAYER_FEATURE_SIZE = 56 + ENTITY_V6_CITY_SLOTS * ENTITY_V6_CITY_SLOT_SIZE
 ENTITY_V6_PLAYER_EMBED_FEATURE_SIZE = 56 + ENTITY_V6_CITY_SLOTS * (7 + CITY_EMBEDDING_DIM)
 ENTITY_V6_BASE_SIZE = 32 + 8 * ENTITY_V6_PLAYER_FEATURE_SIZE + CITY_CARD_FEATURES
-ENTITY_V6_CONTEXT_FEATURES = 256
+ENTITY_V6_CONTEXT_FEATURES = 496
 ENTITY_V6_STATE_SIZE = ENTITY_V6_BASE_SIZE + ENTITY_V6_CONTEXT_FEATURES
-ACTION_SIZE = 256
+ACTION_SIZE = 448
 INSTANCE_FEATURE_SLICE = slice(182, 244)
 
 
@@ -76,25 +76,34 @@ class EntityTransformerBlock(nn.Module):
 
 
 class EntityTransformerNet(nn.Module):
-    def __init__(self, profile="balanced", state_size=None, action_size=ACTION_SIZE,
-                 architecture="entity-v6"):
+    def __init__(self, profile="balanced", state_size=None, action_size=None,
+                 architecture="entity-v6", encoding_version=15):
         super().__init__()
         if architecture != "entity-v6":
             raise ValueError("only entity-v6 is supported")
         self.player_feature_size = ENTITY_V6_PLAYER_FEATURE_SIZE
-        self.state_size = ENTITY_V6_STATE_SIZE
-        if state_size is not None and state_size != self.state_size or action_size != ACTION_SIZE:
+        if encoding_version not in (14, 15):
+            raise ValueError("unsupported entity state encoding version")
+        self.encoding_version = encoding_version
+        self.card_features = CITY_CARD_FEATURES if encoding_version == 15 else 30
+        self.context_features = ENTITY_V6_CONTEXT_FEATURES if encoding_version == 15 else 256
+        self.base_size = 32 + 8 * self.player_feature_size + self.card_features
+        self.state_size = self.base_size + self.context_features
+        expected_action_size = ACTION_SIZE if encoding_version == 15 else 256
+        if action_size is None:
+            action_size = expected_action_size
+        if state_size is not None and state_size != self.state_size or action_size != expected_action_size:
             raise ValueError("entity transformer state/action width mismatch")
         self.architecture = architecture
         model_dim, heads, layers, ff_dim, action_hidden = ENTITY_PROFILES[profile]
         self.profile = profile
         self.action_size = action_size
         self.model_dim = model_dim
-        self.global_embed = nn.Linear(32 + ENTITY_V6_CONTEXT_FEATURES, model_dim)
-        self.city_embed = nn.Embedding(CITY_CARD_FEATURES + 1, CITY_EMBEDDING_DIM, padding_idx=0)
+        self.global_embed = nn.Linear(32 + self.context_features, model_dim)
+        self.city_embed = nn.Embedding(self.card_features + 1, CITY_EMBEDDING_DIM, padding_idx=0)
         player_embed_size = ENTITY_V6_PLAYER_EMBED_FEATURE_SIZE
         self.player_embed = nn.Linear(player_embed_size, model_dim)
-        self.self_embed = nn.Linear(player_embed_size + 30, model_dim)
+        self.self_embed = nn.Linear(player_embed_size + self.card_features, model_dim)
         self.action_embed = nn.Linear(action_size, model_dim)
         self.blocks = nn.ModuleList([
             EntityTransformerBlock(model_dim, heads, ff_dim) for _ in range(layers)
@@ -126,18 +135,18 @@ class EntityTransformerNet(nn.Module):
     def tokenize(self, states):
         if states.shape[-1] != self.state_size:
             raise ValueError("entity transformer state width mismatch")
-        global_features = torch.cat((states[..., :32], states[..., ENTITY_V6_BASE_SIZE:]), dim=-1)
+        global_features = torch.cat((states[..., :32], states[..., self.base_size:]), dim=-1)
         global_token = self.global_embed(global_features).unsqueeze(1)
         player_end = 32 + 8 * self.player_feature_size
         players = states[..., 32:player_end].reshape(*states.shape[:-1], 8, self.player_feature_size)
         city = players[..., 56:].reshape(*states.shape[:-1], 8, ENTITY_V6_CITY_SLOTS, ENTITY_V6_CITY_SLOT_SIZE)
-        city_ids = city[..., 3].to(torch.long).clamp(0, CITY_CARD_FEATURES)
+        city_ids = city[..., 3].to(torch.long).clamp(0, self.card_features)
         city_embeddings = self.city_embed(city_ids).flatten(start_dim=-2)
         city_props = city[..., :3].flatten(start_dim=-2)
         extra_props = city[..., 4:8].flatten(start_dim=-2)
         players = torch.cat((players[..., :56], city_props, extra_props, city_embeddings), dim=-1)
         player_tokens = self.player_embed(players)
-        self_token_input = torch.cat((players[..., 0, :], states[..., player_end:ENTITY_V6_BASE_SIZE]), dim=-1)
+        self_token_input = torch.cat((players[..., 0, :], states[..., player_end:self.base_size]), dim=-1)
         self_token = self.self_embed(self_token_input).unsqueeze(-2)
         player_tokens = torch.cat((self_token, player_tokens[..., 1:, :]), dim=-2)
         tokens = torch.cat((global_token, player_tokens), dim=1)

@@ -1,12 +1,13 @@
 """Shared checkpoint and feature-version contract for training and live play."""
 
 MODEL_CONTRACTS = {
-    "entity-v6": {"state": 14, "action": 10, "stateSize": 1790, "actionSize": 256},
+    "entity-v6": {"state": 15, "action": 11, "stateSize": 2054, "actionSize": 448},
 }
 
 
 def encoding_compatible(state_version, action_version):
-    return state_version == 14 and action_version in (9, 10)
+    return (state_version == 14 and action_version in (9, 10) or
+            state_version == 15 and action_version == 11)
 
 
 def validate_checkpoint_contract(checkpoint: dict, architecture: str) -> dict:
@@ -17,12 +18,6 @@ def validate_checkpoint_contract(checkpoint: dict, architecture: str) -> dict:
     encoding = checkpoint.get("encoding") or {}
     if model.get("architecture") != architecture:
         raise ValueError("checkpoint 网络架构与模型配置不一致")
-    if model.get("stateSize") != expected["stateSize"]:
-        raise ValueError(
-            f"checkpoint 状态宽度不兼容：{model.get('stateSize')} != {expected['stateSize']}")
-    if model.get("actionSize") != expected["actionSize"]:
-        raise ValueError(
-            f"checkpoint 动作宽度不兼容：{model.get('actionSize')} != {expected['actionSize']}")
     state_version = encoding.get("state")
     if state_version is None:
         state_version = model.get("encodingVersion")
@@ -36,5 +31,11 @@ def validate_checkpoint_contract(checkpoint: dict, architecture: str) -> dict:
             "checkpoint 状态/动作编码版本不兼容："
             f"({state_version}, {action_version}) != "
             f"({expected['state']}, {expected['action']})")
-    # Live inference MUST keep the encoding declared by this checkpoint.
-    return {**expected, "action": action_version}
+    # Old models use an explicit legacy layout; dimensions alone do not grant
+    # compatibility with the expanded district encoding.
+    contract = (expected if state_version == 15 else
+                {"state": 14, "action": action_version, "stateSize": 1790, "actionSize": 256})
+    for field, label in (("stateSize", "状态"), ("actionSize", "动作")):
+        if model.get(field) != contract[field]:
+            raise ValueError(f"checkpoint {label}宽度不兼容：{model.get(field)} != {contract[field]}")
+    return dict(contract)

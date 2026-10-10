@@ -9,17 +9,22 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 14;
-constexpr int kCityCardFeatureSize = 30;
+constexpr int kStateEncodingVersion = 15;
+constexpr int kLegacyCityCardFeatureSize = 30;
+constexpr int kCityCardFeatureSize = 54;
 constexpr int kCityCardEmbeddingSize = 8;
 constexpr int kEntityV6CitySlots = 16;
 constexpr int kEntityV6CitySlotSize = 8;
 constexpr int kEntityV6PlayerFeatureSize = 56 + kEntityV6CitySlots * kEntityV6CitySlotSize;
 constexpr int kEntityV6PlayerEmbedFeatureSize = 56 + kEntityV6CitySlots * (7 + kCityCardEmbeddingSize);
 constexpr int kEntityV6BaseFeatureSize = 32 + 8 * kEntityV6PlayerFeatureSize + kCityCardFeatureSize;
-constexpr int kEntityV6PublicContextSize = 256;
+constexpr int kEntityV6PublicContextSize = 496;
 constexpr int kEntityV6StateFeatureSize = kEntityV6BaseFeatureSize + kEntityV6PublicContextSize;
-constexpr int kActionEncodingVersion = 10;
+constexpr int kActionEncodingVersion = 11;
+constexpr int kActionFeatureSize = 448;
+inline int state_version_for_action(int version) { return version >= 11 ? 15 : 14; }
+inline int state_feature_size(int version) { return version >= 15 ? kEntityV6StateFeatureSize : 1790; }
+inline int action_feature_size(int version) { return version >= 11 ? kActionFeatureSize : 256; }
 constexpr std::array<const char*, 27> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
   "king", "emperor", "noble", "bishop", "monk", "merchant", "alchemist", "businessman",
   "architect", "navigator", "scholar", "warlord", "diplomat", "marshal", "queen", "artist",
@@ -83,14 +88,20 @@ inline int district_identity_index(const DistrictCard& card) {
     "Tavern", "Market", "Trading Post", "Docks", "Harbor", "Town Hall",
     "Watchtower", "Prison", "Battlefield", "Fortress", "Ghost Town", "Keep",
     "Museum", "Graveyard", "Laboratory", "Smithy", "Observatory", "Library",
-    "School of Magic", "Dragon Gate", "University", "Great Wall", "Quarry"
+    "School of Magic", "Dragon Gate", "University", "Great Wall", "Quarry",
+    "Armory", "Basilica", "Capitol", "Factory", "Framework", "Gold Mine",
+    "Imperial Treasury", "Ivory Tower", "Map Room", "Monument", "Necropolis", "Park",
+    "Poor House", "Secret Vault", "Stables", "Statue", "Theater", "Thieves’ Den",
+    "Wishing Well", "Lighthouse", "Bell Tower", "Ballroom", "Hospital", "Throne Room"
   };
   for (size_t i = 0; i < names.size(); ++i)
     if ((!card.en.empty() && card.en == names[i]) || (!card.name.empty() && card.name == names[i])) return static_cast<int>(i);
-  if (card.uid.size() > 1 && card.uid[0] == 'd') {
+  // UID order depends on the scenario's deck. Never infer a named unknown
+  // card's identity from its instance number.
+  if (card.en.empty() && card.name.empty() && card.purple_effect.empty() && card.uid.size() > 1 && card.uid[0] == 'd') {
     try {
       const int uid = std::stoi(card.uid.substr(1));
-      static constexpr std::array<int, kCityCardFeatureSize> ends = {
+      static constexpr std::array<int, kLegacyCityCardFeatureSize> ends = {
         5, 9, 12, 15, 18, 21, 23, 28, 32, 35, 38, 41, 43, 46, 49, 52, 54,
         55, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68
       };
@@ -98,6 +109,21 @@ inline int district_identity_index(const DistrictCard& card) {
     } catch (...) {}
   }
   return -1;
+}
+
+inline const DistrictCard* visible_district_card(const NativeGameState& state, int observer,
+                                                 const std::string& uid) {
+  if (uid.empty() || observer < 0 || observer >= static_cast<int>(state.players.size())) return nullptr;
+  for (const auto& card : state.players[observer].hand) if (card.uid == uid) return &card;
+  for (const auto& player : state.players) for (const auto& district : player.city)
+    if (district.card.uid == uid) return &district.card;
+  if (state.has_reaction_card && state.reaction_card.uid == uid) return &state.reaction_card;
+  const int pending_owner = state.pending_kind == "lighthouse" ? state.pending_target : state.active_player;
+  if (observer == pending_owner) for (const auto& card : state.pending_cards) if (card.uid == uid) return &card;
+  if (observer == state.active_player && (state.pending_kind == "wizard_card" || state.pending_kind == "wizard_choice") &&
+      state.pending_target >= 0 && state.pending_target < static_cast<int>(state.players.size()))
+    for (const auto& card : state.players[state.pending_target].hand) if (card.uid == uid) return &card;
+  return nullptr;
 }
 
 inline int active_player_index(const NativeGameState& state) {
@@ -109,11 +135,14 @@ inline int active_player_index(const NativeGameState& state) {
 
 inline std::vector<float> encode_features(const NativeGameState& state,
                                           int perspective_player = -1,
-                                          int max_players = 8) {
+                                          int max_players = 8,
+                                          int encoding_version = kStateEncodingVersion) {
   (void)max_players;
   constexpr int player_feature_size = kEntityV6PlayerFeatureSize;
-  constexpr int state_feature_size = kEntityV6StateFeatureSize;
-  std::vector<float> features(state_feature_size, 0.0f);
+  const bool expanded = encoding_version >= 15;
+  const int card_count = expanded ? kCityCardFeatureSize : kLegacyCityCardFeatureSize;
+  const int base_size = 32 + 8 * player_feature_size + card_count;
+  std::vector<float> features(state_feature_size(encoding_version), 0.0f);
   const int player_count = static_cast<int>(state.players.size());
   if (player_count <= 0) return features;
   const int me = perspective_player >= 0 && perspective_player < player_count ? perspective_player : 0;
@@ -123,7 +152,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     return (absolute - me + player_count) % player_count;
   };
   const int active_rel = rel(active);
-  features[0] = static_cast<float>(kStateEncodingVersion);
+  features[0] = static_cast<float>(encoding_version);
   features[1] = static_cast<float>(player_count) / 8.0f;
   features[2] = static_cast<float>(state_phase_code(state.phase)) / 6.0f;
   features[3] = static_cast<float>(state.round) / 100.0f;
@@ -238,7 +267,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       const int score = card.score_value > 0 ? card.score_value : card.cost;
       features[slot + 2] = std::min(1.0f, std::max(0.0f, static_cast<float>(score) / 10.0f));
       const int identity = district_identity_index(card);
-      if (identity >= 0) features[slot + 3] = static_cast<float>(identity + 1);
+      if (identity >= 0 && identity < card_count) features[slot + 3] = static_cast<float>(identity + 1);
       {
         features[slot + 4] = p.city[i].beautified ? 1.0f : 0.0f;
         features[slot + 5] = std::min(1.0f, static_cast<float>(p.city[i].museum_cards.size()) / 8.0f);
@@ -248,27 +277,22 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     }
   }
   {
-    static constexpr std::array<const char*, 30> hand_cards = {
-      "Manor", "Castle", "Palace", "Temple", "Church", "Monastery", "Cathedral",
-      "Tavern", "Market", "Trading Post", "Docks", "Harbor", "Town Hall",
-      "Watchtower", "Prison", "Battlefield", "Fortress", "Ghost Town", "Keep",
-      "Museum", "Graveyard", "Laboratory", "Smithy", "Observatory", "Library",
-      "School of Magic", "Dragon Gate", "University", "Great Wall", "Quarry"
-    };
     static constexpr std::array<float, 30> maximum_copies = {
       5, 4, 3, 3, 3, 3, 2, 5, 4, 3, 3, 3, 2, 3, 3, 3, 2, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
     };
     for (const auto& card : state.players[me].hand) {
-      for (size_t i = 0; i < hand_cards.size(); ++i) {
-        if (card.en == hand_cards[i] || (card.en.empty() && card.name == hand_cards[i])) {
-          features[kEntityV6BaseFeatureSize - kCityCardFeatureSize + i] += 1.0f / maximum_copies[i];
-          break;
-        }
-      }
+      const int identity = district_identity_index(card);
+      if (identity >= 0 && identity < card_count)
+        features[base_size - card_count + identity] += identity < 30 ? 1.0f / maximum_copies[identity] : 1.0f;
     }
   }
   {
-    const size_t start = kEntityV6BaseFeatureSize;
+    const size_t start = base_size;
+    // Keep the old 30-wide context blocks intact. Append 24 new identities
+    // for reaction, pending card, selected cards and visible pending cards.
+    const auto identity_offset = [&](size_t offset, int identity) -> size_t {
+      return identity < 30 ? offset + identity : 256 + ((offset - 94) / 30) * 24 + identity - 30;
+    };
     const auto mark_roles = [&](const std::vector<std::string>& roles, size_t offset) {
       for (const auto& id : roles) for (size_t i = 0; i < kRoleIds.size(); ++i)
         if (id == kRoleIds[i]) features[start + offset + i] = 1.0f;
@@ -328,21 +352,10 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       features[start + 93] = state.reaction_build ? 1.0f : 0.0f;
       const auto mark_card = [&](const std::string& uid, size_t offset,
                                  bool active_player_knows_other_hands = false) {
-        const auto mark = [&](const DistrictCard& card) {
-          const int identity = district_identity_index(card);
-          if (identity >= 0) features[start + offset + static_cast<size_t>(identity)] = 1.0f;
-        };
-        for (size_t owner = 0; owner < state.players.size(); ++owner) {
-          const auto& player = state.players[owner];
-          for (const auto& card : player.hand) if (card.uid == uid) {
-            if (static_cast<int>(owner) == me ||
-                (active_player_knows_other_hands && me == state.active_player)) mark(card);
-            return;
-          }
-          for (const auto& district : player.city) if (district.card.uid == uid) { mark(district.card); return; }
-        }
-        if (me == state.active_player)
-          for (const auto& card : state.pending_cards) if (card.uid == uid) { mark(card); return; }
+        (void)active_player_knows_other_hands;
+        const auto* card = visible_district_card(state, me, uid);
+        const int identity = card ? district_identity_index(*card) : -1;
+        if (identity >= 0 && identity < card_count) features[start + identity_offset(offset, identity)] = 1.0f;
       };
       mark_card(state.reaction_uid, 94);
       const bool wizard_knows_other_hands = state.pending_kind == "wizard_card" ||
@@ -350,9 +363,10 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       mark_card(state.pending_uid, 124, wizard_knows_other_hands);
       const auto add_identity_count = [&](const DistrictCard& card, size_t offset, float divisor) {
         const int identity = district_identity_index(card);
-        if (identity >= 0) features[start + offset + static_cast<size_t>(identity)] += 1.0f / divisor;
+        if (identity >= 0 && identity < card_count) features[start + identity_offset(offset, identity)] += 1.0f / divisor;
       };
-      const bool sees_pending_selection = me == state.active_player || state.pending_kind == "artist";
+      const int pending_owner = state.pending_kind == "lighthouse" ? state.pending_target : state.active_player;
+      const bool sees_pending_selection = me == pending_owner || state.pending_kind == "artist";
       if (sees_pending_selection) {
         for (const auto& uid : state.pending_selected) {
           bool found = false;
@@ -367,7 +381,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
             }
           }
         }
-        if (me == state.active_player)
+        if (me == pending_owner)
           for (const auto& card : state.pending_cards) add_identity_count(card, 184, 5.0f);
       }
       if (me == state.active_player) {
@@ -381,6 +395,37 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       features[start + 226] = std::min(1.0f, static_cast<float>(state.pending_cards.size()) / 16.0f);
       features[start + 227] = state.pending_kind == "wizard_choice" ? 1.0f : 0.0f;
       features[start + 228] = state.magistrate_claimed ? 1.0f : 0.0f;
+    }
+    if (expanded) {
+      // Private discard/payment identities are visible only to their owner.
+      if (me == state.active_player) {
+        for (const auto& card : state.players[me].hand) {
+          const int identity = district_identity_index(card);
+          if (identity < 0) continue;
+          if (std::find(state.pending_selected.begin(), state.pending_selected.end(), card.uid) != state.pending_selected.end() ||
+              std::find(state.building_cards.begin(), state.building_cards.end(), card.uid) != state.building_cards.end())
+            features[start + 352 + identity] += 0.2f;
+        }
+      }
+      static constexpr std::array<const char*, 6> kinds = {
+        "lighthouse", "bell_tower", "theater_exchange", "ballroom", "thieves_den", "artist"};
+      for (size_t i = 0; i < kinds.size(); ++i) if (state.pending_kind == kinds[i]) features[start + 406 + i] = 1;
+      static constexpr std::array<const char*, 3> modes = {"framework", "necropolis", "thievesDen"};
+      for (size_t i = 0; i < modes.size(); ++i) if (state.building_mode == modes[i]) features[start + 412 + i] = 1;
+      for (int r = 0; r < player_count && r < 8; ++r) {
+        const int owner = (me + r) % player_count;
+        for (const auto& district : state.players[owner].city) {
+          const int identity = district_identity_index(district.card);
+          if (identity >= 0 && district.card.uid == state.building_source) features[start + 415 + identity] = 1;
+          if (district.effect == "bellTower" && std::find(state.enabled_bell_towers.begin(), state.enabled_bell_towers.end(), district.card.uid) != state.enabled_bell_towers.end())
+            features[start + 469 + r] = 1;
+        }
+        if (std::find(state.pending_queue.begin(), state.pending_queue.end(), owner) != state.pending_queue.end()) features[start + 477 + r] = 1;
+        if (std::find(state.first_finishers.begin(), state.first_finishers.end(), owner) != state.first_finishers.end()) features[start + 485 + r] = 1;
+      }
+      features[start + 493] = state.turn_phase == "hospital" ? 1 : 0;
+      features[start + 494] = state.building_mode == "wizard" ? 1 : 0;
+      features[start + 495] = state.turn_phase == "bewitched" ? 1 : 0;
     }
   }
   return features;

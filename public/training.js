@@ -12,8 +12,8 @@ let logErrorEl = null;
 let logErrorText = '';
 let resumeCheckpointCompatible = null;
 let resumeCheckpointCheckedName = '';
-const CURRENT_STATE_ENCODING_VERSION = 14;
-const CURRENT_ACTION_ENCODING_VERSION = 9;
+const CURRENT_STATE_ENCODING_VERSION = 15;
+const CURRENT_ACTION_ENCODING_VERSION = 11;
 
 function num(value, digits = 2) { return value == null || value === '' ? '—' : Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
 function integer(value) { return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('zh-CN') : '0'; }
@@ -389,7 +389,7 @@ function renderRuntime(status) {
     ['自对弈阵容', c.selfPlayMode === 'random-batch' ? '每批随机混合' : c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
     ['本批阵容', status.batchComposition ? status.batchComposition.players + ' 人：当前 ' + status.batchComposition.main + '，历史 ' + status.batchComposition.historical + '，启发式 ' + status.batchComposition.heuristic : '—'],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
-    ['状态 / 动作编码', 'v14 / v9（entity-v6）'],
+    ['状态 / 动作编码', 'v15 / v11（entity-v6，54 种建筑）'],
     ['每局网络玩家', status.point && status.point.networkPlayers ? status.point.networkPlayers + ' 人' : '—'],
     ['本局当前 / 历史模型', status.point && status.point.currentNetworkPlayers != null ? status.point.currentNetworkPlayers + ' / ' + status.point.historicalPlayers + ' 人' : '—'],
     ['历史策略池', status.point && status.point.historicalPoolCount != null ? status.point.historicalPoolCount + ' / ' + c.historicalPoolSize + ' 个版本' : '—'],
@@ -707,7 +707,7 @@ $('start-training').onclick = async () => {
     return;
   }
   if (resumeCheckpointName() && resumeCheckpointCompatible === false) {
-    $('control-message').textContent = '当前权重的状态编码与 v' + CURRENT_STATE_ENCODING_VERSION + ' 不兼容，请从头训练或选择新权重';
+    $('control-message').textContent = '当前权重需先迁移到状态 v15 / 动作 v11，或选择兼容的新权重';
     return;
   }
   $('control-message').textContent = '正在启动…';

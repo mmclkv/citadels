@@ -15,8 +15,9 @@
 
 namespace citadels::native {
 
-inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1) {
-  return encode_features(state, player, 8);
+inline std::vector<float> encode_network_state(const NativeGameState& state, int player = -1,
+                                               int version = kStateEncodingVersion) {
+  return encode_features(state, player, 8, version);
 }
 
 inline void normalize_action_vector(std::vector<float>& vector) {
@@ -78,7 +79,7 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
                                                 const NativeGameState* state = nullptr,
                                                 int perspective_player = -1,
                                                 int action_encoding_version = kActionEncodingVersion) {
-  std::vector<float> result(256, 0.0f);
+  std::vector<float> result(action_feature_size(action_encoding_version), 0.0f);
   // v10 extends the unused suffix; preserve v9's normalized prefix exactly
   // so zero-initialized new columns provide a lossless weight warm start.
   result[0] = static_cast<float>(std::min(action_encoding_version, 9));
@@ -135,16 +136,10 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
       result[116 + i] = uid_reference(action.selected_uids[i]);
   }
   if (state && !action.uid.empty()) {
-    const DistrictCard* card = nullptr;
-    for (const auto& player : state->players) {
-      for (const auto& held : player.hand) if (held.uid == action.uid) { card = &held; break; }
-      if (!card) for (const auto& built : player.city) if (built.card.uid == action.uid) { card = &built.card; break; }
-      if (card) break;
-    }
-    if (!card) for (const auto& pending : state->pending_cards) if (pending.uid == action.uid) { card = &pending; break; }
+    const DistrictCard* card = visible_district_card(*state, perspective_player, action.uid);
     if (card) {
       const int identity = district_identity_index(*card);
-      if (action_encoding_version >= 8 && identity >= 0) result[132 + static_cast<size_t>(identity)] = 1.0f;
+      if (action_encoding_version >= 8 && identity >= 0 && identity < 30) result[132 + static_cast<size_t>(identity)] = 1.0f;
       result[105] = std::min(1.0f, std::max(0.0f, static_cast<float>(card->cost) / 8.0f));
       result[106] = std::min(1.0f, std::max(0.0f, static_cast<float>(card->score_value > 0 ? card->score_value : card->cost) / 10.0f));
       static const std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
@@ -197,13 +192,7 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
     };
     const auto identity = [&](const std::string& uid, size_t offset) {
       if (uid.empty()) return;
-      const DistrictCard* c = nullptr;
-      // Only the observer's hand, public cities, and a visible pending choice.
-      if (perspective_player >= 0 && perspective_player < static_cast<int>(state->players.size()))
-        for (const auto& held : state->players[perspective_player].hand) if (held.uid == uid) c = &held;
-      for (const auto& owner : state->players) for (const auto& built : owner.city) if (built.card.uid == uid) c = &built.card;
-      if ((state->pending_kind == "lighthouse" ? state->pending_target : state->active_player) == perspective_player)
-        for (const auto& pending : state->pending_cards) if (pending.uid == uid) c = &pending;
+      const DistrictCard* c = visible_district_card(*state, perspective_player, uid);
       if (!c) return;
       for (size_t i = 0; i < effects.size(); ++i) if (c->purple_effect == effects[i]) {
         for (size_t bit = 0; bit < 5; ++bit) result[offset + bit] = ((i + 1) >> bit) & 1;
@@ -217,9 +206,24 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
         "thieves_pay", "thieves_cancel", "lighthouse_pick", "lighthouse_skip",
         "bell_enable", "bell_skip", "ballroom_thanks", "ballroom_skip", "theater_swap", "theater_skip"
       };
-      for (size_t i = 0; i < modes.size(); ++i) if (action.name == modes[i]) result[254] = float(i + 1) / 15;
+      for (size_t i = 0; i < modes.size(); ++i) if (action.name == modes[i]) {
+        result[254] = float(i + 1) / 15;
+        if (action_encoding_version >= 11) result[364 + i] = 1;
+      }
       if (perspective_player == state->active_player) result[255] = std::min(1.0f, float(state->building_cards.size()) / 6);
     }
+  }
+  if (action_encoding_version >= 11 && state) {
+    const auto mark = [&](const std::string& uid, size_t offset, float amount = 1) {
+      const auto* card = visible_district_card(*state, perspective_player, uid);
+      const int identity = card ? district_identity_index(*card) : -1;
+      if (identity >= 0) result[offset + identity] += amount;
+    };
+    mark(action.uid, 256);
+    mark(!action.secondary_uid.empty() ? action.secondary_uid :
+      state->pending_kind == "diplomat_theirs" ? state->pending_uid : std::string{}, 310);
+    result[379] = action.type == ActionType::DistrictEffect ? 1 : 0;
+    for (const auto& uid : action.selected_uids) mark(uid, 380, 0.2f);
   }
   return result;
 }
@@ -245,7 +249,8 @@ class NativeNeuralBatchedEvaluator final
     std::vector<std::vector<std::vector<float>>> action_vectors;
     state_vectors.reserve(states.size()); action_vectors.reserve(actions.size());
     for (size_t i = 0; i < states.size(); ++i)
-      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1));
+      state_vectors.push_back(encode_network_state(states[i], i < players.size() ? players[i] : -1,
+        state_version_for_action(action_encoding_version_)));
     for (const auto& group : actions) {
       action_vectors.emplace_back();
       for (const auto& action : group)

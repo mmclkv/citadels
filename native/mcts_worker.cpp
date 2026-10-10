@@ -305,7 +305,7 @@ int main() {
       const auto profile = string_field(request, "profile", "balanced");
       const auto device = string_field(request, "device", "cuda");
       const int action_encoding_version = int_field(request, "actionEncodingVersion", kActionEncodingVersion);
-      if (action_encoding_version != 9 && action_encoding_version != kActionEncodingVersion)
+      if (action_encoding_version != 9 && action_encoding_version != 10 && action_encoding_version != kActionEncodingVersion)
         throw std::runtime_error("unsupported action encoding version");
       const bool include_training_features = bool_field(request, "includeTrainingFeatures");
       const auto config_key = inference_backend + "|" + architecture + "|" + profile + "|" + device + "|" +
@@ -348,7 +348,7 @@ int main() {
           gpu = std::make_shared<GpuTrainerClient>(string_field(request, "python"), string_field(request, "script"));
           gpu->start(string_field(request, "profile", "balanced"), model_path, 0.0003f,
                      string_field(request, "device", "cuda"), "binary",
-                     string_field(request, "architecture", "entity-v6"));
+                     string_field(request, "architecture", "entity-v6"), state_version_for_action(action_encoding_version));
           batch = std::make_unique<BatchEvaluator>(make_gpu_batch_backend(gpu,
             profile));
         neural = std::make_unique<NativeNeuralBatchedEvaluator>(*batch,
@@ -494,6 +494,7 @@ int main() {
       std::cout << "],\"value\":" << root_value << ",\"visits\":" << visits
                 << ",\"expansions\":" << expansions
                 << ",\"actionEncodingVersion\":" << action_encoding_version
+                << ",\"stateEncodingVersion\":" << state_version_for_action(action_encoding_version)
                 << ",\"supportedActionEncodingVersion\":" << kActionEncodingVersion
                 << ",\"policyOnly\":" << (bool_field(request, "policyOnly") ? "true" : "false")
                 << ",\"fallback\":" << (actions_match ? "false" : "true")
@@ -539,7 +540,7 @@ int main() {
         std::cout << ']';
       }
       if (include_training_features && actions_match && !pool.empty()) {
-        const auto state_features = encode_network_state(pool.front(), root);
+        const auto state_features = encode_network_state(pool.front(), root, state_version_for_action(action_encoding_version));
         std::cout << ",\"stateFeatures\":[" << std::setprecision(9);
         for (size_t i = 0; i < state_features.size(); ++i) {
           if (i) std::cout << ',';

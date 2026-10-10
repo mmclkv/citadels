@@ -66,7 +66,7 @@ native mcts_worker 的 GPU evaluator 有三种模式：
 
 ## Entity Transformer v6 输入编码：状态 v14 / 动作 v9
 
-`native/state_features.hpp` 只实现 Entity Transformer v6：1790 维状态、256 维动作。状态包含 32 维全局信息、8 个各 184 维的相对玩家槽、30 维本人手牌及 256 维上下文；上下文包含当前可选角色池、建筑状态、反应及待处理效果。城市建筑 ID 经 31×8 embedding 表；对手手牌只用公开张数，不引入隐藏牌面。动作编码使用 UID 字节特征区分具体建筑。`state_features_probe` 和
+`native/state_features.hpp` 实现 Entity Transformer v6 的状态 v15／动作 v11：2054 维状态、448 维动作。状态包含 32 维全局信息、8 个各 184 维的相对玩家槽、54 维本人手牌及 496 维上下文；城市建筑 ID 经 55×8 embedding 表。上下文覆盖新建筑待处理选择、支付方式和钟楼等状态；动作包含主要／次要建筑、特殊效果及所选牌身份。对手手牌只用公开张数，法师目标手牌和灯塔牌堆仅向规则允许的观察者编码。旧 v14/v9、v14/v10 权重通过明确的 1790／256 维兼容布局推理，不可直接用于新编码训练。`state_features_probe` 和
 `action_features_probe` 用于逐元素跨语言回归检查。
 
 ## 搜索根的隐藏信息约定（确定化由调用方负责）

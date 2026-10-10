@@ -20,11 +20,11 @@ from python_backend.training_runtime import _sample_game
 class HistoricalPolicyPoolTests(unittest.TestCase):
     def checkpoint(self, directory, number, **changes):
         path = Path(directory) / f"checkpoint-{number:06d}-test.json.gz"
-        model = {"architecture": "entity-v6", "profile": "fast", "stateSize": 1790,
-                 "actionSize": 256, "parameterCount": 4, "flat": [number] * 4,
+        model = {"architecture": "entity-v6", "profile": "fast", "stateSize": 2054,
+                 "actionSize": 448, "parameterCount": 4, "flat": [number] * 4,
                  "valueObjective": "win-first-v1", **changes}
         path.write_bytes(gzip.compress(json.dumps({"model": model,
-                        "encoding": {"state": 14, "action": 10}}).encode()))
+                        "encoding": {"state": 15, "action": 11}}).encode()))
         os.utime(path, ns=(number * 1_000_000_000, number * 1_000_000_000))
         return path
 
@@ -160,7 +160,8 @@ class HistoricalPolicyPoolTests(unittest.TestCase):
             def apply(self, **kwargs):
                 self.steps += 1
             def snapshot(self, *args):
-                return {"players": [{"city": [{"cost": 3}]}, {"city": []}], "round": 1}
+                return {"players": [{"city": [{"cost": 3}]}, {"city": []}], "round": 1,
+                        "scores": [{"total": 3}, {"total": 0}]}
             def close_game(self, *args):
                 pass
         class Search:
@@ -171,7 +172,7 @@ class HistoricalPolicyPoolTests(unittest.TestCase):
                 self.calls.append(kwargs)
                 result = {"policy": [0.5, 0.5]}
                 if kwargs["include_training_features"]:
-                    result.update(stateFeatures=[0] * 1790, actionFeatures=[[0] * 256] * 2)
+                    result.update(stateFeatures=[0] * 2054, actionFeatures=[[0] * 448] * 2)
                 return result
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

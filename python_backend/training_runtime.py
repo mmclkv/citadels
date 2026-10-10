@@ -33,7 +33,7 @@ from .batch_composition import random_batch_composition
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = ROOT / "training"
-ACTION_SIZE = 256
+ACTION_SIZE = MODEL_CONTRACTS["entity-v6"]["actionSize"]
 _SAMPLER_CONFIG = None
 _SAMPLER_STOP = None
 _SAMPLER_NATIVE_WORKER = None
@@ -140,9 +140,11 @@ class RecentReplayBuffer:
         return sampled
 
 
-def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
+def _entity_forward_probe_inputs(state_version: int = 15) -> list[tuple[np.ndarray, np.ndarray]]:
     """Build deterministic cases covering seat masks, card IDs and action counts."""
-    contract = MODEL_CONTRACTS["entity-v6"]
+    contract = (MODEL_CONTRACTS["entity-v6"] if state_version == 15 else
+                {"state": 14, "action": 10, "stateSize": 1790, "actionSize": 256})
+    card_count = 54 if state_version == 15 else 30
     state_size = contract["stateSize"]
     state = np.zeros(state_size, dtype=np.float32)
     state[0] = contract["state"]
@@ -159,7 +161,7 @@ def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
         state[base + 4] = float(player == 3)
         state[base + 9] = (10 + player) / 100.0
         for slot in range(6):
-            identity = (player * 6 + slot) % 30
+            identity = (player * 12 + slot) % card_count
             offset = base + 56 + slot * slot_width
             state[offset] = (2 + identity % 7) / 8.0
             state[offset + 1] = (identity % 5 + 1) / 5.0
@@ -177,7 +179,7 @@ def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
 
     # Sparse, valid-shaped action vectors avoid the previous random floats,
     # which did not resemble the actual categorical action encoding.
-    actions = np.zeros((4, 256), dtype=np.float32)
+    actions = np.zeros((4, contract["actionSize"]), dtype=np.float32)
     action_type_indices = (8, 19, 20, 12)  # build, end turn, income, choose player
     for row, action_type in enumerate(action_type_indices):
         actions[row, 0] = min(contract["action"], 9)
@@ -192,6 +194,13 @@ def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
         actions[row, 183] = float(row == 0)
         actions[row, 188] = row / 20.0
         actions[row, 213] = float(row == 2)
+        if state_version == 15:
+            actions[row, 256 + 30 + row] = 1
+            actions[row, 310 + 53 - row] = 1
+            actions[row, 364 + row] = 1
+    if state_version == 15:
+        state[hand_start + 30:hand_start + 54] = .5
+        state[1558 + 256:1558 + 496] = .25
     probes = [(state, actions)]
 
     # A two-seat state forces the transformer to mask the remaining player
@@ -210,7 +219,7 @@ def _entity_forward_probe_inputs() -> list[tuple[np.ndarray, np.ndarray]]:
         eight_seat[base:base + player_width] = state[32 + (player - 5) * player_width:
                                                        32 + (player - 4) * player_width]
         eight_seat[base] += player / 100.0
-    many_actions = np.zeros((11, ACTION_SIZE), dtype=np.float32)
+    many_actions = np.zeros((11, contract["actionSize"]), dtype=np.float32)
     action_types = (20, 8, 12, 19, 8, 20, 12, 19, 8, 20, 12)
     for row, action_type in enumerate(action_types):
         many_actions[row, 0] = min(contract["action"], 9)
@@ -281,9 +290,9 @@ def _entity_parameter_count(profile: str) -> int:
     }[profile]
     dense = lambda inputs, outputs: inputs * outputs + outputs
     player_input = 56 + 16 * (7 + 8)
-    global_input = 32 + 256
+    global_input = 32 + 496
     total = dense(global_input, model_dim) + dense(player_input, model_dim)
-    total += 31 * 8 + dense(player_input + 30, model_dim)
+    total += 55 * 8 + dense(player_input + 54, model_dim)
     total += dense(ACTION_SIZE, model_dim)
     total += layers * (4 * dense(model_dim, model_dim) + dense(model_dim, ff_dim) +
                        dense(ff_dim, model_dim) + 4 * model_dim)
@@ -575,11 +584,15 @@ def _sample_game_in_worker(task):
 
 def _training_data(torch, rows: list[dict]) -> dict:
     if not rows:
-        return {"states": torch.zeros((0, 672)), "rewards": torch.zeros((0, 8)),
+        return {"states": torch.zeros((0, MODEL_CONTRACTS["entity-v6"]["stateSize"])), "rewards": torch.zeros((0, 8)),
                 "value_masks": torch.zeros((0, 8)), "actions_flat": np.zeros((0, ACTION_SIZE), np.float32),
                 "lengths": np.zeros(0, np.int64), "offsets": np.zeros(1, np.int64),
                 "action_width": ACTION_SIZE, "pi_flat": np.zeros(0, np.float32),
                 "pi_offsets": np.zeros(1, np.int64), "pi_lengths": np.zeros(0, np.int64)}
+    for row in rows:
+        if (row["state"].shape != (MODEL_CONTRACTS["entity-v6"]["stateSize"],) or
+                row["actions"].ndim != 2 or row["actions"].shape[1] != ACTION_SIZE):
+            raise ValueError("训练样本必须使用状态 v15 / 动作 v11 的编码宽度")
     lengths = np.asarray([len(row["actions"]) for row in rows], dtype=np.int64)
     offsets = np.zeros(len(rows) + 1, dtype=np.int64)
     np.cumsum(lengths, out=offsets[1:])
@@ -797,6 +810,8 @@ class TrainingManager:
                 if metadata.get("architecture") != architecture or metadata.get("profile") != config["profile"]:
                     raise ValueError("续训 checkpoint 的网络架构/profile 与本次配置不一致")
                 resume_contract = validate_checkpoint_contract(checkpoint, architecture)
+                if resume_contract != MODEL_CONTRACTS[architecture]:
+                    raise ValueError("旧建筑编码 checkpoint 需先迁移到状态 v15 / 动作 v11，不能直接续训")
                 values = np.asarray(metadata.get("flat") or [], dtype="<f4")
                 if values.size != metadata.get("parameterCount"):
                     raise ValueError("续训 checkpoint 权重数量不匹配")
@@ -827,9 +842,6 @@ class TrainingManager:
                     # learning rate explicitly selected for this resumed run.
                     for group in self._optimizer.param_groups:
                         group["lr"] = float(config["learningRate"])
-            if resume_path and trainer.migrate_action_encoding(
-                    self._model, self._optimizer, resume_contract["action"]):
-                self._log("动作编码迁移 v9→v10：新增建筑实例特征；新输入列及 Adam 动量置零，保留旧策略前向结果。")
             suffix = ".exe" if os.name == "nt" else ""
             candidates = list((ROOT / "native").glob(f"mcts_worker_libtorch-*{suffix}"))
             default_worker = (max(candidates, key=lambda item: item.stat().st_mtime_ns)
