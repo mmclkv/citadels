@@ -40,12 +40,24 @@ async function verify(page, label) {
     const x = Math.max(pot.offsetWidth, pot.scrollWidth) * 1.16 / 2 + 11;
     const y = Math.max(pot.offsetHeight, pot.scrollHeight) * 1.16 / 2 + 11;
     const panels = Array.from(document.querySelectorAll('.opp'), n => n.getBoundingClientRect());
+    const wrapNode = document.querySelector('#opponents');
+    const rx = Number(wrapNode.style.getPropertyValue('--desktop-ring-radius-x'));
+    const ry = Number(wrapNode.style.getPropertyValue('--desktop-ring-radius-y'));
+    const count = Number(wrapNode.dataset.players);
     const errors = [];
+    if (!(rx > 0 && ry > 0)) errors.push('Missing ring radii');
     panels.forEach((p, i) => {
+      const seat = Number(document.querySelectorAll('.opp')[i].dataset.relativeSeat);
+      const angle = Math.PI / 2 + seat / count * Math.PI * 2;
+      if (Math.abs((p.left + p.width / 2 - cx) / rx - Math.cos(angle)) > .01 ||
+          Math.abs((p.top + p.height / 2 - cy) / ry - Math.sin(angle)) > .01)
+        errors.push('Panel ' + i + ' leaves its angular seat on the ring');
       if (p.left < cx + x && p.right > cx - x && p.top < cy + y && p.bottom > cy - y)
         errors.push('Panel ' + i + ' overlaps the tax bag animation safety zone');
       if (p.top < wrap.top - 1 || p.bottom > wrap.bottom + 1)
         errors.push('Panel ' + i + ' leaves the arena vertically');
+      if (p.left < wrap.left - 1 || p.right > wrap.right + 1)
+        errors.push('Panel ' + i + ' leaves the arena horizontally');
       panels.slice(i + 1).forEach(q => {
         if (Math.min(p.right, q.right) > Math.max(p.left, q.left) + 1 &&
             Math.min(p.bottom, q.bottom) > Math.max(p.top, q.top) + 1)
@@ -88,9 +100,11 @@ async function verify(page, label) {
               '\nwindow.cleanTaxObserver = () => { if (desktopTaxLayoutObserver) desktopTaxLayoutObserver.disconnect();' +
               'if (desktopTaxLayoutFrame != null) cancelAnimationFrame(desktopTaxLayoutFrame); };');
             const wrap = $('#opponents');
+            wrap.dataset.players = String(players);
             for (let seat = 1; seat < players; seat++) {
               const node = document.createElement('div');
               node.className = 'opp'; node.dataset.seat = seat;
+              node.dataset.relativeSeat = String(seat);
               const angle = Math.PI / 2 + seat / players * Math.PI * 2;
               node.style.setProperty('--seat-x', String(50 + Math.cos(angle) * 36));
               node.style.setProperty('--seat-y', String(50 + Math.sin(angle) * 38));
@@ -104,6 +118,8 @@ async function verify(page, label) {
             observeDesktopTaxLayout(wrap);
           }, { players, layoutCode, separationCode });
           await verify(page, `${width}px ${phase} ${players} players`);
+          if (process.env.DESKTOP_TAX_SCREENSHOT && width === 1920 && phase === 'action' && players === 4)
+            await page.screenshot({ path: process.env.DESKTOP_TAX_SCREENSHOT, fullPage: true });
           // A loaded image or another building changes the panel's actual height.
           await page.locator('.opp > div').first().evaluate(n => n.style.height = '540px');
           await verify(page, `${width}px ${phase} ${players} players after content growth`);
@@ -132,6 +148,6 @@ async function verify(page, label) {
     assert.equal(await page.locator('#opponents').evaluate(n => n.clientHeight), settledHeight,
       'Observer must not continually increase the draft arena height');
     assert.deepEqual(errors, [], 'Layout observer must settle without browser errors');
-    console.log(`Passed ${cases} desktop layouts, content growth, and window resize.`);
+    console.log(`Passed ${cases} desktop ring layouts, angular seats, content growth, and window resize.`);
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
