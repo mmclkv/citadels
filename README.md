@@ -6,6 +6,9 @@
 
 ## 快速开始
 
+`main` 是开发版；稳定版使用固定的 `vX.Y.Z` 附注标签和独立发布目录，后续 `main` 改动不会自动进入稳定版。
+线上启动建议传入 `--require-stable`。发布、按版本部署和回滚步骤见 [版本管理说明](docs/releases.md)。
+
 ```bash
 python python_backend/run.py 8787 --host 0.0.0.0  # Python HTTP + WebSocket + C++ 游戏 worker
 python python_backend/run.py 9000 --host 0.0.0.0  # 指定端口

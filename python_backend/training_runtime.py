@@ -597,7 +597,8 @@ def _training_data(torch, rows: list[dict]) -> dict:
 
 class TrainingManager:
     def __init__(self, data_dir: str | Path | None = None, native_worker=None, game_worker=None):
-        self.data_dir = Path(data_dir or ROOT / "training-data")
+        self.data_dir = Path(data_dir or os.environ.get("CITADELS_TRAINING_DATA_DIR") or
+                             ROOT / "training-data")
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._worker_stop = multiprocessing.get_context("spawn").Event()

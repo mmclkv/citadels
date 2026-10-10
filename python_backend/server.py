@@ -36,6 +36,7 @@ from .model_contract import MODEL_CONTRACTS, encoding_compatible
 from .frp import FrpManager
 from .codex_gateway import CodexGateway, detect_codex
 from .native_worker_manager import NativeWorkerManager
+from .versioning import version_info, require_stable
 
 ROOT = Path(__file__).resolve().parents[1]
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -200,6 +201,7 @@ class Client:
 
 class PythonServer:
     def __init__(self, native_worker_manager: NativeWorkerManager | None = None) -> None:
+        self.release = version_info()
         self.rooms = RoomRegistry()
         self.clients: set[Client] = set()
         self._room_cleanup_lock = asyncio.Lock()
@@ -217,7 +219,8 @@ class PythonServer:
                               "CITADELS_AGENT_TIMEOUT_MS": os.environ.get("CITADELS_AGENT_TIMEOUT_MS", "150000")})
         self.agent = AgentClient(config_from_env(agent_env))
         self.codex_gateway = CodexGateway()
-        self.training_data_dir = ROOT / "training-data"
+        self.training_data_dir = Path(os.environ.get("CITADELS_TRAINING_DATA_DIR") or
+                                      ROOT / "training-data").resolve()
         self.neural = NeuralPolicy(worker=native_worker_manager.worker if native_worker_manager else None)
         self.native_worker_manager = native_worker_manager
         self._native_action_lock = asyncio.Lock()
@@ -231,6 +234,8 @@ class PythonServer:
         self.port: int | None = None
         self.listening = False
         self.logs: list[dict] = []
+        self._log_startup("[version] " + self.release["version"] + " (" +
+                          self.release["channel"] + ")")
         self.console_origins = [origin.strip() for origin in os.environ.get(
             "CITADELS_CONSOLE_ORIGINS", "https://mmclkv.github.io").split(",") if origin.strip()]
         self.admin_credentials = self._load_admin_credentials()
@@ -2271,7 +2276,7 @@ class PythonServer:
                            .isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                            "uptimeSeconds": int(max(0, now - self.started_at)),
                            "pid": os.getpid(), "platform": platform_name(), "port": self.port,
-                           "listening": self.listening, "backend": "python",
+                           "listening": self.listening, "backend": "python", "release": self.release,
                            "rooms": len(self.rooms.rooms),
                            "clients": len(self.clients),
                            "nativeWorker": bool(self.native_worker_manager and
@@ -2418,8 +2423,13 @@ class PythonServer:
                                                                "message": status["message"]}),
                                      headers={"Access-Control-Allow-Origin": "*"})
                 return
+            if route == "/api/version" and method == "GET":
+                await _http_response(writer, 200, _json_bytes(self.release),
+                                     headers={"Cache-Control": "no-store"})
+                return
             if route == "/api/server/startup":
                 await _http_response(writer, 200, _json_bytes({
+                    "release": self.release,
                     "logs": self.logs[-100:],
                     "worker": {"path": "", "exists": False, "running": False,
                                "backend": "python", "message": "Python 后端不使用独立 C++ 搜索进程"},
@@ -2492,7 +2502,12 @@ class PythonServer:
                 pass
 
 
-async def serve(host: str, port: int, *, skip_neural_policy: bool = False) -> None:
+async def serve(host: str, port: int, *, skip_neural_policy: bool = False,
+                stable_only: bool = False) -> None:
+    release = version_info()
+    if stable_only:
+        require_stable(release)
+    print("Citadels " + release["version"] + " (" + release["channel"] + ")", flush=True)
     native_worker = NativeWorkerManager(lambda message: print(message, flush=True))
     await asyncio.to_thread(native_worker.start, skip_neural_policy=skip_neural_policy)
     try:
@@ -2537,6 +2552,10 @@ def parse_server_args(argv: list[str] | None = None) -> argparse.Namespace:
         "CITADELS_HOST", os.environ.get("HOST", "127.0.0.1")))
     parser.add_argument("--skip-neural-policy", action="store_true",
                         help="只启动 C++ 游戏规则引擎，跳过 LibTorch 神经策略 worker")
+    parser.add_argument("--version", action="store_true", help="显示版本并退出，不启动 worker")
+    parser.add_argument("--require-stable", action="store_true",
+                        default=os.environ.get("CITADELS_REQUIRE_STABLE") == "1",
+                        help="只允许干净的稳定版独立检出目录启动（线上建议启用）")
     args = parser.parse_args(argv)
     allow_ephemeral = os.environ.get("CITADELS_ALLOW_EPHEMERAL_PORT") == "1"
     minimum_port = 0 if allow_ephemeral else 1
@@ -2549,7 +2568,14 @@ def parse_server_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_server_args()
-    asyncio.run(serve(args.host, args.port, skip_neural_policy=args.skip_neural_policy))
+    if args.version:
+        print(json.dumps(version_info(), ensure_ascii=False, indent=2))
+        return
+    try:
+        asyncio.run(serve(args.host, args.port, skip_neural_policy=args.skip_neural_policy,
+                          stable_only=args.require_stable))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":
