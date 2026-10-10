@@ -506,7 +506,18 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                 dirichlet_epsilon=(0 if policy_only or historical or discovery else config["mctsDirichletEpsilon"]), seed=seed + steps,
                 batch_size=config.get("mctsBatchSize", 32),
                 action_encoding_version=actor_policy["actionEncodingVersion"],
-                include_training_features=collect, policy_only=policy_only)
+                include_training_features=collect, policy_only=policy_only,
+                # Weakness screening uses searched opponents, so do not model
+                # those seats as direct-policy actors. Ordinary training freezes
+                # each non-learner's exact model for the entire game.
+                opponent_policies=([
+                    {"playerId": seats[index]["id"],
+                     "modelPath": opponent["modelPath"],
+                     "modelVersion": opponent["modelVersion"],
+                     "actionEncodingVersion": opponent["actionEncodingVersion"],
+                     "profile": config["profile"]}
+                    for index, opponent in sorted(seat_policies.items()) if index != learner_seat
+                ] if not discovery and not policy_only else []))
             policy = np.asarray(search_result["policy"], dtype=np.float32)
             inference_ms += float(search_result.get("inferenceMs") or
                                   (time.perf_counter() - search_started) * 1000)

@@ -504,8 +504,10 @@ class BatchedMcts {
 
   BatchedMcts(const GameAdapter<State, Action>& game,
               BatchedEvaluator<State, Action>& evaluator, Config config = {},
-              std::function<int(const State&, int, int, const std::vector<Action>&)> npc_choice = {})
-      : game_(game), evaluator_(evaluator), config_(config), npc_choice_(std::move(npc_choice)) {}
+              std::function<int(const State&, int, int, const std::vector<Action>&)> npc_choice = {},
+              std::function<bool(int)> policy_opponent = {})
+      : game_(game), evaluator_(evaluator), config_(config), npc_choice_(std::move(npc_choice)),
+        policy_opponent_(std::move(policy_opponent)) {}
 
   // 单世界搜索：退化成「粒子池只有一份」。
   Result search(const State& root_state, int root_player, int batch_size) {
@@ -699,7 +701,23 @@ class BatchedMcts {
     node.cycle_pruned.resize(node.actions.size(), false);
     node.expanded = true;
   }
-  size_t select(const Node& node) const {
+  size_t select(const Node& node) {
+    // Fixed direct-policy opponents are chance nodes, not optimizing agents.
+    // Resample on every traversal; caching a single sampled action would make
+    // the opponent deterministic for the lifetime of this information set.
+    if (node.player != root_player_ && policy_opponent_ && policy_opponent_(node.player)) {
+      std::vector<double> weights(node.actions.size(), 0.0);
+      double total = 0;
+      for (size_t i = 0; i < weights.size(); ++i)
+        if (!node.cycle_pruned[i] && i < node.priors.size() && std::isfinite(node.priors[i]))
+          total += weights[i] = std::max(0.0f, node.priors[i]);
+      if (total <= 0) {
+        for (size_t i = 0; i < weights.size(); ++i)
+          if (!node.cycle_pruned[i]) total += weights[i] = 1.0;
+      }
+      if (total <= 0) return node.actions.size();
+      return std::discrete_distribution<size_t>(weights.begin(), weights.end())(rng_);
+    }
     size_t best = node.actions.size(); float score_best = -std::numeric_limits<float>::infinity();
     const float parent = static_cast<float>(std::max(1, node.visits + node.pending_visits));
     // Slot zero always belongs to this node's actor, not the root actor.
@@ -797,6 +815,7 @@ class BatchedMcts {
   int root_player_ = 0;
   int expansions_ = 0;
   std::function<int(const State&, int, int, const std::vector<Action>&)> npc_choice_;
+  std::function<bool(int)> policy_opponent_;
 };
 
 }  // namespace citadels::native

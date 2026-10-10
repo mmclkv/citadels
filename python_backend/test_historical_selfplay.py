@@ -156,9 +156,18 @@ class HistoricalSelfPlayTests(unittest.TestCase):
                 if kwargs["root_player_id"] == learner_id:
                     self.assertFalse(kwargs["policy_only"])
                     self.assertTrue(kwargs["include_training_features"])
+                    opponents = kwargs["opponent_policies"]
+                    self.assertEqual(len(opponents), 2)
+                    self.assertNotIn(learner_id, {p["playerId"] for p in opponents})
+                    self.assertEqual(result["opponentPolicyMode"], "seat-policy-sampling-v1")
+                    self.assertTrue(all(p["actionEncodingVersion"] == kwargs["action_encoding_version"]
+                                        for p in opponents))
+                    if config.get("historicalPoolManifest") and number == 2:
+                        self.assertTrue(any(p["modelPath"] != config["nativeModelPath"] for p in opponents))
                     kinds.add("learner")
                 else:
                     self.assertTrue(kwargs["policy_only"])
+                    self.assertEqual(kwargs["opponent_policies"], [])
                     self.assertFalse(kwargs["include_training_features"])
                     self.assertEqual(kwargs["dirichlet_epsilon"], 0)
                     self.assertEqual(result["visits"], 0)

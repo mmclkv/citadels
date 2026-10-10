@@ -20,6 +20,7 @@
 #include "neural_evaluator.hpp"
 #include "npc_policy.hpp"
 #include "shared_memory_inference.hpp"
+#include "seat_policy_evaluator.hpp"
 #include "state_loader.hpp"
 #include "state_writer.hpp"
 #ifdef _WIN32
@@ -172,6 +173,7 @@ int main() {
   std::unique_ptr<NativeNeuralBatchedEvaluator> shared_neural;
 #ifdef CITADELS_LIBTORCH
   std::unique_ptr<DirectNeuralEvaluator> direct_neural;
+  std::unordered_map<std::string, std::unique_ptr<DirectNeuralEvaluator>> opponent_models;
 #endif
   std::string gpu_model_path;
   std::string evaluator_config_key;
@@ -313,6 +315,7 @@ int main() {
       if (evaluator_config_key != config_key) {
 #ifdef CITADELS_LIBTORCH
         direct_neural.reset();
+        opponent_models.clear();
 #endif
         neural.reset(); batch.reset(); gpu.reset();
         shared_neural.reset(); shared_batch.reset(); shared_inference.reset();
@@ -371,6 +374,55 @@ int main() {
         " · maxDepth=" + std::to_string(config.max_depth) +
         " · batch=" + std::to_string(batch_size) +
         " · 后端=" + inference_backend;
+      const auto* opponent_policies = request.get("opponentPolicies");
+      if (opponent_policies && !opponent_policies->is_array())
+        throw std::runtime_error("opponentPolicies must be an array");
+#ifdef CITADELS_LIBTORCH
+      std::unique_ptr<SeatPolicyEvaluator<NativeGameState, NativeSearchAction>> seat_evaluator;
+      std::unordered_map<int, BatchedEvaluator<NativeGameState, NativeSearchAction>*> seat_backends;
+      std::unordered_set<std::string> active_models;
+      if (opponent_policies && !opponent_policies->as_array().empty()) {
+        if (!direct_neural || bool_field(request, "policyOnly"))
+          throw std::runtime_error("opponentPolicies requires a full LibTorch search");
+        if (opponent_policies->as_array().size() >= state.players.size())
+          throw std::runtime_error("Too many opponent policies");
+        for (const auto& entry : opponent_policies->as_array()) {
+          const int actor = player_index(state, string_field(entry, "playerId"));
+          const auto path = string_field(entry, "modelPath");
+          const auto opponent_profile = string_field(entry, "profile", profile);
+          const int version = int_field(entry, "modelVersion", 0);
+          const int encoding = int_field(entry, "actionEncodingVersion", action_encoding_version);
+          if (actor < 0 || actor == root || seat_backends.count(actor) || path.empty() ||
+              !state.players[actor].is_bot || state.players[actor].bot_type != "neural")
+            throw std::runtime_error("Invalid or duplicate opponent policy seat");
+          if ((encoding != 9 && encoding != 10 && encoding != kActionEncodingVersion) ||
+              state_version_for_action(encoding) != state_version_for_action(action_encoding_version))
+            throw std::runtime_error("Opponent policy state encoding mismatch");
+          if (opponent_profile != "fast" && opponent_profile != "balanced" && opponent_profile != "large")
+            throw std::runtime_error("Invalid opponent policy profile");
+          if (path == gpu_model_path && version == gpu_model_version &&
+              opponent_profile == profile && encoding == action_encoding_version) {
+            seat_backends[actor] = direct_neural.get();
+          } else {
+            const auto key = path + "|" + std::to_string(version) + "|" + opponent_profile + "|" + std::to_string(encoding);
+            active_models.insert(key);
+            auto& model = opponent_models[key];
+            if (!model) model = std::make_unique<LibTorchEntityTransformerEvaluator>(
+              opponent_profile, path, device, true, encoding);
+            seat_backends[actor] = model.get();
+          }
+        }
+        // Retain only this game's assigned models; direct-policy requests in
+        // between learner searches do not flush the cache.
+        for (auto it = opponent_models.begin(); it != opponent_models.end();)
+          if (!active_models.count(it->first)) it = opponent_models.erase(it); else ++it;
+      }
+      if (direct_neural) seat_evaluator = std::make_unique<SeatPolicyEvaluator<NativeGameState, NativeSearchAction>>(
+        *direct_neural, std::move(seat_backends));
+#else
+      if (opponent_policies && !opponent_policies->as_array().empty())
+        throw std::runtime_error("opponentPolicies requires a LibTorch build");
+#endif
       auto run_search = [&](const std::vector<NativeGameState>& states, int perspective,
                             int batch, const std::vector<float>& weights) {
 #ifdef CITADELS_LIBTORCH
@@ -400,9 +452,11 @@ int main() {
           return NativeNpcPolicy::choose(game_state, actor, legal, policy_seed);
         };
 #ifdef CITADELS_LIBTORCH
-        if (direct_neural)
-          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *direct_neural, config, npc_choice)
+        if (direct_neural) {
+          return BatchedMcts<NativeGameState, NativeSearchAction>(game, *seat_evaluator, config, npc_choice,
+            [&](int player) { return seat_evaluator->has_policy(player); })
             .search(states, perspective, batch, weights);
+        }
 #endif
         if (shared_neural)
           return BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config, npc_choice)
@@ -513,6 +567,10 @@ int main() {
         std::cout << '"' << action_type_name(supplied[i].type) << '"';
       }
       std::cout << ']';
+#ifdef CITADELS_LIBTORCH
+      std::cout << ",\"opponentPolicyMode\":\"seat-policy-sampling-v1\""
+                << ",\"opponentPolicyEvaluations\":" << (seat_evaluator ? seat_evaluator->policy_evaluations : 0);
+#endif
       if (!actions_match) {
         std::cout << ",\"nativeActionDetails\":[";
         for (size_t i = 0; i < native_actions.size(); ++i) {

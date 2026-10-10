@@ -67,7 +67,8 @@ class NativeMctsWorker:
                dirichlet_alpha: float, dirichlet_epsilon: float, seed: int,
                batch_size: int = 32, action_encoding_version: int = 11,
                include_training_features: bool = False, policy_only: bool = False,
-               include_root_diagnostics: bool = False) -> dict:
+               include_root_diagnostics: bool = False,
+               opponent_policies: list[dict] | None = None) -> dict:
         with self._lock:
             if self.process.poll() is not None:
                 raise RuntimeError(f"C++ MCTS worker 已退出（exit={self.process.returncode}）")
@@ -87,6 +88,7 @@ class NativeMctsWorker:
                 "dirichletAlpha": float(dirichlet_alpha),
                 "dirichletEpsilon": float(dirichlet_epsilon),
                 "seed": int(seed), "batchSize": int(batch_size),
+                "opponentPolicies": opponent_policies or [],
             }
             assert self.process.stdin is not None and self.process.stdout is not None
             try:
@@ -118,6 +120,8 @@ class NativeMctsWorker:
             if result.get("t") != "search_result":
                 raise RuntimeError("C++ MCTS worker 响应类型不支持")
             self._validate_search_encoding(result, action_encoding_version)
+            if opponent_policies and result.get("opponentPolicyMode") != "seat-policy-sampling-v1":
+                raise RuntimeError("C++ worker 不支持按席位策略预测对手；请重新编译，不能沿用旧搜索目标")
             if policy_only and result.get("policyOnly") is not True:
                 raise RuntimeError("C++ worker 不支持纯网络评测；请重新编译，不能把搜索结果当成网络输出")
             if include_root_diagnostics and ("networkPolicy" not in result or "networkValueVector" not in result):
