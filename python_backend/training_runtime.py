@@ -29,7 +29,8 @@ from .model_contract import MODEL_CONTRACTS, config_contract, checkpoint_resume_
 from .training_config import sanitize_config
 from .historical_policy_pool import HistoricalPolicyPool, assign_seat_policies
 from .weakness_search import WeaknessSearch, discovery_due
-from .batch_composition import random_batch_composition
+from .batch_composition import balanced_game_compositions, composition_summary
+from .opponent_replay import OpponentReplayBuffer
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = ROOT / "training"
@@ -818,7 +819,7 @@ class TrainingManager:
         last_weakness_search = 0
         sampler_pool = None
         native_model_dir = None
-        replay_buffer = RecentReplayBuffer(max_games=config["replayBufferGames"])
+        replay_buffer = OpponentReplayBuffer(max_games=config["replayBufferGames"],seed=config['seed'])
         try:
             self._log("正在初始化 PyTorch 训练环境…")
             torch, trainer = _load_trainer()
@@ -946,8 +947,9 @@ class TrainingManager:
                       f"ε={config['mctsDirichletEpsilon']}；LibTorch 前向推理")
             self._log("每局仅轮换训练席位使用完整 MCTS；其余当前/历史网络对手直接推理，"
                       "不生成策略教师样本；战力指标统计训练席位。")
-            self._log(f"Replay buffer：最近最多 {replay_buffer.max_games} 局；无固定字节上限，"
-                      "内存用量随样本大小增长；每批最多按新样本数等量抽取旧样本")
+            self._log(f"Replay buffer：总容量 {replay_buffer.max_games} 局，最近 {replay_buffer.recent_capacity} 局 + "
+                      f"长期分层储备 {replay_buffer.archive_capacity} 局；按人数、对手类型和对局均衡回放；"
+                      "每批最多按新样本数等量抽取旧样本，无固定字节上限。")
             totals = {"steps": 0, "gameMs": 0.0, "inferenceMs": 0.0,
                       "inferenceSearches": 0, "rounds": 0, "fallbacks": 0,
                       "incompleteGames": 0, "finishedGames": 0,
@@ -958,31 +960,32 @@ class TrainingManager:
                 if self._device.type == "cuda":
                     torch.cuda.reset_peak_memory_stats(self._device)
                 rows: list[dict] = []
-                completed_game_rows: list[list[dict]] = []
+                completed_game_rows = []
                 batch_metrics = []
                 batch_results = []
                 batch_count = int(min(config["batchGames"], config["targetGames"] - games))
                 game_numbers = [games + offset + 1 for offset in range(batch_count)]
-                composition = random_batch_composition(config, game_numbers[0], bool(historical_pool.entries))
-                batch_config = {**config, "batchComposition": composition}
-                if composition:
-                    self._log(f"批次随机阵容：{composition['players']} 人；当前模型 {composition['main']}，"
-                              f"历史策略 {composition['historical']}，启发式 {composition['heuristic']}")
+                compositions = balanced_game_compositions(config, game_numbers, bool(historical_pool.entries))
+                batch_summary = composition_summary(compositions)
+                if batch_summary:
+                    self._log(f"逐局随机、批内均衡阵容：人数分布 {batch_summary['playerCounts']}；"
+                              f"席位合计 当前 {batch_summary['main']}，历史 {batch_summary['historical']}，"
+                              f"启发式 {batch_summary['heuristic']}")
                 with self._lock:
-                    self._status["batchComposition"] = composition
+                    self._status["batchComposition"] = batch_summary
                 self._log(f"开始采样批次：第 {game_numbers[0]}–{game_numbers[-1]} 局（共 {batch_count} 局）…")
                 if sampler_pool:
                     self._model.save_flat(config["nativeModelPath"])
                     sampled_games = sampler_pool.imap_unordered(
-                        _sample_game_in_worker, [(number, composition) for number in game_numbers], chunksize=1)
+                        _sample_game_in_worker, list(zip(game_numbers,compositions)), chunksize=1)
                 else:
                     def serial_samples():
                         self._model.save_flat(config["nativeModelPath"])
-                        for game_number in game_numbers:
+                        for game_number, composition in zip(game_numbers,compositions):
                             if self._stop.is_set():
                                 break
                             self._log(f"正在采样第 {game_number}/{config['targetGames']} 局…")
-                            yield _sample_game(batch_config, game_number, self._stop)
+                            yield _sample_game({**config,"batchComposition":composition}, game_number, self._stop)
                     sampled_games = serial_samples()
                 sampler_pids = set()
                 for result in sampled_games:
@@ -992,7 +995,9 @@ class TrainingManager:
                     sampler_pids.add(int(result["samplerPid"]))
                     rows.extend(result["rows"])
                     if result["completed"] and result["rows"]:
-                        completed_game_rows.append(result["rows"])
+                        completed_game_rows.append((result['gameNumber'],result['rows'],
+                            dict(players=result['playerCount'],main=result['networkPlayerCount'],
+                                 historical=result['historicalPlayers'],heuristic=result['heuristicPlayers'])))
                     batch_results.append(result)
                     totals["steps"] += result["steps"]
                     totals["inferenceMs"] += result["inferenceMs"]
@@ -1026,7 +1031,8 @@ class TrainingManager:
                             "currentNetworkPlayers": result["networkPlayerCount"],
                             "historicalPlayers": result["historicalPlayers"],
                             "heuristicPlayers": result["heuristicPlayers"],
-                            "batchComposition": result["batchComposition"],
+                            "batchComposition": batch_summary,
+                            "gameComposition": result["batchComposition"],
                             "historicalCheckpoints": result["historicalCheckpoints"],
                             "historicalPoolCount": len(historical_pool.entries),
                             "temperature": result["temperature"],
@@ -1058,8 +1064,8 @@ class TrainingManager:
                     replay_rng = np.random.default_rng(
                         (int(config["seed"]) ^ (games * 0x9E3779B1)) & 0xFFFFFFFF)
                     replay_rows = replay_buffer.sample(len(rows), replay_rng)
-                    for game_rows in completed_game_rows:
-                        replay_buffer.add_game(game_rows)
+                    for _, game_rows, game_composition in sorted(completed_game_rows,key=lambda item:item[0]):
+                        replay_buffer.add_game(game_rows,game_composition)
                     training_rows = rows + replay_rows
                     self._log(
                         f"采样批次完成：新样本 {len(rows)} 条 + replay {len(replay_rows)} 条；"
@@ -1079,6 +1085,8 @@ class TrainingManager:
                     batch_metrics["replayBufferGames"] = replay_buffer.game_count
                     batch_metrics["replayBufferSamples"] = replay_buffer.samples
                     batch_metrics["replayBufferBytes"] = replay_buffer.bytes
+                    batch_metrics['replayRecentGames'] = len(replay_buffer.recent)
+                    batch_metrics['replayArchiveGames'] = replay_buffer.archive_games
                     with self._lock:
                         self._status["point"] = {**(self._status.get("point") or {}), **batch_metrics}
                         self._status["history"].append(copy.deepcopy(self._status["point"]))

@@ -77,6 +77,8 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "trainingEpochs": _clamp_or(raw.get("trainingEpochs"), 1, math.inf, 2),
         "miniBatch": _clamp_or(raw.get("miniBatch"), 32, math.inf, 256),
         "replayBufferGames": finite_integer("replayBufferGames", 0, math.inf, 128),
+        "replaySamplingVersion": "recent-stratified-reservoir-v1",
+        "opponentCompositionVersion": "per-game-balanced-v1",
         "historicalPoolSize": finite_integer("historicalPoolSize", 0, math.inf, 8),
         "historicalOpponentProbability": finite_clamp("historicalOpponentProbability", 0, 1, 0.5),
         "weaknessSearchEvery": finite_integer("weaknessSearchEvery", 0, math.inf, 2000),

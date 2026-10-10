@@ -424,8 +424,11 @@ function renderRuntime(status) {
     ['MCTS 引擎', c.mctsEngine === 'cpp' ? 'C++ ISMCTS' : '—'],
     ['神经网络框架', c.neuralNetworkFramework === 'libtorch' ? 'LibTorch' : '—'],
     ['计算设备', c.device === 'cuda' ? 'GPU' : (c.device === 'cpu' ? 'CPU' : '—')],
-    ['自对弈阵容', c.selfPlayMode === 'random-batch' ? '每批随机混合' : c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
-    ['本批阵容', status.batchComposition ? status.batchComposition.players + ' 人：当前 ' + status.batchComposition.main + '，历史 ' + status.batchComposition.historical + '，启发式 ' + status.batchComposition.heuristic : '—'],
+    ['自对弈阵容', c.selfPlayMode === 'random-batch' ? '每局随机混合（批内均衡）' : c.selfPlayMode === 'all-network' ? '全策略网络' : (c.selfPlayMode === 'network-vs-heuristic' ? '策略网络 + 启发式' : '课程式递增')],
+    ['本批阵容', status.batchComposition ? (status.batchComposition.mode === 'per-game-balanced-v1'
+      ? Object.entries(status.batchComposition.playerCounts).map(([n, count]) => n + ' 人 × ' + count + ' 局').join('；') + '；席位合计'
+      : status.batchComposition.players + ' 人：') + ' 当前 ' + status.batchComposition.main + '，历史 ' + status.batchComposition.historical + '，启发式 ' + status.batchComposition.heuristic : '—'],
+    ['回放最近 / 长期对局', status.point && status.point.replayRecentGames != null ? status.point.replayRecentGames + ' / ' + status.point.replayArchiveGames : '—'],
     ['座位公平化', '策略网络座位与开局皇冠每局自动轮换'],
     ['状态 / 动作编码', 'v' + (c.stateEncodingVersion || $('state-encoding').value) + ' / v' + (c.actionEncodingVersion || $('action-encoding').value) + '（entity-v6）'],
     ['权重恢复方式', c.weightMigration ? c.weightMigration.message : '从头训练'],

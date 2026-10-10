@@ -10,13 +10,43 @@ from unittest.mock import patch
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from python_backend.batch_composition import random_batch_composition
+from python_backend.batch_composition import random_batch_composition, balanced_game_compositions, composition_summary
 from python_backend.historical_policy_pool import assign_seat_policies
 from python_backend.training_config import sanitize_config
 from python_backend import training_runtime
 
 
 class BatchCompositionTests(unittest.TestCase):
+    def test_each_batch_balances_players_types_and_keeps_anchors(self):
+        config=sanitize_config({'minPlayers':4,'maxPlayers':8})
+        numbers=list(range(16016,16144))
+        plans=balanced_game_compositions(config,numbers,True)
+        self.assertEqual(plans,balanced_game_compositions(config,numbers,True))
+        self.assertEqual([p['firstGame'] for p in plans],numbers)
+        summary=composition_summary(plans)
+        self.assertLessEqual(max(summary['playerCounts'].values())-min(summary['playerCounts'].values()),1)
+        for n in range(4,9):
+            group=[p for p in plans if p['players']==n]
+            for p in group:self.assertEqual(p['main']+p['historical']+p['heuristic'],n)
+            totals=[sum(p['main']-1 for p in group),sum(p['historical'] for p in group),sum(p['heuristic'] for p in group)]
+            self.assertLessEqual(max(totals)-min(totals),2*(n-1))
+            mixes={(p['main'],p['historical'],p['heuristic']) for p in group}
+            self.assertTrue({(n,0,0),(1,n-1,0),(1,0,n-1)}<=mixes)
+        self.assertGreater(len({(p['players'],p['main'],p['historical'],p['heuristic']) for p in plans}),10)
+
+    def test_partial_batches_disabled_history_and_legacy_modes(self):
+        config=sanitize_config({'minPlayers':4,'maxPlayers':8})
+        for size in (0,1,2,7,128):
+            numbers=list(range(9,9+size))
+            enabled=balanced_game_compositions(config,numbers,True)
+            disabled=balanced_game_compositions(config,numbers,False)
+            for a,b in zip(enabled,disabled):
+                self.assertEqual(b['main'],a['main']+a['historical'])
+                self.assertEqual(b['historical'],0)
+                self.assertEqual(b['heuristic'],a['heuristic'])
+        for mode in ('curriculum','all-network','network-vs-heuristic'):
+            self.assertEqual(balanced_game_compositions({**config,'selfPlayMode':mode},[1,2],True),[None,None])
+
     def test_count_invariants_and_diversity_across_player_counts(self):
         for count in range(2, 9):
             config = sanitize_config({"minPlayers": count, "maxPlayers": count})

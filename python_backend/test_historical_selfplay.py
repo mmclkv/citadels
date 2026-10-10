@@ -110,7 +110,7 @@ class HistoricalSelfPlayTests(unittest.TestCase):
             self.assertEqual(json.loads(reports[0].read_text(encoding="utf-8"))["completePairs"], 1)
 
     def test_random_batch_counts_reach_parallel_native_games(self):
-        from python_backend.batch_composition import random_batch_composition
+        from python_backend.batch_composition import balanced_game_compositions, composition_summary
         from python_backend.training_config import sanitize_config
         with tempfile.TemporaryDirectory() as directory:
             manager = TrainingManager(directory, self.native.worker, self.native.game_worker)
@@ -118,22 +118,29 @@ class HistoricalSelfPlayTests(unittest.TestCase):
                       "selfPlayMode": "random-batch", "charSet": "base", "profile": "fast",
                       "device": "cpu", "mctsSimulations": 1, "mctsParticles": 1,
                       "mctsMaxDepth": 10, "workers": 2, "batchGames": 2,
+                      "replayBufferGames": 2,
                       "trainingEpochs": 1, "miniBatch": 32, "checkpointEvery": 2,
                       "maxRounds": 100, "endDistricts": 7, "weaknessSearchEvery": 0, "seed": 7}
             manager.start(config)
             status = self.wait(manager)
             self.assertEqual(status["completedGames"], 4)
             self.assertEqual(status["point"]["finishedGames"], 4)
-            expected = random_batch_composition(sanitize_config(config), 3, True)
+            plans = balanced_game_compositions(sanitize_config(config), [3,4], True)
+            expected = composition_summary(plans)
             self.assertEqual(status["batchComposition"], expected)
-            self.assertEqual(status["point"]["currentNetworkPlayers"], expected["main"])
-            self.assertEqual(status["point"]["historicalPlayers"], expected["historical"])
-            self.assertEqual(status["point"]["heuristicPlayers"], expected["heuristic"])
+            actual = status['point']['gameComposition']
+            self.assertIn(actual, plans)
+            self.assertEqual(status["point"]["currentNetworkPlayers"], actual["main"])
+            self.assertEqual(status["point"]["historicalPlayers"], actual["historical"])
+            self.assertEqual(status["point"]["heuristicPlayers"], actual["heuristic"])
             self.assertEqual(status["point"]["fallbacks"], 0)
             self.assertEqual(len(status["history"]), 2)
-            first = random_batch_composition(sanitize_config(config), 1, False)
+            first = composition_summary(balanced_game_compositions(sanitize_config(config), [1,2], False))
             self.assertEqual(status["history"][0]["batchComposition"], first)
             self.assertEqual(status["history"][1]["batchComposition"], expected)
+            self.assertEqual(status['point']['replayRecentGames'],1)
+            self.assertEqual(status['point']['replayArchiveGames'],1)
+            self.assertGreater(status['point']['replaySamples'],0)
 
     def test_only_rotating_learner_searches_and_supplies_policy_targets(self):
         from unittest.mock import patch
@@ -195,7 +202,8 @@ class HistoricalSelfPlayTests(unittest.TestCase):
                       "historicalPoolSize": 2, "historicalOpponentProbability": 1,
                       "maxRounds": 100, "endDistricts": 7, "weaknessSearchEvery": 0, "seed": 7}
             with patch.object(runtime, "_sample_game", sample), \
-                    patch.object(runtime, "random_batch_composition", composition):
+                    patch.object(runtime, "balanced_game_compositions", lambda c, numbers, available:
+                                 [dict(composition(c,n,available),firstGame=n) for n in numbers]):
                 manager.start(config)
                 status = self.wait(manager)
             self.assertEqual(status["completedGames"], 2)
