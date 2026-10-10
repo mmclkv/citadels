@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=77">
+  <link rel="stylesheet" href="./style.css?v=78">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=16">
 </head>
 <body>
@@ -54,6 +54,10 @@
 
   <main class="board">
     <div class="board-main" id="board-main">
+      <section class="desktop-public-state" aria-label="公开局面">
+        <strong>公开局面</strong>
+        <div class="desktop-public-effects" id="desktop-public-effects" aria-live="polite"></div>
+      </section>
       <!-- 选角阶段 -->
       <div id="draft-area" class="draft-area" hidden>
         <div class="draft-head">
@@ -277,6 +281,6 @@
 <script src="./src/cards.js?v=5"></script>
 <script src="./components/citadels-lobby.js?v=8"></script>
 <script src="./components/citadels-spectator.js?v=2"></script>
-<script src="./app.js?v=103"></script>
+<script src="./app.js?v=104"></script>
 </body>
 </html>

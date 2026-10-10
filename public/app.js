@@ -2829,6 +2829,7 @@
       fx.textContent = parts.join(' · ');
       fx.hidden = parts.length === 0;
     }
+    renderPublicEffects(s);
 
     // 关键事件提示（被刺杀等）。用 seq 去重，重复渲染不会重复弹窗。
     processNotices(s);
@@ -3280,12 +3281,12 @@
   function mobileDistrictName(name) {
     return String(name || '').slice(0, 3);
   }
-  function mobilePublicEffectItems(s) {
+  function publicEffectItems(s) {
     const effects = s.effects || {};
-    if (!App.mobileEffectMemo || App.mobileEffectMemo.roomId !== s.roomId || App.mobileEffectMemo.round !== s.round) {
-      App.mobileEffectMemo = { roomId: s.roomId, round: s.round };
+    if (!App.publicEffectMemo || App.publicEffectMemo.roomId !== s.roomId || App.publicEffectMemo.round !== s.round) {
+      App.publicEffectMemo = { roomId: s.roomId, round: s.round };
     }
-    const memo = App.mobileEffectMemo;
+    const memo = App.publicEffectMemo;
     const items = [];
     const label = number => {
       const character = (s.charDeck || []).find(c => Number(c.num) === Number(number));
@@ -3308,19 +3309,24 @@
     }
     return items;
   }
-  function renderMobilePublicEffects(s) {
-    const box = $('#mobile-public-effects');
-    if (!box) return;
-    const items = mobilePublicEffectItems(s);
-    box.hidden = !items.length;
-    box.innerHTML = items.map(item => '<span class="mobile-public-effect ' + item.tone + '">' +
-      escapeHtml(item.text) + '</span>').join('');
+  function renderPublicEffects(s) {
+    const items = publicEffectItems(s);
+    const desktop = $('#desktop-public-effects');
+    if (desktop) desktop.innerHTML = items.length
+      ? items.map(item => '<span class="desktop-public-effect ' + item.tone + '">' +
+        escapeHtml(item.text) + '</span>').join('')
+      : '<span class="desktop-public-empty">本轮暂无公开宣告</span>';
+    const mobile = $('#mobile-public-effects');
+    if (mobile) {
+      mobile.hidden = !items.length;
+      mobile.innerHTML = items.map(item => '<span class="mobile-public-effect ' + item.tone + '">' +
+        escapeHtml(item.text) + '</span>').join('');
+    }
   }
   function renderMobilePlayers(s) {
     const wrap = $('#opponents');
     const arena = $('#table-arena');
     if (!wrap) return;
-    renderMobilePublicEffects(s);
     wrap.dataset.layout = 'mobile-grid';
     wrap.dataset.players = String(s.players.length);
     wrap.style.height = '';
