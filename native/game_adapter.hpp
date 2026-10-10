@@ -550,6 +550,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     if (!state.resources_taken) {
       actions.push_back({ActionType::TakeGold});
       actions.push_back({ActionType::TakeCards});
+      if (state.awaiting_blackmail()) return actions;
     }
     if (state.resources_taken && !state.ability_used && state.pending_kind.empty()) {
       const auto& role = state.players[player].role_id;

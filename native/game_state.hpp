@@ -621,6 +621,8 @@ struct NativeGameState {
     if (!p || resources_taken) return false;
     p->gold += plan_take_gold(turn_phase == "hospital" ? "" : p->role_id,
       turn_phase == "witch_resume" ? ResourcePhase::WitchResume : ResourcePhase::Main).gold;
+    // Character bonuses must wait until any post-resource threat is resolved.
+    if (turn_phase == "main" || turn_phase.empty()) p->gold -= role_gold_bonus(p->role_id);
     if (turn_phase != "hospital" && has_effect(active_player, "goldMine")) ++p->gold;
     resources_taken = true;
     if (turn_phase == "bewitched") return finish_bewitched_turn();
@@ -640,6 +642,7 @@ struct NativeGameState {
       draw_three ? DistrictDrawEffect::Observatory : (keep_both ? DistrictDrawEffect::Library : effect));
     auto cards = deck.draw(draw_three ? 3 : plan.drawn, rng);
     p->gold += plan.gold;
+    if (turn_phase == "main" || turn_phase.empty()) p->gold -= role_gold_bonus(p->role_id);
     resources_taken = true;
     if (keep_both || plan.keep_all || cards.empty()) {
       p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()),
@@ -653,9 +656,53 @@ struct NativeGameState {
     return true;
   }
 
+  bool awaiting_blackmail() const {
+    const auto* p = active();
+    if (!p) return false;
+    const int number = role_number(p->role_id);
+    return (turn_phase == "main" || turn_phase.empty()) && blackmailer_player >= 0 &&
+        blackmailer_player < static_cast<int>(players.size()) &&
+        assassinated != number && bewitched != number &&
+        std::find(blackmailer_nums.begin(), blackmailer_nums.end(), number) != blackmailer_nums.end() &&
+        std::find(blackmailer_done.begin(), blackmailer_done.end(), number) == blackmailer_done.end();
+  }
+
   void after_resources() {
     auto* p = active();
-    if (!p || turn_phase == "hospital" || turn_phase == "witch_resume" || ability_used || !pending_kind.empty()) return;
+    if (!p || !resources_taken || !pending_kind.empty() || !reaction_kind.empty() ||
+        turn_phase == "hospital" || turn_phase == "bewitched") return;
+    if (awaiting_blackmail()) {
+      const int number = role_number(p->role_id);
+      pending_kind = "blackmailer_threat"; pending_target = active_player;
+      pending_first = number; pending_signed = blackmailer_signed == number;
+      return;
+    }
+    if (turn_phase == "witch_resume" || ability_used) return;
+    if (p->role_id == "merchant" && !bonus_done) {
+      p->gold += role_gold_bonus(p->role_id);
+      bonus_done = true;
+    }
+    if (p->role_id == "noble" && !income_taken) {
+      const int count = static_cast<int>(std::count_if(p->city.begin(), p->city.end(),
+        [](const NativeDistrict& d) { return d.card.color == "yellow" || d.effect == "anyColorIncome"; }));
+      auto cards = deck.draw(count, rng);
+      p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
+      income_taken = true;
+    }
+    if (p->role_id == "queen" && !bonus_done) {
+      int holder = -1;
+      for (size_t i = 0; i < players.size(); ++i)
+        if (std::any_of(players[i].role_ids.begin(), players[i].role_ids.end(),
+            [&](const std::string& role) { return role_number(role) == 4; })) holder = static_cast<int>(i);
+      if (holder >= 0) {
+        if (assassinated == 4) pending_queen = active_player;
+        else {
+          const int distance = std::abs(active_player - holder);
+          if (distance == 1 || distance == static_cast<int>(players.size()) - 1) p->gold += 3;
+        }
+      }
+      bonus_done = true;
+    }
     if (p->role_id == "architect" && !bonus_done) {
       auto bonus = deck.draw(2, rng);
       p->hand.insert(p->hand.end(), std::make_move_iterator(bonus.begin()),
@@ -778,30 +825,32 @@ struct NativeGameState {
       const int owner = blackmailer_player;
       const bool real = pending_signed;
       if (real) blackmailer_revealed_real.push_back(pending_first);
-      if (real && owner >= 0 && owner < static_cast<int>(players.size())) {
+      if (real && owner >= 0 && owner < static_cast<int>(players.size()) && owner != active_player) {
         players[owner].gold += target->gold; target->gold = 0;
       }
       blackmailer_done.push_back(pending_first);
       pending_kind.clear(); pending_target = -1; pending_first = -1; pending_signed = -1;
       reaction_kind.clear(); reaction_player = -1;
-      resources_taken = false;
+      after_resources();
       return true;
     }
     // The marked player refused the ransom; this branch is the blackmailer's
     // subsequent choice not to expose the token (the mark expires this round).
     blackmailer_done.push_back(pending_first);
     pending_kind.clear(); pending_target = -1; pending_first = -1; pending_signed = -1;
-    reaction_kind.clear(); reaction_player = -1; resources_taken = false; return true;
+    reaction_kind.clear(); reaction_player = -1; after_resources(); return true;
   }
 
   bool blackmailer_bribe() {
     auto* target = active();
-    if (!target || pending_kind != "blackmailer_threat") return false;
-    target->gold -= target->gold / 2;
+    if (!target || pending_kind != "blackmailer_threat" || blackmailer_player < 0 ||
+        blackmailer_player >= static_cast<int>(players.size())) return false;
+    const int amount = target->gold / 2;
+    target->gold -= amount; players[blackmailer_player].gold += amount;
     blackmailer_nums.erase(std::remove(blackmailer_nums.begin(), blackmailer_nums.end(), pending_first), blackmailer_nums.end());
     blackmailer_done.push_back(pending_first);
     pending_kind.clear(); pending_target = -1; pending_first = -1; pending_signed = -1;
-    resources_taken = false; return true;
+    after_resources(); return true;
   }
 
   bool blackmailer_refuse() {
@@ -1188,8 +1237,7 @@ struct NativeGameState {
         ability_used = false; bonus_done = false;
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
         // The crown changes hands as soon as role 4 is called. Resolve it
-        // before interrupting the turn for a Blackmailer threat; that
-        // response pauses the role but must not postpone its crown effect.
+        // before resources and any subsequent Blackmailer threat.
         if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
           move_crown(entry.player);
         }
@@ -1198,42 +1246,6 @@ struct NativeGameState {
           if (static_cast<int>(owner) != active_player && players[owner].has_crown && has_effect(static_cast<int>(owner), "ballroom")) {
             pending_kind = "ballroom"; break;
           }
-        if (pending_kind.empty() && blackmailer_player >= 0 &&
-            bewitched != entry.number &&
-            std::find(blackmailer_nums.begin(), blackmailer_nums.end(), entry.number) != blackmailer_nums.end() &&
-            std::find(blackmailer_done.begin(), blackmailer_done.end(), entry.number) == blackmailer_done.end()) {
-          active_player = entry.player;
-          players[active_player].role_id = entry.char_id;
-          turn_phase = "main";
-          resources_taken = false; income_taken = false; monk_extra_taken = false;
-          builds = 0; spent_on_build = 0; ability_used = false;
-          used_lab = false; used_smithy = false; used_museum = false;
-          pending_kind = "blackmailer_threat"; pending_target = entry.player;
-          pending_first = entry.number; pending_signed = blackmailer_signed == entry.number;
-          return true;
-        }
-        if (entry.char_id == "noble") {
-          const int count = static_cast<int>(std::count_if(players[entry.player].city.begin(), players[entry.player].city.end(),
-            [](const NativeDistrict& district) { return district.card.color == "yellow" || district.effect == "anyColorIncome"; }));
-          auto cards = deck.draw(count, rng);
-          players[entry.player].hand.insert(players[entry.player].hand.end(),
-            std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
-          income_taken = true;
-        }
-        if (entry.char_id == "queen") {
-          int holder = -1;
-          for (size_t i = 0; i < players.size(); ++i)
-            if (std::any_of(players[i].role_ids.begin(), players[i].role_ids.end(), [&](const std::string& role) {
-              return role_number(role) == 4;
-            })) holder = static_cast<int>(i);
-          if (holder >= 0) {
-            if (assassinated == 4) pending_queen = entry.player;
-            else {
-              const int distance = std::abs(entry.player - holder);
-              if (distance == 1 || distance == static_cast<int>(players.size()) - 1) players[entry.player].gold += 3;
-            }
-          }
-        }
         return true;
       }
       active_player = -1; has_turn = false; turn_phase.clear();

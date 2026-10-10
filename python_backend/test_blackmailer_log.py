@@ -84,6 +84,22 @@ class BlackmailerLogTests(unittest.TestCase):
         self.assertTrue(PythonServer._reaction_used({"name": "use", "use": False}))
         self.assertFalse(PythonServer._reaction_used({"name": "skip", "use": True}))
 
+    def test_post_threat_character_gold_does_not_reduce_reported_confiscation(self):
+        for bonus in (1, 3):
+            state, updated = self.state(gold=5)
+            updated["players"][1]["gold"] = bonus
+            action = {"type": "reaction", "name": "use"}
+            PythonServer._append_blackmailer_reveal_notice(state, updated, action)
+            self.assertEqual(updated["notices"][-1]["amount"], 5)
+            text = PythonServer._game_action_log_text(state, action, updated)
+            self.assertIn("全部5枚金币", text)
+
+    def test_failed_transfer_does_not_emit_confiscation_notice(self):
+        state, updated = self.state(gold=5)
+        updated["players"][0]["gold"] = state["players"][0]["gold"]
+        PythonServer._append_blackmailer_reveal_notice(state, updated, {"type": "reaction", "name": "use"})
+        self.assertFalse(updated.get("notices"))
+
 
 if __name__ == "__main__":
     unittest.main()

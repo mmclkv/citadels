@@ -609,7 +609,7 @@
 
     { id: 'blackmailer', num: 2, name: '勒索者', en: 'Blackmailer', version: 'dark',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
-      desc: '将两个威胁标记暗置分配给两个角色。被威胁者行动前可支付一半金币赎回；签名标记的目标拒绝时失去全部金币。',
+      desc: '将两个威胁标记暗置分配给两个角色。被威胁者先领取资源并完成抽牌选择，再支付当前金币的一半（向下取整）给勒索者赎回；若拒绝，勒索者可翻开标记，真标记使目标交出全部金币。结算后才能使用角色能力和建造。',
       hint: '分配威胁标记' },
 
     /* ============ 3 号 ============ */
@@ -620,7 +620,7 @@
 
     { id: 'wizard', num: 3, name: '法师', en: 'Wizard', version: 'dark',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
-      desc: '查看一位玩家的手牌并选择一张：加入手牌或立即支付建造。立即建造不占本回合建造次数；本回合可建造同名建筑。',
+      desc: '查看一位玩家的手牌并选择一张：加入手牌或立即支付建造。立即建造不占本回合建造次数，但仍受行政官首次付费建造的没收效果影响；本回合可建造同名建筑。',
       hint: '查看并取得一张手牌' },
 
     { id: 'prophet', num: 3, name: '预言家', en: 'Prophet', version: 'deluxe',
