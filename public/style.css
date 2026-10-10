@@ -1172,9 +1172,9 @@ html[data-theme="neon"] .mobile-hand-back{border-color:#9a58c4;
 /* PC / 大屏（>=821px）：顶栏整条收起，只保留右下角一个浮动「菜单」按钮，
    点开后在按钮上方弹出原来的菜单项与对局状态。 */
 @media (min-width:821px){
-  /* 选角阶段的说明横条（选角阶段 + 行动指引）纯占位，PC 端整块收起。
-     :not(.rc) 保护轮末「确认本轮战果」块——它复用同一个容器。 */
-  #screen-game.draft-phase .turn-banner:not(.rc){display:none!important}
+  /* 选角横条固定高度，不参与战斗区域的 flex 高度分配。 */
+  #screen-game.draft-phase .turn-banner{
+    display:flex!important;flex:0 0 54px;height:54px;min-height:54px;max-height:54px;overflow-y:auto}
   /* 行动指引与横条里的「轮到谁」重复，PC 端不再单列一行。 */
   #screen-game .turn-order-guide{display:none!important}
 
@@ -1203,10 +1203,9 @@ html[data-theme="neon"] .mobile-hand-back{border-color:#9a58c4;
   /* 行动栏右侧留出浮动按钮的位置，避免按钮压住行动选项。 */
   #screen-game .actionbar{padding-right:118px}
 
-  /* === 选角阶段 PC 大屏布局：隐藏标题/状态条，压缩角色卡，下方战斗区放大，
+  /* === 选角阶段 PC 大屏布局：隐藏牌池标题，压缩角色卡，下方战斗区放大，
         使角色牌池与“我的城市”在同一屏内同时可见（无滚动）。 === */
   #screen-game.draft-phase .draft-head{display:none}
-  #screen-game.draft-phase .turn-banner:not(.rc){display:none!important}
   #screen-game.draft-phase .actionbar{display:none!important}
   #screen-game.draft-phase .board-main{
     display:flex;flex-direction:column;overflow:hidden;padding-top:8px;padding-bottom:8px;height:100%}
