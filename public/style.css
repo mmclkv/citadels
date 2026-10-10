@@ -554,6 +554,14 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opponents{position:relative;display:block;height:600px;margin:0 0 14px;z-index:2}
 /* 玩家框互斥分离期间关闭宽度过渡：否则测量会拿到过渡中的中间宽度，分离结果来回抖动 */
 .opponents.separating .opp{transition:none!important}
+/* 钱袋安全横带需要按内容扩展高度，选角时也不能被固定战场裁掉。 */
+#screen-game #opponents[data-layout="ring"].tax-safe-layout{height:var(--tax-safe-height)!important;bottom:auto!important}
+#screen-game .opponents[data-layout="ring"].tax-safe-layout .opp{transition:none!important}
+#screen-game .table-arena:has(>[data-layout="ring"].tax-safe-layout){min-height:calc(var(--tax-safe-height) + 24px)!important}
+#screen-game.draft-phase .board-main:has([data-layout="ring"].tax-safe-layout){overflow-y:auto!important}
+#screen-game.draft-phase .table-arena:has(>[data-layout="ring"].tax-safe-layout){flex:0 0 auto;height:auto}
+#screen-game.draft-phase [data-layout="ring"].tax-safe-layout ~ .me-area{
+  position:relative;left:auto;bottom:auto;transform:none;margin:calc(var(--tax-safe-height) + 12px) auto 10px}
 .opp{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fffdf7;box-shadow:var(--shadow);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
 .opponents .opp{position:absolute;left:calc(var(--seat-x) * 1%);top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px));width:min(272px,24%);transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)));margin:0}
 .opponents .opp[data-compact="1"]{padding:9px 10px;font-size:.94em}

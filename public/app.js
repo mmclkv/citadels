@@ -3033,6 +3033,10 @@
     hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
     const wrap = $('#opponents');
     const totalPlayers = s.players.length || 1;
+    wrap.classList.remove('tax-safe-layout');
+    wrap.style.removeProperty('--tax-safe-height');
+    const taxArena = $('#table-arena');
+    if (taxArena) taxArena.style.removeProperty('--tax-safe-height');
     const viewerId = viewerIdForState(s);
     const mobileRingLayout = isMobileOpponentLayout() && totalPlayers >= 5;
     const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
@@ -3164,7 +3168,96 @@
       resolveOpponentTableCollisions();
       // 圆桌半径保证不了玩家框互不相交（5 人局左右两侧各排两张），再跑一遍互斥分离。
       separateOpponentPanels(wrap);
+      reserveDesktopTaxPotSpace(wrap);
+      observeDesktopTaxLayout(wrap);
     }
+  }
+
+  // 中央钱袋是固定障碍物。空间不足时为它留出完整的中央横带，
+  // 将玩家框按座位分到上下两侧；根据真实内容高度扩展战场，不能靠层级遮住重叠。
+  function reserveDesktopTaxPotSpace(wrap) {
+    if (!wrap || wrap.dataset.layout !== 'ring' || isMobileOpponentLayout()) return;
+    const pot = wrap.querySelector('#tax-pot');
+    const nodes = Array.from(wrap.querySelectorAll('.opp'));
+    if (!pot || !nodes.length || !wrap.clientWidth || !pot.offsetHeight) return;
+    const wr = wrap.getBoundingClientRect();
+    const scale = wr.width / wrap.clientWidth;
+    const gap = 12;
+    // 包含金币数角标、阴影和收税提示的 1.16 倍弹跳动画。
+    const halfWidth = (Math.max(pot.offsetWidth, pot.scrollWidth) * 1.16 / 2 + gap) * scale;
+    const halfHeight = (Math.max(pot.offsetHeight, pot.scrollHeight) * 1.16 / 2 + gap) * scale;
+    const cx = wr.left + wr.width / 2, cy = wr.top + wr.height / 2;
+    const collided = nodes.some(node => {
+      const r = node.getBoundingClientRect();
+      return r.left < cx + halfWidth && r.right > cx - halfWidth &&
+        r.top < cy + halfHeight && r.bottom > cy - halfHeight;
+    });
+    if (!collided && !wrap.classList.contains('tax-safe-layout')) return;
+    wrap.classList.add('tax-safe-layout');
+    const width = wrap.clientWidth;
+    const rows = [[], []];
+    nodes.slice().sort((a, b) => Number(a.dataset.seat) - Number(b.dataset.seat)).forEach(node => {
+      const side = Number(node.style.getPropertyValue('--seat-y')) <= 50 ? 0 : 1;
+      const r = node.getBoundingClientRect();
+      const item = { node, width: r.width / scale, height: r.height / scale };
+      let row = rows[side][rows[side].length - 1];
+      if (!row || row.width + gap + item.width > width - gap * 2) {
+        row = { items: [], width: 0, height: 0 };
+        rows[side].push(row);
+      }
+      row.width += (row.items.length ? gap : 0) + item.width;
+      row.height = Math.max(row.height, item.height);
+      row.items.push(item);
+    });
+    const heights = rows.map(side => side.reduce((sum, row) => sum + row.height + gap, 0));
+    const band = halfHeight / scale;
+    const height = Math.ceil(Math.max(wrap.clientHeight, 2 * (Math.max(...heights) + band + gap)));
+    wrap.style.setProperty('--tax-safe-height', height + 'px');
+    const arena = $('#table-arena');
+    if (arena) arena.style.setProperty('--tax-safe-height', height + 'px');
+    rows.forEach((side, index) => {
+      let y = index === 0 ? height / 2 - band - heights[0] : height / 2 + band + gap;
+      side.forEach(row => {
+        let x = (width - row.width) / 2;
+        row.items.forEach(item => {
+          const node = item.node;
+          // 保留环形座位锚点，使用现有 push 位移机制，不改变钱袋的 50% 锚点。
+          node.style.setProperty('--push-x', '0px');
+          node.style.setProperty('--push-y', '0px');
+          const r = node.getBoundingClientRect();
+          const base = wrap.getBoundingClientRect();
+          const dx = x - (r.left - base.left) / scale;
+          const dy = y - (r.top - base.top) / scale;
+          node.dataset.pushX = String(dx);
+          node.dataset.pushY = String(dy);
+          node.style.setProperty('--push-x', dx + 'px');
+          node.style.setProperty('--push-y', dy + 'px');
+          x += item.width + gap;
+        });
+        y += row.height + gap;
+      });
+    });
+  }
+
+  let desktopTaxLayoutObserver = null;
+  let desktopTaxLayoutFrame = null;
+  function observeDesktopTaxLayout(wrap) {
+    if (typeof ResizeObserver === 'undefined') return;
+    if (!desktopTaxLayoutObserver) {
+      desktopTaxLayoutObserver = new ResizeObserver(() => {
+        if (desktopTaxLayoutFrame != null) return;
+        desktopTaxLayoutFrame = window.requestAnimationFrame(() => {
+          desktopTaxLayoutFrame = null;
+          const current = $('#opponents');
+          if (!current || current.dataset.layout !== 'ring' || isMobileOpponentLayout()) return;
+          if (!current.classList.contains('tax-safe-layout')) separateOpponentPanels(current);
+          reserveDesktopTaxPotSpace(current);
+        });
+      });
+    }
+    desktopTaxLayoutObserver.disconnect();
+    desktopTaxLayoutObserver.observe(wrap);
+    wrap.querySelectorAll('.opp, #tax-pot').forEach(node => desktopTaxLayoutObserver.observe(node));
   }
 
   const MOBILE_V12_DISTRICT_COLORS = {
@@ -3985,7 +4078,7 @@
   function separateOpponentPanels(wrap) {
     if (!wrap) return;
     const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
-    if (nodes.length < 2) return;
+    if (!nodes.length) return;
     const gap = 10;
     const floorWidth = 148;
     const table = $('#table-core');
