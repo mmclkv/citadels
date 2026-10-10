@@ -9,11 +9,40 @@ import unittest
 from python_backend import cards
 from python_backend.server import PythonServer
 from python_backend.views import _pending_public, sanitize
-from test.python_game_reference import create_game
+from test.python_game_reference import create_game, _new_turn
 
 ROOT = Path(__file__).resolve().parents[1]
 
 class DistrictExpansionTests(unittest.TestCase):
+    def test_action_views_for_owner_opponent_and_spectator(self):
+        state = create_game({"seed": 1, "endDistricts": 8, "charSetMode": "base",
+                             "seats": [{"id": "p0", "name": "甲"}, {"id": "p1", "name": "乙"}]})
+        state["phase"] = "action"
+        state["players"][0]["chars"] = ["assassin"]
+        state["players"][1]["chars"] = ["thief"]
+        state["turn"] = _new_turn({"playerIdx": 0, "charId": "assassin", "num": 1}, "normal")
+        for viewer in ("p0", "p1", None):
+            with self.subTest(viewer=viewer):
+                view = sanitize(state, viewer)
+                self.assertEqual(view["turn"]["charId"], "assassin")
+                self.assertEqual(view["players"][0]["revealedCharId"], "assassin")
+                if viewer != "p1":
+                    self.assertIsNone(view["players"][1]["revealedCharId"])
+        state["turn"].update({"phase": "setup", "charId": "", "num": 0,
+                                "pending": {"kind": "theater_exchange", "queue": [0]}})
+        state["effects"]["blackmailer"] = {"playerIdx": 1, "nums": [1], "done": [], "revealed": []}
+        state["effects"]["magistrate"] = {"playerIdx": 1, "nums": [1]}
+        for viewer in ("p0", "p1", None):
+            with self.subTest(setup_viewer=viewer):
+                view = sanitize(state, viewer)
+                self.assertIsNone(view["turn"]["charId"])
+                self.assertIsNone(view["turn"]["charNum"])
+                self.assertEqual(view["turn"]["charName"], "剧院交换")
+                if viewer != "p0":
+                    self.assertIsNone(view["players"][0]["revealedCharId"])
+                    self.assertIsNone(view["players"][0]["threat"])
+                    self.assertIsNone(view["players"][0]["warrant"])
+
     def test_catalog_matches_browser_and_has_all_buildings(self):
         script = (ROOT / "src/cards.js").read_text(encoding="utf-8")
         browser = json.loads(re.search(r"const DISTRICTS = (\[.*?\]);", script, re.S).group(1))

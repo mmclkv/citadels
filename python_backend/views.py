@@ -22,7 +22,7 @@ def _public_character_numbers(state: dict, player_index: int, viewer_index: int)
     result = []
     turn = state.get("turn")
     setup = bool(turn and turn.get("phase") == "setup")
-    if state["phase"] == "action" and turn and turn["playerIdx"] == player_index:
+    if state["phase"] == "action" and turn and not setup and turn["playerIdx"] == player_index:
         result.append(CHAR_MAP[turn["charId"]]["num"])
     result.extend(CHAR_MAP[character_id]["num"] for character_id in player["played"])
     return result
@@ -173,6 +173,7 @@ def sanitize(state: dict, player_id: str | None,
                          if player["id"] == player_id), -1)
     players = []
     turn = state.get("turn")
+    setup = bool(turn and turn.get("phase") == "setup")
     buildable_uids = {action.get("uid") for action in (legal_actions or [])
                       if action.get("type") == "build" and action.get("uid")}
     for index, player in enumerate(state["players"]):
