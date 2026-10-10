@@ -1040,7 +1040,13 @@ html[data-theme="neon"] .mobile-hand-back{border-color:#9a58c4;
   .modal-box{width:100%;max-width:100%;height:100dvh;max-height:100dvh;border-radius:0;
     display:flex;flex-direction:column}
   .modal-body{flex:1 1 auto;padding:14px 15px calc(20px + env(safe-area-inset-bottom))}
-  .char-grid{grid-template-columns:1fr;gap:9px}
+  .char-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;flex:0 0 auto}
+  .char-grid .ref-card{min-width:0;padding:5px;border-left-width:2px}
+  .char-grid .ref-card h4{flex-wrap:wrap;gap:3px;font-size:10px;overflow-wrap:anywhere}
+  .char-grid .ref-card .rc-num{width:16px;height:16px;flex:0 0 16px;font-size:10px}
+  .char-grid .ref-card .rc-en{flex-basis:100%;font-size:9px;overflow-wrap:anywhere}
+  .char-grid .ref-card p{font-size:10px;line-height:1.4;overflow-wrap:anywhere}
+  .char-grid .ref-hd-trigger{margin:4px 0 6px;padding:4px 2px;font-size:9px}
   .pick-grid{gap:16px;padding:18px 0}
   .pick-grid .card{width:min(44vw, 180px);height:auto;aspect-ratio:2/3}
   .pick-grid .card .c-name{font-size:20px;padding:26px 0 6px}
