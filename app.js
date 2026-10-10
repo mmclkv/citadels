@@ -1,0 +1,5371 @@
+/* =========================================================================
+ * 富饶之城 — 客户端
+ * 对局规则和电脑玩家由 Python 服务器驱动；浏览器负责显示与交互。
+ * ========================================================================= */
+(function () {
+  'use strict';
+  const Cards = window.CitCards;
+  const Theme = window.CitadelThemeManager || {
+    current: 'classic',
+    is(id) { return id === 'classic'; },
+    label() { return '经典羊皮纸'; },
+    apply() {},
+    toggle() {},
+    updateControls() {},
+    roleAsset() { return null; },
+    districtAsset() { return null; },
+    onChange() { return function () {}; }
+  };
+
+  /* ============================== 全局状态 ============================== */
+  const App = {
+    mode: null,            // 'net'（包含服务器托管的单人房间）
+    localServerGame: false,
+    state: null,
+    myId: null,
+    name: '我',
+    sel: null,             // 选择模式
+    mobileHandExpanded: false,
+    mobileDraftExpanded: true,
+    logOpen: true,
+    chatOpen: false,
+    voiceOpen: false,
+    activeSideTab: 'log',
+    sidePanelCollapsed: false,
+    lastCfg: null,
+    speed: 'normal',       // 电脑行动节奏：slow | normal | fast
+    paused: false,         // 事件弹层展示期间暂停电脑行动
+    buildingAnimPaused: false,
+    noticeSeen: null,      // 已展示到第几条关键事件（seq）
+    _reveal: {},           // 每位玩家上一帧的角色卡状态，用于检测「盖牌→翻面」触发动画
+    myIdx: null,
+    leavingNetGame: false,
+    lobbyState: null,      // 大厅阶段下发的视图（App.state 只放对局状态）
+    chatBubbles: new Map(),
+    botDebugOpen: false,
+    botDebugEntries: []
+  };
+
+  const NET_SESSION_KEY = 'citadels.net.session';
+  let selectedGameServer = '';
+  let serverConsoleCredentials = null;
+  try { selectedGameServer = localStorage.getItem('citadels.gameServer') || ''; } catch (_) { /* storage unavailable */ }
+  function loadNetSession() {
+    try {
+      const raw = window.localStorage.getItem(NET_SESSION_KEY);
+      const data = raw ? JSON.parse(raw) : null;
+      if (data && data.server && data.server !== gameServerBase()) return null;
+      return data && data.token && data.roomId ? data : null;
+    } catch (e) { return null; }
+  }
+  /* --------------------------- 电脑行动节奏 ---------------------------
+   * 原先固定 330ms，真人根本来不及看清电脑做了什么。
+   * 现在按「这一步有多值得看」分级停顿：
+   *   draft  选角（信息量大，要看清谁拿了什么）
+   *   big    宣告刺杀/施咒、建造、摧毁抢夺（关键局势变化）
+   *   act    领资源、用能力、结束回合
+   *   min    其它内部推进步骤
+   * ------------------------------------------------------------------ */
+  const PACE = {
+    slow:   { draft: 1700, big: 2100, act: 1300, min: 700, label: '慢速' },
+    normal: { draft: 1050, big: 1300, act: 820,  min: 430, label: '标准' },
+    fast:   { draft: 420,  big: 480,  act: 330,  min: 190, label: '快速' }
+  };
+  const SPEED_ORDER = ['slow', 'normal', 'fast'];
+  // 主题界面使用纯文本标签，避免速度按钮被图标字体或系统表情影响布局。
+  PACE.slow.label = '慢速';
+  PACE.normal.label = '标准';
+  PACE.fast.label = '快速';
+
+  function loadSpeed() {
+    let v = null;
+    try { v = window.localStorage.getItem('citadels.speed'); } catch (e) { /* 隐私模式 */ }
+    App.speed = PACE[v] ? v : 'normal';
+  }
+  function saveSpeed() {
+    try { window.localStorage.setItem('citadels.speed', App.speed); } catch (e) { /* 忽略 */ }
+  }
+  function pace() { return PACE[App.speed] || PACE.normal; }
+
+  function syncSpeedBtn() {
+    const b = $('#btn-speed');
+    if (!b) return;
+    b.textContent = pace().label;
+    b.title = App.mode === 'net'
+      ? '点击切换服务器上电脑的行动速度'
+      : '点击切换电脑行动速度';
+  }
+  function syncThemeBtn() {
+    const b = $('#btn-theme');
+    if (!b || !Theme.label) return;
+    b.textContent = '主题 · ' + Theme.label();
+    b.title = '当前：' + Theme.label() + '，点击切换';
+  }
+  function cycleSpeed() {
+    const i = SPEED_ORDER.indexOf(App.speed);
+    App.speed = SPEED_ORDER[(i + 1) % SPEED_ORDER.length];
+    saveSpeed(); syncSpeedBtn();
+    toast('电脑节奏：' + pace().label);
+    if (App.mode === 'net') Net.send({ t: 'setPace', pace: pace().act });
+  }
+
+  /* ============================== 工具 ============================== */
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+  function el(tag, cls, html) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html != null) e.innerHTML = html;
+    return e;
+  }
+
+  /* ---------------------- 移动端（触屏）适配 ---------------------- */
+  /** 触屏设备：没有真正的 hover。浏览器会把 tap 合成为 mouseover/mousemove，
+   *  导致"悬浮放大浮窗"在手机上乱弹并干扰点击，这类设备要禁用悬浮相关的交互。 */
+  function isTouchDevice() {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    try {
+      return window.matchMedia('(hover: none)').matches ||
+             window.matchMedia('(pointer: coarse)').matches;
+    } catch (e) { return false; }
+  }
+
+  /** 统一的点击绑定：桌面仍用 click；触屏改用 touchend 立即响应，
+   *  并阻止后续合成的 mouse 事件（避免弹出 hover 浮窗）与 300ms 点击延迟。 */
+  function onTap(node, fn) {
+    if (!node) return;
+    if (typeof window === 'undefined' || !isTouchDevice()) { node.onclick = fn; return; }
+    // 触屏设备：把动作存到 __tapFn，绑定一次监听器即可。这样卡片节点被
+    // keyed reconciliation 复用时，只需更新 __tapFn 而不会重复 addEventListener。
+    node.__tapFn = fn;
+    if (node.__tapBound) return;
+    node.__tapBound = true;
+    let sx = 0, sy = 0, moved = false;
+    node.addEventListener('touchstart', e => {
+      const t = e.touches && e.touches[0];
+      if (!t) return;
+      sx = t.clientX; sy = t.clientY; moved = false;
+    }, { passive: true });
+    node.addEventListener('touchmove', e => {
+      const t = e.touches && e.touches[0];
+      if (!t) return;
+      if (Math.abs(t.clientX - sx) > 12 || Math.abs(t.clientY - sy) > 12) moved = true;
+    }, { passive: true });
+    node.addEventListener('touchend', e => {
+      if (moved) return;                      // 判定为滑动（滚动页面），不当作点击
+      if (e.cancelable) e.preventDefault();    // 阻止合成的 mouseover/click
+      const f = node.__tapFn; if (f) f();
+    }, { passive: false });
+  }
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  }
+
+  function debugActionText(action) {
+    if (!action) return '—';
+    const copy = Object.assign({}, action);
+    try { return JSON.stringify(copy, null, 2); }
+    catch (_) { return String(copy); }
+  }
+  function botDebugText(entry) {
+    const time = new Date(Number(entry.at) || Date.now()).toLocaleTimeString();
+    const name = entry.playerName || entry.playerId || '电脑';
+    const bot = entry.botType === 'neural' ? '策略网络' : entry.botType === 'agent' ? 'AI Agent' : '启发式';
+    let title = entry.kind === 'decision_start' ? '开始决策' :
+      entry.kind === 'decision_detail' ? '决策完成' :
+      entry.kind === 'action_apply' ? '执行行动' :
+      entry.kind === 'fallback_action' ? '回退行动' : '决策异常';
+    let body = name + ' · ' + bot;
+    if (entry.phase) body += ' · ' + entry.phase + ' · 第' + (entry.round || 0) + '轮';
+    if (entry.legalCount != null) body += ' · 合法行动 ' + entry.legalCount + ' 个';
+    if (entry.action) body += '\n行动：' + debugActionText(entry.action);
+    if (entry.inference) {
+      const inference = Object.assign({}, entry.inference);
+      const policy = Array.isArray(inference.policy) ? inference.policy : null;
+      delete inference.policy;
+      body += '\n推理：' + debugActionText(inference);
+      if (policy) {
+        const label = inference.method === 'native-mcts' ? 'MCTS访问概率分布' : '策略概率分布';
+        body += '\n' + label + '：\n' + policy.map((item, index) => {
+          const percent = (Number(item.probability || 0) * 100).toFixed(2) + '%';
+          const actionText = debugActionText(item.action).replace(/\n/g, '\n     ');
+          return '  ' + (index + 1) + '. ' + percent + ' · ' + actionText;
+        }).join('\n');
+      }
+    }
+    if (entry.mcts) body += '\nMCTS：' + debugActionText(entry.mcts);
+    if (entry.checkpoint) body += '\n权重：' + entry.checkpoint;
+    if (entry.strategy) body += '\n策略：' + entry.strategy;
+    if (entry.error) body += '\n错误：' + entry.error + (entry.fallback ? '；' + entry.fallback : '');
+    return { time, title, body, neural: entry.botType === 'neural', error: entry.kind === 'decision_error' };
+  }
+  function renderBotDebug() {
+    const box = $('#bot-debug-log');
+    if (!box) return;
+    box.textContent = '';
+    if (!App.botDebugEntries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'bot-debug-entry';
+      empty.textContent = '等待电脑玩家做出决策…';
+      box.appendChild(empty);
+      return;
+    }
+    App.botDebugEntries.forEach(entry => {
+      const view = botDebugText(entry);
+      const row = document.createElement('div');
+      row.className = 'bot-debug-entry' + (view.neural ? ' neural' : '') + (view.error ? ' error' : '');
+      const time = document.createElement('span'); time.className = 'debug-time'; time.textContent = '[' + view.time + '] ';
+      const title = document.createElement('span'); title.className = 'debug-title'; title.textContent = view.title;
+      const body = document.createElement('div'); body.className = 'debug-body'; body.textContent = view.body;
+      row.append(time, title, body); box.appendChild(row);
+    });
+    box.scrollTop = box.scrollHeight;
+  }
+  function appendBotDebug(entry) {
+    if (!entry) return;
+    App.botDebugEntries.push(entry);
+    if (App.botDebugEntries.length > 300) App.botDebugEntries.splice(0, App.botDebugEntries.length - 300);
+    if (App.botDebugOpen) renderBotDebug();
+  }
+  function setBotDebugOpen(open) {
+    const consoleEl = $('#bot-debug-console');
+    if (!consoleEl) return;
+    App.botDebugOpen = !!open;
+    consoleEl.hidden = !App.botDebugOpen;
+    if (App.botDebugOpen) {
+      renderBotDebug();
+      if (App.mode === 'net') Net.send({ t: 'botDebugSubscribe' });
+    }
+  }
+  function toggleBotDebug() { setBotDebugOpen(!App.botDebugOpen); }
+  function handleRoomNotice(n) {
+    if (!n) return;
+    const name = n.playerName || '玩家';
+    if (n.kind === 'player_disconnected') toast('⚠ ' + name + ' 已断连（超过 20 秒未响应）');
+    else if (n.kind === 'player_left') toast('↩ ' + name + ' 已离开房间');
+  }
+  function gameServerBase() {
+    const url = new URL(selectedGameServer || location.origin);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+      throw new Error('请输入有效的游戏服务器地址');
+    }
+    if (location.protocol === 'https:' && url.protocol !== 'https:') {
+      throw new Error('当前网页使用 HTTPS，游戏服务器也需要 HTTPS');
+    }
+    return url.href.replace(/\/$/, '');
+  }
+  function clearGameBoardView() {
+    // Restarting a local Python room briefly passes through lobby without
+    // leaving the game screen. Drop cached card DOM so the previous game can
+    // never remain visible while the fresh state is being created/rendered.
+    ['#draft-pool', '#opponents', '#my-city', '#my-hand'].forEach(sel => {
+      const node = $(sel);
+      if (node) node.innerHTML = '';
+    });
+    App._reveal = Object.create(null);
+    App.noticeSeen = 0;
+    hideEvent(true);
+  }
+  function showScreen(id) {
+    $$('.screen').forEach(s => s.classList.remove('active'));
+    $('#' + id).classList.add('active');
+    if (id !== 'screen-game') {
+      closeChatComposer();
+      clearPlayerChatBubbles();
+    }
+    // 语音面板挂在侧栏上，不是每次 render 都会走到；切屏时同步一次，
+    // 免得上一个界面留下的麦克风按钮状态串到下一个界面。
+    voiceSync();
+  }
+  // 取消所有页面级屏幕（首页/设置/大厅已由共享组件渲染）。
+  function hidePageScreens() { $$('.screen').forEach(s => s.classList.remove('active')); }
+  // 离开对局回主菜单：把 socket 交还组件，由组件清会话并显示首页。
+  function leaveToMenu() {
+    Voice.leave();
+    Net.release();
+    App.state = null; App.myId = null; App.localServerGame = false; App.leavingNetGame = false;
+    hidePageScreens();
+    const el = $('#lobby');
+    if (el && el.returnToHome) el.returnToHome();
+  }
+
+  /* ======================= 关键事件提示（居中弹层） =======================
+   * 「别人对我做了什么」这类事件（被刺杀 / 被施咒 / 被偷 / 建筑被摧毁抢走）
+   * 原先只写进战报，真人经常整轮被跳过却毫不知情。
+   * 现在的规则：涉及自己 → 居中弹层 + 暂停电脑行动；涉及别人 → 轻量 toast。
+   * ==================================================================== */
+  let evQueue = [];
+  let evTimer = null, evBarTimer = null;
+
+  function queueEvent(opt) {
+    evQueue.push(opt);
+    const ov = $('#event-overlay');
+    if (!ov || ov.hidden) nextEvent();
+  }
+
+  function nextEvent() {
+    const opt = evQueue.shift();
+    if (!opt) { hideEvent(); return; }
+    const ov = $('#event-overlay');
+    $('#event-box').className = 'event-box tone-' + (opt.tone || 'info');
+    $('#event-icon').textContent = opt.icon || 'i';
+    $('#event-title').textContent = opt.title || '';
+    $('#event-text').innerHTML = opt.text || '';
+    $('#event-ok').textContent = evQueue.length ? '下一条（还有 ' + evQueue.length + '）' : '知道了，继续';
+    ov.hidden = false;
+    App.paused = true;                       // 读提示的时候电脑先别动
+
+    const hold = opt.hold || 4200;
+    const fill = $('#event-bar-fill');
+    if (fill && fill.style) {
+      fill.style.transition = 'none';
+      fill.style.width = '100%';
+      clearTimeout(evBarTimer);
+      evBarTimer = setTimeout(() => {
+        fill.style.transition = 'width ' + hold + 'ms linear';
+        fill.style.width = '0%';
+      }, 40);
+    }
+    clearTimeout(evTimer);
+    evTimer = setTimeout(dismissEvent, hold);
+  }
+
+  function dismissEvent() {
+    clearTimeout(evTimer); evTimer = null;
+    if (evQueue.length) { nextEvent(); return; }
+    hideEvent();
+  }
+
+  /** silent=true 时只关闭，不唤醒电脑循环（开局重置用） */
+  function hideEvent(silent) {
+    clearTimeout(evTimer); evTimer = null;
+    clearTimeout(evBarTimer); evBarTimer = null;
+    evQueue = [];
+    const ov = $('#event-overlay');
+    if (ov) ov.hidden = true;
+    App.paused = false;
+  }
+
+  /* -------------------- 读取引擎下发的关键事件并分发 -------------------- */
+  function processNotices(s) {
+    const list = s.notices || [];
+    if (!list.length) return;
+    const lastSeq = list[list.length - 1].seq;
+    // noticeSeen 为 null 表示中途加入对局：只对齐进度，不回放历史事件
+    if (App.noticeSeen == null) { App.noticeSeen = lastSeq; return; }
+    const fresh = list.filter(n => n.seq > App.noticeSeen);
+    App.noticeSeen = lastSeq;
+    fresh.forEach(n => { try { handleNotice(n, s); } catch (e) { console.error(e); } });
+  }
+
+  function myChars(s) {
+    const me = s.players.find(p => p.id === App.myId);
+    return (me && me.chars) ? me.chars : [];
+  }
+  function myCharName(s, num) {
+    const c = myChars(s).find(x => x.num === num);
+    return c ? c.name : ('' + num + ' 号');
+  }
+
+  function handleNotice(n, s) {
+    const holdsIt = myChars(s).some(c => c.num === n.num);
+    const isMe = !!(n.playerId && n.playerId === App.myId);
+    const byMe = !!(n.byId && n.byId === App.myId);
+
+    switch (n.kind) {
+      case 'role_effect':
+        queueEvent({
+          tone: 'magic', icon: '✦', title: '角色能力发动：' + escapeHtml(n.roleName || '角色'),
+          hold: 5200,
+          text: '<b>' + escapeHtml(n.playerName || '玩家') + '</b> 发动了【' +
+                escapeHtml(n.roleName || '角色') + '】的能力。<br>' +
+                escapeHtml(n.description || '效果正在结算中，具体目标与资源变化会记录在战报里。')
+        });
+        return;
+
+      case 'role_effect_detail':
+        queueEvent({
+          tone: 'magic', icon: '✦', title: '角色效果：' + escapeHtml(n.roleName || '角色'),
+          hold: 5600,
+          text: '<b>' + escapeHtml(n.playerName || '玩家') + '</b>：' +
+                escapeHtml(n.description || '效果已结算。')
+        });
+        return;
+
+      case 'assassin_declare':
+        if (holdsIt) {
+          App.deathWarned = n.round;
+          queueEvent({
+            tone: 'danger', icon: '!', title: '你被刺杀了！', hold: 6000,
+            text: escapeHtml(n.byName) + ' 的【刺客】宣布刺杀 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || myCharName(s, n.num)) + '</b>，' +
+                  '正是你的『<b>' + escapeHtml(myCharName(s, n.num)) + '</b>』。<br>' +
+                  '本轮叫到它时会<b>直接跳过</b>——不能领资源、不能建造、不能用能力。'
+          });
+        } else {
+          queueEvent({
+            tone: 'danger', icon: '!', title: '刺客已宣告目标', hold: 4600,
+            text: escapeHtml(n.byName) + ' 的【刺客】宣布刺杀 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || (n.num + ' 号角色')) + '</b>。'
+          });
+        }
+        return;
+
+      case 'witch_declare':
+        if (byMe) return;
+        if (holdsIt) {
+          App.deathWarned = n.round;
+          queueEvent({
+            tone: 'magic', icon: '*', title: '你被施咒了！', hold: 6000,
+            text: escapeHtml(n.byName) + ' 的【女巫】对 <b>' + n.num + ' 号角色</b>施咒，' +
+                  '正是你的『<b>' + escapeHtml(myCharName(s, n.num)) + '</b>』。<br>' +
+                  '你这回合<b>只能领取资源</b>，随后由女巫接管该角色的剩余行动。'
+          });
+        } else toast('* ' + n.byName + ' 对 ' + n.num + ' 号角色施咒');
+        return;
+
+      case 'thief_declare':
+        if (holdsIt) {
+          queueEvent({
+            tone: 'warn', icon: '$', title: '盗贼盯上了你', hold: 5000,
+            text: escapeHtml(n.byName) + ' 的【盗贼】宣布偷窃 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || myCharName(s, n.num)) + '</b>（你的『' +
+                  escapeHtml(myCharName(s, n.num)) + '』）。<br>' +
+                  '轮到你时手上的金币会被<b>全部拿走</b>，建议先想好怎么花。'
+          });
+        } else {
+          queueEvent({
+            tone: 'warn', icon: '$', title: '盗贼已宣告目标', hold: 4600,
+            text: escapeHtml(n.byName) + ' 的【盗贼】宣布偷窃 <b>' + n.num + ' 号·' +
+                  escapeHtml(n.charName || (n.num + ' 号角色')) + '</b>。'
+          });
+        }
+        return;
+
+      case 'magistrate_declare': {
+        // 逮捕令的去向对全场公开，所以不管是不是自己的角色都弹一次
+        const list = (Array.isArray(n.targets) && n.targets.length)
+          ? n.targets
+          : (n.nums || []).map(num => ({ num: num, name: num + ' 号角色' }));
+        const names = list.map(t => '<b>' + t.num + ' 号·' + escapeHtml(t.name) + '</b>').join('、');
+        const mine = list.filter(t => myChars(s).some(c => c.num === t.num));
+        const tail = '其中只有<b>一张是真的</b>——被真逮捕令命中的玩家建造建筑时，行政官可以当场没收那座建筑。';
+        if (byMe) {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '逮捕令已发出', hold: 5200,
+            text: '你把 3 张逮捕令发给了 ' + names + '。<br>' + tail
+          });
+        } else if (mine.length) {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '你收到了逮捕令', hold: 6000,
+            text: '【行政官】' + escapeHtml(n.byName) + ' 把逮捕令发给了 ' + names + '，' +
+                  '其中包括你的『<b>' + escapeHtml(mine[0].name) + '</b>』。<br>' + tail
+          });
+        } else {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '行政官已发出逮捕令', hold: 5200,
+            text: '【行政官】' + escapeHtml(n.byName) + ' 把 3 张逮捕令发给了 ' + names + '。<br>' + tail
+          });
+        }
+        return;
+      }
+
+      case 'blackmailer_declare': {
+        // 勒索者的目标角色公开，但真威胁标记落在哪个目标上不公开。
+        // 发动者可从自己的操作/战报确认，不向本人重复弹；其余玩家均显示居中提示。
+        if (byMe) return;
+        const list = (Array.isArray(n.targets) && n.targets.length)
+          ? n.targets
+          : (n.nums || []).map(num => ({ num: num, name: num + ' 号角色' }));
+        const names = list.map(t => '<b>' + t.num + ' 号·' + escapeHtml(t.name) + '</b>').join('、');
+        queueEvent({
+          tone: 'warn', icon: '†', title: '勒索者已发动威胁', hold: 5600,
+          text: '【勒索者】' + escapeHtml(n.byName || '其他玩家') + ' 把威胁标记发给了 ' + names + '。<br>' +
+                '其中只有<b>一个是真威胁</b>，但目前还不知道具体是哪一个。被命中的玩家可选择支付一半金币赎回。'
+        });
+        return;
+      }
+
+      case 'assassinated':
+        if (isMe) {
+          // 极少数情况（中途接管 / 漏掉了宣告）没提前警告过，这里补一次弹层
+          if (App.deathWarned !== n.round) {
+            queueEvent({
+              tone: 'danger', icon: '!', title: '本回合被跳过', hold: 5000,
+              text: '你的『<b>' + escapeHtml(n.charName) + '</b>』（' + n.num + ' 号）已被刺杀，' +
+                    '本回合直接跳过，无法行动。'
+            });
+          } else toast('! 你的『' + n.charName + '』被刺杀，本回合已跳过');
+        } else toast('! ' + n.playerName + ' 的『' + n.charName + '』被刺杀，跳过回合');
+        return;
+
+      case 'bewitched':
+        if (isMe) toast('* 你的『' + n.charName + '』被施咒，本回合只能领资源');
+        else toast('* ' + n.playerName + ' 的『' + n.charName + '』被施咒');
+        return;
+
+      case 'thief_steal':
+        flyCoins(n.playerIdx, n.byIdx, n.amount);
+        if (isMe) {
+          queueEvent({
+            tone: 'warn', icon: '$', title: '金币被偷走了', hold: 4200,
+            text: '【盗贼】' + escapeHtml(n.byName) + ' 从你这里拿走了 <b>' + n.amount + ' 枚金币</b>。'
+          });
+        } else toast('$ ' + n.byName + ' 偷走了 ' + n.playerName + ' 的 ' + n.amount + ' 金');
+        return;
+
+      case 'spy_result':
+        // 间谍从调查目标处取得金币与对应数量的建筑牌：牌面保持朝下，避免动画泄露抽到的牌。
+        flyCoins(n.targetIdx, n.byIdx, n.gold);
+        handTransferAnim(n.targetIdx, n.byIdx, Array.isArray(n.cards) ? n.cards.length : 0, '间谍获得手牌');
+        return;
+
+      case 'hand_gain':
+        // 统一补齐所有规则效果带来的手牌入账动画：从别的玩家获得时显示玩家间转移，
+        // 从牌库/公共区域获得时显示牌堆飞入，始终只显示牌背以保护隐藏信息。
+        if (n.fromIdx != null) handTransferAnim(n.fromIdx, n.playerIdx, n.amount, n.why || '获得手牌');
+        else flyCardsToHand(n.playerIdx, n.amount);
+        return;
+
+      case 'prophet_collect':
+        // 预言家从每位有手牌的对手处各取一张；全程只飞牌背，避免泄露牌面。
+        (n.fromIdxs || []).forEach(fromIdx =>
+          handTransferAnim(fromIdx, n.toIdx, 1, ''));
+        return;
+
+      case 'prophet_return':
+        handTransferAnim(n.fromIdx, n.toIdx, n.amount || 1, '预言家归还手牌');
+        if (isMe) {
+          queueEvent({
+            tone: 'info', icon: '☉', title: '收到归还的手牌', hold: 4400,
+            text: '预言家 <b>' + escapeHtml(n.byName || '其他玩家') +
+                  '</b> 将 <b>1 张手牌</b>归还给你。'
+          });
+        } else {
+          toast('☉ 预言家将1张手牌归还给 ' + escapeHtml(n.playerName || '玩家'));
+        }
+        return;
+
+      case 'destroyed':
+        destroyAnim(n.playerIdx, n.uid, n.cardName);
+        if (isMe) {
+          queueEvent({
+            tone: 'danger', icon: '!', title: '你的建筑被摧毁', hold: 4800,
+            text: escapeHtml(n.byName) + ' 用【领主】支付 ' + n.cost + ' 金，' +
+                  '摧毁了你的『<b>' + escapeHtml(n.cardName) + '</b>』。'
+          });
+        } else toast('! ' + n.byName + ' 摧毁了 ' + n.playerName + ' 的『' + n.cardName + '』');
+        return;
+
+      case 'seized':
+        buildingTransferAnim(n.playerIdx, n.byIdx, n.cardUid);
+        if (isMe) {
+          queueEvent({
+            tone: 'warn', icon: '!', title: '你的建筑被抢走', hold: 4800,
+            text: escapeHtml(n.byName) + ' 用【元帅】支付 ' + n.cost + ' 金，' +
+                  '抢走了你的『<b>' + escapeHtml(n.cardName) + '</b>』（金币已补偿给你）。'
+          });
+        } else toast('! ' + n.byName + ' 抢走了 ' + n.playerName + ' 的『' + n.cardName + '』');
+        return;
+
+      case 'magistrate_confiscate':
+        buildingTransferAnim(n.playerIdx, n.byIdx, n.cardUid);
+        if (isMe) {
+          queueEvent({
+            tone: 'danger', icon: '§', title: '你的建筑被行政官没收', hold: 5200,
+            text: '【行政官】' + escapeHtml(n.byName) + ' 没收了你刚建造的『<b>' +
+                  escapeHtml(n.card && n.card.name || '建筑') + '</b>』，建造费用已退还。'
+          });
+        } else if (byMe) {
+          queueEvent({
+            tone: 'magic', icon: '§', title: '逮捕令已执行', hold: 4600,
+            text: '你从 ' + escapeHtml(n.playerName) + ' 处没收了『<b>' +
+                  escapeHtml(n.card && n.card.name || '建筑') + '</b>』，并免费建入自己的城市。'
+          });
+        } else {
+          toast('§ ' + escapeHtml(n.byName) + ' 没收了 ' + escapeHtml(n.playerName) + ' 建造的『' +
+            escapeHtml(n.card && n.card.name || '建筑') + '』');
+        }
+        return;
+
+      case 'got_gold':
+        // 金币入账的统一入口（引擎侧 notifyGoldGain）：
+        // 有来源玩家就是玩家间转移，来自银行/角色效果则从顶部金库飞入。
+        if (n.fromIdx != null) flyCoins(n.fromIdx, n.playerIdx, n.amount);
+        else flyGoldIn(n.playerIdx, n.amount);
+        return;
+
+      case 'tax_collected':
+        flyTaxCoinsToCollector(n.playerIdx, n.amount);
+        return;
+
+      case 'tax_paid':
+        flyCoinToTaxPot(n.playerIdx, n.amount || 1);
+        if (isMe) toast('税务官收取了你 ' + (n.amount || 1) + ' 枚建筑税');
+        return;
+
+      case 'beautified':
+        beautifyBuildingAnim(n.playerIdx, n.uids || []);
+        if (isMe) {
+          queueEvent({
+            tone: 'good', icon: '✦', title: '建筑已美化', hold: 4200,
+            text: '你美化了 <b>' + (n.amount || 0) + ' 栋建筑</b>，每栋建筑额外计分 +1。'
+          });
+        } else {
+          toast('✦ ' + escapeHtml(n.playerName || '玩家') + ' 美化了 ' + (n.amount || 0) + ' 栋建筑');
+        }
+        return;
+
+      case 'blackmailer_reveal':
+        // 真威胁标记翻开：被勒索者的全部金币飞向勒索者（刀）；假标记不产生金币流动。
+        if (n.revealed && n.isReal && n.amount > 0) flyCoins(n.fromIdx, n.toIdx, n.amount);
+        if (isMe) {
+          queueEvent({
+            tone: n.revealed && n.isReal ? 'danger' : 'good', icon: n.revealed && n.isReal ? '†' : '❀',
+            title: n.revealed ? (n.isReal ? '威胁标记：带血的刀' : '威胁标记：玫瑰花') : '威胁标记未翻开',
+            hold: 5000,
+            text: n.revealed && n.isReal
+              ? '【勒索者】' + escapeHtml(n.byName) + ' 翻开了真威胁标记，' +
+                '你失去全部 <b>' + n.amount + ' 枚金币</b>。'
+              : (n.revealed ? '虚惊一场——那是朵玫瑰花，你分文未失。'
+                           : escapeHtml(n.byName) + ' 选择不翻开你的威胁标记，本轮作废。')
+          });
+        } else if (n.revealed && n.isReal) {
+          toast('† ' + n.byName + ' 翻走了 ' + n.playerName + ' 的全部 ' + n.amount + ' 金');
+        }
+        return;
+
+      case 'navigator_bonus':
+        if (n.mode === 'gold') flyGoldIn(n.playerIdx, n.amount);
+        else if (n.mode === 'cards') flyCardsToHand(n.playerIdx, n.amount);
+        return;
+
+      case 'noble_draw':
+        // 贵族：每有1栋皇家建筑抽1张建筑牌。飞行动画让玩家看清"谁抽了多少张"。
+        flyCardsToHand(n.playerIdx, n.amount);
+        if (isMe) {
+          const names = (n.cardNames && n.cardNames.length) ?
+            '：<b>' + n.cardNames.map(escapeHtml).join('、') + '</b>' : '';
+          queueEvent({
+            tone: 'good', icon: '▦', title: '贵族抽牌', hold: 4600,
+            text: '你凭<b>贵族</b>（' + n.amount + ' 栋皇家建筑）抽到 <b>' + n.amount +
+                  ' 张建筑牌</b>' + names + '。'
+          });
+        } else {
+          toast('▦ ' + n.playerName + ' 凭贵族抽到 ' + n.amount + ' 张建筑牌');
+        }
+        return;
+
+      case 'monk_take':
+        flyCoins(n.fromIdx, n.toIdx, n.amount || 1);
+        return;
+
+      case 'crown_transfer':
+        crownTransferAnim(n.fromIdx, n.toIdx);
+        return;
+
+      case 'emperor_gold':
+        // 皇帝从目标玩家处取得金币：金币从目标玩家飞向皇帝。
+        flyCoins(n.fromIdx, n.toIdx, n.amount || 1);
+        return;
+
+      case 'emperor_card':
+        // 皇帝从目标玩家处取得手牌：只显示一张牌背，避免泄露具体牌面。
+        handTransferAnim(n.fromIdx, n.toIdx);
+        return;
+
+      case 'built':
+        beginBuildingAnimation();
+        buildingBuildAnim(n.playerIdx, n.card, endBuildingAnimation);
+        return;
+
+      case 'alchemist_refund':
+        // 炼金术士回合结束回收建造费：沿用金币飞行动画，并补充明确提示。
+        flyGoldIn(n.playerIdx, n.amount);
+        if (isMe) {
+          queueEvent({
+            tone: 'good', icon: '⚗', title: '炼金术士回收金币', hold: 4200,
+            text: '本回合建筑花费已返还：<b>' + n.amount + ' 枚金币</b>。'
+          });
+        } else {
+          toast('⚗ ' + n.playerName + ' 回收了 ' + n.amount + ' 枚建造金币');
+        }
+        return;
+
+      case 'magician_swap':
+        // 所有人都看到两端之间的背面手牌交换动画，不泄露具体牌面。
+        handSwapAnim(n.byIdx, n.playerIdx);
+        if (isMe) {
+          queueEvent({
+            tone: 'magic', icon: '↔', title: '你的手牌被交换了', hold: 5000,
+            text: '【魔术师】' + escapeHtml(n.byName) + ' 与你交换了<b>全部手牌</b>。'
+          });
+        } else if (byMe) {
+          toast('↔ 你与 ' + escapeHtml(n.playerName) + ' 交换了全部手牌');
+        } else {
+          toast('↔ ' + escapeHtml(n.byName) + ' 与 ' + escapeHtml(n.playerName) + ' 交换了全部手牌');
+        }
+        return;
+
+      case 'round_end':
+        return;
+
+      case 'swapped':
+        buildingSwapAnim(n.byIdx, n.playerIdx, n.mineCard, n.theirsCard);
+        if (isMe) {
+          queueEvent({
+            tone: 'warn', icon: '<>', title: '建筑被外交官换走', hold: 4800,
+            text: escapeHtml(n.byName) + ' 用『' + escapeHtml(n.gotName) + '』' +
+                  '换走了你的『<b>' + escapeHtml(n.cardName) + '</b>』。'
+          });
+        } else toast('<> ' + n.byName + ' 与 ' + n.playerName + ' 交换了建筑');
+        return;
+    }
+  }
+  function curPlayer() {
+    if (!App.state) return null;
+    return App.state.players.find(p => p.id === App.state.you) || null;
+  }
+  function isMyTurn() {
+    const s = App.state; if (!s) return false;
+    if (s.spectating) return false;
+    const av = s.available;
+    if (!av) return false;
+    if (s.reaction) return s.reaction.playerId === App.myId;
+    return !!(av.actions && av.actions.length);
+  }
+
+  /* ============================== 联机驱动（对局内） ==============================
+   * 首页 / 单人设置 / 联机大厅 / 建房 / 加入房间由共享组件
+   * public/components/citadels-lobby.js 负责。开局时组件通过 lobbyEl.onGameStart
+   * 把 socket 交过来，此后本文件只处理对局内的消息；回到大厅或主菜单时再交还组件。 */
+  const Net = {
+    ws: null, myId: null, roomId: null, name: '', heartbeatTimer: null,
+    // 接管组件交过来的 socket：接收对局消息并自行维持心跳。
+    install(handle) {
+      this.ws = handle.ws;
+      this.myId = handle.myId || null;
+      this.roomId = handle.roomId || null;
+      this.name = handle.name || this.name;
+      this.stopHeartbeat();
+      this.heartbeatTimer = setInterval(() => this.send({ t: 'heartbeat', ts: Date.now() }), 5000);
+      const ws = this.ws;
+      if (!ws) return;
+      ws.onmessage = ev => {
+        let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        this.handle(m);
+      };
+      ws.onclose = () => {
+        if (this.ws !== ws) return;
+        this.stopHeartbeat();
+        this.ws = null;
+        toast('与服务器的连接已断开，正在重连…');
+        // 重连交回组件：它手里有本地会话，能重新 hello/resume 后再交一次 socket。
+        const el = $('#lobby');
+        if (el && el.reconnect) el.reconnect();
+      };
+      ws.onerror = () => { /* 组件会在重连结果里给出反馈 */ };
+    },
+    // 交还 socket（返回大厅或主菜单前调用）：页面不再处理任何对局消息。
+    release() {
+      this.stopHeartbeat();
+      const ws = this.ws;
+      if (ws) { ws.onmessage = null; ws.onclose = null; }
+      this.ws = null;
+    },
+    stopHeartbeat() { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; },
+    send(o) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(o)); },
+    handle(m) {
+      switch (m.t) {
+        case 'state':
+          if (App.leavingNetGame) break;
+          App.state = m.state;
+          if (m.state.you) App.myId = m.state.you;
+          if (m.state.phase === 'lobby' && App.localServerGame) {
+            // 单机房间重开：清掉上一局残留的牌，再让服务器重新开局。
+            App.chatHistory = [];
+            clearGameBoardView();
+            this.send({ t: 'startGame' });
+          } else if (m.state.phase === 'lobby') {
+            // 联机房间重开：还回组件，由它显示大厅房间。
+            App.chatHistory = [];
+            hidePageScreens();
+            this.release();
+            const el = $('#lobby');
+            if (el && el.returnToLobby) el.returnToLobby(m.state);
+          } else {
+            showScreen('screen-game'); render();
+            if (m.state.phase === 'gameover') showOver(m.state);
+          }
+          break;
+        case 'error': toast('✗ ' + m.error); break;
+        case 'chat': {
+          // 自己与对手的发言都在各自圆角矩形头顶弹出气泡（含自己）
+          if (m.playerId) showPlayerChatBubble(m);
+          if (m.playerId && m.text) {
+            if (!App.chatHistory) App.chatHistory = [];
+            App.chatHistory.push({ playerId: m.playerId, playerName: m.playerName, text: m.text, sentAt: m.sentAt });
+            const paneChat = $('#pane-chat');
+            if (paneChat && !paneChat.hidden) {
+              const box = $('#chat-log');
+              if (box) { box.appendChild(chatEntryNode(m)); box.scrollTop = box.scrollHeight; }
+            }
+          }
+          break;
+        }
+        case 'botDebug': appendBotDebug(m.entry); break;
+        case 'botDebugHistory':
+          App.botDebugEntries = Array.isArray(m.entries) ? m.entries.slice(-300) : [];
+          if (App.botDebugOpen) renderBotDebug();
+          break;
+        case 'roomNotice': handleRoomNotice(m.notice); break;
+      }
+    },
+    action(a) { this.send({ t: 'action', action: a }); }
+  };
+
+  /* ============================== 房间语音（LiveKit） ==============================
+   * 音频由 LiveKit 在浏览器之间转发，这里只负责：取令牌 → 连房间 → 上/下麦 →
+   * 把远端音轨挂进 DOM → 把「谁在说话」映射到玩家面板。
+   *
+   * SDK 压缩后近 600KB，所以只在第一次点「语音」时才动态加载：单机玩家和不开
+   * 语音的联机玩家都不必为它买单。这里从头到尾不接触 LiveKit 的 API Secret ——
+   * 令牌由 Python 游戏服务器签发，见 python_backend/voice.py。
+   * ============================================================================ */
+  const VOICE_VOLUME_KEY = 'citadels.voice.volumes';
+  const VOICE_SDK_PATH = 'vendor/livekit-client.umd.min.js';
+  let voiceSdkPromise = null;
+
+  function loadVoiceSdk() {
+    if (window.LivekitClient) return Promise.resolve(window.LivekitClient);
+    if (voiceSdkPromise) return voiceSdkPromise;
+    voiceSdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = new URL(VOICE_SDK_PATH, document.baseURI).href;
+      script.async = true;
+      script.onload = () => {
+        if (window.LivekitClient) resolve(window.LivekitClient);
+        else { voiceSdkPromise = null; reject(new Error('语音组件加载异常')); }
+      };
+      script.onerror = () => { voiceSdkPromise = null; reject(new Error('无法加载语音组件，请检查网络')); };
+      document.head.appendChild(script);
+    });
+    return voiceSdkPromise;
+  }
+
+  const Voice = {
+    room: null,
+    joined: false,
+    joining: false,
+    muted: false,
+    micDenied: false,      // 麦克风被拒后仍可收听，只是自己说不了
+    audioBlocked: false,   // 浏览器拦截了自动播放，等一次点击解锁
+    error: '',
+    hint: '',              // 重连等待等临时提示
+    ready: false,          // 服务器是否配好了 LiveKit
+    checked: false,
+    statusMessage: '',
+    speakers: new Set(),   // 正在说话的 playerId
+    panelSig: '',
+    volumes: (function () {
+      try { return JSON.parse(window.localStorage.getItem(VOICE_VOLUME_KEY) || '{}') || {}; }
+      catch (e) { return {}; }
+    })(),
+
+    /* 服务器配好了、房主也没关，才值得显示语音入口。
+     * 大厅阶段 App.state 还没有对局状态（render 会跳过 lobby），所以另存一份
+     * lobbyState，两边取当前有效的那份。 */
+    available() {
+      if (App.mode !== 'net') return false;
+      const st = (App.state && App.state.phase !== 'lobby') ? App.state : App.lobbyState;
+      if (!st) return false;
+      if (st.voiceReady === false || st.voiceEnabled === false) return false;
+      if (st.config && st.config.voice === false) return false;
+      return true;
+    },
+
+    async check() {
+      if (this.checked) return this.ready;
+      this.checked = true;
+      try {
+        const res = await fetch(gameServerBase() + '/api/voice/status', { cache: 'no-store' });
+        const data = await res.json();
+        this.ready = !!data.configured;
+        this.statusMessage = data.message || '';
+      } catch (e) {
+        this.ready = false;
+        this.statusMessage = '无法连接游戏服务器，暂时用不了语音';
+      }
+      voiceSync();
+      return this.ready;
+    },
+
+    async join() {
+      if (this.joined || this.joining) return;
+      const session = loadNetSession();
+      if (!session || !session.token) { toast('请先进入联机房间再加入语音'); return; }
+      // 非安全上下文里 navigator.mediaDevices 直接不存在。先在本地拦下来，
+      // 否则用户只会看到 SDK 抛出的英文错误，看不出是页面没走 HTTPS。
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast('浏览器不允许在非 HTTPS 页面使用麦克风，请用 HTTPS 打开');
+        return;
+      }
+      this.joining = true;
+      this.error = '';
+      this.hint = '';
+      voiceSync();
+      try {
+        const sdk = await loadVoiceSdk();
+        const res = await fetch(gameServerBase() + '/api/voice/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId: session.roomId, resumeToken: session.token })
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok) throw new Error(data.error || '服务器拒绝了语音请求');
+        const room = new sdk.Room({
+          // 语音只用到麦克风：关掉为视频设计的自适应/动态码率，避免多余的协商。
+          adaptiveStream: false,
+          dynacast: false,
+          disconnectOnPageLeave: true,
+          audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+        this.room = room;
+        this.bindRoom(room);
+        await room.connect(data.url, data.token);
+        this.joined = true;
+        this.audioBlocked = !room.canPlaybackAudio;
+        // 连上就把语音面板顶出来：开麦要等权限弹窗，不能让用户对着没反应的界面等。
+        // 面板里能看到名单和「正在开麦」，权限结果出来后再刷新一次。
+        App.voiceOpen = true;
+        App.activeSideTab = 'voice';
+        App.sidePanelCollapsed = false;
+        updateSidePanel();
+        // 先接上再开麦：麦克风被拒时连接仍然保留，还能听别人说话。
+        await this.setMic(true);
+      } catch (error) {
+        this.error = (error && error.message) || '加入语音失败';
+        this.teardown();
+      } finally {
+        this.joining = false;
+        voiceSync();
+        updateSidePanel();
+      }
+    },
+
+    /* setMicrophoneEnabled 会在权限被拒时抛错。这里不把它当致命错误：
+     * 保持连接、退回「只能收听」状态，比直接踢出语音有用得多。 */
+    async setMic(on) {
+      const room = this.room;
+      if (!room) return;
+      try {
+        await room.localParticipant.setMicrophoneEnabled(on);
+        this.muted = !on;
+        this.micDenied = false;
+      } catch (error) {
+        this.muted = true;
+        this.micDenied = true;
+        toast('麦克风不可用：' + ((error && error.message) || '权限被拒绝') + '（仍可收听）');
+      }
+    },
+
+    async toggleMute() {
+      if (!this.joined) { this.join(); return; }
+      await this.setMic(this.muted);
+      voiceSync();
+    },
+
+    leave() {
+      if (!this.joined && !this.room) return;
+      this.teardown();
+      this.hint = '';
+      voiceSync();
+      updateSidePanel();
+    },
+
+    teardown() {
+      const room = this.room;
+      this.room = null;
+      this.joined = false;
+      this.speakers = new Set();
+      this.audioBlocked = false;
+      if (room) { try { room.disconnect(); } catch (e) { /* 已经断开 */ } }
+      const box = $('#voice-audio');
+      if (box) box.innerHTML = '';
+      voiceSync();
+    },
+
+    async unblockAudio() {
+      const room = this.room;
+      if (!room) return;
+      try { await room.startAudio(); } catch (e) { /* 仍然被拦，下次点击再试 */ }
+      this.audioBlocked = !room.canPlaybackAudio;
+      voiceSync();
+    },
+
+    volumeOf(identity) {
+      const v = this.volumes[identity];
+      return typeof v === 'number' ? v : 1;
+    },
+
+    setVolume(identity, value) {
+      const v = Math.max(0, Math.min(1, Number(value)));
+      this.volumes[identity] = v;
+      try { window.localStorage.setItem(VOICE_VOLUME_KEY, JSON.stringify(this.volumes)); }
+      catch (e) { /* 隐私模式或存储被禁用 */ }
+      this.applyVolume(identity);
+    },
+
+    applyVolume(identity) {
+      const room = this.room;
+      if (!room) return;
+      const p = room.remoteParticipants.get(identity);
+      if (p) { try { p.setVolume(this.volumeOf(identity)); } catch (e) { /* 还没发布音轨 */ } }
+    },
+
+    bindRoom(room) {
+      const sdk = window.LivekitClient;
+      const E = sdk.RoomEvent;
+      room.on(E.TrackSubscribed, (track, publication, participant) => {
+        if (track.kind !== sdk.Track.Kind.Audio) return;
+        const node = track.attach();
+        node.autoplay = true;
+        node.setAttribute('playsinline', '');
+        const box = $('#voice-audio');
+        if (box) box.appendChild(node);
+        this.applyVolume(participant.identity);
+        voiceSync();
+      });
+      room.on(E.TrackUnsubscribed, track => {
+        try { track.detach().forEach(node => node.remove()); } catch (e) { /* 已移除 */ }
+      });
+      room.on(E.ParticipantConnected, () => voiceSync());
+      room.on(E.ParticipantDisconnected, participant => {
+        this.speakers.delete(participant.identity);
+        voiceSync();
+      });
+      // 服务端算好的说话人列表，比自己算音量阈值准，也不会给每个远端流加 AudioContext。
+      room.on(E.ActiveSpeakersChanged, speakers => {
+        this.speakers = new Set(speakers.map(p => p.identity));
+        syncVoiceIndicators();
+      });
+      room.on(E.TrackMuted, () => voiceSync());
+      room.on(E.TrackUnmuted, () => voiceSync());
+      room.on(E.LocalTrackPublished, () => voiceSync());
+      room.on(E.ParticipantNameChanged, () => voiceSync());
+      room.on(E.AudioPlaybackStatusChanged, () => {
+        this.audioBlocked = !room.canPlaybackAudio;
+        voiceSync();
+      });
+      room.on(E.ConnectionStateChanged, () => voiceSync());
+      room.on(E.Reconnecting, () => { this.hint = '语音正在重连…'; voiceSync(); });
+      room.on(E.Reconnected, () => { this.hint = ''; voiceSync(); });
+      room.on(E.Disconnected, () => {
+        const wasJoined = this.joined;
+        this.room = null;
+        this.joined = false;
+        this.speakers = new Set();
+        const box = $('#voice-audio');
+        if (box) box.innerHTML = '';
+        if (wasJoined) this.hint = '语音连接已断开';
+        voiceSync();
+      });
+      room.on(E.MediaDevicesError, () => {
+        this.micDenied = true;
+        this.muted = true;
+        voiceSync();
+      });
+    },
+
+    /* 远端参与者 → 面板行数据。麦克风「关」有两种表现：整条音轨没发布
+     * （isMicrophoneEnabled 为假），或发布了但被静音。两种都要算静音。 */
+    roster() {
+      const room = this.room;
+      const rows = [];
+      if (!room) return rows;
+      const collect = (p, isLocal) => {
+        let hasAudio = false;
+        let muted = false;
+        p.audioTrackPublications.forEach(pub => {
+          hasAudio = true;
+          if (pub.isMuted || (pub.track && pub.track.isMuted)) muted = true;
+        });
+        rows.push({
+          identity: p.identity,
+          name: p.name || '玩家',
+          isLocal: isLocal,
+          speaking: this.speakers.has(p.identity),
+          muted: !p.isMicrophoneEnabled || !hasAudio || muted
+        });
+      };
+      collect(room.localParticipant, true);
+      room.remoteParticipants.forEach(p => collect(p, false));
+      return rows;
+    }
+  };
+
+  /* 语音面板是可交互的（音量滑杆、静音按钮），所以只在「结构」变化时重建；
+   * 说话状态这种高频变化单独用 class 切换，免得拖滑杆时被重建打断。 */
+  function voicePanelSignature() {
+    if (!Voice.joined) return 'off|' + Voice.joining + '|' + Voice.error + '|' + Voice.ready + '|' + Voice.hint;
+    return 'on|' + Voice.muted + '|' + Voice.micDenied + '|' + Voice.audioBlocked + '|' + Voice.hint + '|' +
+      Voice.roster().map(r => r.identity + ':' + r.name + ':' + (r.muted ? 1 : 0) + ':' + (r.isLocal ? 1 : 0)).join(',');
+  }
+
+  function voiceRenderPanel() {
+    const box = $('#voice-pane');
+    if (!box) return;
+    const sig = voicePanelSignature();
+    if (sig === Voice.panelSig) return;
+    Voice.panelSig = sig;
+    box.innerHTML = '';
+    box.appendChild(el('div', 'voice-status', Voice.joined
+      ? (Voice.muted ? '已加入 · 静音中' : '已加入 · 正在通话')
+      : (Voice.joining ? '正在连接语音…' : (Voice.ready ? '未加入语音' : (Voice.statusMessage || '服务器未启用语音')))));
+    if (Voice.error) box.appendChild(el('div', 'voice-error', Voice.error));
+    if (Voice.hint) box.appendChild(el('div', 'voice-hint', Voice.hint));
+    if (Voice.micDenied) {
+      box.appendChild(el('div', 'voice-hint', '麦克风不可用，当前只能听到别人说话。'));
+    }
+    if (Voice.audioBlocked && Voice.joined) {
+      const unblock = el('button', 'btn tiny primary', '点击开启声音');
+      unblock.type = 'button';
+      unblock.onclick = () => Voice.unblockAudio();
+      box.appendChild(unblock);
+    }
+    if (!Voice.joined) {
+      if (Voice.ready && Voice.available()) {
+        const joinBtn = el('button', 'btn primary block', Voice.joining ? '连接中…' : '加入语音');
+        joinBtn.type = 'button';
+        joinBtn.disabled = Voice.joining;
+        joinBtn.onclick = () => Voice.join();
+        box.appendChild(joinBtn);
+        box.appendChild(el('p', 'dim small', '真人座位之间实时通话；电脑座位不参与语音。'));
+      }
+      return;
+    }
+    const list = el('div', 'voice-list');
+    Voice.roster().forEach(row => {
+      const item = el('div', 'voice-row' + (row.isLocal ? ' is-local' : ''));
+      item.dataset.id = row.identity;
+      item.classList.toggle('is-speaking', row.speaking);
+      item.classList.toggle('is-muted', row.muted);
+      const dot = el('i', 'voice-dot');
+      dot.setAttribute('aria-hidden', 'true');
+      const name = el('span', 'voice-name', escapeHtml(row.name) + (row.isLocal ? '（我）' : ''));
+      item.appendChild(dot);
+      item.appendChild(name);
+      // 自己的音量由对方控制，滑杆只对远端有意义。
+      if (!row.isLocal) {
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'voice-volume';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '5';
+        slider.value = String(Math.round(Voice.volumeOf(row.identity) * 100));
+        slider.title = '调整 ' + row.name + ' 的音量';
+        slider.setAttribute('aria-label', row.name + ' 的音量');
+        slider.oninput = () => Voice.setVolume(row.identity, Number(slider.value) / 100);
+        item.appendChild(slider);
+      }
+      list.appendChild(item);
+    });
+    box.appendChild(list);
+    const foot = el('div', 'voice-foot');
+    const muteBtn = el('button', 'btn tiny', Voice.muted ? '开麦' : '静音');
+    muteBtn.type = 'button';
+    muteBtn.onclick = () => Voice.toggleMute();
+    const leaveBtn = el('button', 'btn tiny ghost', '退出语音');
+    leaveBtn.type = 'button';
+    leaveBtn.onclick = () => Voice.leave();
+    foot.appendChild(muteBtn);
+    foot.appendChild(leaveBtn);
+    box.appendChild(foot);
+  }
+
+  /* 说话高亮同时打在玩家面板和语音面板行上。identity 就是座位 id，
+   * 所以直接按 p.id 匹配，不需要另建映射表。 */
+  function syncVoiceIndicators() {
+    const st = App.state;
+    const players = (st && st.players) || [];
+    $$('#opponents .opp').forEach(node => {
+      const seat = Number(node.dataset.seat);
+      const p = players.find(x => x.seat === seat);
+      node.classList.toggle('voice-speaking', !!(p && Voice.speakers.has(p.id)));
+    });
+    const meArea = $('#me-area');
+    if (meArea) {
+      const me = players.find(p => p.id === App.myId);
+      meArea.classList.toggle('voice-speaking', !!(me && Voice.speakers.has(me.id)));
+    }
+    $$('#voice-pane .voice-row').forEach(node => {
+      node.classList.toggle('is-speaking', Voice.speakers.has(node.dataset.id));
+    });
+  }
+
+  function voiceSync() {
+    // 服务器有没有配 LiveKit 是异步问出来的；还没问过就先问一次（check 完成后
+    // 会再回调这里）。没配的服务器上不该出现任何语音开关。
+    if (App.mode === 'net' && !Voice.checked) Voice.check();
+    $$('.voice-capable').forEach(node => { node.hidden = !Voice.ready; });
+    const btn = $('#btn-voice');
+    if (btn) {
+      const show = Voice.available();
+      btn.hidden = !show;
+      btn.classList.toggle('is-live', Voice.joined && !Voice.muted);
+      btn.classList.toggle('is-muted', Voice.joined && Voice.muted);
+      btn.classList.toggle('is-busy', Voice.joining);
+      btn.setAttribute('aria-pressed', String(!!Voice.joined));
+      btn.textContent = Voice.joining ? '语音 · 连接中'
+        : !Voice.joined ? '语音'
+          : Voice.muted ? '语音 · 静音' : '语音 · 开麦';
+      btn.title = Voice.joined
+        ? (Voice.muted ? '已静音，点击开麦' : '正在通话，点击静音')
+        : (Voice.ready ? '加入房间语音' : (Voice.statusMessage || '加入房间语音'));
+      // 房间没了 / 房主关了语音 / 回到主菜单：不能让麦克风还开着。
+      if (btn.hidden && Voice.joined) Voice.leave();
+    }
+    const tab = $('#tab-voice');
+    if (tab) tab.hidden = !Voice.available();
+    voiceRenderPanel();
+    syncVoiceIndicators();
+  }
+
+  function send(action) {
+    if (App.state?.spectating) return;
+    if (App.buildingAnimPaused) return;
+    // 选角牌的点击可能在状态广播与 DOM 重绘之间落后一个瞬间。
+    // 如果选角已经结束，丢弃这次陈旧点击，避免把 draft_pick 发到行动阶段。
+    if (action && (action.type === 'draft_pick' || action.type === 'draft_discard')) {
+      const d = App.state && App.state.draft;
+      const viewerId = App.state && (App.state.you || App.myId);
+      if (!App.state || App.state.phase !== 'draft' || !d || d.currentPlayer !== viewerId) {
+        App.sel = null;
+        if (typeof closeCharZoomPreview === 'function') closeCharZoomPreview();
+        if (App.state) render();
+        toast('选角已结束或当前不是你的选角回合');
+        return;
+      }
+    }
+    Net.action(action);
+  }
+
+  /* ============================== 卡牌渲染 ============================== */
+  function cardClassOf(c, opts) {
+    opts = opts || {};
+    const neon = Theme.is && Theme.is('neon');
+    return 'card c-' + c.color + (neon ? ' neon-card' : '') + (opts.mini ? ' mini' : '') +
+      (opts.clickable ? ' clickable' : '') + (opts.disabled ? ' disabled' : '') +
+      (opts.selected ? ' selected' : '') + (opts.pickable ? ' pickable' : '');
+  }
+
+  function cardNode(c, opts) {
+    opts = opts || {};
+    const neon = Theme.is && Theme.is('neon');
+    const d = el('div', cardClassOf(c, opts));
+    d.dataset.uid = c.uid;
+    d.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
+      ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
+    const art = neon && Theme.districtAsset ? Theme.districtAsset(c, 'thumb') : null;
+    const full = neon && Theme.districtAsset ? Theme.districtAsset(c, 'full') : null;
+    if (art) {
+      const img = el('img', 'card-art');
+      img.src = art;
+      img.alt = c.name;
+      // 不再用 loading="lazy"：每次 render 都会重建 DOM，懒加载图片在移动端会
+      // 出现「空白→加载」的闪烁。去掉后新节点立即（从缓存）解码，配合 keyed
+      // reconciliation（syncCards）复用节点，彻底消除每步行动的画面闪烁。
+      img.decoding = 'async';
+      d.appendChild(img);
+      if (d.dataset) {
+        d.dataset.zoomSrc = full || art;
+        d.dataset.zoomTitle = c.name;
+      }
+    } else {
+      d.appendChild(el('div', 'c-top'));
+      d.appendChild(el('div', 'c-cost', String(c.cost)));
+      d.appendChild(el('div', 'c-name', c.name));
+      d.appendChild(el('div', 'c-en', c.en || ''));
+    }
+    syncBeautifiedDecoration(d, c);
+    renderMuseumStack(d, c);
+    return d;
+  }
+
+  function syncBeautifiedDecoration(node, c) {
+    if (!node || !node.classList) return;
+    const beautified = !!(c && c.beautified);
+    node.classList.toggle('beautified', beautified);
+    const oldShimmer = node.querySelector('.beautified-shimmer');
+    if (beautified && !oldShimmer) {
+      const shimmer = el('span', 'beautified-shimmer');
+      shimmer.setAttribute('aria-hidden', 'true');
+      node.appendChild(shimmer);
+    } else if (!beautified && oldShimmer && oldShimmer.parentNode) {
+      oldShimmer.parentNode.removeChild(oldShimmer);
+    }
+  }
+
+  function renderMuseumStack(node, c) {
+    if (!node || !node.querySelector) return;
+    const old = node.querySelector('.museum-stack');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    const count = Number(c && c.museumCount) || 0;
+    if (!count) return;
+    const stack = el('div', 'museum-stack');
+    stack.title = '博物馆下叠放 ' + count + ' 张牌';
+    stack.setAttribute('aria-label', stack.title);
+    for (let i = 0; i < Math.min(3, count); i++) {
+      const back = el('span', 'museum-stack-card');
+      back.style.setProperty('--stack-index', String(i));
+      stack.appendChild(back);
+    }
+    stack.appendChild(el('span', 'museum-stack-count', String(count)));
+    node.appendChild(stack);
+  }
+
+  /* 复用已有卡片节点时，只更新外层动态属性（className / title / uid），
+   * 不重建内部 <img>，从而不触发图片重新解码与闪烁。 */
+  function refreshCardNode(node, c, opts) {
+    node.className = cardClassOf(c, opts);
+    syncBeautifiedDecoration(node, c);
+    if (node.dataset) node.dataset.uid = c.uid;
+    node.title = (c.desc ? c.desc + '\n' : '') + c.name + ' · ' + Cards.COLORS[c.color].name +
+      ' · 花费 ' + c.cost + (c.scoreValue && c.scoreValue !== c.cost ? ' · 计分 ' + c.scoreValue : '');
+    renderMuseumStack(node, c);
+  }
+
+  /* 按 uid 复用卡片节点的列表渲染：不整盘 innerHTML 清空，已存在的卡片
+   * （含内部 <img>）保留不动，只增删变化项并微调顺序。这是消除霓虹主题
+   * 「每行动一次整盘重绘→图片闪烁」的根本手段。 */
+  /**
+   * container.children 是 **live** HTMLCollection：边遍历边 removeChild 会让集合实时缩短，
+   * forEach 的索引随之错位，紧随其后的节点会被跳过、永远删不掉，残留成「幽灵卡片」
+   * （典型表现：跨轮次时「本轮出局角色」多显示一张上一轮的角色）。
+   * 凡是要在遍历中删除节点，必须先取静态快照。
+   */
+  function childrenSnapshot(container) {
+    return Array.prototype.slice.call(container.children);
+  }
+
+  function syncCards(container, cards, optsFor, onNode) {
+    if (!container) return;
+    const existing = {};
+    Array.prototype.forEach.call(container.children, ch => {
+      const k = ch.dataset && ch.dataset.uid;
+      if (k) existing[k] = ch;
+    });
+    const keep = {};
+    const frag = document.createDocumentFragment();
+    cards.forEach(c => {
+      let node = existing[c.uid];
+      if (node) refreshCardNode(node, c, optsFor(c));
+      else node = cardNode(c, optsFor(c));
+      keep[c.uid] = node;
+      if (onNode) onNode(node, c, optsFor(c));
+      frag.appendChild(node);
+    });
+    // 移除已不在列表中的旧节点（必须用快照遍历：live HTMLCollection 边删边遍历会漏删）
+    childrenSnapshot(container).forEach(ch => {
+      const k = ch.dataset && ch.dataset.uid;
+      if (k && !keep[k] && ch.parentNode) ch.parentNode.removeChild(ch);
+    });
+    container.appendChild(frag);
+  }
+
+  /* 经典主题沿用旧插画；霓虹主题严格按角色 id 映射最终完整卡图。 */
+  const ROLE_IMG = { 1: '刺客', 2: '小偷', 3: '魔术师', 4: '国王', 5: '住持', 6: '商人', 7: '建筑师', 8: '领主' };
+  function roleImage(c) {
+    if (!c || !ROLE_IMG[c.num]) return null;
+    return 'images/roles/' + ROLE_IMG[c.num] + '.jpg';
+  }
+
+  function roleThumb(c) {
+    if (Theme.is && Theme.is('neon') && Theme.roleAsset) return Theme.roleAsset(c, 'thumb');
+    return roleImage(c);
+  }
+  function roleFull(c) {
+    if (Theme.is && Theme.is('neon') && Theme.roleAsset) return Theme.roleAsset(c, 'full');
+    return roleImage(c);
+  }
+  function charMeta(id, num) {
+    if (id && Cards && Cards.CHAR_MAP && Cards.CHAR_MAP[id]) return Cards.CHAR_MAP[id];
+    if (Cards && Cards.CHAR_MAP) {
+      const values = Object.values(Cards.CHAR_MAP);
+      return values.find(c => c.num === num) || null;
+    }
+    return id ? { id: id, num: num, name: String(num || '') } : null;
+  }
+
+  function charNode(c, opts) {
+    opts = opts || {};
+    const neon = Theme.is && Theme.is('neon');
+    const d = el('div', 'char-card' + (neon ? ' neon-role-card' : '') + (opts.dim ? ' faceup-char' : '') +
+      (opts.clickable ? ' clickable' : '') + (opts.mini ? ' mini' : ''));
+    if (d.dataset && c.id) d.dataset.uid = c.id;
+    const img = roleThumb(c);
+    const full = roleFull(c);
+    let art = '<div class="cc-art">';
+    if (img) art += '<img src="' + img + '" alt="' + escapeHtml(c.name) + '" decoding="async">';
+    else art += '<div class="cc-art-emoji">' + escapeHtml(String(c.num || '?')) + '</div>';
+    art += '</div>';
+    // 霓虹卡图本身已含编号、名称与规则；经典主题保留原来的简化卡牌排版。
+    d.innerHTML = neon ? art : art +
+      '<div class="cc-num">' + c.num + '</div>' +
+      '<div class="cc-name">' + c.name + '</div>';
+    if (img && d.dataset) {
+      d.dataset.zoomSrc = full || img;
+      d.dataset.zoomTitle = c.name;
+    }
+    return d;
+  }
+
+  let cardHdPreviousFocus = null;
+  const CARD_HD_ZOOM_MIN = 0.5;
+  const CARD_HD_ZOOM_MAX = 3;
+  const CARD_HD_ZOOM_STEP = 0.25;
+  let cardHdZoom = 1;
+  let cardHdPan = { x: 0, y: 0 };
+  let cardHdRenderView = function () {};
+  let cardHdPreviewCloser = null;
+  let closeCharZoomPreview = null;
+
+  function setCardHdZoom(value) {
+    const next = Math.max(CARD_HD_ZOOM_MIN, Math.min(CARD_HD_ZOOM_MAX, Number(value) || 1));
+    cardHdZoom = Math.round(next * 100) / 100;
+    cardHdRenderView();
+  }
+
+  function resetCardHdView() {
+    cardHdZoom = 1;
+    cardHdPan = { x: 0, y: 0 };
+    cardHdRenderView();
+  }
+
+  const warmedCardHdImages = new Map();
+  function warmCardHdImage(src) {
+    if (!src || warmedCardHdImages.has(src)) return;
+    const image = new Image();
+    image.decoding = 'async';
+    image.fetchPriority = 'high';
+    image.src = src;
+    warmedCardHdImages.set(src, image);
+    while (warmedCardHdImages.size > 4) warmedCardHdImages.delete(warmedCardHdImages.keys().next().value);
+  }
+
+  function openCardHd(src, title, previewCloser) {
+    const overlay = $('#card-hd-overlay');
+    const img = $('#card-hd-img');
+    const titleEl = $('#card-hd-title');
+    if (!overlay || !img || !src) return;
+    cardHdPreviewCloser = typeof previewCloser === 'function' ? previewCloser : null;
+    cardHdPreviousFocus = document.activeElement || null;
+    resetCardHdView();
+    warmCardHdImage(src);
+    img.fetchPriority = 'high';
+    img.decoding = 'async';
+    img.src = src;
+    img.alt = (title || '卡牌') + '高清大图';
+    if (titleEl) titleEl.textContent = title || '卡牌高清大图';
+    overlay.hidden = false;
+    if (document.body && document.body.classList) document.body.classList.add('card-hd-open');
+    const close = $('#card-hd-close');
+    if (close && close.focus) close.focus();
+  }
+
+  function closeCardHd() {
+    const overlay = $('#card-hd-overlay');
+    if (!overlay) return;
+    overlay.hidden = true;
+    if (document.body && document.body.classList) document.body.classList.remove('card-hd-open');
+    const previous = cardHdPreviousFocus;
+    const previewCloser = cardHdPreviewCloser;
+    cardHdPreviousFocus = null;
+    cardHdPreviewCloser = null;
+    if (previewCloser) previewCloser();
+    // 高清图从悬浮预览打开时，原按钮会随预览一起隐藏，不再把焦点放回隐藏节点。
+    if (previous && previous.focus && !previous.hidden && previous.isConnected !== false) previous.focus();
+  }
+
+  function openCardHdFrom(trigger) {
+    if (!trigger || !trigger.getAttribute) return;
+    const fromPreview = trigger.closest && trigger.closest('#char-zoom');
+    openCardHd(
+      trigger.getAttribute('data-hd-src'),
+      trigger.getAttribute('data-hd-title') || trigger.getAttribute('aria-label') || '卡牌',
+      fromPreview ? closeCharZoomPreview : null
+    );
+  }
+
+  function initCardHd() {
+    const overlay = $('#card-hd-overlay');
+    if (!overlay) return;
+    const close = $('#card-hd-close');
+    const stage = document.querySelector('.card-hd-stage');
+    const img = $('#card-hd-img');
+    const zoomOut = $('#card-hd-zoom-out');
+    const zoomReset = $('#card-hd-zoom-reset');
+    const zoomIn = $('#card-hd-zoom-in');
+    const zoomValue = $('#card-hd-zoom-value');
+    if (close) close.onclick = closeCardHd;
+    overlay.onclick = e => { if (e.target === overlay) closeCardHd(); };
+
+    function clampPan() {
+      if (!stage || !img) return;
+      const width = Number(img.clientWidth) || 0;
+      const height = Number(img.clientHeight) || 0;
+      const stageWidth = Number(stage.clientWidth) || 0;
+      const stageHeight = Number(stage.clientHeight) || 0;
+      const maxX = Math.max(0, (width * cardHdZoom - stageWidth) / 2);
+      const maxY = Math.max(0, (height * cardHdZoom - stageHeight) / 2);
+      cardHdPan.x = Math.max(-maxX, Math.min(maxX, cardHdPan.x));
+      cardHdPan.y = Math.max(-maxY, Math.min(maxY, cardHdPan.y));
+    }
+
+    function renderView() {
+      clampPan();
+      if (img && img.style) {
+        img.style.transform = 'translate3d(' + cardHdPan.x + 'px,' + cardHdPan.y + 'px,0) scale(' + cardHdZoom + ')';
+        img.style.transformOrigin = 'center center';
+        img.style.cursor = cardHdZoom > 1 ? 'grab' : 'default';
+      }
+      if (zoomValue) {
+        zoomValue.textContent = Math.round(cardHdZoom * 100) + '%';
+        if (zoomValue.setAttribute) zoomValue.setAttribute('aria-valuenow', String(Math.round(cardHdZoom * 100)));
+      }
+      if (zoomOut) zoomOut.disabled = cardHdZoom <= CARD_HD_ZOOM_MIN;
+      if (zoomIn) zoomIn.disabled = cardHdZoom >= CARD_HD_ZOOM_MAX;
+      if (stage && stage.classList) {
+        if (cardHdZoom > 1) stage.classList.add('zoomed');
+        else stage.classList.remove('zoomed');
+      }
+    }
+    cardHdRenderView = renderView;
+    if (img && img.addEventListener) img.addEventListener('load', renderView);
+    if (zoomOut) zoomOut.onclick = () => setCardHdZoom(cardHdZoom - CARD_HD_ZOOM_STEP);
+    if (zoomReset) zoomReset.onclick = resetCardHdView;
+    if (zoomIn) zoomIn.onclick = () => setCardHdZoom(cardHdZoom + CARD_HD_ZOOM_STEP);
+
+    // 桌面拖拽：只在放大后接管鼠标，避免影响按钮和普通滚动。
+    let mouseDrag = null;
+    function stopMouseDrag() {
+      mouseDrag = null;
+      if (stage && stage.classList) stage.classList.remove('is-dragging');
+      if (img && img.style) img.style.cursor = cardHdZoom > 1 ? 'grab' : 'default';
+    }
+    if (stage && stage.addEventListener) {
+      stage.addEventListener('mousedown', e => {
+        if (e.button !== 0 || cardHdZoom <= 1) return;
+        mouseDrag = { x: e.clientX, y: e.clientY, panX: cardHdPan.x, panY: cardHdPan.y };
+        if (stage.classList) stage.classList.add('is-dragging');
+        if (e.preventDefault) e.preventDefault();
+      });
+      stage.addEventListener('wheel', e => {
+        if (!e.deltaY) return;
+        if (e.preventDefault) e.preventDefault();
+        setCardHdZoom(cardHdZoom + (e.deltaY < 0 ? CARD_HD_ZOOM_STEP : -CARD_HD_ZOOM_STEP));
+      }, { passive: false });
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('mousemove', e => {
+        if (!mouseDrag) return;
+        cardHdPan.x = mouseDrag.panX + e.clientX - mouseDrag.x;
+        cardHdPan.y = mouseDrag.panY + e.clientY - mouseDrag.y;
+        renderView();
+        if (e.preventDefault) e.preventDefault();
+      });
+      window.addEventListener('mouseup', stopMouseDrag);
+    }
+
+    // 手机拖拽与双指缩放；单指仅在已放大时移动卡图。
+    let touchDrag = null;
+    let pinch = null;
+    function touchDistance(a, b) {
+      const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    if (stage && stage.addEventListener) {
+      stage.addEventListener('touchstart', e => {
+        if (e.touches.length >= 2) {
+          pinch = { distance: touchDistance(e.touches[0], e.touches[1]), zoom: cardHdZoom };
+          touchDrag = null;
+          if (e.preventDefault) e.preventDefault();
+        } else if (e.touches.length === 1 && cardHdZoom > 1) {
+          const t = e.touches[0];
+          touchDrag = { x: t.clientX, y: t.clientY, panX: cardHdPan.x, panY: cardHdPan.y };
+        }
+      }, { passive: false });
+      stage.addEventListener('touchmove', e => {
+        if (pinch && e.touches.length >= 2) {
+          const distance = touchDistance(e.touches[0], e.touches[1]);
+          setCardHdZoom(pinch.zoom * distance / Math.max(1, pinch.distance));
+          if (e.preventDefault) e.preventDefault();
+        } else if (touchDrag && e.touches.length === 1) {
+          const t = e.touches[0];
+          cardHdPan.x = touchDrag.panX + t.clientX - touchDrag.x;
+          cardHdPan.y = touchDrag.panY + t.clientY - touchDrag.y;
+          renderView();
+          if (e.preventDefault) e.preventDefault();
+        }
+      }, { passive: false });
+      stage.addEventListener('touchend', e => {
+        if (e.touches.length < 2) pinch = null;
+        if (e.touches.length === 1 && cardHdZoom > 1) {
+          const t = e.touches[0];
+          touchDrag = { x: t.clientX, y: t.clientY, panX: cardHdPan.x, panY: cardHdPan.y };
+        } else if (!e.touches.length) {
+          touchDrag = null;
+        }
+      }, { passive: true });
+    }
+
+    document.addEventListener('click', e => {
+      const target = e.target && e.target.closest && e.target.closest('[data-hd-src]');
+      if (!target) return;
+      e.preventDefault();
+      openCardHdFrom(target);
+    });
+    const warmFromIntent = e => {
+      const target = e.target && e.target.closest && e.target.closest('[data-hd-src]');
+      if (target) warmCardHdImage(target.getAttribute('data-hd-src'));
+    };
+    document.addEventListener('pointerover', warmFromIntent, { passive: true });
+    document.addEventListener('pointerdown', warmFromIntent, { passive: true });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !overlay.hidden) { closeCardHd(); return; }
+      if (!overlay.hidden && (e.key === '+' || e.key === '=')) { e.preventDefault(); setCardHdZoom(cardHdZoom + CARD_HD_ZOOM_STEP); return; }
+      if (!overlay.hidden && (e.key === '-' || e.key === '_')) { e.preventDefault(); setCardHdZoom(cardHdZoom - CARD_HD_ZOOM_STEP); return; }
+      if (!overlay.hidden && e.key === '0') { e.preventDefault(); resetCardHdView(); return; }
+      const target = e.target && e.target.closest && e.target.closest('[data-hd-src]');
+      if (!target || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      openCardHdFrom(target);
+    });
+    renderView();
+  }
+
+  /* 统一卡牌预览：角色卡与建筑卡共用桌面悬浮、触屏确认与高清查看。 */
+  function initCharZoom() {
+    const zoom = $('#char-zoom');
+    if (!zoom) return;
+    const zimg = $('#char-zoom-img', zoom);
+    const zback = $('#char-zoom-back', zoom);
+    const zbg = $('#char-zoom-bg');
+    const zact = $('#cz-actions');
+    const zok = $('#cz-ok');
+    const zcancel = $('#cz-cancel');
+    const hdBtn = $('#cz-hd-btn');
+    const W = 330; // 放大浮窗宽度
+    const SEL = '[data-zoom-src],[data-zoom-back]';
+    const HIDE_DELAY = 500;
+    let active = null;
+    let pending = null;   // 触屏下待确认的选角行动
+    let hideTimer = null;
+    let overlapTarget = null; // 预览层覆盖的底层卡牌，优先把点击交给它
+
+    function cancelHide() {
+      if (hideTimer !== null) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    }
+
+    function scheduleHide() {
+      cancelHide();
+      hideTimer = setTimeout(() => {
+        hideTimer = null;
+        hide();
+      }, HIDE_DELAY);
+    }
+
+    function isInsideZoom(e) {
+      if (zoom.hidden || !zoom.getBoundingClientRect || typeof e.clientX !== 'number' ||
+          typeof e.clientY !== 'number') return false;
+      const r = zoom.getBoundingClientRect();
+      if (!r) return false;
+      return e.clientX >= r.left && e.clientX <= r.right &&
+        e.clientY >= r.top && e.clientY <= r.bottom;
+    }
+
+    function place(r) {
+      // 优先放在卡片右侧，空间不足则放左侧
+      let left = r.right + 16;
+      if (left + W > window.innerWidth - 12) left = r.left - W - 16;
+      if (left < 12) left = 12;
+      zoom.style.left = left + 'px';
+      // 顶边与卡片对齐，并夹在视口内
+      let top = r.top;
+      const h = zoom.offsetHeight || 440;
+      if (top + h > window.innerHeight - 12) top = Math.max(12, window.innerHeight - h - 12);
+      if (top < 12) top = 12;
+      zoom.style.top = top + 'px';
+    }
+
+    function paint(trigger) {
+      const src = trigger.getAttribute('data-zoom-src');
+      if (src) {
+        if (zimg && zimg.getAttribute('src') !== src) zimg.src = src;
+        if (zimg) zimg.style.display = '';
+        if (zback) zback.style.display = 'none';
+      } else {
+        // 盖牌 / 暗置移除：展示放大牌背
+        if (zimg) zimg.style.display = 'none';
+        if (zback) zback.style.display = '';
+      }
+    }
+
+    function hide() {
+      cancelHide();
+      zoom.hidden = true; active = null; pending = null; overlapTarget = null;
+      if (zbg) zbg.hidden = true;
+      if (zact) zact.hidden = true;
+      if (hdBtn) hdBtn.hidden = true;
+      if (zoom.classList) {
+        zoom.classList.remove('touch');
+        zoom.classList.remove('interactive');
+      }
+    }
+    closeCharZoomPreview = hide;
+
+    function show(trigger) {
+      cancelHide();
+      paint(trigger);
+      active = trigger;
+      zoom.hidden = false;
+      const src = trigger.getAttribute('data-zoom-src');
+      const zoomTitle = trigger.getAttribute('data-zoom-title') || trigger.getAttribute('aria-label') || '卡牌';
+      if (hdBtn) {
+        hdBtn.hidden = !src;
+        if (src) {
+          hdBtn.setAttribute('data-hd-src', src);
+          hdBtn.setAttribute('data-hd-title', zoomTitle);
+        } else {
+          hdBtn.removeAttribute('data-hd-src');
+          hdBtn.removeAttribute('data-hd-title');
+        }
+      }
+      if (zoom.classList) zoom.classList.toggle('interactive', !!src);
+      if (touchMode) {
+        zoom.classList.add('touch');
+        if (zbg) zbg.hidden = false;
+        // 选角牌或可操作建筑牌，放大后在卡片下方给出「确认 / 取消」。
+        pending = typeof trigger.__cardAction === 'function' ? trigger.__cardAction :
+          ((trigger.dataset && trigger.dataset.pickChar)
+            ? { type: trigger.dataset.pickType, charId: trigger.dataset.pickChar }
+            : null);
+        if (zact) zact.hidden = !pending;
+        return;   // 触屏用 .touch 的居中定位（CSS），不再按卡片坐标摆放
+      }
+      if (zact) zact.hidden = true;
+      place(trigger.getBoundingClientRect());
+    }
+
+    // 预览浮层可能挡住另一张卡牌。elementFromPoint 只会返回最上层浮层，
+    // 因此使用 elementsFromPoint 找到它下面的卡牌，并排除当前正在预览的卡牌。
+    function underlyingCardAt(e) {
+      if (!document.elementsFromPoint || typeof e.clientX !== 'number' ||
+          typeof e.clientY !== 'number') return null;
+      const stack = document.elementsFromPoint(e.clientX, e.clientY);
+      for (const node of stack) {
+        const card = node && node.closest && node.closest(SEL);
+        if (card && card !== active) return card;
+      }
+      return null;
+    }
+
+    // The compact mobile board uses its own card viewer even when a narrow
+    // viewport is driven by a mouse (for example, a tablet with a pointer).
+    const touchMode = isTouchDevice() || isMobileGameUI();
+
+    /* ---------------- 触屏：点一下放大，确认 / 取消 ---------------- */
+    if (touchMode) {
+      let sx = 0, sy = 0;
+      document.addEventListener('touchstart', e => {
+        const t = e.touches && e.touches[0];
+        if (t) { sx = t.clientX; sy = t.clientY; }
+      }, { passive: true });
+      document.addEventListener('touchend', e => {
+        const t0 = e.changedTouches && e.changedTouches[0];
+        if (!t0) return;
+        // 位移超过阈值视为滑动（滚动页面），不当作点击
+        if (Math.abs(t0.clientX - sx) > 12 || Math.abs(t0.clientY - sy) > 12) return;
+        const hit = e.target && e.target.closest && e.target.closest(SEL);
+        if (hit) {
+          if (hit.__noZoom) return;
+          if (e.cancelable) e.preventDefault();  // 阻止合成的 mouseover/click
+          show(hit);
+          return;
+        }
+        // 点空白处收起
+        if (!zoom.hidden) { if (e.cancelable) e.preventDefault(); hide(); }
+      }, { passive: false });
+      // 确认：执行选角
+      if (zok) zok.addEventListener('touchend', e => {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        const p = pending; hide();
+        if (typeof p === 'function') p();
+        else if (p) send(p);
+      }, { passive: false });
+      if (hdBtn) hdBtn.addEventListener('touchend', e => {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        openCardHdFrom(hdBtn);
+      }, { passive: false });
+      // 取消：收起放大，回到无放大状态
+      if (zcancel) zcancel.addEventListener('touchend', e => {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        hide();
+      }, { passive: false });
+      // 点背景遮罩同样收起
+      if (zbg) zbg.addEventListener('touchend', e => {
+        if (e.cancelable) e.preventDefault();
+        hide();
+      }, { passive: false });
+      if (typeof window !== 'undefined' && window.addEventListener) {
+        window.addEventListener('resize', hide);
+      }
+      return;   // 触屏不绑任何 mouse 事件，避免合成事件干扰
+    }
+
+    /* ---------------- 桌面：悬浮放大 ---------------- */
+    document.addEventListener('mouseover', e => {
+      // 预览框覆盖另一张卡时，优先切换到底层卡牌。
+      if (isInsideZoom(e)) {
+        const under = underlyingCardAt(e);
+        if (under) { overlapTarget = under; show(under); return; }
+        overlapTarget = null; cancelHide(); return;
+      }
+      const t = e.target.closest && e.target.closest(SEL);
+      if (t && t !== active) { overlapTarget = null; show(t); }
+      else if (e.target.closest && e.target.closest('#char-zoom')) cancelHide();
+    });
+    document.addEventListener('mousemove', e => {
+      if (zoom.hidden || !active) return;
+      if (isInsideZoom(e)) {
+        const under = underlyingCardAt(e);
+        if (under) { overlapTarget = under; if (under !== active) show(under); }
+        else { overlapTarget = null; cancelHide(); }
+        return;
+      }
+      // 卡片若已被移出 DOM（如选角后重渲染），立即收起
+      if (!active.isConnected) { hide(); return; }
+      const t = e.target.closest && e.target.closest(SEL);
+      // 仍在原卡片上：稳定跟随卡片位置（不追光标，避免抖动）
+      if (t === active) place(active.getBoundingClientRect());
+    });
+    document.addEventListener('mouseout', e => {
+      if (!active) return;
+      const t = e.target.closest && e.target.closest(SEL);
+      const to = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(SEL);
+      const fromZoom = e.target.closest && e.target.closest('#char-zoom');
+      const toZoom = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('#char-zoom');
+      if ((t === active || fromZoom) && !to && !toZoom) scheduleHide();
+    });
+    // 点击角色卡（选角）后立即收起放大浮窗
+    document.addEventListener('click', e => {
+      // 若预览层覆盖了另一张卡，点击优先转发给底层卡牌。
+      if (e.target.closest && e.target.closest('#char-zoom') && overlapTarget) {
+        const target = overlapTarget;
+        hide();
+        if (target.isConnected && typeof target.click === 'function') target.click();
+        return;
+      }
+      if (e.target.closest && e.target.closest(SEL)) hide();
+    });
+    // 滚动时位置会失真，直接隐藏
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('scroll', hide, true);
+      window.addEventListener('resize', hide);
+    }
+  }
+
+  /**
+   * 给可操作卡牌绑定动作。移动端需要先看清完整卡图再确认；桌面端保留直接点击。
+   * multi/handpick 这类需要连续点选的手牌动作不走确认浮层。
+   */
+  function bindCardAction(node, fn, zoomOnTouch) {
+    if (!node) return;
+    if (isTouchDevice() && zoomOnTouch) node.__cardAction = fn;
+    else {
+      if (isTouchDevice()) node.__noZoom = true;
+      onTap(node, fn);
+    }
+  }
+
+  /* 玩家小框框里的角色卡状态：未选 / 盖牌 / 翻面；翻面后立即在右侧显示角色名 */
+  /* 威胁标记：盖牌 → 翻开后是「带血的刀」（真）或「玫瑰花」（假）。
+     画在金币图案左侧，尺寸跟金币一致，纯 SVG 不依赖字体/emoji。 */
+  const THREAT_SVG = {
+    back: '<svg viewBox="0 0 24 32" aria-hidden="true"><rect x="1.2" y="1.2" width="21.6" height="29.6" rx="3.2" fill="#2b3a67" stroke="#d9b25a" stroke-width="1.6"/>' +
+      '<path d="M7 8 L17 16 L7 24 Z" fill="none" stroke="#d9b25a" stroke-width="1.3" opacity=".9"/>' +
+      '<path d="M17 8 L7 16 L17 24 Z" fill="none" stroke="#d9b25a" stroke-width="1.3" opacity=".45"/></svg>',
+    knife: '<svg viewBox="0 0 24 32" aria-hidden="true"><path d="M12 2.5 L15 11 L12 20 L9 11 Z" fill="#d3dae6" stroke="#7d879b" stroke-width="1"/>' +
+      '<rect x="10.4" y="19.6" width="3.2" height="6" rx="1" fill="#8b5a2b"/><rect x="9.6" y="25" width="4.8" height="4.5" rx="1.4" fill="#6f4520"/>' +
+      '<path d="M16.6 8.6 c1.3 2 1.3 3.4 0 4.8 c-1.3 -1.4 -1.3 -2.8 0 -4.8 z" fill="#c0392b"/>' +
+      '<circle cx="18.4" cy="16" r="1.7" fill="#c0392b"/><circle cx="20" cy="20.4" r="1.15" fill="#c0392b"/></svg>',
+    rose: '<svg viewBox="0 0 24 32" aria-hidden="true"><path d="M12 18 L12 30.5" stroke="#2e7d32" stroke-width="1.7" stroke-linecap="round"/>' +
+      '<path d="M12 25.5 c-4.6 -.3 -6.6 -2.4 -6.2 -4.6 c3.2 .3 5.2 1.5 6.2 3.6 z" fill="#43a047"/>' +
+      '<path d="M12 22 c4.4 -.4 6.4 -2.5 6 -4.7 c-3.1 .3 -5.1 1.6 -6 3.7 z" fill="#66bb6a"/>' +
+      '<circle cx="12" cy="13" r="5.2" fill="#c62828"/><circle cx="12" cy="13" r="3.1" fill="#ef5350"/>' +
+      '<circle cx="12" cy="13" r="1.5" fill="#8e1b1b"/></svg>'
+  };
+  /* 行政官的逮捕令：动画画风的羊皮纸卷轴（上下卷轴杆 + 正文横线 + 红蜡封）。 */
+  const WARRANT_SVG = '<svg viewBox="0 0 24 32" aria-hidden="true">' +
+    '<path d="M6 4.6 Q4.2 15 6 25.4 L18 25.4 Q19.8 15 18 4.6 Z" fill="#f7e6bd" stroke="#c2902f" stroke-width="1"/>' +
+    '<rect x="3.4" y="1.8" width="17.2" height="4.6" rx="2.3" fill="#e0bb7d" stroke="#a9762a" stroke-width="1"/>' +
+    '<rect x="3.4" y="23.6" width="17.2" height="4.6" rx="2.3" fill="#e0bb7d" stroke="#a9762a" stroke-width="1"/>' +
+    '<path d="M8.8 10.4 H15.2" stroke="#b8862f" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>' +
+    '<path d="M8.8 13.7 H15.2" stroke="#b8862f" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>' +
+    '<path d="M8.8 17 H13" stroke="#b8862f" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>' +
+    '<circle cx="12" cy="25.9" r="2.4" fill="#c0392b" stroke="#8e1b1b" stroke-width=".7"/>' +
+    '<path d="M10.8 25.4 h2.4" stroke="#f6cdc8" stroke-width=".8" stroke-linecap="round"/></svg>';
+  /* 税务官标记：战场中央的钱袋，袋上压一枚铜钱，右下角挂金币数。
+     只有本局角色里有税务官时才出现，用来提示「场上已经积压了多少建筑税」。 */
+  const TAX_POT_SVG = '<svg viewBox="0 0 32 36" aria-hidden="true">' +
+    '<path d="M8.5 12.6 Q5.2 24 8 29.6 Q11 34.4 16 34.4 Q21 34.4 24 29.6 Q26.8 24 23.5 12.6 Z" ' +
+    'fill="#b07a45" stroke="#7a4f27" stroke-width="1.3" stroke-linejoin="round"/>' +
+    '<path d="M8.5 12.6 Q16 16.6 23.5 12.6 Q22.4 8.6 16 8.6 Q9.6 8.6 8.5 12.6 Z" ' +
+    'fill="#c98f56" stroke="#7a4f27" stroke-width="1.2" stroke-linejoin="round"/>' +
+    '<path d="M9.8 12.3 Q16 15.5 22.2 12.3" fill="none" stroke="#e6c469" stroke-width="1.8" stroke-linecap="round"/>' +
+    '<path d="M11 9.5 Q16 6.9 21 9.5" fill="none" stroke="#8a5a2c" stroke-width="1.4" stroke-linecap="round"/>' +
+    '<path d="M11.6 19 Q10.8 25.2 13 29.4" fill="none" stroke="#f3d9b0" stroke-width="1.4" ' +
+    'stroke-linecap="round" opacity=".5"/>' +
+    '<circle cx="16" cy="24.4" r="5.3" fill="#f6d877" stroke="#b8862f" stroke-width="1.2"/>' +
+    '<rect x="14.2" y="22.6" width="3.6" height="3.6" rx=".4" fill="#b8862f"/></svg>';
+
+  function renderTaxPot(wrap, s) {
+    if (!wrap) return;
+    const inPlay = (s.charDeck || []).some(c => c.id === 'tax_collector');
+    let pot = wrap.querySelector('#tax-pot');
+    if (!inPlay || s.phase === 'gameover') { if (pot) pot.remove(); return; }
+    if (!pot) {
+      pot = el('div', 'tax-pot');
+      pot.id = 'tax-pot';
+      pot.innerHTML = '<span class="tax-pot-mark">' + TAX_POT_SVG +
+        '<span class="tax-pot-count">0</span></span><span class="tax-pot-label">税务官</span>';
+      // 放在最前面：环形座位里的玩家框都带 data-seat，靠后追加，中央标记不会被它们顶掉
+      wrap.insertBefore(pot, wrap.firstChild);
+    }
+    const amount = (s.effects && s.effects.taxCollectorGold) || 0;
+    const cnt = pot.querySelector('.tax-pot-count');
+    if (cnt.textContent !== String(amount)) {
+      const grew = Number(cnt.textContent || 0) < amount;
+      cnt.textContent = String(amount);
+      if (grew) {
+        pot.classList.remove('is-bumped');
+        void pot.offsetWidth; // 强制回流，让动画能重新触发
+        pot.classList.add('is-bumped');
+      }
+    }
+    pot.classList.toggle('is-empty', amount <= 0);
+    const mark = pot.querySelector('.tax-pot-mark');
+    mark.title = amount > 0
+      ? '税务官：场上已放置 ' + amount + ' 枚金币，轮到税务官时可全部收走'
+      : '税务官：还没有人缴纳建筑税';
+  }
+
+  function warrantMarkHTML(warrant) {
+    if (!warrant) return '';
+    return '<i class="warrant-mark" title="逮捕令：你被行政官盯上了">' + WARRANT_SVG + '</i>';
+  }
+
+  function threatMarkHTML(threat) {
+    if (!threat) return '';
+    if (!threat.revealed) {
+      return '<i class="threat-mark" title="威胁标记（盖牌，真假未知）">' + THREAT_SVG.back + '</i>';
+    }
+    return threat.isReal
+      ? '<i class="threat-mark is-real" title="威胁标记：带血的刀（真）——金币已被勒索者拿走">' + THREAT_SVG.knife + '</i>'
+      : '<i class="threat-mark is-fake" title="威胁标记：玫瑰花（假）——虚惊一场">' + THREAT_SVG.rose + '</i>';
+  }
+
+  /**
+   * 面板标记（逮捕令卷轴 / 威胁标记）的状态签名。
+   * 玩家面板每次行动都会整块重建，而入场动画是 CSS animation —— 新节点一插进去就会重播，
+   * 于是别人每动一步，这两枚标记都要抖一下。这里只在签名真的变了
+   * （标记刚出现、盖牌翻成刀或玫瑰、逮捕令刚随角色牌显形）时才给它加 .mark-in 播一次。
+   */
+  function markSignature(pl) {
+    const t = pl.threat
+      ? 'T' + pl.threat.num + (!pl.threat.revealed ? ':back' : pl.threat.isReal ? ':knife' : ':rose')
+      : 'T-';
+    const w = pl.warrant ? 'W' + pl.warrant.num : 'W-';
+    return t + w;
+  }
+
+  /** 签名变化时给容器内的标记加上一次性的入场动画，返回新签名。 */
+  function playMarkAnim(root, sig, lastSig, store) {
+    const changed = sig !== lastSig;
+    if (changed) {
+      Array.prototype.forEach.call(root.querySelectorAll('.threat-mark, .warrant-mark'),
+        m => m.classList.add('mark-in'));
+    }
+    if (store) store(sig);
+    return changed;
+  }
+
+  function charStatusHTML(p) {
+    let st = 'none';
+    if (p.hasChosen && p.draftComplete !== false) {
+      // 选角期间其他玩家的角色始终是暗牌；即便收到上一轮残留的
+      // revealedCharNum，也不能把它渲染成正面。
+      const isHiddenDraftRole = App.state && App.state.phase === 'draft' && p.id !== App.myId;
+      st = (p.revealedCharNum != null && !isHiddenDraftRole) ? 'up' : 'down';
+    }
+    // 检测本帧是否从「盖牌」变为「翻面」，是则播放翻牌动画
+    const prev = App._reveal[p.seat];
+    let flip = '';
+    if (prev === 'down' && st === 'up') flip = ' flip-in';
+    App._reveal[p.seat] = st;
+    let front = '';
+    if (st === 'up') {
+      const ch = charMeta(p.revealedCharId, p.revealedCharNum) ||
+        { id: p.revealedCharId, num: p.revealedCharNum, name: String(p.revealedCharNum || '') };
+      const img = roleThumb(ch);
+      const full = roleFull(ch);
+      front = img
+        ? '<img src="' + img + '" alt="' + escapeHtml(ch.name) + '" decoding="async">'
+        : '<div class="cs-emoji">' + escapeHtml(String(p.revealedCharNum || '?')) + '</div>';
+      var zoomAttr = img ? ' data-zoom-src="' + escapeHtml(full || img) + '" data-zoom-title="' + escapeHtml(ch.name) + '"' : ' data-zoom-back="1"';
+    } else if (st === 'down') {
+      var zoomAttr = ' data-zoom-back="1"';
+    } else {
+      var zoomAttr = '';
+    }
+    const cardBody = st === 'none' ? '' :
+      '<div class="cs-inner">' +
+        '<div class="cs-face cs-back">▧</div>' +
+        '<div class="cs-face cs-front">' + front + '</div>' +
+      '</div>';
+    return '<div class="cs-card ' + st + flip + '"' + zoomAttr + '>' + cardBody + '</div>';
+  }
+
+  /* 角色牌右侧只显示手牌数量：牌背 × 数字，牌背会复用当前主题的牌背样式。 */
+  function handCountHTML(count) {
+    const total = Math.max(0, Number(count) || 0);
+    return '<div class="hand-count-indicator" role="img" aria-label="手牌 ' + total + ' 张" title="手牌 ' + total + ' 张">' +
+      '<span class="facedown hand-count-back" aria-hidden="true"></span>' +
+      '<span class="hand-count-multiply" aria-hidden="true">×</span>' +
+      '<span class="hand-count-number" aria-hidden="true">' + total + '</span>' +
+      '</div>';
+  }
+
+  /* 通用金币飞行动画：从 a 矩形飞向 b 矩形，错峰起飞、弧线、淡出 */
+  function coinFlight(a, b, amount) {
+    if (!a || !b) return;
+    if (typeof document === 'undefined' || !document.body) return;
+    const n = Math.min(9, Math.max(3, Math.round((amount || 1) / 2)));
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => fn();
+    for (let k = 0; k < n; k++) {
+      const c = document.createElement('div');
+      c.className = 'fly-coin';
+      c.innerHTML = '<i class="coin-icon" aria-hidden="true"></i>';
+      document.body.appendChild(c);
+      const sx = a.left + a.width / 2 + (Math.random() * 40 - 20);
+      const sy = a.top + a.height / 2 + (Math.random() * 30 - 15);
+      const ex = b.left + b.width / 2 + (Math.random() * 40 - 20);
+      const ey = b.top + b.height / 2 + (Math.random() * 30 - 15);
+      c.style.left = sx + 'px';
+      c.style.top = sy + 'px';
+      const dx = ex - sx, dy = ey - sy;
+      // 错峰起飞
+      c.style.transitionDelay = (k * 70) + 'ms';
+      raf(() => {
+        c.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(.55)';
+        c.style.opacity = '0.15';
+      });
+      setTimeout(() => { if (c.parentNode) c.parentNode.removeChild(c); }, 1100 + k * 70);
+    }
+  }
+
+  // 魔术师换手牌：用两张牌背沿相反方向飞行，保持信息隐藏但让交换关系清楚可见。
+  function handSwapAnim(fromSeat, toSeat) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat) return;
+    const from = rectOf(playerBox(fromSeat));
+    const to = rectOf(playerBox(toSeat));
+    if (!from || !to || typeof document === 'undefined' || !document.body) return;
+    const sx = from.left + from.width / 2, sy = from.top + from.height / 2;
+    const ex = to.left + to.width / 2, ey = to.top + to.height / 2;
+    const dx = ex - sx, dy = ey - sy;
+    [
+      { x: sx, y: sy, dx: dx, dy: dy, rotate: '-8deg' },
+      { x: ex, y: ey, dx: -dx, dy: -dy, rotate: '8deg' }
+    ].forEach((v, i) => {
+      const card = document.createElement('div');
+      card.className = 'hand-swap-flight';
+      card.textContent = '▧';
+      card.style.left = (v.x - 21) + 'px';
+      card.style.top = (v.y - 29) + 'px';
+      card.style.setProperty('--swap-dx', v.dx + 'px');
+      card.style.setProperty('--swap-dy', v.dy + 'px');
+      card.style.setProperty('--swap-rotate', v.rotate);
+      card.style.animationDelay = (i * 90) + 'ms';
+      document.body.appendChild(card);
+      setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 1150 + i * 90);
+    });
+    const badge = document.createElement('div');
+    badge.className = 'hand-swap-badge';
+    badge.textContent = '手牌交换';
+    badge.style.left = ((sx + ex) / 2 - 34) + 'px';
+    badge.style.top = ((sy + ey) / 2 - 12) + 'px';
+    document.body.appendChild(badge);
+    setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1250);
+  }
+
+  // 外交官交换建筑：从两张建筑牌当前 DOM 位置飞向交换后的真实 DOM 位置。
+  function buildingSwapAnim(fromSeat, toSeat, mineCard, theirsCard) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
+        typeof document === 'undefined' || !document.body) return;
+    const findCard = uid => {
+      if (!uid) return null;
+      return Array.prototype.find.call(document.querySelectorAll('[data-uid]'), node =>
+        node.dataset && node.dataset.uid === uid);
+    };
+    const entries = [
+      { data: mineCard, from: fromSeat, to: toSeat, rotate: '-7deg' },
+      { data: theirsCard, from: toSeat, to: fromSeat, rotate: '7deg' }
+    ];
+    const flights = entries.map((entry, i) => {
+      const data = entry.data || {};
+      const source = findCard(data.uid);
+      const start = rectOf(source);
+      if (!start) return null;
+      const card = source.cloneNode(true);
+      card.classList.remove('clickable', 'pickable', 'selected');
+      card.classList.add('building-swap-flight');
+      card.style.left = start.left + 'px';
+      card.style.top = start.top + 'px';
+      card.style.width = start.width + 'px';
+      card.style.height = start.height + 'px';
+      card.style.setProperty('--swap-rotate', entry.rotate);
+      card.style.animationDelay = (i * 90) + 'ms';
+      document.body.appendChild(card);
+      return { card: card, entry: entry, start: start };
+    }).filter(Boolean);
+    if (!flights.length) return;
+
+    // 当前通知在 render() 的前半段处理，等本轮 DOM reconciliation 完成后读取目标卡牌位置。
+    const nextFrame = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    nextFrame(() => {
+      flights.forEach((flight, i) => {
+        const uid = flight.entry.data && flight.entry.data.uid;
+        const targetCard = findCard(uid);
+        const target = rectOf(targetCard) || rectOf(playerCityBox(flight.entry.to));
+        if (!target) {
+          if (flight.card.parentNode) flight.card.parentNode.removeChild(flight.card);
+          return;
+        }
+        const dx = target.left - flight.start.left;
+        const dy = target.top - flight.start.top;
+        flight.card.style.setProperty('--swap-dx', dx + 'px');
+        flight.card.style.setProperty('--swap-dy', dy + 'px');
+        flight.card.style.setProperty('--swap-scale-x', (target.width / flight.start.width).toFixed(4));
+        flight.card.style.setProperty('--swap-scale-y', (target.height / flight.start.height).toFixed(4));
+        flight.card.classList.add('is-flying');
+        setTimeout(() => { if (flight.card.parentNode) flight.card.parentNode.removeChild(flight.card); }, 1150 + i * 90);
+      });
+    });
+  }
+
+  // 元帅抢夺建筑：克隆目标城市里的原牌，飞向元帅城市中的新位置。
+  function buildingTransferAnim(fromSeat, toSeat, uid) {
+    if (fromSeat == null || toSeat == null || !uid ||
+        typeof document === 'undefined' || !document.body) return;
+    const findCard = cardUid => Array.prototype.find.call(
+      document.querySelectorAll('.card[data-uid]'), node =>
+        node.dataset && node.dataset.uid === String(cardUid));
+    const source = findCard(uid);
+    const start = rectOf(source);
+    if (!source || !start) return;
+    const flight = source.cloneNode(true);
+    flight.classList.remove('clickable', 'pickable', 'selected');
+    flight.classList.add('building-swap-flight');
+    flight.style.left = start.left + 'px';
+    flight.style.top = start.top + 'px';
+    flight.style.width = start.width + 'px';
+    flight.style.height = start.height + 'px';
+    flight.style.setProperty('--swap-rotate', '-5deg');
+    document.body.appendChild(flight);
+
+    const nextFrame = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame : fn => setTimeout(fn, 0);
+    nextFrame(() => {
+      const destination = findCard(uid);
+      const end = rectOf(destination) || rectOf(playerCityBox(toSeat));
+      if (!end) {
+        if (flight.parentNode) flight.parentNode.removeChild(flight);
+        return;
+      }
+      if (destination) {
+        destination.style.visibility = 'hidden';
+        destination.dataset.buildArrivalHidden = 'true';
+      }
+      flight.style.setProperty('--swap-dx', (end.left - start.left) + 'px');
+      flight.style.setProperty('--swap-dy', (end.top - start.top) + 'px');
+      flight.style.setProperty('--swap-scale-x', (end.width / start.width).toFixed(4));
+      flight.style.setProperty('--swap-scale-y', (end.height / start.height).toFixed(4));
+      flight.classList.add('is-flying');
+      setTimeout(() => {
+        if (destination && destination.dataset.buildArrivalHidden === 'true') {
+          destination.style.visibility = '';
+          delete destination.dataset.buildArrivalHidden;
+        }
+        if (flight.parentNode) flight.parentNode.removeChild(flight);
+      }, 1150);
+    });
+  }
+
+  // 建造动画：建筑牌从屏幕中央缩小飞入建造者的城区，并提示玩家框完成扩张。
+  function buildingBuildAnim(seat, data, onDone) {
+    const finish = typeof onDone === 'function' ? onDone : function () {};
+    if (seat == null || !data || typeof document === 'undefined' || !document.body) {
+      finish();
+      return;
+    }
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    const BASE_BUILD_FLIGHT_MS = 1050;
+    // 在上一版基础上，中央展示时间减半，飞行时间缩短为五分之一。
+    const BUILD_HOLD_MS = Math.round(BASE_BUILD_FLIGHT_MS * 5 / 6);
+    const BUILD_FLIGHT_MS = Math.round(BASE_BUILD_FLIGHT_MS * 3 / 5);
+    const baseWidth = Math.min(148, Math.max(112, Math.round(window.innerWidth * .12)));
+    const width = baseWidth * 3;
+    // 霓虹建筑卡图比例为 1:1.5；保持原图比例，避免 object-fit:cover 裁掉上下内容。
+    const height = Math.round(width * 1.5);
+    const sx = window.innerWidth / 2 - width / 2;
+    const sy = window.innerHeight / 2 - height / 2;
+    const card = cardNode(data, {});
+    card.classList.add('building-build-flight');
+    card.style.width = width + 'px';
+    card.style.height = height + 'px';
+    card.style.left = sx + 'px';
+    card.style.top = sy + 'px';
+    card.style.transformOrigin = 'center center';
+    document.body.appendChild(card);
+
+    raf(() => {
+      const box = playerBox(seat);
+      const city = playerCityBox(seat);
+      const targetCard = data.uid
+        ? Array.prototype.find.call(document.querySelectorAll('.card[data-uid]'), node =>
+            node.dataset && node.dataset.uid === String(data.uid))
+        : null;
+      const target = rectOf(targetCard) || rectOf(city) || rectOf(box);
+      if (!target) {
+        if (card.parentNode) card.parentNode.removeChild(card);
+        finish();
+        return;
+      }
+      // render() 已经把新建筑放入城区；动画期间隐藏静态卡，避免出现“静态卡+飞行卡”两张。
+      if (targetCard) {
+        targetCard.style.visibility = 'hidden';
+        targetCard.dataset.buildArrivalHidden = 'true';
+      }
+      if (box) {
+        box.classList.add('building-arrival-expand');
+        setTimeout(() => box.classList.remove('building-arrival-expand'), 900);
+      }
+      // 以卡牌中心为基准计算位移，并将最终缩放设置为目标卡牌的实际尺寸，
+      // 确保飞行结束时准确落在城区中对应的卡位。
+      const tx = target.left + target.width / 2 - (sx + width / 2);
+      const ty = target.top + target.height / 2 - (sy + height / 2);
+      card.style.setProperty('--build-dx', tx + 'px');
+      card.style.setProperty('--build-dy', ty + 'px');
+      card.style.setProperty('--build-scale-x', (target.width / width).toFixed(4));
+      card.style.setProperty('--build-scale-y', (target.height / height).toFixed(4));
+      // 先在中央保持展示，再开始缩小飞行。
+      setTimeout(() => {
+        if (!card.parentNode) {
+          finish();
+          return;
+        }
+        card.classList.add('is-flying');
+        setTimeout(() => {
+          if (targetCard && targetCard.dataset.buildArrivalHidden === 'true') {
+            targetCard.style.visibility = '';
+            delete targetCard.dataset.buildArrivalHidden;
+          }
+          if (card.parentNode) card.parentNode.removeChild(card);
+          finish();
+        }, BUILD_FLIGHT_MS + 180);
+      }, BUILD_HOLD_MS);
+    });
+  }
+
+  function rectOf(el) {
+    return (el && el.getBoundingClientRect) ? el.getBoundingClientRect() : null;
+  }
+  /** 玩家小框框元素（我的框用 #me-area，对手框用 data-seat） */
+  function playerBox(s) {
+    if (typeof document === 'undefined' || !document.querySelector) return null;
+    if (s != null && s === App.myIdx) return $('#me-area') ||
+      document.querySelector('[data-seat="' + s + '"]');
+    return document.querySelector('[data-seat="' + s + '"]');
+  }
+
+  function clearPlayerChatBubbles() {
+    App.chatBubbles.forEach(item => {
+      clearTimeout(item.timer);
+      if (item.el && item.el.parentNode) item.el.parentNode.removeChild(item.el);
+    });
+    App.chatBubbles.clear();
+  }
+
+  function positionPlayerChatBubbles() {
+    if (!App.state || !App.state.players) return;
+    App.chatBubbles.forEach((item, playerId) => {
+      const player = App.state.players.find(p => p.id === playerId);
+      const box = player && playerBox(player.seat);
+      if (!box || !item.el || !item.el.isConnected) return;
+      const r = box.getBoundingClientRect();
+      const bubble = item.el;
+      const width = bubble.offsetWidth || 180;
+      const height = bubble.offsetHeight || 54;
+      const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.left + (r.width - width) / 2));
+      bubble.style.left = Math.round(left) + 'px';
+      bubble.style.top = Math.round(Math.max(8, r.top - height - 9)) + 'px';
+    });
+  }
+
+  function showPlayerChatBubble(message) {
+    if (!message || !message.playerId || !String(message.text || '').trim()) return;
+    const old = App.chatBubbles.get(message.playerId);
+    if (old) {
+      clearTimeout(old.timer);
+      if (old.el && old.el.parentNode) old.el.parentNode.removeChild(old.el);
+    }
+    const bubble = el('div', 'player-chat-bubble');
+    if (message.playerId === App.myId) bubble.classList.add('self');
+    bubble.setAttribute('role', 'status');
+    const speaker = el('span', 'chat-speaker');
+    const textNode = el('span', 'chat-text');
+    speaker.textContent = message.playerName || '玩家';
+    textNode.textContent = String(message.text);
+    bubble.appendChild(speaker);
+    bubble.appendChild(textNode);
+    document.body.appendChild(bubble);
+    const item = { el: bubble, timer: null };
+    item.timer = setTimeout(() => {
+      if (bubble.parentNode) bubble.parentNode.removeChild(bubble);
+      App.chatBubbles.delete(message.playerId);
+    }, 6500);
+    App.chatBubbles.set(message.playerId, item);
+    requestAnimationFrame(positionPlayerChatBubbles);
+  }
+
+  function closeChatComposer() {
+    const composer = $('#chat-composer');
+    const screen = $('#screen-game');
+    if (composer) composer.hidden = true;
+    if (screen) screen.classList.remove('chat-open');
+  }
+
+  function openChatComposer() {
+    if (App.mode !== 'net' || !App.state || App.state.phase === 'gameover') return;
+    const composer = $('#chat-composer');
+    const input = $('#chat-input');
+    if (!composer || !input) return;
+    composer.hidden = false;
+    $('#screen-game').classList.add('chat-open');
+    input.value = '';
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function syncChatControl() {
+    const button = $('#btn-chat');
+    if (!button) return;
+    button.hidden = !(App.mode === 'net' && App.state && !App.state.spectating && App.state.phase !== 'gameover');
+    if (button.hidden) closeChatComposer();
+  }
+
+  /* 金币从被偷者飞向盗贼的动画 */
+  function flyCoins(fromSeat, toSeat, amount) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat) return;
+    coinFlight(rectOf(playerBox(fromSeat)), rectOf(playerBox(toSeat)), amount);
+  }
+
+  // 建造时交税：金币从玩家飞向战场中央的税务官钱罐（与 flyTaxCoinsToCollector 方向相反）。
+  function flyCoinToTaxPot(seat, amount) {
+    if (seat == null || !(amount > 0)) return;
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    // 同 readTaxPot 的时机问题：等本帧 render 把 #tax-pot 重绘出来再量坐标。
+    nextFrame(() => {
+      const pot = $('#tax-pot .tax-pot-mark') || $('#tax-pot');
+      const from = playerGoldAnchor(seat);
+      if (pot && from) {
+        coinFlight({ left: from.x, top: from.y, width: 0, height: 0 }, rectOf(pot), amount);
+      }
+    });
+  }
+
+  function flyTaxCoinsToCollector(seat, amount) {
+    if (seat == null || !(amount > 0)) return;
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    // 通知在棋盘重绘前处理；等税务官框和金币标识完成更新后再读取坐标。
+    nextFrame(() => {
+      const pot = $('#tax-pot .tax-pot-mark') || $('#tax-pot');
+      const to = playerGoldAnchor(seat);
+      if (pot && to) coinFlight(rectOf(pot), { left: to.x, top: to.y, width: 0, height: 0 }, amount);
+    });
+  }
+
+  // 艺术家美化建筑：金币从玩家的金币标识飞向被美化的建筑，建筑随后短暂金色闪耀。
+  function beautifyBuildingAnim(seat, uids) {
+    if (seat == null || !Array.isArray(uids) || !uids.length ||
+        typeof document === 'undefined' || !document.body) return;
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    nextFrame(() => {
+      const from = playerGoldAnchor(seat);
+      if (!from) return;
+      uids.forEach((uid, index) => {
+        const targetCard = Array.prototype.find.call(document.querySelectorAll('.card[data-uid]'), node =>
+          node.dataset && node.dataset.uid === String(uid));
+        const target = rectOf(targetCard);
+        if (!target) return;
+        coinFlight({ left: from.x, top: from.y, width: 0, height: 0 }, target, 1);
+        targetCard.classList.add('beautified-flash');
+        setTimeout(() => {
+          if (targetCard && targetCard.classList) targetCard.classList.remove('beautified-flash');
+        }, 1200 + index * 90);
+      });
+      const badge = document.createElement('div');
+      badge.className = 'beautify-badge';
+      badge.textContent = '✦ 美化 +' + uids.length;
+      badge.style.left = (from.x - 34) + 'px';
+      badge.style.top = (from.y - 30) + 'px';
+      document.body.appendChild(badge);
+      setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1350);
+    });
+  }
+
+  // 皇冠动画的视觉锚点：玩家圆角矩形中金币图标左侧（皇冠在界面上的固定位置）。
+  // 对手框用 .opp-gold，自己框用 #my-gold；返回的是金币区域左缘的中心点。
+  function playerGoldAnchor(seat) {
+    const box = playerBox(seat);
+    if (!box) return null;
+    const gold = box.querySelector('.opp-gold') ||
+      (box.id === 'me-area' ? box.querySelector('#my-gold') : null);
+    const r = rectOf(gold) || rectOf(box);
+    if (!r) return null;
+    return { x: r.left, y: r.top + r.height / 2 };
+  }
+
+  function crownTransferAnim(fromSeat, toSeat) {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
+        typeof document === 'undefined' || !document.body) return;
+    // 当前通知在 render() 的前半段触发，此时 renderOpponents 还没跑。
+    // 用 rAF 等到本轮 DOM reconciliation 完成后再读位置：
+    //   1) 原持有者的皇冠已随重渲染被移除（满足"起飞后原位皇冠消失"）；
+    //   2) 新持有者的 .opp-gold / #my-gold 也已就位，可正确取到锚点。
+    const nextFrame = (typeof requestAnimationFrame === 'function') ?
+      requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    nextFrame(() => {
+      const from = playerGoldAnchor(fromSeat), to = playerGoldAnchor(toSeat);
+      if (!from || !to) return;
+      const crown = document.createElement('div');
+      crown.className = 'crown-flight';
+      crown.innerHTML = '<i class="crown-icon" aria-hidden="true">♛</i>';
+      crown.style.left = (from.x - 11) + 'px';
+      crown.style.top = (from.y - 11) + 'px';
+      crown.style.setProperty('--crown-dx', (to.x - from.x) + 'px');
+      crown.style.setProperty('--crown-dy', (to.y - from.y) + 'px');
+      document.body.appendChild(crown);
+      setTimeout(() => { if (crown.parentNode) crown.parentNode.removeChild(crown); }, 1250);
+    });
+  }
+
+  // 单张手牌从目标玩家飞向皇帝，使用牌背以保持信息隐藏。
+  function handTransferAnim(fromSeat, toSeat, amount = 1, badgeText = '手牌转移') {
+    if (fromSeat == null || toSeat == null || fromSeat === toSeat ||
+        typeof document === 'undefined' || !document.body) return;
+    const count = Math.max(0, Math.min(8, Math.floor(Number(amount) || 0)));
+    if (!count) return;
+    const from = rectOf(playerBox(fromSeat)), to = rectOf(playerBox(toSeat));
+    if (!from || !to) return;
+    const sx = from.left + from.width / 2, sy = from.top + from.height / 2;
+    const ex = to.left + to.width / 2, ey = to.top + to.height / 2;
+    for (let i = 0; i < count; i++) {
+      const offset = (i - (count - 1) / 2) * 5;
+      const card = document.createElement('div');
+      card.className = 'hand-swap-flight hand-transfer-flight';
+      card.textContent = '▧';
+      card.style.left = (sx - 21 + offset) + 'px';
+      card.style.top = (sy - 29 + offset * .45) + 'px';
+      card.style.setProperty('--swap-dx', (ex - sx) + 'px');
+      card.style.setProperty('--swap-dy', (ey - sy) + 'px');
+      card.style.setProperty('--swap-rotate', (i % 2 ? '7deg' : '-7deg'));
+      card.style.animationDelay = (i * 65) + 'ms';
+      document.body.appendChild(card);
+      setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 1150 + i * 65);
+    }
+    if (badgeText) {
+      const badge = document.createElement('div');
+      badge.className = 'hand-swap-badge';
+      badge.textContent = badgeText;
+      badge.style.left = ((sx + ex) / 2 - 34) + 'px';
+      badge.style.top = ((sy + ey) / 2 - 12) + 'px';
+      document.body.appendChild(badge);
+      setTimeout(() => { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 1250);
+    }
+  }
+
+  // 建造动画期间锁住所有行动，避免下一步操作与建筑入场效果重叠。
+  let buildingAnimDepth = 0;
+  function beginBuildingAnimation() {
+    buildingAnimDepth++;
+    App.buildingAnimPaused = true;
+    App.paused = true;
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.add('building-animation-paused');
+    }
+  }
+
+  function endBuildingAnimation() {
+    buildingAnimDepth = Math.max(0, buildingAnimDepth - 1);
+    if (buildingAnimDepth > 0) return;
+    App.buildingAnimPaused = false;
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.remove('building-animation-paused');
+    }
+    // 若同时有事件弹层，继续保持暂停。
+    const eventVisible = $('#event-overlay') && !$('#event-overlay').hidden;
+    App.paused = !!eventVisible;
+  }
+
+  /* 领取金币：金币从顶部"金库"（回合横幅/顶栏）飞进该玩家的小框框 */
+  function flyGoldIn(seat, amount) {
+    if (seat == null || !(amount > 0)) return;
+    if (typeof document === 'undefined' || !document.body) return;
+    const to = rectOf(playerBox(seat));
+    if (!to) return;
+    // 起点优先用回合横幅（代表金库/牌堆），退化到视口顶部居中
+    const bankEl = $('#turn-banner') || $('#topbar') || $('#tb-round');
+    let from = rectOf(bankEl);
+    if (!from) {
+      const w = 120, h = 40;
+      from = { left: (window.innerWidth - w) / 2, top: 8, width: w, height: h };
+    }
+    coinFlight(from, to, amount);
+  }
+
+  /* 贵族抽牌：建筑牌从牌堆飞进该玩家的手牌区，直观提示"抽到了几张"。 */
+  function flyCardsToHand(seat, amount) {
+    if (seat == null || !(amount > 0)) return;
+    if (typeof document === 'undefined' || !document.body) return;
+    const to = rectOf(playerBox(seat));
+    if (!to) return;
+    // 起点优先用牌堆，退化到回合横幅（代表牌库），再退化到视口顶部居中
+    const bankEl = $('#deck') || $('#turn-banner') || $('#topbar') || $('#tb-deck');
+    let from = rectOf(bankEl);
+    if (!from) {
+      const w = 120, h = 40;
+      from = { left: (window.innerWidth - w) / 2, top: 8, width: w, height: h };
+    }
+    const n = Math.min(12, Math.max(3, Math.round(amount)));
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => fn();
+    for (let k = 0; k < n; k++) {
+      const c = document.createElement('div');
+      c.className = 'fly-card';
+      c.innerHTML = '<i class="card-back-icon" aria-hidden="true">▦</i>';
+      document.body.appendChild(c);
+      const sx = from.left + from.width / 2 + (Math.random() * 36 - 18);
+      const sy = from.top + from.height / 2 + (Math.random() * 26 - 13);
+      const ex = to.left + to.width / 2 + (Math.random() * 44 - 22);
+      const ey = to.top + to.height / 2 + (Math.random() * 30 - 15);
+      c.style.left = sx + 'px';
+      c.style.top = sy + 'px';
+      const dx = ex - sx, dy = ey - sy;
+      c.style.transitionDelay = (k * 60) + 'ms';   // 错峰起飞
+      raf(() => {
+        c.style.transform = 'translate(' + dx + 'px,' + dy + 'px) rotate(' +
+          (Math.random() * 16 - 8).toFixed(1) + 'deg) scale(.6)';
+        c.style.opacity = '0.15';
+      });
+      setTimeout(() => { if (c.parentNode) c.parentNode.removeChild(c); }, 1000 + k * 60);
+    }
+  }
+
+  /* 防抖动：每次 render() 都会重建棋盘 DOM，滚动容器（手机上是 .board-main，
+   * 还有横向滚动的城区/手牌/牌池）的滚动位置会被清零，表现为"每行动一次页面就跳一下"。
+   * 渲染前记录、渲染后恢复即可消除。 */
+  // 注意：不含 #log —— 日志要一直贴着底部刷新（renderLog 已设 scrollTop=scrollHeight），
+  // 若在这里恢复旧位置就会抵消它的自动滚动。
+  const SCROLL_KEEP = ['#board-main', '#opponents', '#my-city', '#my-hand', '#draft-pool'];
+  function snapshotScroll() {
+    const out = [];
+    if (typeof document === 'undefined' || !document.querySelector) return out;
+    SCROLL_KEEP.forEach(sel => {
+      const e = $(sel);
+      if (e) out.push([e, e.scrollTop || 0, e.scrollLeft || 0]);
+    });
+    return out;
+  }
+  function restoreScroll(snap) {
+    snap.forEach(([e, top, left]) => {
+      if (!e) return;
+      if (e.scrollTop !== top) e.scrollTop = top;
+      if (e.scrollLeft !== left) e.scrollLeft = left;
+    });
+  }
+
+  let mobileFitRaf = null;
+  function scheduleMobileFitScale() {
+    if (mobileFitRaf != null || typeof requestAnimationFrame !== 'function') return;
+    mobileFitRaf = requestAnimationFrame(() => {
+      mobileFitRaf = null;
+      updateMobileFitScale();
+    });
+  }
+  function updateMobileFitScale() {
+    const root = $('#mobile-fit-root');
+    const screen = $('#screen-game');
+    if (!root || !screen) return;
+    if ($('#opponents') && $('#opponents').dataset.layout === 'mobile-grid') {
+      root.classList.remove('mobile-fit-scaled');
+      root.style.removeProperty('--mobile-fit-scale');
+      screen.classList.remove('pwa-readable-mode');
+      return;
+    }
+    const mobile = typeof window !== 'undefined' && window.innerWidth <= 820;
+    const standalone = typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+    if ((!mobile && !standalone) || !screen.classList.contains('active')) {
+      root.classList.remove('mobile-fit-scaled');
+      root.style.removeProperty('--mobile-fit-scale');
+      return;
+    }
+    // 先恢复原始布局再测量，避免上一次缩放结果影响下一次计算。
+    root.classList.remove('mobile-fit-scaled');
+    root.style.setProperty('--mobile-fit-scale', '1');
+    // PWA 大屏会同时命中 PC 选角样式。先把“我的城市”恢复到正常文档流，
+    // 再按实际 DOM 边界做最终碰撞校验，避免它盖住环形布局下排的玩家。
+    resolvePwaMeOpponentCollisions();
+    const topbar = root.querySelector('.topbar');
+    const board = root.querySelector('.board');
+    const boardMain = root.querySelector('.board-main');
+    const actionbar = root.querySelector('.actionbar');
+    const naturalHeight = (topbar ? topbar.offsetHeight : 0) +
+      Math.max(board ? board.offsetHeight : 0, boardMain ? boardMain.scrollHeight : 0) +
+      (actionbar ? actionbar.offsetHeight : 0);
+    const naturalWidth = Math.max(root.scrollWidth || 0, boardMain ? boardMain.scrollWidth : 0, 1);
+    const viewportHeight = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    // 留出少量安全边距；下限避免极端小屏变得完全不可操作。
+    const readableAction = standalone && screen.classList.contains('pwa-action-phase');
+    const fitScale = Math.min(1, (viewportHeight - 6) / Math.max(1, naturalHeight),
+      (viewportWidth - 6) / Math.max(1, naturalWidth));
+    const scale = Math.max(readableAction ? .72 : .45, fitScale);
+    screen.classList.toggle('pwa-readable-mode', readableAction && fitScale < .72);
+    if (scale < .999) {
+      root.style.setProperty('--mobile-fit-scale', scale.toFixed(4));
+      root.classList.add('mobile-fit-scaled');
+    }
+  }
+
+  function resolvePwaMeOpponentCollisions() {
+    const wrap = $('#opponents');
+    const me = $('#me-area');
+    if (!wrap || !me || typeof window === 'undefined') return;
+    const pwa = window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+    const active = !!pwa && wrap.dataset.layout === 'mobile-ring' &&
+      Number(wrap.dataset.players || 0) >= 5;
+    me.classList.toggle('pwa-collision-flow', active);
+    me.classList.remove('pwa-collision-compact');
+    me.style.removeProperty('--pwa-me-clearance');
+    if (!active) return;
+
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (!nodes.length) return;
+    const gap = Math.max(8, Math.min(16, Math.round(window.innerWidth * .012)));
+    const baseHeight = parseFloat(wrap.dataset.ringBaseHeight || wrap.style.height) ||
+      wrap.clientHeight || 0;
+    wrap.style.height = baseHeight + 'px';
+
+    // 先用正常流中的位置测量；若绝对定位的对手卡越过了环形容器底边，
+    // 就把容器精确撑到最后一张卡的底部，使后续的“我的城市”自然下移。
+    let wr = wrap.getBoundingClientRect();
+    let mr = me.getBoundingClientRect();
+    let requiredBottom = wr.top + baseHeight;
+    nodes.forEach(node => {
+      const r = node.getBoundingClientRect();
+      const horizontalHit = r.right + gap > mr.left && r.left - gap < mr.right;
+      if (horizontalHit) requiredBottom = Math.max(requiredBottom, r.bottom + gap);
+    });
+    const requiredHeight = Math.ceil(requiredBottom - wr.top);
+    if (requiredHeight > baseHeight) wrap.style.height = requiredHeight + 'px';
+
+    // 二次测量是真正的碰撞检测兜底。若主题样式或浏览器安全区仍造成相交，
+    // 只增加必要的间距，而不使用与设备绑定的固定偏移。
+    mr = me.getBoundingClientRect();
+    let clearance = 0;
+    nodes.forEach(node => {
+      const r = node.getBoundingClientRect();
+      const overlapX = Math.min(r.right, mr.right) - Math.max(r.left, mr.left);
+      const overlapY = Math.min(r.bottom, mr.bottom) - Math.max(r.top, mr.top);
+      if (overlapX > 0 && overlapY > 0) {
+        clearance = Math.max(clearance, Math.ceil(r.bottom + gap - mr.top));
+      }
+    });
+    if (clearance > 0) me.style.setProperty('--pwa-me-clearance', clearance + 'px');
+
+    // 总高度超过可视区时，压缩“我的城市”内部两排，但不改变卡牌长宽比。
+    // 随后的 mobile-fit 测量仍会选择可容纳整页的最大整体缩放比例。
+    const actionbar = $('#screen-game .actionbar');
+    const available = Math.max(240, window.innerHeight - (actionbar ? actionbar.offsetHeight : 0));
+    const span = me.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top;
+    me.classList.toggle('pwa-collision-compact', span > available * .96);
+  }
+
+  /* 领主摧毁建筑：克隆被毁建筑卡到 body 上播放摧毁动画（不受后续整局重渲染影响），并撒出碎片粒子 */
+  function destroyAnim(seat, uid, name) {
+    if (typeof document === 'undefined' || !document.querySelector) return;
+    if (typeof window === 'undefined' || !window.getComputedStyle) return;
+    let cityEl = null;
+    if (seat === App.myIdx) cityEl = $('#my-city');
+    else cityEl = document.querySelector('[data-seat="' + seat + '"] .opp-city');
+    if (!cityEl) return;
+    const card = cityEl.querySelector('.card[data-uid="' + uid + '"]');
+    if (!card || !card.getBoundingClientRect) return;
+    const r = card.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return;
+    // 把克隆节点钉在 body 上，原卡将在下一次重渲染时被移除，克隆独立播放动画
+    const clone = card.cloneNode(true);
+    clone.classList.add('destroying');
+    clone.style.position = 'fixed';
+    clone.style.left = r.left + 'px';
+    clone.style.top = r.top + 'px';
+    clone.style.width = r.width + 'px';
+    clone.style.height = r.height + 'px';
+    clone.style.margin = '0';
+    document.body.appendChild(clone);
+    // 碎片 / 火花向四周飞散
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const bits = ['×', '+', '!', '·'];
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : (fn) => fn();
+    for (let i = 0; i < 7; i++) {
+      const b = document.createElement('div');
+      b.className = 'debris';
+      b.textContent = bits[i % bits.length];
+      b.style.left = cx + 'px';
+      b.style.top = cy + 'px';
+      document.body.appendChild(b);
+      const ang = (Math.PI * 2 * i) / 7 + (Math.random() - 0.5);
+      const dist = 60 + Math.random() * 70;
+      const dx = Math.cos(ang) * dist, dy = Math.sin(ang) * dist - 24;
+      raf(() => {
+        b.style.transform = 'translate(' + dx + 'px,' + dy + 'px) rotate(' + (Math.random() * 360 - 180) + 'deg) scale(.5)';
+        b.style.opacity = '0';
+      });
+      setTimeout(() => { if (b.parentNode) b.parentNode.removeChild(b); }, 720);
+    }
+    setTimeout(() => { if (clone.parentNode) clone.parentNode.removeChild(clone); }, 760);
+  }
+
+  /* ============================== 渲染主函数 ============================== */
+  function viewerIdForState(s) {
+    const players = Array.isArray(s && s.players) ? s.players : [];
+    const hasPlayer = id => id != null && players.some(player => player && player.id === id);
+    // The per-view `you` field is authoritative. The cached socket identity can
+    // briefly belong to the previous room/game while the first state arrives.
+    if (hasPlayer(s && s.you)) return s.you;
+    // Private hand data is only included for the viewer. It safely recovers the
+    // local identity if an initial/reconnected state omitted `you`.
+    const privatePlayer = players.find(player => player && Array.isArray(player.hand));
+    if (privatePlayer) return privatePlayer.id;
+    // Use the cached identity only when it still refers to a player in this state.
+    return hasPlayer(App.myId) ? App.myId : null;
+  }
+
+  function render() {
+    const s = App.state;
+    if (!s) return;
+    if (s.phase === 'lobby') return;
+    // The per-view state is authoritative for identity. Refresh this before
+    // rendering the draft pool and player panels so a reconnect/state update
+    // cannot leave every opponent filtered or the local panel unresolved.
+    const viewerId = viewerIdForState(s);
+    if (viewerId != null) App.myId = viewerId;
+    $('#spectator-control').update(s, payload => Net.send(payload));
+    $('#btn-speed').hidden = !!s.spectating;
+    $('#btn-again').hidden = !!s.spectating;
+    // 记录滚动位置，渲染完恢复（避免每次行动后画面跳动）
+    const _scrollSnap = snapshotScroll();
+
+    $('#tb-round').textContent = s.round;
+    $('#tb-target').textContent = s.endDistricts;
+    $('#tb-deck').textContent = s.deckCount;
+    const crownP = s.players.find(p => p.hasCrown);
+    $('#tb-crown').innerHTML = '<i class="crown-icon" aria-hidden="true">♛</i>' +
+      '<span class="crown-owner">' + (crownP ? escapeHtml(crownP.name) : '—') + '</span>';
+    $('#tb-room').textContent = App.localServerGame ? '单人模式'
+      : (s.roomName || '联机房间 ' + (s.roomId || ''));
+    syncSpeedBtn();
+    syncThemeBtn();
+    syncChatControl();
+    voiceSync();
+    updateSidePanel();
+
+    // 本轮生效的负面效果常驻显示，别让玩家忘了自己被刺杀/被盯上
+    const fx = $('#tb-effects');
+    if (fx) {
+      const parts = [];
+      const e = s.effects || {};
+      if (e.assassinated != null) parts.push('! ' + e.assassinated + ' 号被刺杀');
+      if (e.bewitched != null) parts.push('* ' + e.bewitched + ' 号被施咒');
+      if (e.thief != null) parts.push('$ ' + e.thief + ' 号被盯上');
+      fx.textContent = parts.join(' · ');
+      fx.hidden = parts.length === 0;
+    }
+
+    // 关键事件提示（被刺杀等）。用 seq 去重，重复渲染不会重复弹窗。
+    processNotices(s);
+
+    const isDraft = s.phase === 'draft';
+    const gameScreen = $('#screen-game');
+    const mobilePhase = $('#mobile-phase-status');
+    if (mobilePhase) {
+      mobilePhase.hidden = !isMobileGameUI();
+      if (!mobilePhase.hidden) {
+        $('#mobile-phase-title').textContent = '第 ' + s.round + ' 轮 · ' +
+          (isDraft ? '选角阶段' : '行动阶段');
+        $('#mobile-phase-sub').textContent = s.players.length + ' 人局 · 公开局面按顺时针排列';
+      }
+    }
+    if (gameScreen) {
+      gameScreen.classList.toggle('draft-phase', isDraft);
+      gameScreen.classList.toggle('pwa-action-phase', s.phase === 'action');
+    }
+    $('#draft-area').hidden = !isDraft;
+    $('#play-area').hidden = false;
+    renderRemoved(s);
+    if (isDraft) {
+      renderMobileChoiceShelf(s);
+      renderDraft(s);
+      // 选角阶段也展示全场局势（对手城市 / 我的城市与手牌），方便决策
+      $('#turn-banner').innerHTML =
+        '<div class="tb-who">选角阶段</div>' +
+        '<div class="tb-sub">上方为当前选角者与牌池，下方为场上局势</div>' +
+        '<div class="turn-order-guide draft-guide" id="turn-order-guide-draft" aria-label="行动顺序"></div>';
+      renderTableGuide(s);
+      renderOpponents(s);
+      renderMe(s);
+      refreshMobileDetail(s);
+      scheduleDraftBoardLayout(s);
+      scheduleMobilePanelInnerCollisionPass();
+      renderLog(s);
+      requestAnimationFrame(positionPlayerChatBubbles);
+      restoreScroll(_scrollSnap);
+      scheduleMobileFitScale();
+      return;
+    }
+
+    renderTurnBanner(s);
+    renderTableGuide(s);
+    renderOpponents(s);
+    renderMe(s);
+    scheduleMobilePanelInnerCollisionPass();
+    renderLog(s);
+    renderActions(s);
+    renderMobileChoiceShelf(s);
+    refreshMobileDetail(s);
+    autoOpenPick(s);
+    requestAnimationFrame(positionPlayerChatBubbles);
+    restoreScroll(_scrollSnap);
+    scheduleMobileFitScale();
+  }
+
+  /** 抽牌保留 / 学者选牌 / 预言家归还：自动弹出卡牌选择窗 */
+  function autoOpenPick(s) {
+    if (s.spectating) return;
+    if (isMobileGameUI()) return;
+    const t = s.turn;
+    if (!t || !t.pending || t.playerId !== App.myId) { App.pickKey = null; return; }
+    const k = t.pending.kind;
+    if (k !== 'draw_keep' && k !== 'scholar_pick' && k !== 'prophet_give' && k !== 'wizard_card') {
+      App.pickKey = null; return;
+    }
+    const key = s.round + '|' + k + '|' +
+      (t.pending.cards ? t.pending.cards.map(c => c.uid).join(',') : String(t.pending.targetIdx));
+    if (App.pickKey === key) return;
+    App.pickKey = key;
+    openPickModal();
+  }
+
+  function escapeHtml(x) {
+    return String(x == null ? '' : x).replace(/[&<>"']/g, m =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  }
+
+  /** 「思考中」的三点跳动动画，让等待电脑时界面不显得像卡死 */
+  function thinkingDots() {
+    return '<span class="dots"><i></i><i></i><i></i></span>';
+  }
+
+  /* 轮末战果确认：本轮结束后暂停，所有玩家都点过「确认本轮战果」才进入下一轮选角 */
+  function renderRoundConfirm(box, s) {
+    box.classList.add('rc');
+    const rc = s.roundConfirm;
+    const myIdx = s.players.findIndex(p => p.id === App.myId);
+    const done = rc.confirmed.filter(Boolean).length;
+    const total = s.players.length;
+
+    const left = el('div');
+    const rows = s.players.map((p, i) => {
+      const okd = !!rc.confirmed[i];
+      return '<span class="rc-who' + (okd ? ' ok' : '') + '">' +
+        escapeHtml(p.name) + (okd ? ' ✓' : ' 等待') + '</span>';
+    }).join('');
+    left.innerHTML =
+      '<div class="tb-who">第 ' + rc.round + ' 轮结束 — 请确认本轮战果</div>' +
+      '<div class="rc-list">' + rows + '</div>';
+    box.appendChild(left);
+
+    const btn = el('button', 'btn rc-btn');
+    if (myIdx >= 0 && rc.confirmed[myIdx]) {
+      btn.textContent = '已确认，等待其他玩家（' + done + '/' + total + '）';
+      btn.className = 'btn ghost rc-btn';
+      btn.disabled = true;
+    } else {
+      btn.textContent = '确认本轮战果（' + done + '/' + total + '）';
+      btn.className = 'btn rc-btn';
+      onTap(btn, () => send({ type: 'confirm_round' }));
+    }
+    box.appendChild(btn);
+    if (s.spectating) { btn.disabled = true; btn.textContent = '观战中，等待玩家确认（' + done + '/' + total + '）'; }
+  }
+
+  function renderTurnBanner(s) {
+    const box = $('#turn-banner');
+    box.innerHTML = '';
+    box.classList.remove('rc');
+    const t = s.turn;
+    if (!t) {
+      if (s.roundConfirm) { renderRoundConfirm(box, s); return; }
+      box.innerHTML = '<div class="tb-who">等待中…</div><div class="tb-sub">准备下一轮</div>';
+      return;
+    }
+    const who = s.players[t.playerIdx];
+    const left = el('div');
+    let mark = '';
+    if (s.effects.assassinated === t.charNum) mark = ' <span class="tag dead">被刺杀</span>';
+    if (s.effects.bewitched === t.charNum) mark += ' <span class="tag magic">被施咒</span>';
+    let phaseTip = '';
+    if (t.phase === 'witch_resume') phaseTip = '<span class="tag magic">女巫接管</span>';
+    if (t.phase === 'bewitched') phaseTip = '<span class="tag magic">仅可领资源</span>';
+    left.innerHTML = '<div class="tb-who">' + (who.id === App.myId ? '你' : escapeHtml(who.name)) +
+      ' — ' + t.charNum + ' · ' + escapeHtml(t.charName) + mark + ' ' + phaseTip + '</div>' +
+      '<div class="tb-sub">已建造 ' + t.builds + ' / ' + t.buildLimit + ' 栋' +
+      (t.takenResources ? ' · 已领资源' : '') + '</div>';
+    box.appendChild(left);
+
+    const stats = el('div', 'tb-stats');
+    stats.innerHTML =
+      '<span>牌堆 <b>' + s.deckCount + '</b></span>' +
+      '<span>弃牌 <b>' + s.discardCount + '</b></span>' +
+      (s.effects.thief != null ? '<span>盗贼锁定 <b>' + s.effects.thief + ' 号</b></span>' : '') +
+      (s.firstToFinish >= 0 ? '<span>* <b>' + escapeHtml(s.players[s.firstToFinish].name) + '</b> 已达标</span>' : '');
+    box.appendChild(stats);
+  }
+
+  function playerCityBox(s) {
+    const box = playerBox(s);
+    if (!box) return null;
+    return box.id === 'me-area' ? $('#my-city') : box.querySelector('.opp-city');
+  }
+
+  function renderTableGuide(s) {
+    // 选角阶段使用横条内的独立槽位；行动阶段使用桌面顶部槽位。
+    // 两个节点不来回搬运，避免 render() 重建横条时把行动指引一起清掉。
+    const arenaGuide = $('#turn-order-guide');
+    const guide = s.phase === 'draft'
+      ? ($('#turn-order-guide-draft') || arenaGuide)
+      : arenaGuide;
+    if (!guide) return;
+    const banner = $('#turn-banner');
+    if (s.phase === 'draft') {
+      // 选角阶段：行动指引属于“选角阶段”横条的一部分，避免压住桌面玩家卡片。
+      if (arenaGuide && arenaGuide !== guide) {
+        arenaGuide.hidden = true;
+        arenaGuide.style.display = 'none';
+        arenaGuide.setAttribute('aria-hidden', 'true');
+      }
+      guide.hidden = false;
+      guide.style.display = 'flex';
+      guide.style.visibility = 'visible';
+      guide.setAttribute('aria-hidden', 'false');
+    } else if (banner && guide.parentNode !== banner) {
+      // 行动阶段也固定放在顶部横条，避免遮住圆桌上方的玩家卡片。
+      banner.appendChild(guide);
+      guide.hidden = false;
+      guide.style.display = 'flex';
+      guide.style.visibility = 'visible';
+      guide.setAttribute('aria-hidden', 'false');
+    }
+    const actorIdx = s.phase === 'draft'
+      ? s.players.findIndex(p => p.id === (s.draft && s.draft.currentPlayer))
+      : (s.turn && Number.isInteger(s.turn.playerIdx) ? s.turn.playerIdx : -1);
+    guide.innerHTML = '<span class="order-label">行动指引</span>' +
+      '<span class="order-note">角色按编号顺序行动</span>' +
+      s.players.map((p, i) =>
+        (i ? '<span class="order-arrow">→</span>' : '') +
+        '<span class="order-step' + (i === actorIdx ? ' current' : '') + '"' +
+        (i === actorIdx ? ' aria-current="step"' : '') + '>' +
+        '<span class="order-seat">' + (p.seat + 1) + '</span>' + escapeHtml(p.name) +
+        (i === actorIdx ? ' · 当前' : '') + '</span>'
+      ).join('');
+  }
+
+  function renderOpponents(s) {
+    if (isMobileGameUI()) { renderMobilePlayers(s); return; }
+    hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
+    const wrap = $('#opponents');
+    const totalPlayers = s.players.length || 1;
+    const viewerId = viewerIdForState(s);
+    const mobileRingLayout = isMobileOpponentLayout() && totalPlayers >= 5;
+    const compactLevel = totalPlayers >= 8 ? 3 : totalPlayers >= 7 ? 2 : totalPlayers >= 5 ? 1 : 0;
+    const viewportH = (typeof window !== 'undefined' && window.innerHeight) || 720;
+    const wrapWidth = wrap.clientWidth || window.innerWidth || 0;
+    const spacious = wrapWidth >= 900 && viewportH >= 560;
+    // iPad 级大屏：把环形座位半径拉大，给放大的玩家框留出更多横向/纵向间距。
+    const radiusX = mobileRingLayout && spacious
+      ? (totalPlayers >= 7 ? 50 : 48)
+      : (totalPlayers >= 7 ? 43 : totalPlayers >= 5 ? 40 : 36);
+    const radiusY = mobileRingLayout && spacious
+      ? (totalPlayers >= 7 ? 54 : 52)
+      : (totalPlayers >= 7 ? 42 : totalPlayers >= 5 ? 40 : 38);
+    const cardWidth = totalPlayers >= 8 ? 17 : totalPlayers >= 7 ? 19 : totalPlayers >= 5 ? 21 : totalPlayers === 4 ? 30 : 24;
+    wrap.dataset.players = String(totalPlayers);
+    wrap.dataset.layout = mobileRingLayout ? 'mobile-ring' : 'ring';
+    const arena = $('#table-arena');
+    if (arena) {
+      arena.dataset.players = String(totalPlayers);
+      // PWA 横屏可能同时命中桌面选角规则。把实际布局模式同步给父容器，
+      // 让 CSS 能解除固定高度与裁剪，确保后面的“我的城市”参与整页适配。
+      arena.dataset.layout = wrap.dataset.layout;
+    }
+    // 多人时顶部玩家卡片更容易向下延伸，圆桌下移到环形座位的空白中心，避免相互覆盖。
+    const me = s.players.find(p => p.id === viewerId);
+    const meSeat = me ? me.seat : 0;
+    const picking = districtSelectMode();
+    // 按 seat 复用对手区块，避免整盘重建导致城区卡图在移动端闪烁
+    const existing = {};
+    Array.prototype.forEach.call(wrap.children, ch => { if (ch.dataset && ch.dataset.seat != null) existing[ch.dataset.seat] = ch; });
+    const keep = {};
+    const frag = document.createDocumentFragment();
+    s.players.forEach((p, i) => {
+      if (p.id === viewerId) return;
+      let d = existing[p.seat];
+      if (!d) {
+        d = el('div', 'opp');
+        d.dataset.seat = p.seat;
+        const roleRow = el('div', 'opp-role-row');
+        roleRow.appendChild(el('div', 'opp-char'));
+        roleRow.appendChild(el('div', 'opp-char-stats'));
+        d.appendChild(roleRow);
+        const head = el('div', 'opp-head'); d.appendChild(head);
+        const body = el('div', 'opp-body');
+        body.appendChild(el('div', 'opp-city'));
+        d.appendChild(body);
+      }
+      keep[p.seat] = d;
+      const relativeSeat = (p.seat - meSeat + totalPlayers) % totalPlayers;
+      const angle = Math.PI / 2 + relativeSeat / totalPlayers * Math.PI * 2;
+      d.style.setProperty('--seat-x', String(50 + Math.cos(angle) * radiusX));
+      d.style.setProperty('--seat-y', String(50 + Math.sin(angle) * radiusY));
+      // 行动提示条位于游戏区域上沿。4 人时正上方座位、5 人时上方两个座位
+      // 都需要额外下移，避免玩家卡片与提示条发生重叠。
+      const inPlayPhase = s.phase === 'action' || s.phase === 'draft';
+      const isTopSeat = totalPlayers === 4
+        ? relativeSeat === 2
+        : totalPlayers === 5 && (relativeSeat === 2 || relativeSeat === 3);
+      const topSeatShift = !mobileRingLayout && inPlayPhase && isTopSeat
+        ? (totalPlayers === 5 ? 110 : 58)
+        : 0;
+      d.style.setProperty('--seat-shift-y', (totalPlayers === 4 ? 42 + topSeatShift : topSeatShift) + 'px');
+      const cityWidth = totalPlayers === 4
+        ? Math.min(700, 340 + Math.max(0, p.city.length - 5) * 90) + 'px'
+        : 'min(340px, ' + cardWidth + '%)';
+      d.style.width = cityWidth;
+      d.dataset.widthBase = cityWidth;
+      d.dataset.cardWidth = String(cardWidth);
+      d.dataset.cityCount = String(p.city.length);
+      // 碰撞位移仅属于当前渲染，防止下一帧把旧偏移再次叠加到环形座位。
+      d.style.setProperty('--push-x', '0px');
+      d.style.setProperty('--push-y', '0px');
+      d.dataset.pushX = '0';
+      d.dataset.pushY = '0';
+      d.dataset.compact = String(mobileRingLayout ? 3 : compactLevel);
+      const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id);
+      const actionActive = !!(s.turn && s.turn.playerIdx === p.seat);
+      d.classList.toggle('active', draftActive || actionActive);
+      // 角色状态 HTML 未变（如每步行动但身份没翻面）时跳过重建，避免霓虹角色立绘闪烁
+      const cs = d.querySelector('.opp-char');
+      const csHtml = charStatusHTML(p);
+      if (cs._lastHTML !== csHtml) { cs.innerHTML = csHtml; cs._lastHTML = csHtml; }
+      const tags = (p.disconnected ? '<span class="tag disconnected">已断连</span>' : '') +
+        (p.left ? '<span class="tag left">已离开</span>' : '') +
+        (!p.disconnected && !p.left && p.isBot ? '<span class="tag bot">' +
+          (p.botType === 'agent' ? 'AI Agent' : p.botType === 'neural' ? '策略神经' : '电脑') + '</span>' : '');
+      const crownIcon = p.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '';
+      const head = d.querySelector('.opp-head');
+      head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
+        '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
+        '<span class="opp-gold">' + threatMarkHTML(p.threat) + warrantMarkHTML(p.warrant) + crownIcon +
+          '<i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
+        scoreBadgeHTML(i, p.name);
+      bindScoreBadge(head.querySelector('.score-badge'), i);
+      playMarkAnim(head, markSignature(p), d.dataset.markSig, sig => { d.dataset.markSig = sig; });
+
+      const city = d.querySelector('.opp-city');
+      if (!p.city.length) {
+        childrenSnapshot(city).forEach(ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+        if (!city.querySelector('.empty-hint')) city.appendChild(el('div', 'empty-hint', '（尚无建筑）'));
+      } else {
+        const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
+        syncCards(city, p.city, c => {
+          const act = districtActionFor(p, c);
+          // 选择目标时放大对手的建筑牌，方便触屏点击
+          return { mini: !picking, clickable: !!act, pickable: !!act };
+        }, (node, c) => {
+          const act = districtActionFor(p, c);
+          if (act) bindCardAction(node, () => pickDistrict(p.id, c.uid, act), true);
+          else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
+        });
+      }
+      d.querySelector('.opp-char-stats').innerHTML = handCountHTML(p.handCount);
+      frag.appendChild(d);
+    });
+    // 移除已不存在的对手区块
+    Array.prototype.forEach.call(wrap.children, ch => {
+      if (ch.dataset && ch.dataset.seat != null && !keep[ch.dataset.seat] && ch.parentNode) ch.parentNode.removeChild(ch);
+    });
+    wrap.appendChild(frag);
+    renderTaxPot(wrap, s);
+    if (mobileRingLayout) {
+      applyMobileRingLayout(wrap);
+      const pwa = typeof window !== 'undefined' && window.matchMedia &&
+        window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+      wrap.classList.toggle('pwa-many-players', !!pwa && totalPlayers >= 5);
+      if (pwa && totalPlayers >= 5) stabilizePwaRingCollisions(wrap);
+    } else {
+      resolveOpponentTableCollisions();
+      // 圆桌半径保证不了玩家框互不相交（5 人局左右两侧各排两张），再跑一遍互斥分离。
+      separateOpponentPanels(wrap);
+    }
+  }
+
+  const MOBILE_V12_DISTRICT_COLORS = {
+    yellow: '#e0a92b', blue: '#3d7ec4', green: '#3fa46a',
+    red: '#d0503f', purple: '#8b5cc7'
+  };
+  function mobileDistrictColor(color) {
+    return MOBILE_V12_DISTRICT_COLORS[color] || MOBILE_V12_DISTRICT_COLORS.purple;
+  }
+  function mobileDistrictName(name) {
+    return String(name || '').slice(0, 3);
+  }
+  function renderMobilePlayers(s) {
+    const wrap = $('#opponents');
+    const arena = $('#table-arena');
+    if (!wrap) return;
+    wrap.dataset.layout = 'mobile-grid';
+    wrap.dataset.players = String(s.players.length);
+    wrap.style.height = '';
+    wrap.style.display = '';
+    if (arena) { arena.dataset.layout = 'mobile-grid'; arena.dataset.players = String(s.players.length); }
+    $('#mobile-public-count').textContent = s.players.length + ' 人局';
+    const targeting = mobileHasTargetChoice(s);
+    $('#mobile-public-status').textContent = targeting
+      ? (availableMobileActions().some(a => a.type === 'choose_district') ? '选择目标玩家和建筑' : '点击目标玩家')
+      : '顺时针排列';
+    const ordered = [];
+    for (let low = 0, high = s.players.length - 1; low <= high; low++, high--) {
+      ordered.push(s.players[low]);
+      if (low !== high) ordered.push(s.players[high]);
+    }
+    wrap.innerHTML = '';
+    ordered.forEach(p => {
+      const idx = s.players.indexOf(p);
+      const score = s.scores && s.scores[idx] ? s.scores[idx].total : 0;
+      const playerActions = mobilePlayerActionsFor(p.id);
+      const buildingActions = mobileDistrictActionsFor(p.id);
+      const selectable = playerActions.length || buildingActions.length;
+      const active = s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id ||
+        s.turn && s.turn.playerId === p.id;
+      const d = el('div', 'opp mobile-player' + (p.id === App.myId ? ' self' : '') +
+        (p.threat ? ' threat' : '') +
+        (active ? ' active' : '') + (targeting && selectable ? ' mobile-target' : '') +
+        (targeting && !selectable ? ' mobile-unavailable' : ''));
+      d.dataset.seat = p.seat;
+      d.setAttribute('role', 'button'); d.tabIndex = 0;
+      d.setAttribute('aria-label', '查看' + p.name + '的详细信息');
+      const role = s.phase === 'action' && p.revealedCharNum != null
+        ? '<span class="mobile-role-tag"><span class="mobile-role-no">' + p.revealedCharNum + '</span><span>' +
+          escapeHtml((charMeta(p.revealedCharId, p.revealedCharNum) || {}).name || '') + '</span></span>' : '';
+      const head = el('div', 'mobile-player-head');
+      head.innerHTML = '<strong class="mobile-player-name">' + escapeHtml(p.name) + '</strong>' +
+        (p.id === App.myId ? '<span class="mobile-you-chip">你</span>' : '') +
+        (p.hasCrown ? '<i class="crown-icon" aria-label="皇冠">♛</i>' : '') +
+        threatMarkHTML(p.threat) + warrantMarkHTML(p.warrant) + role +
+        '<span class="mobile-player-stats"><span><i class="coin-icon" aria-hidden="true"></i><span class="mobile-stat-value">' + p.gold +
+        '</span></span><span><i class="score-icon" aria-hidden="true"></i><span class="mobile-stat-value">' + score +
+        '</span></span><span class="mobile-hand-count" title="手牌 ' + p.handCount + ' 张"><i class="mobile-hand-back" aria-hidden="true"></i><span class="mobile-stat-value">×' + p.handCount + '</span></span></span>';
+      d.appendChild(head);
+      const city = el('div', 'mobile-player-city');
+      (p.city || []).forEach(card => {
+        const chip = el('span', 'mobile-city-chip');
+        chip.style.setProperty('--district-color', mobileDistrictColor(card.color));
+        chip.title = card.name + ' · 费用 ' + card.cost;
+        chip.innerHTML = '<b>' + card.cost + '</b><span>' + escapeHtml(mobileDistrictName(card.name)) + '</span>';
+        city.appendChild(chip);
+      });
+      d.appendChild(city);
+      if (Voice.speakers.has(p.id)) d.classList.add('voice-speaking');
+      onTap(d, () => openMobilePlayerDetail(p.id));
+      d.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); openMobilePlayerDetail(p.id); } };
+      wrap.appendChild(d);
+    });
+  }
+
+  function isMobileOpponentLayout() {
+    if (typeof window === 'undefined') return false;
+    const touch = (typeof navigator !== 'undefined' &&
+      (navigator.maxTouchPoints > 0 || 'ontouchstart' in window));
+    return window.innerWidth <= 1000 || (touch && window.innerWidth <= 1400);
+  }
+
+  /* 移动端的目标选择共用公开玩家区、玩家详情和卡图确认。 */
+  const MobileDetail = { playerId: null, preview: null };
+  function isMobileGameUI() {
+    return typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(max-width: 820px)').matches;
+  }
+  const MOBILE_PLAYER_ACTIONS = ['choose_player', 'spy_target', 'wizard_target', 'emperor_crown'];
+  const MOBILE_ROLE_ACTIONS = ['choose_char', 'magistrate_signed', 'magistrate_char',
+    'blackmailer_signed', 'blackmailer_char'];
+  function availableMobileActions() {
+    return (App.state && App.state.available && App.state.available.actions) || [];
+  }
+  function mobilePlayerActionsFor(playerId) {
+    return availableMobileActions().filter(a => MOBILE_PLAYER_ACTIONS.includes(a.type) && a.target === playerId);
+  }
+  function mobileDistrictActionsFor(playerId) {
+    return availableMobileActions().filter(a => a.type === 'choose_district' && a.target === playerId);
+  }
+  function mobileHasTargetChoice(s) {
+    return !!(s && s.turn && s.turn.playerId === App.myId &&
+      availableMobileActions().some(a => MOBILE_PLAYER_ACTIONS.includes(a.type) || a.type === 'choose_district'));
+  }
+  function closeMobileDetail() {
+    MobileDetail.playerId = null;
+    MobileDetail.preview = null;
+    const overlay = $('#mobile-detail');
+    if (overlay) overlay.hidden = true;
+  }
+  function mobileDetailBack() {
+    if (MobileDetail.preview) {
+      MobileDetail.preview = null;
+      if (MobileDetail.playerId) refreshMobileDetail(App.state);
+      else closeMobileDetail();
+    } else closeMobileDetail();
+  }
+  function openMobilePlayerDetail(playerId) {
+    if (!isMobileGameUI() || !App.state || !App.state.players.some(p => p.id === playerId)) return;
+    MobileDetail.playerId = playerId;
+    MobileDetail.preview = null;
+    refreshMobileDetail(App.state);
+  }
+  function mobilePreview(card, action, kind) {
+    MobileDetail.preview = { card: card, action: action || null, kind: kind || 'district' };
+    refreshMobileDetail(App.state);
+  }
+  function mobileDetailButton(label, callback, className) {
+    const button = el('button', 'btn ' + (className || ''), escapeHtml(label));
+    button.type = 'button';
+    onTap(button, callback);
+    return button;
+  }
+  function mobileActionStillAvailable(action) {
+    if (!action) return null;
+    if ((action.type === 'draft_pick' || action.type === 'draft_discard') &&
+        App.state && App.state.phase === 'draft' && App.state.draft &&
+        App.state.draft.currentPlayer === App.myId &&
+        App.state.draft.pool.some(c => c.id === action.charId)) return action;
+    return availableMobileActions().find(a => a.type === action.type &&
+      a.uid === action.uid && a.target === action.target && a.num === action.num &&
+      a.name === action.name && a.charId === action.charId) || null;
+  }
+  function refreshMobileDetail(s) {
+    const overlay = $('#mobile-detail');
+    if (!overlay || !isMobileGameUI() || !s) { closeMobileDetail(); return; }
+    if (s.reaction) { closeMobileDetail(); return; }
+    const player = MobileDetail.playerId && s.players.find(p => p.id === MobileDetail.playerId);
+    if (MobileDetail.playerId && !player) { closeMobileDetail(); return; }
+    if (MobileDetail.preview && MobileDetail.preview.action &&
+        !mobileActionStillAvailable(MobileDetail.preview.action)) MobileDetail.preview = null;
+    if (!player && !MobileDetail.preview) { overlay.hidden = true; return; }
+    overlay.hidden = false;
+    overlay.classList.toggle('is-preview', !!MobileDetail.preview);
+    const body = $('#mobile-detail-body');
+    const footer = $('#mobile-detail-actions');
+    const title = $('#mobile-detail-title');
+    const kicker = $('#mobile-detail-kicker');
+    const close = $('#mobile-detail-close');
+    body.innerHTML = '';
+    footer.innerHTML = '';
+    close.textContent = '×';
+    close.setAttribute('aria-label', MobileDetail.preview ? '返回详情' : '关闭玩家详情');
+    if (MobileDetail.preview) {
+      const preview = MobileDetail.preview;
+      const card = preview.card;
+      kicker.textContent = '';
+      title.textContent = (preview.action ? '确认目标 · ' : '查看卡牌 · ') + (card.name || '卡牌');
+      const stage = el('div', 'mobile-detail-preview');
+      const imageSrc = preview.kind === 'role' ? roleFull(card) :
+        (Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(card, 'full') : null);
+      if (imageSrc) {
+        const image = el('img'); image.src = imageSrc; image.alt = card.name || '卡牌';
+        stage.appendChild(image);
+      } else {
+        const node = preview.kind === 'role' ? charNode(card) : cardNode(card);
+        node.__noZoom = true;
+        stage.appendChild(node);
+      }
+      body.appendChild(stage);
+      const meta = el('p', 'mobile-detail-description');
+      meta.textContent = preview.kind === 'role'
+        ? (card.num ? card.num + ' · ' : '') + (card.name || '角色')
+        : (player ? player.name + ' · ' : '') +
+          (Cards.COLORS[card.color] ? Cards.COLORS[card.color].name + ' · ' : '') +
+          '费用 ' + (card.cost || 0) + ' · 计分 ' + (card.scoreValue || card.cost || 0);
+      body.appendChild(meta);
+      const previewActions = el('div', 'mobile-preview-actions');
+      previewActions.appendChild(mobileDetailButton('返回重选', mobileDetailBack, 'ghost'));
+      const liveAction = mobileActionStillAvailable(preview.action);
+      if (liveAction) previewActions.appendChild(mobileDetailButton(
+        preview.action.label ? '确认 · ' + preview.action.label : '确认选择',
+        () => {
+          if (liveAction.type === 'wizard_card' && MobileDetail.playerId) MobileDetail.preview = null;
+          else closeMobileDetail();
+          runAction(liveAction);
+        }, 'primary'));
+      body.appendChild(previewActions);
+      return;
+    }
+    kicker.textContent = player.id === App.myId ? '我的详情' : '玩家详情 · 座位 ' + (player.seat + 1);
+    const playerActions = mobilePlayerActionsFor(player.id);
+    const districtActions = mobileDistrictActionsFor(player.id);
+    title.textContent = playerActions.length ? '选择玩家 · ' + player.name :
+      districtActions.length ? '选择建筑 · ' + player.name : player.name + ' · 详情';
+    if (playerActions.length || districtActions.length) body.appendChild(el('p', 'mobile-detail-context',
+      playerActions.length ? '已选择玩家 <b>' + escapeHtml(player.name) + '</b>。确认目标，或返回公开区域重选。' :
+        '已选择玩家 <b>' + escapeHtml(player.name) + '</b>。请在下方城区选择目标建筑。'));
+    const scoreIdx = s.players.indexOf(player);
+    const score = s.scores && s.scores[scoreIdx] || { base: 0, bonus: 0, total: 0, detail: [] };
+    const stats = el('div', 'mobile-detail-stats');
+    stats.innerHTML = '<span>金币 <b><i class="coin-icon" aria-hidden="true"></i>' + player.gold +
+      '</b></span><span>当前得分 <b><i class="score-icon" aria-hidden="true"></i>' + score.total +
+      '</b></span><span>城区 <b>' + player.city.length + '</b></span><span>手牌 <b><i class="mobile-hand-back" aria-hidden="true"></i>×' +
+      player.handCount + '</b></span>';
+    body.appendChild(stats);
+    const knownRoles = player.id === App.myId ? (player.chars || []) :
+      s.phase === 'action' && player.revealedCharNum != null
+        ? [charMeta(player.revealedCharId, player.revealedCharNum)].filter(Boolean) : [];
+    const scorePanel = el('div', 'mobile-detail-score-panel' + (!knownRoles.length ? ' no-role' : ''));
+    if (knownRoles.length) {
+      const roleBox = el('div', 'mobile-detail-role-box');
+      const node = charNode(knownRoles[0]); node.__noZoom = true;
+      onTap(node, () => mobilePreview(knownRoles[0], null, 'role'));
+      roleBox.appendChild(node);
+      roleBox.appendChild(el('b', '', knownRoles[0].num + ' · ' + escapeHtml(knownRoles[0].name)));
+      scorePanel.appendChild(roleBox);
+    }
+    const scoreDetails = el('div', 'mobile-detail-score-details');
+    scoreDetails.innerHTML = '<div class="mobile-detail-score-kpis"><div>建筑分<b>' +
+      (score.base || 0) + '</b></div><div>总分<b>' + (score.total || 0) + '</b></div></div>' +
+      '<div class="mobile-detail-score-bonus"><span>奖励分 <b>+' + (score.bonus || 0) +
+      '</b></span><ul>' + ((score.detail || []).filter(item => item.label !== '建筑总分').map(item =>
+        '<li>' + escapeHtml(item.label) + '<b>+' + item.value + '</b></li>').join('') ||
+        '<li>暂无奖励分</li>') + '</ul></div>';
+    scorePanel.appendChild(scoreDetails);
+    body.appendChild(scorePanel);
+    body.appendChild(el('h3', 'mobile-detail-section-title', districtActions.length
+      ? '选择建筑 · ' + player.city.length + ' 栋' : '公开城区 · ' + player.city.length + ' 栋'));
+    const city = el('div', 'mobile-detail-city');
+    if (!player.city.length) city.appendChild(el('p', 'empty-hint', '尚无建筑'));
+    player.city.forEach(card => {
+      const action = districtActions.find(a => a.uid === card.uid);
+      const node = cardNode(card, { clickable: false });
+      node.__noZoom = true;
+      const wrapper = el('button', 'mobile-detail-card' + (action ? ' targetable' : ''));
+      wrapper.type = 'button';
+      wrapper.appendChild(node);
+      wrapper.appendChild(el('span', '', escapeHtml(card.name) + ' · ' + card.cost));
+      onTap(wrapper, () => mobilePreview(card, action, 'district'));
+      city.appendChild(wrapper);
+    });
+    body.appendChild(city);
+    const pending = s.turn && s.turn.pending;
+    if (pending && pending.kind === 'wizard_card' && s.turn.playerId === App.myId &&
+        s.players[pending.targetIdx] && s.players[pending.targetIdx].id === player.id) {
+      body.appendChild(el('h3', 'mobile-detail-section-title', '法师视野 · 目标手牌'));
+      const hand = el('div', 'mobile-detail-city');
+      (pending.cards || []).forEach(card => {
+        const node = cardNode(card, { clickable: false });
+        const action = availableMobileActions().find(a => a.type === 'wizard_card' && a.uid === card.uid);
+        node.__noZoom = true;
+        const wrapper = el('button', 'mobile-detail-card targetable');
+        wrapper.type = 'button'; wrapper.appendChild(node);
+        wrapper.appendChild(el('span', '', escapeHtml(card.name) + ' · ' + card.cost));
+        onTap(wrapper, () => mobilePreview(card, action, 'district'));
+        hand.appendChild(wrapper);
+      });
+      body.appendChild(hand);
+    }
+    footer.appendChild(mobileDetailButton('返回重选', closeMobileDetail, 'ghost'));
+    playerActions.forEach(action => footer.appendChild(mobileDetailButton(
+      '确认 · ' + (action.label || player.name),
+      () => {
+        if (!['spy_target', 'wizard_target', 'emperor_crown'].includes(action.type)) closeMobileDetail();
+        runAction(action);
+      }, 'primary')));
+    if (pending && s.turn && s.turn.playerId === App.myId &&
+        s.players[pending.targetIdx] && s.players[pending.targetIdx].id === player.id) {
+      const followUpTypes = pending.kind === 'spy_color' ? ['spy_color'] :
+        pending.kind === 'emperor_take' ? ['emperor_take'] :
+        pending.kind === 'wizard_choice' ? ['wizard_take', 'wizard_build'] : [];
+      availableMobileActions().filter(a => followUpTypes.includes(a.type)).forEach(action =>
+        footer.appendChild(mobileDetailButton(action.label || action.type,
+          () => { closeMobileDetail(); runAction(action); }, 'primary')));
+    }
+    if (districtActions.length) body.appendChild(el('p', 'mobile-detail-hint', '点击高亮建筑查看大图并确认目标'));
+  }
+
+  function renderMobileChoiceShelf(s) {
+    const shelf = $('#mobile-choice-shelf');
+    if (!shelf) return;
+    shelf.hidden = true;
+    if (!isMobileGameUI() || s.phase !== 'action' || !s.turn || s.turn.playerId !== App.myId) return;
+    const pending = s.turn.pending;
+    const actions = availableMobileActions();
+    const roles = actions.filter(a => MOBILE_ROLE_ACTIONS.includes(a.type));
+    const cardKind = pending && pending.kind;
+    let cards = [];
+    let title = '';
+    if (roles.length) {
+      title = (s.available && s.available.prompt) || '选择角色';
+      cards = roles.map(action => {
+        const num = Number(action.num != null ? action.num : action.name);
+        return { card: (s.charDeck || []).find(c => c.num === num) ||
+          charMeta(null, num) || { num, name: action.label }, action, kind: 'role' };
+      });
+    } else if (cardKind === 'draw_keep' || cardKind === 'scholar_pick' || cardKind === 'prophet_give') {
+      title = cardKind === 'scholar_pick' ? '学者 · 选择保留的建筑' :
+        cardKind === 'prophet_give' ? '预言家 · 选择归还的手牌' : '选择保留的建筑';
+      const pool = cardKind === 'prophet_give'
+        ? ((s.players.find(p => p.id === App.myId) || {}).hand || []) : (pending.cards || []);
+      cards = pool.map(card => ({ card, action: actions.find(a => a.type === cardKind && a.uid === card.uid) ||
+        (cardKind === 'prophet_give' ? { type: 'prophet_give', uid: card.uid } : null), kind: 'district' }));
+    }
+    if (!cards.length) return;
+    shelf.hidden = false;
+    $('#mobile-choice-title').textContent = title;
+    $('#mobile-choice-count').textContent = cards.length + ' 张可选';
+    const list = $('#mobile-choice-cards'); list.innerHTML = '';
+    cards.forEach(item => {
+      const node = item.kind === 'role' ? charNode(item.card, { clickable: true }) :
+        cardNode(item.card, { clickable: true });
+      node.__noZoom = true;
+      node.setAttribute('role', 'button'); node.setAttribute('tabindex', '0');
+      onTap(node, () => { MobileDetail.playerId = null; mobilePreview(item.card, item.action, item.kind); });
+      node.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); MobileDetail.playerId = null; mobilePreview(item.card, item.action, item.kind); } };
+      list.appendChild(node);
+    });
+  }
+
+  // 首次进入对局时，选角状态可能在棋盘从 display:none 切为可见前抵达。
+  // 等浏览器完成一次布局后重新测量座位，并同步手牌/城市，避免首屏留白。
+  function scheduleDraftBoardLayout(s) {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
+    window.requestAnimationFrame(() => {
+      const screen = $('#screen-game');
+      if (App.state !== s || s.phase !== 'draft' || !screen || !screen.classList.contains('active')) return;
+      renderOpponents(s);
+      renderMe(s);
+      scheduleMobilePanelInnerCollisionPass();
+    });
+  }
+
+  // Mobile card/text rules can force adjacent items to overlap even when the
+  // outer player panels themselves do not. Measure real DOM boxes recursively
+  // and give the owning player panel enough room before resolving panel-vs-panel
+  // collisions. This is intentionally run after card sizes/layout are applied.
+  function scheduleMobilePanelInnerCollisionPass() {
+    if (!isMobileOpponentLayout() || isMobileGameUI() || typeof window.requestAnimationFrame !== 'function') return;
+    window.requestAnimationFrame(() => {
+      const wrap = $('#opponents');
+      if (!wrap || !document.documentElement.contains(wrap)) return;
+      expandPanelsForInnerCollisions(wrap);
+      if (wrap.dataset.layout === 'mobile-ring') stabilizePwaRingCollisions(wrap);
+      else separateOpponentPanels(wrap);
+    });
+  }
+
+  function expandPanelsForInnerCollisions(wrap) {
+    if (!wrap || !isMobileOpponentLayout()) return;
+    const panels = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    const me = $('#me-area');
+    if (me) panels.push(me);
+    const viewportLimit = Math.max(180, (window.innerWidth || 360) - 16);
+    panels.forEach(panel => {
+      panel.style.removeProperty('min-height');
+      panel.style.removeProperty('min-width');
+      panel.style.removeProperty('--inner-collision-min-width');
+      panel.querySelectorAll('.mobile-inner-collision-wrap').forEach(node => node.classList.remove('mobile-inner-collision-wrap'));
+      let widthGrowth = 0;
+      let heightGrowth = 0;
+      const rowCollisionParents = [];
+      const visit = parent => {
+        const children = Array.prototype.filter.call(parent.children || [], child => {
+          if (!(child instanceof Element)) return false;
+          const style = getComputedStyle(child);
+          return style.display !== 'none' && style.position !== 'absolute' &&
+            style.position !== 'fixed' && child.getBoundingClientRect().width > 0 &&
+            child.getBoundingClientRect().height > 0;
+        });
+        if (children.length > 1) {
+          const parentStyle = getComputedStyle(parent);
+          const row = parentStyle.display.indexOf('flex') === 0
+            ? parentStyle.flexDirection.indexOf('row') === 0
+            : parentStyle.display.indexOf('grid') === 0;
+          for (let i = 0; i < children.length; i++) {
+            const a = children[i].getBoundingClientRect();
+            for (let j = i + 1; j < children.length; j++) {
+              const b = children[j].getBoundingClientRect();
+              const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (overlapX <= 1 || overlapY <= 1) continue;
+              if (row) {
+                widthGrowth = Math.max(widthGrowth, Math.ceil(overlapX + 6));
+                if (rowCollisionParents.indexOf(parent) < 0) rowCollisionParents.push(parent);
+              }
+              else heightGrowth = Math.max(heightGrowth, Math.ceil(overlapY + 6));
+            }
+          }
+        }
+        children.forEach(visit);
+      };
+      visit(panel);
+      if (!widthGrowth && !heightGrowth) return;
+      const rect = panel.getBoundingClientRect();
+      const desiredWidth = Math.min(viewportLimit, Math.ceil(rect.width + widthGrowth));
+      if (desiredWidth > rect.width + 1) {
+        if (panel.classList.contains('opp') && wrap.dataset.layout === 'mobile-ring') {
+          panel.style.setProperty('--mobile-opp-width', desiredWidth + 'px');
+        } else {
+          panel.style.setProperty('min-width', desiredWidth + 'px', 'important');
+        }
+      }
+      if (widthGrowth && desiredWidth <= rect.width + 1) {
+        // No horizontal viewport room remains. Let the colliding row wrap and
+        // allow the panel to grow vertically instead of clipping its contents.
+        rowCollisionParents.forEach(parent => parent.classList.add('mobile-inner-collision-wrap'));
+      }
+      if (heightGrowth) panel.style.setProperty('min-height', Math.ceil(rect.height + heightGrowth) + 'px', 'important');
+      panel.dataset.innerCollisionExpanded = 'true';
+    });
+  }
+
+  // 移动端多人布局：保留圆桌座位角度，只缩小玩家框和内部元素，
+  // 再用真实 DOM 矩形做碰撞检测，必要时沿环形方向微调位置。
+  function applyMobileRingLayout(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (!nodes.length) { wrap.style.height = ''; return; }
+    const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
+    const gap = Math.max(6, Math.round(Math.min(14, width * .018)));
+    const totalPlayers = Number(wrap.dataset.players || nodes.length + 1);
+    const pwa = typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+    // iPad 级大屏（横屏、宽 ≥900 且高 ≥560）：屏幕远大于手机，玩家框与内部元素整体
+    // 再放大一档，避免圆角矩形和卡牌在宽屏上显得过小、四周留大片空白。
+    // 判据与 style.css 中同名媒体查询保持一致，保证尺寸计算与样式同进同退。
+    const viewportH = (typeof window !== 'undefined' && window.innerHeight) || 720;
+    const spacious = width >= 900 && viewportH >= 560;
+    const boost = spacious ? 1.45 : 1;
+    // 玩家框至少保持 1.5:1 的宽高比；有空间时先横向容纳更多建筑，
+    // 空间不足时再切换到更紧凑的卡牌尺寸。
+    const maxWidth = Math.max(126, Math.floor(width * (pwa && totalPlayers >= 5
+      ? (totalPlayers >= 7 ? .38 : .42)
+      : (totalPlayers >= 7 ? .46 : totalPlayers >= 5 ? .5 : .58)) * boost));
+    // 大屏时玩家框的基础宽度再提高一档（.18 → .30），让圆角矩形本身明显变大。
+    const baseRatio = pwa && totalPlayers >= 5 ? (spacious ? .30 : .18) : .25;
+    const cardWidth = Math.max(104, Math.min(maxWidth, Math.floor(width * baseRatio * boost)));
+    const minWidth = Math.max(104, Math.floor(cardWidth * .78));
+    // 大屏时环形区更高（视口 76%，上限 640），配合加大的半径，
+    // 保证放大后的上下两排玩家框仍有足够垂直间距。
+    const height = pwa && totalPlayers >= 5
+      ? Math.max(420, Math.min(spacious ? 640 : 620, Math.round(viewportH * (spacious ? .76 : .62))))
+      : Math.max(300, Math.min(400, Math.round(viewportH * .44)));
+    wrap.style.display = 'block';
+    wrap.style.height = height + 'px';
+    wrap.dataset.ringBaseHeight = String(height);
+    wrap.style.overflow = 'visible';
+    nodes.forEach(node => {
+      node.style.setProperty('--mobile-opp-width', cardWidth + 'px');
+      node.style.setProperty('--push-x', '0px');
+      node.style.setProperty('--push-y', '0px');
+      node.dataset.pushX = '0';
+      node.dataset.pushY = '0';
+      node.dataset.compact = '3';
+    });
+
+    const fitPanelRatioAndBuildings = () => {
+      for (let pass = 0; pass < 5; pass++) {
+        let changed = false;
+        nodes.forEach(node => {
+          const compact = Number(node.dataset.compact || 3);
+          const cityCount = Number(node.dataset.cityCount || 0);
+          const cityCardWidth = compact >= 4
+            ? Math.max(16, Math.min(spacious ? 42 : 31, Math.floor((maxWidth - 18 - Math.max(0, cityCount - 1) * 3) / Math.max(1, cityCount))))
+            : (spacious ? 52 : 40);
+          node.style.setProperty('--mobile-city-card-width', cityCardWidth + 'px');
+          node.style.setProperty('--mobile-city-card-height', Math.round(cityCardWidth * 1.5) + 'px');
+          const cityNeed = cityCount
+            ? 18 + Math.min(cityCount, 7) * (cityCardWidth + 3)
+            : 0;
+          const rect = node.getBoundingClientRect();
+          const ratioNeed = Math.ceil(rect.height * 1.5);
+          const current = parseFloat(getComputedStyle(node).width || cardWidth);
+          const desired = Math.min(maxWidth, Math.max(cardWidth, minWidth, cityNeed, ratioNeed));
+          if (desired > current + 1) {
+            node.style.setProperty('--mobile-opp-width', desired + 'px');
+            changed = true;
+          }
+          // 达到屏幕允许的最大宽度仍放不下时，缩小角色牌和建筑牌，
+          // 保留横向布局，避免建筑牌优先换行导致玩家框变高。
+          if (desired >= maxWidth && (rect.height * 1.5 > maxWidth || cityNeed > maxWidth) && compact < 4) {
+            node.dataset.compact = '4';
+            changed = true;
+          }
+        });
+        if (!changed) break;
+      }
+    };
+    fitPanelRatioAndBuildings();
+
+    const clampInsideRing = () => {
+      const wr = wrap.getBoundingClientRect();
+      nodes.forEach(node => {
+        const r = node.getBoundingClientRect();
+        let pushX = parseFloat(node.dataset.pushX || '0');
+        let pushY = parseFloat(node.dataset.pushY || '0');
+        if (r.left < wr.left + gap) pushX += wr.left + gap - r.left;
+        if (r.right > wr.right - gap) pushX -= r.right - (wr.right - gap);
+        if (r.top < wr.top + gap) pushY += wr.top + gap - r.top;
+        if (r.bottom > wr.bottom - gap) pushY -= r.bottom - (wr.bottom - gap);
+        node.dataset.pushX = String(pushX);
+        node.dataset.pushY = String(pushY);
+        node.style.setProperty('--push-x', pushX + 'px');
+        node.style.setProperty('--push-y', pushY + 'px');
+      });
+    };
+    clampInsideRing();
+
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          changed = true;
+          const currentWidth = parseFloat(getComputedStyle(nodes[j]).width || cardWidth);
+          if (currentWidth > minWidth) {
+            const nextWidth = Math.max(minWidth, Math.floor(currentWidth * .9));
+            nodes[i].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            nodes[j].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            continue;
+          }
+          // 到达安全最小宽度后，沿玩家相对圆心的方向轻推后一个玩家框。
+          const wr = wrap.getBoundingClientRect();
+          const cx = wr.left + wr.width / 2, cy = wr.top + wr.height / 2;
+          const dx = (b.left + b.width / 2) - cx;
+          const dy = (b.top + b.height / 2) - cy;
+          const pushX = (parseFloat(nodes[j].dataset.pushX || '0')) +
+            (Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? -1 : 1) * (overlapX + gap) : 0);
+          const pushY = (parseFloat(nodes[j].dataset.pushY || '0')) +
+            (Math.abs(dx) < Math.abs(dy) ? (dy < 0 ? -1 : 1) * (overlapY + gap) : 0);
+          nodes[j].dataset.pushX = String(pushX);
+          nodes[j].dataset.pushY = String(pushY);
+          nodes[j].style.setProperty('--push-x', pushX + 'px');
+          nodes[j].style.setProperty('--push-y', pushY + 'px');
+        }
+      }
+      clampInsideRing();
+      if (!changed) break;
+    }
+  }
+
+  // PWA 多人环形布局的最终稳定 pass：移动后再次测量，保证玩家框不会互相盖住。
+  function stabilizePwaRingCollisions(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (nodes.length < 2) return;
+    wrap.classList.add('pwa-collision-layout');
+    const gap = 8;
+    // 与 applyMobileRingLayout 同一判据：iPad 级大屏给更高的环形区与更宽松的
+    // 碰撞收缩下限，避免刚放大就被压回手机尺寸。
+    const viewportH = (window.innerHeight || 720);
+    const spacious = (wrap.clientWidth || window.innerWidth || 0) >= 900 && viewportH >= 560;
+    const pwa = window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches;
+    const currentHeight = parseFloat(wrap.style.height) || wrap.clientHeight || 0;
+    // 高 DPI 横屏设备虽然物理屏幕很宽，但 CSS 逻辑高度往往仍落在手机档。
+    // 如果继续使用 viewportH * .62，左右两侧上下玩家会被挤到同一条水平带内，
+    // 碰撞分离只能把它们推到边界，最后看起来像互相覆盖。多人 PWA 环形区
+    // 至少保留 600 CSS px 的垂直空间，根布局会再统一缩放到屏幕可见范围。
+    const minRingHeight = pwa && nodes.length >= 4 ? (spacious ? 520 : 600) : 420;
+    const maxRingHeight = pwa && nodes.length >= 4 ? (spacious ? 680 : 760) : (spacious ? 640 : 620);
+    const targetHeight = Math.max(currentHeight, Math.min(maxRingHeight, Math.max(minRingHeight, Math.round(viewportH * (spacious ? .76 : .62)))));
+    wrap.style.height = targetHeight + 'px';
+
+    // 设备像素比高的横屏 PWA 可能只有约 768px 的 CSS 逻辑宽度，不能走
+    // “spacious” 分支；此前这里会退回 112–150px 的手机下限，经过整页适配
+    // 后玩家框就只剩一条竖线。PWA 多人环形布局统一保留可读宽度，空间不足
+    // 时由环形位移和内部卡牌缩放解决，而不是继续压缩外框。
+    const minPanelWidth = pwa
+      ? (spacious ? Math.max(240, Math.min(280, Math.round((wrap.clientWidth || window.innerWidth || 900) * .22))) : 250)
+      : (spacious ? 220 : 112);
+    nodes.forEach(node => {
+      const current = parseFloat(getComputedStyle(node).width) || 0;
+      if (current + 1 < minPanelWidth) {
+        node.style.setProperty('--mobile-opp-width', minPanelWidth + 'px');
+        node.dataset.compact = '4';
+      }
+    });
+
+    const addPush = (node, dx, dy) => {
+      const x = (parseFloat(node.dataset.pushX || '0') || 0) + dx;
+      const y = (parseFloat(node.dataset.pushY || '0') || 0) + dy;
+      node.dataset.pushX = String(x);
+      node.dataset.pushY = String(y);
+      node.style.setProperty('--push-x', x + 'px');
+      node.style.setProperty('--push-y', y + 'px');
+    };
+    const clamp = () => {
+      const wr = wrap.getBoundingClientRect();
+      nodes.forEach(node => {
+        const r = node.getBoundingClientRect();
+        let dx = 0, dy = 0;
+        if (r.left < wr.left + gap) dx = wr.left + gap - r.left;
+        if (r.right > wr.right - gap) dx = wr.right - gap - r.right;
+        if (r.top < wr.top + gap) dy = wr.top + gap - r.top;
+        if (r.bottom > wr.bottom - gap) dy = wr.bottom - gap - r.bottom;
+        if (dx || dy) addPush(node, dx, dy);
+      });
+    };
+
+    for (let pass = 0; pass < 36; pass++) {
+      clamp();
+      let collided = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          collided = true;
+
+          const aw = parseFloat(getComputedStyle(nodes[i]).width) || 0;
+          const bw = parseFloat(getComputedStyle(nodes[j]).width) || 0;
+          // 不要把玩家框压成窄竖条：PWA 的整页 fit 缩放会再次缩小这里的
+          // CSS 像素宽度，160px 在 iPad/手机上最终只剩几十像素。先保留
+          // 可读的面板最小宽度，空间不足时交给下面的环形位移和内部卡牌
+          // 缩放逻辑处理；只有超过这个下限才继续收缩外框。
+          if (Math.min(aw, bw) > minPanelWidth) {
+            const floor = minPanelWidth;
+            const next = Math.max(floor, Math.floor(Math.min(aw, bw) * .94));
+            nodes[i].style.setProperty('--mobile-opp-width', next + 'px');
+            nodes[j].style.setProperty('--mobile-opp-width', next + 'px');
+            nodes[i].dataset.compact = '4';
+            nodes[j].dataset.compact = '4';
+            continue;
+          }
+
+          // 到达紧凑尺寸后，沿重叠较小的轴把两个矩形向相反方向各推一半。
+          const acx = a.left + a.width / 2, bcx = b.left + b.width / 2;
+          const acy = a.top + a.height / 2, bcy = b.top + b.height / 2;
+          if (overlapX <= overlapY) {
+            const dir = acx <= bcx ? -1 : 1;
+            addPush(nodes[i], dir * (overlapX + gap) / 2, 0);
+            addPush(nodes[j], -dir * (overlapX + gap) / 2, 0);
+          } else {
+            const dir = acy <= bcy ? -1 : 1;
+            addPush(nodes[i], 0, dir * (overlapY + gap) / 2);
+            addPush(nodes[j], 0, -dir * (overlapY + gap) / 2);
+          }
+        }
+      }
+      if (!collided) break;
+    }
+    clamp();
+    wrap.dataset.ringBaseHeight = String(parseFloat(wrap.style.height) || targetHeight);
+  }
+
+  // 兼容旧调用名，保留旧实现，实际移动端使用上面的圆桌布局。
+  // 移动端多人布局：先放入两列网格，再用真实 DOM 矩形做碰撞检测。
+  // 如果内容仍然挤压，就逐步缩小玩家框；data-compact 会同步缩小内部角色牌和文字。
+  function applyMobileOpponentLayout(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (!nodes.length) { wrap.style.height = ''; return; }
+    const width = Math.max(280, wrap.clientWidth || window.innerWidth || 360);
+    const gap = Math.max(8, Math.round(Math.min(18, width * .025)));
+    const cols = 2;
+    // 5 人以上时给左右和中间留出安全间距，避免玩家框贴边或被横向滚动截断。
+    const cardWidth = Math.max(112, Math.min(220, Math.floor((width - gap * 3) * .44)));
+    const minWidth = Math.max(118, Math.floor(cardWidth * .72));
+    wrap.style.display = 'block';
+    wrap.style.overflow = 'visible';
+    nodes.forEach((node, i) => {
+      node.style.setProperty('--mobile-opp-width', cardWidth + 'px');
+      node.style.left = (gap + (i % cols) * (cardWidth + gap)) + 'px';
+      node.style.top = (gap + Math.floor(i / cols) * 190) + 'px';
+      node.style.setProperty('--push-x', '0px');
+      node.style.setProperty('--push-y', '0px');
+    });
+    const updateHeight = () => {
+      let bottom = 0;
+      const wr = wrap.getBoundingClientRect();
+      nodes.forEach(node => { bottom = Math.max(bottom, node.getBoundingClientRect().bottom - wr.top); });
+      wrap.style.height = Math.ceil(bottom + gap) + 'px';
+    };
+    updateHeight();
+
+    for (let pass = 0; pass < 10; pass++) {
+      let changed = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          changed = true;
+          const currentTop = parseFloat(nodes[j].style.top) || 0;
+          const nextTop = currentTop + overlapY + gap;
+          const wrapHeight = Math.max(wrap.clientHeight, 1);
+          if (nextTop + b.height <= wrapHeight + 24) {
+            nodes[j].style.top = nextTop + 'px';
+          } else {
+            const currentWidth = parseFloat(nodes[j].style.width || cardWidth);
+            const nextWidth = Math.max(minWidth, Math.floor(currentWidth * .9));
+            nodes[i].style.width = nextWidth + 'px';
+            nodes[j].style.width = nextWidth + 'px';
+            nodes[i].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            nodes[j].style.setProperty('--mobile-opp-width', nextWidth + 'px');
+            nodes[i].dataset.compact = '3';
+            nodes[j].dataset.compact = '3';
+          }
+        }
+      }
+      updateHeight();
+      if (!changed) break;
+    }
+    updateHeight();
+  }
+
+  // 用实际屏幕矩形检查玩家卡片与圆桌是否相交；相交时沿座位方向推开，
+  // 并横向增加少量宽度，让卡片之间的间距更稳定。
+  function resolveOpponentTableCollisions() {
+    const table = $('#table-core');
+    const wrap = $('#opponents');
+    if (!table || !wrap) return;
+    const tr = table.getBoundingClientRect();
+    if (!tr.width || !tr.height) return;
+    const tcx = tr.left + tr.width / 2;
+    const tcy = tr.top + tr.height / 2;
+    Array.prototype.forEach.call(wrap.querySelectorAll('.opp'), d => {
+      d.style.setProperty('--push-x', '0px');
+      d.style.setProperty('--push-y', '0px');
+      d.dataset.pushX = '0';
+      d.dataset.pushY = '0';
+      const baseWidth = d.dataset.widthBase || ('min(340px, ' + (d.dataset.cardWidth || 24) + '%)');
+      d.style.width = baseWidth;
+      const r = d.getBoundingClientRect();
+      const overlapX = Math.min(r.right, tr.right) - Math.max(r.left, tr.left);
+      const overlapY = Math.min(r.bottom, tr.bottom) - Math.max(r.top, tr.top);
+      if (overlapX <= 0 || overlapY <= 0) return;
+      const dx = r.left + r.width / 2 - tcx;
+      const dy = r.top + r.height / 2 - tcy;
+      let pushX = 0, pushY = 0;
+      if (Math.abs(dx) > Math.abs(dy)) pushX = (dx < 0 ? -1 : 1) * (overlapX + 12);
+      else pushY = (dy < 0 ? -1 : 1) * (overlapY + 12);
+      d.style.setProperty('--push-x', pushX + 'px');
+      d.style.setProperty('--push-y', pushY + 'px');
+      d.dataset.pushX = String(pushX);
+      d.dataset.pushY = String(pushY);
+      const expand = Math.min(26, Math.max(8, Math.round(overlapX * 0.12)));
+      d.style.width = baseWidth.indexOf('px') >= 0
+        ? 'min(720px, calc(' + baseWidth + ' + ' + expand + 'px))'
+        : 'min(340px, calc(' + baseWidth + ' + ' + expand + 'px))';
+    });
+  }
+
+  // 桌面圆桌布局下玩家框之间的互斥分离。
+  // 5 人局时 4 名对手占据相对座位 1~4：座位 1/2 同在左侧、座位 3/4 同在右侧，
+  // 两者的横向中心距只有座位半径差的 0.363 倍（半径 40 → 14.5% 圆桌宽），
+  // 而玩家框宽度是 min(340px, 21%)，比间距还宽，圆角矩形必然互相压住
+  // （2560 宽的屏幕上约压 14px，1920 宽的屏幕上要压 100px 以上）。
+  // 这里对每一对重叠的玩家框：先沿重叠更小的那条轴把两张框推向相反方向
+  // （尽量对称分摊，一侧空间不够时由另一侧补足），这条轴推不动就换另一条，
+  // 两条轴都推不动才收缩宽度兜底。全程不越出圆桌区、不压到中央圆桌。
+  function separateOpponentPanels(wrap) {
+    if (!wrap) return;
+    const nodes = Array.prototype.slice.call(wrap.querySelectorAll('.opp'));
+    if (nodes.length < 2) return;
+    const gap = 10;
+    const floorWidth = 148;
+    const table = $('#table-core');
+    // .opp 带 width .55s 过渡，不关掉会量到过渡中的中间宽度，导致分离结果来回抖。
+    wrap.classList.add('separating');
+
+    const addPush = (node, dx, dy) => {
+      const x = (parseFloat(node.dataset.pushX || '0') || 0) + dx;
+      const y = (parseFloat(node.dataset.pushY || '0') || 0) + dy;
+      node.dataset.pushX = String(x);
+      node.dataset.pushY = String(y);
+      node.style.setProperty('--push-x', x + 'px');
+      node.style.setProperty('--push-y', y + 'px');
+    };
+
+    // 单张玩家框沿某条轴向 sign 方向还能挪多远：不越出圆桌区，也不压到中央圆桌。
+    const roomOf = (rect, axis, sign, wr, tr) => {
+      let limit = sign > 0
+        ? (axis === 'x' ? wr.right - gap - rect.right : wr.bottom - gap - rect.bottom)
+        : (axis === 'x' ? rect.left - wr.left - gap : rect.top - wr.top - gap);
+      // 横向移动时若与圆桌在纵向仍有交集，则不允许挪进圆桌的横向范围。
+      if (tr && axis === 'x' && Math.min(rect.bottom, tr.bottom) - Math.max(rect.top, tr.top) > 0) {
+        const t = sign > 0 ? tr.left - rect.right : rect.left - tr.right;
+        if (t >= 0) limit = Math.min(limit, t);
+      }
+      return Math.max(0, limit);
+    };
+
+    const clampInside = (wr, moved) => {
+      nodes.forEach(node => {
+        const r = node.getBoundingClientRect();
+        let dx = 0, dy = 0;
+        if (r.left < wr.left + gap) dx = wr.left + gap - r.left;
+        else if (r.right > wr.right - gap) dx = wr.right - gap - r.right;
+        if (r.top < wr.top + gap) dy = wr.top + gap - r.top;
+        else if (r.bottom > wr.bottom - gap) dy = wr.bottom - gap - r.bottom;
+        if (dx || dy) { addPush(node, dx, dy); moved.changed = true; }
+      });
+    };
+
+    for (let pass = 0; pass < 12; pass++) {
+      const wr = wrap.getBoundingClientRect();
+      if (!wr.width) break;
+      const tr = table && table.getBoundingClientRect();
+      const moved = { changed: false };
+      // 先把越出圆桌区的玩家框拉回来，再做两两分离，两个动作互相兜底。
+      clampInside(wr, moved);
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i].getBoundingClientRect();
+          const b = nodes[j].getBoundingClientRect();
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          moved.changed = true;
+          // 优先沿重叠更小的轴分离（这里通常很小），推不开再换轴。
+          const axes = overlapX <= overlapY ? ['x', 'y'] : ['y', 'x'];
+          let done = false;
+          for (let k = 0; k < axes.length && !done; k++) {
+            const axis = axes[k];
+            const need = (axis === 'x' ? overlapX : overlapY) + gap;
+            const ca = axis === 'x' ? a.left + a.width / 2 : a.top + a.height / 2;
+            const cb = axis === 'x' ? b.left + b.width / 2 : b.top + b.height / 2;
+            const dir = ca <= cb ? 1 : -1;
+            const roomA = roomOf(a, axis, -dir, wr, tr);
+            const roomB = roomOf(b, axis, dir, wr, tr);
+            if (roomA + roomB < need) continue;
+            // 尽量对称分摊；一侧空间不足时由另一侧补足剩余量。
+            let shareA = Math.min(roomA, need / 2);
+            let shareB = need - shareA;
+            if (shareB > roomB) { shareB = roomB; shareA = need - shareB; }
+            if (axis === 'x') { addPush(nodes[i], -dir * shareA, 0); addPush(nodes[j], dir * shareB, 0); }
+            else { addPush(nodes[i], 0, -dir * shareA); addPush(nodes[j], 0, dir * shareB); }
+            done = true;
+          }
+          // 两条轴都推不开（四周已被占满）：退化为收缩宽度，让玩家框装得下横向间距。
+          if (!done) {
+            const dx = Math.abs((a.left + a.width / 2) - (b.left + b.width / 2));
+            const target = Math.max(floorWidth, Math.floor(dx - gap));
+            if (target < Math.min(a.width, b.width) - 1) {
+              nodes[i].style.width = target + 'px';
+              nodes[j].style.width = target + 'px';
+            }
+          }
+        }
+      }
+      if (!moved.changed) break;
+    }
+    wrap.classList.remove('separating');
+  }
+
+  /* 得分明细浮动窗口 */
+  function openScore(idx) {
+    const s = App.state;
+    if (!s || !s.scores) return;
+    if (idx == null) idx = (App.myIdx != null ? App.myIdx
+      : s.players.findIndex(p => p.id === App.myId));
+    if (idx < 0) return;
+    const row = s.scores[idx];
+    if (!row) return;
+    const p = s.players[idx];
+    if (!p) return;
+    $('#score-name').textContent = p.name;
+    $('#score-total').textContent = row.total;
+    $('#score-sub').textContent = '城区 ' + (row.cityCount != null ? row.cityCount : p.cityCount) +
+      ' / ' + s.endDistricts + ' 栋　建筑 ' + row.base + ' ＋ 奖励 ' + row.bonus;
+    const ul = $('#score-detail'); ul.innerHTML = '';
+    (row.detail || []).forEach(d => {
+      const li = el('li', 'sd-row');
+      li.innerHTML = '<span class="sd-label">' + escapeHtml(d.label) + '</span>' +
+        '<span class="sd-val">' + (d.value >= 0 ? '+' : '') + d.value + '</span>';
+      ul.appendChild(li);
+    });
+    const li = el('li', 'sd-row total');
+    li.innerHTML = '<span class="sd-label">合计</span><span class="sd-val">' + row.total + '</span>';
+    ul.appendChild(li);
+    $('#score-foot').textContent = s.phase === 'gameover'
+      ? (s.winner === idx ? '本局胜利者' : '游戏已结束') + '（最终得分）'
+      : '（当前实时计分，最终以结算为准）';
+    const pop = $('#score-popup');
+    pop.hidden = false;
+  }
+  function closeScore() { $('#score-popup').hidden = true; }
+
+  /* 分数徽章：蓝色圆圈图标 + 数值，样式对齐金币徽章。
+     鼠标悬停 / 键盘聚焦弹出轻量计分组成提示；点击 / 触屏仍打开完整明细窗。 */
+  function scoreBadgeHTML(idx, name) {
+    const s = App.state || {};
+    const row = s.scores && s.scores[idx];
+    const total = row ? row.total : 0;
+    return '<button type="button" class="score-badge" title="显示 ' + escapeHtml(name || '') +
+      ' 的得分与计算过程"><i class="score-icon" aria-hidden="true"></i><span class="score-val">' +
+      total + '</span></button>';
+  }
+  function bindScoreBadge(btn, idx) {
+    if (!btn) return;
+    onTap(btn, () => openScore(idx));
+    btn.addEventListener('mouseenter', () => showScoreTip(btn, idx));
+    btn.addEventListener('mouseleave', hideScoreTip);
+    btn.addEventListener('focus', () => showScoreTip(btn, idx));
+    btn.addEventListener('blur', hideScoreTip);
+  }
+  let scoreTipEl = null;
+  function hideScoreTip() {
+    if (scoreTipEl && scoreTipEl.parentNode) scoreTipEl.parentNode.removeChild(scoreTipEl);
+    scoreTipEl = null;
+  }
+  function showScoreTip(btn, idx) {
+    const s = App.state;
+    if (!s || !btn) return;
+    const row = s.scores && s.scores[idx];
+    const p = s.players && s.players[idx];
+    if (!p) return;
+    hideScoreTip();
+    const tip = document.createElement('div');
+    tip.className = 'score-tip';
+    let html = '<div class="st-name">' + escapeHtml(p.name) + '</div>';
+    if (row && row.detail && row.detail.length) {
+      html += row.detail.map(d =>
+        '<div class="st-row"><span>' + escapeHtml(d.label) + '</span><b>' +
+        (d.value >= 0 ? '+' : '') + d.value + '</b></div>').join('');
+      html += '<div class="st-row total"><span>合计</span><b>' + row.total + '</b></div>';
+    } else {
+      html += '<div class="st-row"><span>暂无计分</span></div>';
+    }
+    tip.innerHTML = html;
+    document.body.appendChild(tip);
+    const r = btn.getBoundingClientRect();
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = Math.min(Math.max(8, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 8);
+    let top = r.top - th - 8;
+    if (top < 8) top = r.bottom + 8;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+    scoreTipEl = tip;
+  }
+
+  function renderMe(s) {
+    hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
+    const viewerId = viewerIdForState(s);
+    const me = s.players.find(p => p.id === viewerId);
+    if (!me) return;
+    App.myIdx = s.players.findIndex(p => p.id === viewerId);
+    const meArea = $('#me-area');
+    if (meArea) {
+      meArea.dataset.seat = App.myIdx;
+      meArea.classList.toggle('many-players', s.players.length >= 5);
+    }
+    if (meArea) {
+      const totalPlayers = s.players.length || 1;
+      if (totalPlayers === 4 && window.innerWidth > 1000) {
+        const desired = Math.min(1120, 860 + Math.max(0, me.city.length - 5) * 85);
+        const viewportLimit = Math.max(860, window.innerWidth - 120);
+        meArea.style.width = Math.min(desired, viewportLimit) + 'px';
+      } else {
+        meArea.style.width = '';
+      }
+    }
+    const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === me.id);
+    const actionActive = !!(s.turn && s.turn.playerIdx === App.myIdx);
+    if (meArea) meArea.classList.toggle('active', draftActive || actionActive);
+    const ms = $('#my-char-status');
+    if (ms) ms.innerHTML = charStatusHTML(me);
+    const myStats = $('#my-char-stats');
+    if (myStats) myStats.innerHTML = handCountHTML(me.hand.length);
+    const myGold = $('#my-gold');
+    myGold.innerHTML = threatMarkHTML(me.threat) + warrantMarkHTML(me.warrant) +
+      (me.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '') +
+      '<i class="coin-icon" aria-hidden="true"></i><span>' + me.gold + '</span>';
+    playMarkAnim(myGold, markSignature(me), myGold.dataset.markSig,
+      sig => { myGold.dataset.markSig = sig; });
+    const myScoreVal = $('#my-score-val');
+    if (myScoreVal) {
+      const srow = s.scores && s.scores[App.myIdx];
+      myScoreVal.textContent = srow ? srow.total : 0;
+    }
+    $('#my-city-count').textContent = '';
+    $('#my-hand-count').textContent = '';
+    $('#my-chars-tip').innerHTML = '';
+
+    const city = $('#my-city');
+    if (!me.city.length) {
+      // 按 uid 清掉残留卡片（如被摧毁后清空），再补空提示，避免整盘 innerHTML 重建导致图片闪烁
+      childrenSnapshot(city).forEach(ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+      if (!city.querySelector('.empty-hint')) city.appendChild(el('div', 'empty-hint', '（尚无建筑，快去建造吧）'));
+    } else {
+      const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
+      syncCards(city, me.city, c => {
+        const act = districtActionFor(me, c);
+        return { clickable: !!act, pickable: !!act,
+          selected: !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0) };
+      }, (node, c) => {
+        const act = districtActionFor(me, c);
+        if (act) bindCardAction(node, () => pickDistrict(me.id, c.uid, act), true);
+        else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
+      });
+    }
+
+    const hand = $('#my-hand');
+    if (!me.hand.length) {
+      childrenSnapshot(hand).forEach(ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
+      if (!hand.querySelector('.empty-hint')) hand.appendChild(el('div', 'empty-hint', '（手牌为空）'));
+    } else {
+      const eh = hand.querySelector('.empty-hint'); if (eh) eh.remove();
+      syncCards(hand, me.hand, c => {
+        const inSel = !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0);
+        let clickable = false, disabled = false, pickable = false;
+        if (App.sel && App.sel.kind === 'labpick') {
+          clickable = App.sel.actions.some(a => a.discardUid === c.uid);
+          pickable = clickable;
+          disabled = !clickable;
+        }
+        else if (App.sel && App.sel.kind === 'handpick') { clickable = true; pickable = true; }
+        else if (App.sel && App.sel.kind === 'multi') { clickable = true; }
+        else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) { clickable = c.canBuild; disabled = !c.canBuild; }
+        return { clickable: clickable, disabled: disabled, selected: inSel, pickable: pickable };
+      }, (node, c) => {
+        const inSel = !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0);
+        let clickable = false;
+        if (App.sel && App.sel.kind === 'labpick') clickable = App.sel.actions.some(a => a.discardUid === c.uid);
+        else if (App.sel && App.sel.kind === 'handpick') clickable = true;
+        else if (App.sel && App.sel.kind === 'multi') clickable = true;
+        else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) clickable = c.canBuild;
+        let mobileLabel = node.querySelector('.mobile-card-label');
+        if (isMobileGameUI()) {
+          if (!mobileLabel) {
+            mobileLabel = el('span', 'mobile-card-label');
+            node.appendChild(mobileLabel);
+          }
+          mobileLabel.textContent = c.name;
+        } else if (mobileLabel) mobileLabel.remove();
+        if (isMobileGameUI() && !App.sel) {
+          node.__noZoom = true;
+          const action = availableMobileActions().find(a => a.type === 'build' && a.uid === c.uid);
+          onTap(node, () => mobilePreview(c, action, 'district'));
+        } else if (clickable) bindCardAction(node, () => onHandClick(c), !(App.sel && (App.sel.kind === 'labpick' || App.sel.kind === 'handpick' || App.sel.kind === 'multi')));
+        else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
+      });
+    }
+    if (isMobileGameUI()) {
+      const pendingKind = s.turn && s.turn.pending && s.turn.pending.kind;
+      const forceOpen = !!App.sel || ['prophet_give', 'bishop_repay', 'magician_redraw'].includes(pendingKind);
+      const expanded = App.mobileHandExpanded || forceOpen;
+      meArea.classList.toggle('mobile-hand-expanded', expanded);
+      $('#my-hand-count').textContent = me.hand.length + ' 张';
+      const toggle = $('#mobile-hand-toggle');
+      toggle.textContent = expanded ? '收起' : '展开';
+      toggle.setAttribute('aria-expanded', String(expanded));
+      toggle.disabled = forceOpen;
+      const summary = $('#mobile-hand-summary'); summary.innerHTML = '';
+      summary.style.setProperty('--summary-count', String(Math.max(1, me.hand.length)));
+      me.hand.forEach(card => {
+        const chip = el('button', 'mobile-hand-chip');
+        chip.type = 'button';
+        chip.style.setProperty('--district-color', mobileDistrictColor(card.color));
+        chip.title = card.name + ' · 费用 ' + card.cost;
+        const art = Theme.is && Theme.districtAsset ? Theme.districtAsset(card, 'thumb') : null;
+        if (art) {
+          const image = el('img', 'mobile-hand-thumb');
+          image.src = art;
+          image.alt = card.name;
+          image.decoding = 'async';
+          chip.appendChild(image);
+          chip.appendChild(el('b', 'mobile-hand-cost', String(card.cost)));
+        } else {
+          chip.innerHTML = '<b>' + card.cost + '</b><span>' + escapeHtml(mobileDistrictName(card.name)) + '</span>';
+        }
+        const buildAction = availableMobileActions().find(a => a.type === 'build' && a.uid === card.uid);
+        onTap(chip, () => mobilePreview(card, buildAction, 'district'));
+        summary.appendChild(chip);
+      });
+    }
+  }
+
+  function renderLog(s) {
+    const box = $('#log');
+    box.innerHTML = '';
+    s.log.forEach(l => {
+      box.appendChild(el('div', l.type || 'info', escapeHtml(l.text)));
+    });
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /* ============================== 聊天记录侧栏 ============================== */
+  function chatTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, '0');
+    return p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function chatEntryNode(m) {
+    const row = el('div', 'chat-entry' + (m.playerId === App.myId ? ' self' : ''));
+    const name = el('span', 'name');
+    name.textContent = m.playerName || '玩家';
+    const text = el('span', 'text');
+    text.textContent = String(m.text || '');
+    const ts = el('span', 'ts');
+    ts.textContent = chatTime(m.sentAt);
+    row.appendChild(name); row.appendChild(text); row.appendChild(ts);
+    return row;
+  }
+  function renderChatLog() {
+    const box = $('#chat-log');
+    if (!box) return;
+    box.innerHTML = '';
+    const list = App.chatHistory || [];
+    if (!list.length) { box.appendChild(el('div', 'chat-empty', '还没有人发言')); return; }
+    list.forEach(m => box.appendChild(chatEntryNode(m)));
+    box.scrollTop = box.scrollHeight;
+  }
+  /* 统一控制侧栏：战报 / 聊天记录 各自的开关与「同时开启时的 Chrome 式标签页叠加」 */
+  function updateSidePanel() {
+    const sp = $('#side-panel');
+    if (!sp) return;
+    const gameScreen = $('#screen-game');
+    // 三个面板共用一条侧栏：各自的开/关由自己的按钮决定，同时开着时用 activeSideTab
+    // 选一个显示。语音面板还要求当前房间真的能用语音，否则不占位置。
+    const open = { log: !!App.logOpen, chat: !!App.chatOpen, voice: !!App.voiceOpen && Voice.available() };
+    const any = open.log || open.chat || open.voice;
+    const collapsed = any && !!App.sidePanelCollapsed;
+    sp.classList.toggle('show', any);
+    sp.classList.toggle('collapsed', collapsed);
+    const sideToggle = $('#btn-side-panel-toggle');
+    const mobileSideToggle = $('#btn-side-panel-mobile-toggle');
+    if (mobileSideToggle) mobileSideToggle.hidden = !(isMobileGameUI() && collapsed);
+    if (sideToggle) {
+      sideToggle.setAttribute('aria-expanded', String(!collapsed));
+      sideToggle.setAttribute('aria-label', collapsed ? '展开右侧边栏' : '收起右侧边栏');
+      sideToggle.title = collapsed ? '展开右侧边栏' : '收起右侧边栏';
+      const icon = sideToggle.querySelector('.side-panel-toggle-icon');
+      if (icon) icon.textContent = collapsed ? '‹' : '›';
+    }
+    // PC 端侧栏占用棋盘右侧宽度：让浮动菜单继续锚定战斗区域右下角
+    if (gameScreen) {
+      gameScreen.classList.toggle('log-panel-open', any);
+      if (any) {
+        gameScreen.style.setProperty('--desktop-log-width', Math.ceil(sp.getBoundingClientRect().width) + 'px');
+      } else {
+        gameScreen.style.removeProperty('--desktop-log-width');
+      }
+    }
+    const tabs = $('#side-tabs');
+    if (tabs) tabs.hidden = false;
+    const keys = ['log', 'chat', 'voice'].filter(k => open[k]);
+    const active = keys.indexOf(App.activeSideTab) >= 0 ? App.activeSideTab : (keys[0] || 'log');
+    const showLog = open.log && active === 'log';
+    const showChat = open.chat && active === 'chat';
+    const showVoice = open.voice && active === 'voice';
+    const paneLog = $('#pane-log'); if (paneLog) paneLog.hidden = !showLog;
+    const paneChat = $('#pane-chat'); if (paneChat) paneChat.hidden = !showChat;
+    const paneVoice = $('#pane-voice'); if (paneVoice) paneVoice.hidden = !showVoice;
+    const tabLog = $('#tab-log'); if (tabLog) tabLog.classList.toggle('is-active', active === 'log');
+    const tabChat = $('#tab-chat'); if (tabChat) tabChat.classList.toggle('is-active', active === 'chat');
+    const tabVoice = $('#tab-voice'); if (tabVoice) tabVoice.classList.toggle('is-active', active === 'voice');
+    if (showLog && App.state) renderLog(App.state);
+    if (showChat) renderChatLog();
+    if (showVoice) voiceRenderPanel();
+  }
+
+  /* ============================== 选角阶段 ============================== */
+  function renderDraft(s) {
+    const d = s.draft; if (!d) return;
+    const viewerId = viewerIdForState(s);
+    const me = s.players.find(p => p.id === viewerId);
+    const hasDraftAction = !!(s.available && s.available.actions &&
+      s.available.actions.some(a => a.type === 'draft_pick' || a.type === 'draft_discard'));
+    // 以状态里的 you / available 为准，避免重连或本地状态切换时 App.myId 短暂滞后。
+    const isPicker = d.currentPlayer === viewerId || hasDraftAction;
+    $('#draft-title').textContent = s.spectating ? '观战 · 选角阶段' : isPicker ? (d.sub === 'discard' ? '暗置弃掉一张角色牌' : '选择你的角色')
+      : '等待其他玩家选角…';
+    const cur = s.players.find(p => p.id === d.currentPlayer);
+    const allChosen = s.players.every(p => p.hasChosen);
+    // 2~3 人局每人要选 2 张，hasChosen 为真时仍可能再次轮到，不算卡住；4 人及以上每人只选 1 张
+    const multiPickMode = s.players.length <= 3;
+    const stuckDraft = !multiPickMode && ((cur && cur.hasChosen) || (allChosen && s.phase === 'draft'));
+    $('#draft-sub').innerHTML = '进度 ' + Math.min(d.stepIdx + 1, d.totalSteps) + ' / ' + d.totalSteps +
+      ' · 当前：' + (cur ? escapeHtml(cur.name) : '-') +
+      ' · 明置移除 ' + d.faceUp.length + ' 张 · 暗置移除 ' + d.faceDownCount + ' 张 · 牌池 ' + d.poolCount + ' 张' +
+      (stuckDraft ? ' · <b style="color:#c0392b">选角进度异常</b>' : '');
+
+    const pool = $('#draft-pool'); pool.innerHTML = '';
+    const mobileDraft = isMobileGameUI();
+    const summary = $('#mobile-draft-summary');
+    if (summary) {
+      summary.innerHTML = '';
+      summary.style.setProperty('--summary-count', String(Math.max(1, d.pool.length)));
+      if (mobileDraft && isPicker) d.pool.forEach(c => {
+        const chip = el('button', 'mobile-role-summary');
+        chip.type = 'button';
+        chip.innerHTML = '<b>' + c.num + '</b><span>' + escapeHtml(c.name) + '</span>';
+        onTap(chip, () => mobilePreview(c, s.spectating ? null : { type: d.sub === 'discard' ? 'draft_discard' : 'draft_pick', charId: c.id }, 'role'));
+        summary.appendChild(chip);
+      });
+      summary.hidden = !mobileDraft || App.mobileDraftExpanded;
+    }
+    const draftToggle = $('#mobile-draft-toggle');
+    if (draftToggle) {
+      draftToggle.textContent = App.mobileDraftExpanded ? '收起' : '展开';
+      draftToggle.setAttribute('aria-expanded', String(App.mobileDraftExpanded));
+    }
+    pool.classList.toggle('mobile-collapsed', mobileDraft && !App.mobileDraftExpanded);
+    if (!isPicker) {
+      pool.appendChild(el('div', 'empty-hint', '只有当前选角的玩家可以看到牌池内容'));
+    } else {
+      d.pool.forEach(c => {
+        const n = charNode(c, { clickable: !s.spectating });
+        if (s.spectating) { pool.appendChild(n); return; }
+        if (mobileDraft) {
+          n.__noZoom = true;
+          n.setAttribute('role', 'button'); n.tabIndex = 0;
+          n.appendChild(el('span', 'mobile-card-label', c.num + ' · ' + c.name));
+          const pick = () => mobilePreview(c, { type: d.sub === 'discard' ? 'draft_discard' : 'draft_pick', charId: c.id }, 'role');
+          onTap(n, pick);
+          n.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+        } else if (isTouchDevice()) {
+          // 触屏：点一下先放大，再由浮窗下方的「确认 / 取消」决定是否选它
+          if (n.dataset) {
+            n.dataset.pickChar = c.id;
+            n.dataset.pickType = d.sub === 'discard' ? 'draft_discard' : 'draft_pick';
+          }
+        } else {
+          n.onclick = () => send({ type: d.sub === 'discard' ? 'draft_discard' : 'draft_pick', charId: c.id });
+        }
+        pool.appendChild(n);
+      });
+    }
+
+    if (isPicker) {
+      $('#prompt').textContent = '选角阶段 · 轮到你选择角色';
+    } else {
+      $('#prompt').innerHTML = '选角阶段 · ' + (cur && cur.isBot ? '电脑：' : '等待：') +
+        escapeHtml(cur ? cur.name : '') + ' 正在选角' + thinkingDots();
+    }
+    $('#actions').innerHTML = '';
+    renderAgentStatus(s);
+  }
+
+  /* ============================== 本轮出局角色 ============================== */
+  /* 明置移除：画出整张角色卡（身份公开）；暗置移除：画出盖着的牌背（身份保密，仅显示数量） */
+  function renderRemoved(s) {
+    const rem = (s && s.removed) || { faceUp: [], faceDownCount: 0 };
+    const corner = $('#removed-corner');
+    if (!corner) return;
+    const fu = $('#rs-faceup-corner');
+    const fd = $('#rs-facedown-corner');
+    const faceUpGroup = $('#removed-faceup-group');
+    const faceDownGroup = $('#removed-facedown-group');
+    const empty = $('#removed-widget-empty');
+    const faceUp = rem.faceUp || [];
+    const faceDownCount = Number(rem.faceDownCount) || 0;
+    if (fu) {
+      // 按角色 id 复用节点，避免每步行动整盘重建导致霓虹角色立绘在移动端闪烁
+      const existing = {};
+      Array.prototype.forEach.call(fu.children, ch => { const k = ch.dataset && ch.dataset.uid; if (k) existing[k] = ch; });
+      const keep = {};
+      const frag = document.createDocumentFragment();
+      faceUp.forEach(c => {
+        let node = existing[c.id];
+        if (!node) node = charNode(c, { dim: true, mini: true });
+        keep[c.id] = node;
+        frag.appendChild(node);
+      });
+      // 快照遍历：跨轮次时 faceUp 全换、需删除多个旧节点，live 集合会漏删导致多显示一张
+      childrenSnapshot(fu).forEach(ch => {
+        const k = ch.dataset && ch.dataset.uid;
+        if (k && !keep[k] && ch.parentNode) ch.parentNode.removeChild(ch);
+      });
+      fu.appendChild(frag);
+    }
+    if (fd) {
+      fd.innerHTML = '';
+      for (let i = 0; i < faceDownCount; i++) fd.appendChild(el('div', 'facedown sm', '？'));
+    }
+    if (faceUpGroup) faceUpGroup.hidden = faceUp.length === 0;
+    if (faceDownGroup) faceDownGroup.hidden = faceDownCount === 0;
+    if (empty) empty.hidden = faceUp.length + faceDownCount > 0;
+    const count = $('#removed-widget-count');
+    if (count) count.textContent = String(faceUp.length + faceDownCount);
+    // Keep the corner control visible throughout an active game, including
+    // the opening draft before any role cards have been removed.
+    corner.hidden = false;
+    renderMobileRemoved(s);
+  }
+
+  function renderMobileRemoved(s) {
+    const area = $('#mobile-removed');
+    if (!area) return;
+    area.hidden = !isMobileGameUI();
+    if (area.hidden) return;
+    const wrap = $('#mobile-removed-cards'); wrap.innerHTML = '';
+    const rem = s.removed || { faceUp: [], faceDownCount: 0 };
+    wrap.appendChild(el('span', 'mobile-removed-label', '弃置'));
+    (rem.faceUp || []).forEach(c => {
+      const node = el('button', 'mobile-role-summary mobile-removed-role');
+      node.type = 'button';
+      node.title = '明置弃置：' + c.name;
+      node.setAttribute('aria-label', '查看明置弃置角色 ' + c.name);
+      node.innerHTML = '<b>' + c.num + '</b><span>' + escapeHtml(c.name) + '</span>';
+      onTap(node, () => mobilePreview(c, null, 'role'));
+      wrap.appendChild(node);
+    });
+    for (let i = 0; i < Number(rem.faceDownCount || 0); i++)
+      wrap.appendChild(el('span', 'facedown mobile-removed-back', ''));
+    wrap.appendChild(el('span', 'mobile-removed-count', String((rem.faceUp || []).length + Number(rem.faceDownCount || 0))));
+    if (Number(rem.faceDownCount || 0)) wrap.appendChild(el('span', 'mobile-removed-note', '暗置身份不可见'));
+  }
+
+  /* ============================== 行动栏 ============================== */
+  function renderAgentStatus(s) {
+    const status = s.agentStatus;
+    if (!status || !['thinking', 'error'].includes(status.state)) return false;
+    if (s.available && s.available.actions && s.available.actions.length) return false;
+    const player = s.players.find(p => p.id === status.playerId);
+    const text = (player ? player.name : 'AI Agent') + ' · ' + (status.model || 'AI Agent');
+    $('#prompt').textContent = text + (status.state === 'thinking' ? ' 正在请求模型决策…' : '：' + status.message);
+    $('#actions').innerHTML = '';
+    if (status.state === 'error' && s.hostId === App.myId) {
+      [['retry', '重试模型'], ['npc', '改用普通电脑']].forEach(([mode, label]) => {
+        const button = el('button', 'btn', label);
+        button.onclick = () => Net.send({ t: 'agentControl', mode });
+        $('#actions').appendChild(button);
+      });
+    }
+    return true;
+  }
+  function renderActions(s) {
+    const av = s.available;
+    const promptEl = $('#prompt');
+    const actionsEl = $('#actions');
+    actionsEl.innerHTML = '';
+    if (s.spectating) { promptEl.textContent = '观战中，仅可查看局面'; return; }
+    if (renderAgentStatus(s)) return;
+    if (!av) { promptEl.textContent = ''; return; }
+
+    // 墓地 / 行政官 / 勒索者响应
+    if (s.reaction) {
+      if (s.reaction.playerId === App.myId) {
+        // prompt 已自带【墓地】/【行政官】/【勒索者】等前缀，这里不再重复拼接来源
+        promptEl.innerHTML = escapeHtml(s.reaction.prompt);
+        (av.actions || []).forEach(a => actionsEl.appendChild(actionBtn(a, a.use ? 'main' : '')));
+      } else if (s.reaction.kind === 'blackmailer' && s.reaction.targetIdx === App.myIdx) {
+        // 被威胁的一方处于冻结状态，明确告诉他现在在等谁
+        promptEl.textContent = '请等待勒索者翻开威胁标记……';
+      } else {
+        const who = s.players.find(p => p.id === s.reaction.playerId);
+        promptEl.innerHTML = '等待 ' + escapeHtml(who ? who.name : '') + ' 决定是否响应…';
+      }
+      return;
+    }
+
+    if (!av.actions || !av.actions.length) {
+      const t = s.turn;
+      if (t && t.playerId !== App.myId) {
+        const who = s.players[t.playerIdx];
+        promptEl.innerHTML = (who.isBot ? '电脑：' : '等待：') + escapeHtml(who.name) +
+          '（' + t.charNum + '·' + escapeHtml(t.charName) + '）正在行动' + thinkingDots();
+      } else promptEl.textContent = '';
+      return;
+    }
+
+    promptEl.innerHTML = escapeHtml(av.prompt || '请选择行动');
+    const turnPending = s.turn && s.turn.pending;
+    if (turnPending && turnPending.kind === 'prophet_give') {
+      const recipient = s.players[turnPending.targetIdx];
+      if (recipient) {
+        const seat = Number.isInteger(recipient.seat) ? '（座位 ' + (recipient.seat + 1) + '）' : '';
+        promptEl.textContent = '预言家：选择归还给 ' + recipient.name + seat + ' 的手牌';
+      }
+    }
+    if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
+    if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
+    const representedActions = new Set();
+    if (isMobileGameUI()) av.actions.filter(a => a.type === 'build').forEach(a => representedActions.add(a));
+    // Keep the native action schema unchanged: group its existing lab choices
+    // into a front-end-only activation step followed by card selection.
+    const labGroups = new Map();
+    av.actions.filter(a => a.type === 'lab').forEach(a => {
+      representedActions.add(a);
+      if (!labGroups.has(a.uid)) labGroups.set(a.uid, []);
+      labGroups.get(a.uid).push(a);
+    });
+    labGroups.forEach((actions, buildingUid) => {
+      const me = s.players.find(p => p.id === App.myId);
+      const building = me && (me.city || []).find(c => c.uid === buildingUid);
+      const label = building ? '发动实验室效果（' + building.name + '）' : '发动实验室效果';
+      const selecting = App.sel && App.sel.kind === 'labpick';
+      const button = el('button', 'act main', selecting && App.sel.buildingUid === buildingUid
+        ? '选择要弃置的手牌…' : label);
+      button.disabled = !!selecting;
+      if (!selecting) onTap(button, () => {
+        App.sel = { kind: 'labpick', buildingUid: buildingUid, actions: actions,
+          label: label + '：点击一张手牌弃掉，换取 1 金' };
+        render();
+      });
+      actionsEl.appendChild(button);
+    });
+    const playerActions = av.actions.filter(a =>
+      ['choose_player', 'spy_target', 'wizard_target', 'emperor_crown'].includes(a.type));
+    if (playerActions.length) {
+      playerActions.forEach(a => representedActions.add(a));
+      const prompt = s.turn && s.turn.pending && s.turn.pending.kind === 'emperor_crown'
+        ? '选择接收皇冠的玩家'
+        : '选择目标玩家';
+      if (isMobileGameUI()) promptEl.textContent = prompt + ' · 点击高亮的玩家区域';
+      else appendTargetActionButtons(actionsEl, promptEl, playerActions, prompt);
+    }
+    const roleActions = av.actions.filter(a =>
+      ['choose_char', 'magistrate_signed', 'magistrate_char',
+       'blackmailer_signed', 'blackmailer_char'].includes(a.type));
+    if (roleActions.length) {
+      roleActions.forEach(a => representedActions.add(a));
+      if (isMobileGameUI()) promptEl.textContent = (av.prompt || '选择角色') + ' · 点击上方角色卡';
+      else appendRoleActionButtons(actionsEl, promptEl, roleActions, av.prompt || '选择角色');
+    }
+    if (districtSelectMode()) {
+      av.actions.filter(a => a.type === 'choose_district').forEach(a => representedActions.add(a));
+      if (isMobileGameUI() && av.actions.some(a => a.type === 'choose_district' && a.target === App.myId)) {
+        const own = el('button', 'act main', '查看我的建筑');
+        onTap(own, () => openMobilePlayerDetail(App.myId));
+        actionsEl.appendChild(own);
+      }
+    }
+    const pendingKind = s.turn && s.turn.pending && s.turn.pending.kind;
+    const cardPickTypes = {
+      draw_keep: 'draw_keep', scholar_pick: 'scholar_pick',
+      prophet_give: 'prophet_give', wizard_card: 'wizard_card'
+    };
+    const cardPickType = cardPickTypes[pendingKind];
+    if (cardPickType) {
+      av.actions.filter(a => a.type === cardPickType).forEach(a => representedActions.add(a));
+    }
+    if (pendingKind === 'bishop_repay') {
+      const repayActions = av.actions.filter(a => a.type === 'choose_cards');
+      repayActions.forEach(a => representedActions.add(a));
+      if (repayActions.length && !(App.sel && App.sel.kind === 'multi')) {
+        const choose = el('button', 'act main', '选择手牌偿还代偿');
+        onTap(choose, () => runAction(repayActions[0]));
+        actionsEl.appendChild(choose);
+      }
+    }
+    av.actions.forEach(a => {
+      if (representedActions.has(a)) return;
+      // 多选已开始（魔术师弃牌重抽）时，引擎还会给一个「确定（可点选手牌后再确定）」，
+      // 与下面追加的「✓ 确定（N）」重复，两个都叫确定容易误点 —— 这里只保留带计数的那个。
+      if (a.type === 'choose_cards' && App.sel && App.sel.kind === 'multi') return;
+      let cls = '';
+      if (a.type === 'end_turn') cls = 'main';
+      if (a.type === 'build') cls = 'main';
+      if (a.type === 'take_gold' || a.type === 'take_cards' || a.type === 'income') cls = 'main';
+      if (a.type === 'choose_district' || a.type === 'warlord_destroy') cls = 'danger';
+      actionsEl.appendChild(actionBtn(a, cls));
+    });
+
+    // 多选确认按钮（魔术师弃牌 / 艺术家美化）
+    if (App.sel && App.sel.kind === 'multi') {
+      const b = el('button', 'act main', '✓ 确定（' + App.sel.items.length + '）');
+      const min = App.sel.min || 0;
+      const max = App.sel.max;
+      b.disabled = App.sel.items.length < min || (max != null && App.sel.items.length > max);
+      onTap(b, () => { App.sel.commit(App.sel.items.slice()); App.sel = null; });
+      actionsEl.appendChild(b);
+      const c = el('button', 'act', '取消选择');
+      onTap(c, () => { App.sel = null; render(); });
+      actionsEl.appendChild(c);
+    }
+    // 从手牌选一张（实验室 / 博物馆）
+    if (App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'labpick')) {
+      promptEl.innerHTML = escapeHtml(App.sel.label);
+      const c = el('button', 'act', '取消');
+      onTap(c, () => { App.sel = null; render(); });
+      actionsEl.appendChild(c);
+    }
+    // pending 卡牌选择弹窗（抽牌保留 / 学者 / 预言家归还）
+    const tk = s.turn && s.turn.pending ? s.turn.pending.kind : null;
+    if (tk === 'draw_keep' || tk === 'scholar_pick' || tk === 'prophet_give' || tk === 'wizard_card') {
+      if (!isMobileGameUI()) {
+        const b = el('button', 'act main', '打开卡牌选择');
+        onTap(b, openPickModal);
+        actionsEl.appendChild(b);
+      }
+    }
+  }
+
+  function appendTargetActionButtons(actionsEl, promptEl, choices, prompt) {
+    promptEl.textContent = prompt;
+    const group = el('div', 'role-action-choices target-action-choices');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', prompt);
+    choices.forEach(action => group.appendChild(actionBtn(action)));
+    actionsEl.appendChild(group);
+  }
+
+  function appendRoleActionButtons(actionsEl, promptEl, choices, prompt) {
+    promptEl.textContent = prompt;
+    const group = el('div', 'role-action-choices');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', prompt);
+    choices.forEach(action => group.appendChild(actionBtn(action)));
+    actionsEl.appendChild(group);
+  }
+
+  function actionBtn(a, cls) {
+    const b = el('button', 'act ' + (cls || '') + (a.disabled ? ' disabled' : ''));
+    b.dataset.actionType = a.type || '';
+    b.innerHTML = escapeHtml(a.type === 'museum' ? '使用博物馆（选择一张手牌）' : a.label || a.type);
+    b.disabled = !!a.disabled;
+    if (!a.disabled) onTap(b, () => runAction(a));
+    return b;
+  }
+
+  /* ============================== 行动分发 ============================== */
+  function runAction(a) {
+    if (App.buildingAnimPaused) return;
+    switch (a.type) {
+      case 'lab':
+        App.sel = { kind: 'labpick', buildingUid: a.uid,
+          actions: (App.state.available.actions || []).filter(item => item.type === 'lab' && item.uid === a.uid),
+          label: '【实验室】点击一张手牌弃掉，换取 1 金' };
+        render(); return;
+      case 'museum':
+        if (a.cardUid) { send(a); return; }
+        App.sel = { kind: 'handpick', items: [], label: '【博物馆】点击一张手牌放入，计分 +1',
+          commit(uids) { App.sel = null; send({ type: 'museum', uid: a.uid, cardUid: uids[0] }); } };
+        render(); return;
+      case 'choose_cards': {
+        const pending = App.state && App.state.turn && App.state.turn.pending;
+        App.sel = { kind: 'multi', items: [],
+          min: pending && pending.kind === 'bishop_repay' ? pending.amount : 0,
+          max: pending && pending.kind === 'bishop_repay' ? pending.amount : undefined,
+          excludeUid: pending && pending.kind === 'bishop_repay' ? pending.uid : null,
+          commit(uids) { App.sel = null; send({ type: 'choose_cards', uids: uids }); } };
+        render(); return;
+      }
+      case 'choose_district':
+        send(a); return;
+      case 'pending_back':
+        // 多步能力中撤回上一步前，先丢弃前端的多选/手选缓存，避免回退后仍残留旧选择
+        if (App.sel) { App.sel = null; }
+        if (App.state && App.state.turn && App.state.turn.pending &&
+            App.state.turn.pending.kind === 'wizard_choice') { App.pickKey = null; closeModal(); }
+        send(a); return;
+      default:
+        send(a);
+    }
+  }
+
+  function onHandClick(c) {
+    if (App.buildingAnimPaused) return;
+    const s = App.state;
+    if (App.sel && App.sel.kind === 'labpick') {
+      const action = App.sel.actions.find(item => item.discardUid === c.uid);
+      if (!action) return;
+      App.sel = null;
+      send(action);
+      return;
+    }
+    if (App.sel && (App.sel.kind === 'handpick' || App.sel.kind === 'multi')) {
+      if (App.sel.kind === 'handpick') { App.sel.commit([c.uid]); return; }
+      if (App.sel.excludeUid && App.sel.excludeUid === c.uid) return;
+      const i = App.sel.items.indexOf(c.uid);
+      if (i >= 0) App.sel.items.splice(i, 1);
+      else if (App.sel.max == null || App.sel.items.length < App.sel.max) App.sel.items.push(c.uid);
+      render(); return;
+    }
+    // 默认：建造
+    if (s.turn && s.turn.playerId === App.myId && c.canBuild && !s.turn.pending) {
+      send({ type: 'build', uid: c.uid });
+    } else if (s.turn && s.turn.playerId === App.myId && !s.turn.pending) {
+      toast('无法建造『' + c.name + '』：金币不足 / 超出本回合建造数 / 已有同名建筑');
+    }
+  }
+
+  /** 当前是否处于「选择建筑」模式 */
+  function districtSelectMode() {
+    const s = App.state;
+    if (!s || !s.turn || !s.turn.pending) return false;
+    return s.turn.playerId === App.myId &&
+      ['warlord_destroy', 'marshal_seize', 'diplomat_mine', 'diplomat_theirs', 'artist'].indexOf(s.turn.pending.kind) >= 0;
+  }
+  /** 返回这栋建筑对应的 choose_district 动作；没有则返回 null */
+  function districtActionFor(player, card) {
+    if (!districtSelectMode()) return null;
+    const av = App.state.available;
+    if (!av || !av.actions) return null;
+    return av.actions.find(a => a.type === 'choose_district' && a.target === player.id && a.uid === card.uid) || null;
+  }
+  function isSelectableDistrict(player, card) {
+    return !!districtActionFor(player, card);
+  }
+  /* 点击高亮建筑。
+   * 必须优先使用渲染时绑定的动作对象：早期版本只按 (playerId, uid) 现查
+   * App.state.available，一旦状态与 DOM 有一帧不同步（广播到达、动画期间
+   * 的延迟重绘），回查就会落空，点击变成「毫无反应的死点」，而面板上同名
+   * 按钮因为自带动作对象始终有效 —— 同一动作两条入口表现不一致。 */
+  function pickDistrict(playerId, uid, boundAction) {
+    if (boundAction) { runAction(boundAction); return; }
+    const av = App.state.available;
+    const a = (av && av.actions || []).find(x => x.type === 'choose_district' && x.target === playerId && x.uid === uid);
+    if (a) runAction(a);
+    else render();     // 状态已变：重绘同步高亮，别留在「点了没反应」的状态
+  }
+
+  /* ============================== 卡牌选择弹窗 ============================== */
+  function openPickModal() {
+    const s = App.state;
+    const pd = s.turn.pending;
+    if (!pd) return;
+    const cards = pd.cards || [];
+    const kind = pd.kind;
+    const title = kind === 'scholar_pick' ? '学者：从 7 张中选 1 张'
+      : kind === 'draw_keep' ? '选择要保留的建筑牌'
+      : kind === 'wizard_card' ? '法师：从目标玩家手牌中选择 1 张'
+      : '选择一张卡牌';
+    const recipient = kind === 'prophet_give' && s.players[pd.targetIdx];
+    $('#modal-title').textContent = recipient
+      ? '预言家：选择归还给 ' + recipient.name + ' 的手牌' : title;
+    const body = $('#modal-body');
+    body.innerHTML = '';
+    const grid = el('div', 'pick-grid pick-grid-' + kind);
+    if (kind === 'prophet_give') {
+      const me = s.players.find(p => p.id === App.myId);
+      me.hand.forEach(c => {
+        const n = cardNode(c, { clickable: true });
+        bindCardAction(n, () => { closeModal(); send({ type: 'prophet_give', uid: c.uid }); }, true);
+        grid.appendChild(n);
+      });
+    } else {
+      cards.forEach(c => {
+        const n = cardNode(c, { clickable: true });
+        bindCardAction(n, () => {
+          closeModal();
+          if (kind === 'scholar_pick') send({ type: 'scholar_pick', uid: c.uid });
+          else if (kind === 'wizard_card') send({ type: 'wizard_card', uid: c.uid });
+          else send({ type: 'draw_keep', uid: c.uid });
+        }, true);
+        grid.appendChild(n);
+      });
+    }
+    body.appendChild(grid);
+    $('#modal').hidden = false;
+  }
+  let serverConsoleTimer = null;
+  function closeModal() {
+    $('#modal').hidden = true;
+    if (serverConsoleTimer) {
+      clearInterval(serverConsoleTimer);
+      serverConsoleTimer = null;
+    }
+  }
+
+  /* ============================== 服务器控制台 ============================== */
+  function renderServerConsoleCard(summary, label, value) {
+    const card = el('div', 'server-console-card');
+    const title = document.createElement('b');
+    title.textContent = label;
+    const text = document.createElement('span');
+    text.textContent = value == null ? '' : String(value);
+    card.appendChild(title);
+    card.appendChild(text);
+    summary.appendChild(card);
+  }
+  async function refreshServerConsole() {
+    const body = $('#modal-body');
+    if (!body) return;
+    try {
+      const serverUrl = new URL(gameServerBase());
+      const localHost = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(serverUrl.hostname);
+      if (!localHost || serverUrl.origin !== window.location.origin) {
+        throw new Error('服务器控制台仅支持 localhost / 127.0.0.1 / ::1 的同源服务，已阻止向远程地址发送管理员凭据');
+      }
+      const headers = {};
+      // 仅同源本机服务时发送 Basic Auth，避免密码外传到用户填写的远程地址。
+      if (serverConsoleCredentials) {
+        headers.Authorization = 'Basic ' + btoa(
+          serverConsoleCredentials.username + ':' + serverConsoleCredentials.password);
+      }
+      const response = await fetch(serverUrl.href + '/api/server/status', { cache: 'no-store', headers });
+      const data = await response.json();
+      if (response.status === 401 && !serverConsoleCredentials) {
+        const username = window.prompt('请输入服务器控制台管理员账号');
+        if (username == null) throw new Error('已取消管理员认证');
+        const password = window.prompt('请输入服务器控制台管理员密码');
+        if (password == null) throw new Error('已取消管理员认证');
+        serverConsoleCredentials = { username, password };
+        return refreshServerConsole();
+      }
+      if (!response.ok) throw new Error(data.error || '服务器拒绝了请求');
+      const summary = el('div', 'server-console-summary');
+      const memory = data.memory && Number.isFinite(data.memory.rss)
+        ? Math.round(data.memory.rss / 1024 / 1024) + ' MB RSS' : '未知';
+      const training = data.training && data.training.running
+        ? '运行中 · ' + (data.training.game || '自对弈') : '未运行';
+      const neural = data.neural && data.neural.message ? data.neural.message : '未配置';
+      const worker = data.backend === 'python'
+        ? '由 Python 后端承载（无独立 worker）'
+        : data.nativeWorker ? '运行中' : '未运行';
+      const rooms = Number.isFinite(data.rooms) ? data.rooms : 0;
+      const clients = Number.isFinite(data.clients) ? data.clients : 0;
+      const uptime = Number.isFinite(data.uptimeSeconds) ? data.uptimeSeconds : 0;
+      const started = data.startedAt ? new Date(data.startedAt).toLocaleString() : '未知';
+      renderServerConsoleCard(summary, '进程', 'PID ' + data.pid + ' · ' + (data.platform || '未知平台'));
+      renderServerConsoleCard(summary, '监听状态', data.listening ? '监听中 · :' + data.port : '未监听');
+      renderServerConsoleCard(summary, '运行时间', uptime + ' 秒 · 启动于 ' + started);
+      renderServerConsoleCard(summary, '在线规模', rooms + ' 个房间 · ' + clients + ' 个连接');
+      renderServerConsoleCard(summary, '原生 MCTS', worker);
+      renderServerConsoleCard(summary, '内存', memory);
+      renderServerConsoleCard(summary, '训练服务', training);
+      renderServerConsoleCard(summary, '本地神经网络', neural);
+
+      const actions = el('div', 'server-console-actions');
+      const refresh = el('button', 'btn tiny ghost', '立即刷新');
+      refresh.type = 'button';
+      refresh.onclick = () => {
+        serverConsoleCredentials = null;
+        refreshServerConsole();
+      };
+      const updated = el('span', 'dim small', '更新于 ' + new Date().toLocaleTimeString());
+      actions.appendChild(refresh);
+      actions.appendChild(updated);
+
+      const log = el('div', 'server-console-log');
+      const entries = Array.isArray(data.logs) ? data.logs : [];
+      if (!entries.length) {
+        log.textContent = '暂无服务器日志。';
+      } else {
+        entries.forEach(item => {
+          const line = el('div', 'server-console-entry' + (item.level === 'error' ? ' error' : ''));
+          const time = item.at ? new Date(item.at).toLocaleTimeString() : '--:--:--';
+          line.textContent = '[' + time + '] ' + (item.text == null ? '' : String(item.text));
+          log.appendChild(line);
+        });
+        log.scrollTop = log.scrollHeight;
+      }
+      body.innerHTML = '';
+      body.appendChild(summary);
+      body.appendChild(actions);
+      body.appendChild(log);
+    } catch (error) {
+      body.innerHTML = '';
+      const message = document.createElement('p');
+      message.className = 'dim';
+      message.textContent = '无法读取服务器状态：' + (error && error.message ? error.message : error);
+      body.appendChild(message);
+      body.appendChild(el('p', 'small dim', '请确认游戏服务器已启动，并且当前页面连接的是本机服务器。'));
+    }
+  }
+  function openServerConsole() {
+    $('#modal-title').textContent = '服务器控制台';
+    $('#modal-body').innerHTML = '<p class="dim">正在读取服务器状态…</p>';
+    $('#modal').hidden = false;
+    refreshServerConsole();
+    if (serverConsoleTimer) clearInterval(serverConsoleTimer);
+    serverConsoleTimer = setInterval(refreshServerConsole, 3000);
+  }
+
+  async function openServerStartupInfo() {
+    if (serverConsoleTimer) {
+      clearInterval(serverConsoleTimer);
+      serverConsoleTimer = null;
+    }
+    $('#modal-title').textContent = '启动信息';
+    const body = $('#modal-body');
+    body.innerHTML = '<p class="dim">正在读取 worker / FRP 启动日志…</p>';
+    $('#modal').hidden = false;
+    try {
+      const response = await fetch(gameServerBase() + '/api/server/startup', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '服务器拒绝了请求');
+      const state = data.worker || {};
+      const frp = data.frp || {};
+      const summary = document.createElement('p');
+      summary.className = 'small';
+      summary.textContent = state.backend === 'python'
+        ? '游戏后端：Python（不使用独立原生 worker）'
+        : 'worker：' + (state.running ? '运行中' : state.exists ? '已编译但未运行' : '未找到编译产物');
+      if (frp.enabled) summary.textContent += '　FRP：' + (frp.running ? '运行中' : '未运行');
+      if (data.release) summary.textContent += '　版本：' + data.release.version +
+        '（' + (data.release.channel === 'stable' ? '稳定版' : '开发版') + '）';
+      const log = el('div', 'server-console-log');
+      const entries = Array.isArray(data.logs) ? data.logs : [];
+      if (!entries.length) log.textContent = '暂无启动阶段日志。';
+      entries.forEach(item => {
+        const line = el('div', 'server-console-entry' + (item.level === 'error' ? ' error' : ''));
+        line.textContent = '[' + (item.at ? new Date(item.at).toLocaleTimeString() : '--:--:--') + '] ' +
+          (item.text == null ? '' : String(item.text));
+        log.appendChild(line);
+      });
+      body.innerHTML = '';
+      body.appendChild(summary);
+      body.appendChild(log);
+    } catch (error) {
+      body.innerHTML = '';
+      body.appendChild(el('p', 'dim', '无法读取启动信息：' + (error && error.message ? error.message : error)));
+    }
+  }
+
+  /* ============================== 结算 ============================== */
+  function showOver(s) {
+    // 避免之前打开的计分详情浮层挡住结算页按钮，导致首击只关闭浮层。
+    closeScore();
+    const rows = s.scores || [];
+    let best = -1;
+    rows.forEach(r => { if (r.total > best) best = r.total; });
+    $('#over-title').innerHTML = s.winner != null
+      ? escapeHtml(s.players[s.winner].name) + ' 获胜！'
+      : '游戏结束（平局）';
+    const tb = $('#score-table');
+    tb.innerHTML = '<tr><th>玩家</th><th>城区</th><th>建筑分</th><th>奖励</th><th>总分</th><th class="score-detail">明细</th></tr>';
+    rows.slice().sort((a, b) => b.total - a.total).forEach(r => {
+      const tr = el('tr', (s.winner === r.playerIdx ? 'win' : ''));
+      tr.innerHTML = '<td>' + escapeHtml(r.name) + '</td>' +
+        '<td>' + r.cityCount + '</td>' +
+        '<td>' + r.base + '</td>' +
+        '<td>+' + r.bonus + '</td>' +
+        '<td class="total">' + r.total + '</td>' +
+        '<td class="score-detail">' + r.detail.map(d => escapeHtml(d.label) + ' +' + d.value).join('，') + '</td>';
+      tb.appendChild(tr);
+    });
+    showScreen('screen-over');
+  }
+
+  /* ============================== 参考弹层 ============================== */
+  function openCharacters() {
+    $('#modal-title').textContent = '角色一览';
+    const body = $('#modal-body');
+    body.innerHTML = '';
+    const s = App.state;
+    const used = (s && s.charDeck && s.charDeck.length)
+      ? s.charDeck.slice()
+      : Cards.CHARACTERS.map(c => ({ id: c.id, num: c.num, name: c.name, en: c.en, desc: c.desc }));
+
+    body.appendChild(el('div', 'section-title', '本局角色（按编号）'));
+    const cg = el('div', 'char-grid');
+    used.slice().sort((a, b) => a.num - b.num).forEach(c => {
+      const d = el('div', 'ref-card');
+      const img = roleThumb(c);
+      const full = roleFull(c);
+      const art = img ? '<img class="rc-art" src="' + img + '" alt="' + escapeHtml(c.name) + '" loading="lazy" decoding="async">' : '';
+      const hd = full ? '<button class="ref-hd-trigger" type="button" data-hd-src="' + escapeHtml(full) + '" data-hd-title="' + escapeHtml(c.name) + '">查看高清大图</button>' : '';
+      // 角色卡图已含效果文字，顶部仅保留名称，不再重复说明
+      d.innerHTML = art + hd + '<h4><span class="rc-num">' + c.num + '</span>' + c.name +
+        '<span class="rc-en">' + c.en + '</span></h4>';
+      cg.appendChild(d);
+    });
+    body.appendChild(cg);
+    $('#modal').hidden = false;
+  }
+
+  function openBuildings() {
+    $('#modal-title').textContent = '建筑一览';
+    const body = $('#modal-body');
+    body.innerHTML = '';
+    const s = App.state;
+
+    body.appendChild(el('div', 'section-title', '建筑颜色与收入角色'));
+    const lg = el('div', 'color-legend');
+    ['yellow', 'blue', 'green', 'red', 'purple'].forEach(k => {
+      const col = Cards.COLORS[k];
+      lg.appendChild(el('span', '',
+        '<i class="dot" style="background:' + col.hex + '"></i>' + col.name + '（' + col.en + '）' +
+        (col.incomeChar ? ' — 提供 ' + col.incomeChar + ' 号角色收入' : ' — 独特建筑')));
+    });
+    body.appendChild(lg);
+
+    body.appendChild(el('div', 'section-title', '全部建筑（按颜色，含特殊效果）'));
+    ['yellow', 'blue', 'green', 'red', 'purple'].forEach(k => {
+      const col = Cards.COLORS[k];
+      body.appendChild(el('div', 'color-sub', col.name + '（' + col.en + '）'));
+      const grp = el('div', 'char-grid');
+      Cards.DISTRICTS.filter(d => d.color === k).sort((a, b) => a.cost - b.cost).forEach(d => {
+        const e = el('div', 'ref-card c-' + k);
+        const thumb = Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(d, 'thumb') : null;
+        const full = Theme.is && Theme.is('neon') && Theme.districtAsset ? Theme.districtAsset(d, 'full') : null;
+        const art = thumb
+          ? '<img class="rc-art district-ref-art" src="' + thumb + '" alt="' + escapeHtml(d.name) + '" loading="lazy" decoding="async">'
+          : '';
+        const hd = full ? '<button class="ref-hd-trigger" type="button" data-hd-src="' + escapeHtml(full) + '" data-hd-title="' + escapeHtml(d.name) + '">查看高清大图</button>' : '';
+        e.innerHTML = art + hd + '<h4>' + d.name + '<span class="rc-en">' + d.en + ' · ' + d.cost + ' 金</span></h4>' +
+          (d.desc ? '<p>' + d.desc + '</p>' : '<p class="dim">— 无特殊效果，仅计入建筑分</p>');
+        grp.appendChild(e);
+      });
+      body.appendChild(grp);
+    });
+
+    body.appendChild(el('div', 'section-title', '计分方式'));
+    body.appendChild(el('p', 'small',
+      '建筑总分（建造费用之和，巨龙门/大学按 8 分计）＋ 五色齐全 +3 ＋ 率先建成 ' +
+      (s ? s.endDistricts : 8) + ' 栋 +4（其余达标者 +2）＋ 博物馆/美化等特殊加分。'));
+    $('#modal').hidden = false;
+  }
+
+  function openRules() {
+    $('#modal-title').textContent = '游戏规则';
+    const body = $('#modal-body');
+    body.innerHTML =
+      '<div class="section-title">一局总体流程</div>' +
+      '<p class="small">① 按人数随机移除若干角色牌（部分明置、部分暗置，4 号角色不会被明置移除）→ ' +
+      '② 由皇冠持有者开始依次秘密选角，每号角色只能有一张 → ' +
+      '③ 皇冠持有者按编号叫号，被叫到的玩家公开角色并执行回合 → ' +
+      '④ 全部角色行动完毕后结束一轮，角色牌重洗进入下一轮。</p>' +
+      '<div class="section-title">每个回合的具体操作</div>' +
+      '<p class="small"><b>第 1 步 · 领取资源（二选一）</b>：拿 2 枚金币，或抽 2 张建筑牌保留 1 张（另一张放回牌堆底）。<br><br>' +
+      '<b>第 2 步 · 建造</b>：支付费用打出 1 栋建筑（通常每回合限 1 栋，建筑师 3 栋、学者/预言家 2 栋）。城市中不可有同名建筑。<br><br>' +
+      '<b>第 3 步 · 使用角色能力</b>：回合内任意时机可使用一次，也可不使用（如刺客刺杀、小偷偷金、建筑师多建、商人加金、魔法师换牌、女巫夺取他人回合等）。<br><br>' +
+      '<b>第 4 步 · 结束回合</b>：轮到下一编号角色行动，直至全部角色行动完毕。</p>' +
+      '<div class="section-title">结束与计分</div>' +
+      '<p class="small">有玩家建成第 8 栋建筑时，本轮结束后游戏结束。分数＝建筑费用总和' +
+      '＋五色齐全 3 分＋率先达标 4 分（其他达标者 2 分）＋特殊建筑加分，最高者获胜。</p>' +
+      '<div class="section-title">皇冠</div>' +
+      '<p class="small">拥有皇冠者本轮优先选角。<b>国王 / 贵族</b>（4 号）被叫号时立即获得皇冠；' +
+      '<b>皇帝</b>（4 号，黑暗城市扩充）则必须把皇冠转交给另一名玩家，再从该玩家处拿 1 金币或抽 1 张手牌。' +
+      '被刺杀的国王 / 贵族仍会在轮末获得皇冠。</p>';
+    $('#modal').hidden = false;
+  }
+
+  /* ============================== 大厅渲染 ============================== */
+  /* ============================== 事件绑定 ============================== */
+  function bind() {
+    if (Theme.onChange) Theme.onChange(() => {
+      syncThemeBtn();
+      // 主题切换会改变卡片内部结构（neon 用 <img>、classic 用文本），复用旧节点会错乱，
+      // 因此先清空所有卡片容器，让本次 render 全量重建出正确结构。
+      ['#my-city', '#my-hand', '#opponents'].forEach(sel => { const e = $(sel); if (e) e.innerHTML = ''; });
+      if (App.state && App.state.phase !== 'lobby') render();
+    });
+    const themeBtn = $('#btn-theme');
+    if (themeBtn) themeBtn.onclick = () => Theme.toggle();
+    if (Theme.updateControls) Theme.updateControls();
+    syncThemeBtn();
+    // 首页的「规则速查 / 服务器控制台 / 启动信息」按钮已移入共享组件，
+    // 组件用 citadels-extra 事件请求页面打开自己的弹层。
+    const lobbyHost = $('#lobby');
+    if (lobbyHost) lobbyHost.addEventListener('citadels-extra', e => {
+      const kind = e.detail && e.detail.kind;
+      if (kind === 'rules') openRules();
+      else if (kind === 'console') openServerConsole();
+      else if (kind === 'startup') openServerStartupInfo();
+    });
+    $$('[data-goto]').forEach(b => b.onclick = () => {
+      if (b.dataset.goto === 'home') leaveToMenu();
+      else showScreen('screen-' + b.dataset.goto);
+    });
+    $('#modal-close').onclick = closeModal;
+    $('#modal').onclick = e => { if (e.target === $('#modal')) closeModal(); };
+    $('#mobile-detail-close').onclick = mobileDetailBack;
+    $('#mobile-detail').onclick = e => { if (e.target === $('#mobile-detail')) mobileDetailBack(); };
+    $('#mobile-hand-toggle').onclick = () => {
+      App.mobileHandExpanded = !App.mobileHandExpanded;
+      if (App.state) renderMe(App.state);
+    };
+    $('#mobile-draft-toggle').onclick = () => {
+      App.mobileDraftExpanded = !App.mobileDraftExpanded;
+      if (App.state && App.state.phase === 'draft') renderDraft(App.state);
+    };
+
+    // 关键事件弹层
+    $('#event-ok').onclick = dismissEvent;
+    $('#event-overlay').onclick = e => { if (e.target === $('#event-overlay')) dismissEvent(); };
+
+    // 得分明细浮动窗口
+    const myScoreBtn = $('#btn-my-score');
+    if (myScoreBtn) {
+      myScoreBtn.onclick = () => openScore(App.myIdx);
+      myScoreBtn.addEventListener('mouseenter', () => showScoreTip(myScoreBtn, App.myIdx));
+      myScoreBtn.addEventListener('mouseleave', hideScoreTip);
+      myScoreBtn.addEventListener('focus', () => showScoreTip(myScoreBtn, App.myIdx));
+      myScoreBtn.addEventListener('blur', hideScoreTip);
+    }
+    $('#score-close').onclick = closeScore;
+    $('#score-popup').onclick = e => { if (e.target === $('#score-popup')) closeScore(); };
+
+    // 选角卡图悬浮放大
+    initCharZoom();
+    initCardHd();
+    const removedWidget = $('#removed-corner');
+    const removedToggle = $('#removed-widget-toggle');
+    if (removedWidget && removedToggle) {
+      removedToggle.onclick = () => {
+        const collapsed = removedWidget.classList.toggle('collapsed');
+        removedToggle.setAttribute('aria-expanded', String(!collapsed));
+        removedToggle.title = collapsed ? '展开查看本轮被移除的角色' : '收起本轮出局角色';
+      };
+      removedWidget.classList.add('collapsed');
+    }
+    const mobileMenuToggle = $('#mobile-menu-toggle');
+    const gameScreen = $('#screen-game');
+    // 顶栏菜单（PC 与移动端共用）：默认收起，点右下角浮动按钮弹出。
+    function setMenuOpen(open) {
+      if (!gameScreen) return;
+      gameScreen.classList.toggle('mobile-menu-open', !!open);
+      if (mobileMenuToggle) {
+        mobileMenuToggle.setAttribute('aria-expanded', String(!!open));
+        mobileMenuToggle.title = open ? '收起游戏菜单' : '展开游戏菜单';
+      }
+      scheduleMobileFitScale();
+    }
+    if (mobileMenuToggle && gameScreen) {
+      mobileMenuToggle.onclick = () => setMenuOpen(!gameScreen.classList.contains('mobile-menu-open'));
+    }
+    $('#bot-debug-close').onclick = () => setBotDebugOpen(false);
+    $('#bot-debug-clear').onclick = () => {
+      App.botDebugEntries = [];
+      renderBotDebug();
+    };
+    // 选中菜单里的任一项后自动收起（「电脑节奏」要连点切换，保持展开）。
+    const topbarEl = $('#topbar');
+    if (topbarEl && gameScreen) {
+      topbarEl.addEventListener('click', e => {
+        const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+        if (!btn || btn.id === 'btn-speed') return;
+        setMenuOpen(false);
+      });
+    }
+
+    // 电脑节奏：对局内一键切换（设置页下拉已随首页/设置页移入共享组件）
+    loadSpeed();
+    $('#btn-speed').onclick = cycleSpeed;
+    syncSpeedBtn();
+
+    // 对局内
+    $('#btn-back-home').onclick = () => {
+      if (App.state && App.state.phase !== 'gameover' && !confirm('确定离开当前对局吗？')) return;
+      leaveToMenu();
+    };
+    $('#btn-chars').onclick = openCharacters;
+    $('#btn-buildings').onclick = openBuildings;
+    $('#btn-rules-top').onclick = openRules;
+    const sidePanelToggle = $('#btn-side-panel-toggle');
+    const mobileSidePanelToggle = $('#btn-side-panel-mobile-toggle');
+    [sidePanelToggle, mobileSidePanelToggle].filter(Boolean).forEach(toggle => {
+      toggle.onclick = () => {
+        if (!App.logOpen && !App.chatOpen && !App.voiceOpen) return;
+        App.sidePanelCollapsed = !App.sidePanelCollapsed;
+        updateSidePanel();
+      };
+    });
+    $('#btn-log-toggle').onclick = () => {
+      // 竖屏下拉需从顶栏下沿开始：同步顶栏实际高度，避免盖住按钮也无法返回
+      const tb = document.querySelector('.topbar');
+      if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
+      App.logOpen = !App.logOpen;
+      if (App.logOpen) App.sidePanelCollapsed = false;
+      if (App.logOpen && !App.chatOpen) App.activeSideTab = 'log';
+      else if (!App.logOpen && App.chatOpen) App.activeSideTab = 'chat';
+      updateSidePanel();
+    };
+    $('#btn-chat-log-toggle').onclick = () => {
+      App.chatOpen = !App.chatOpen;
+      if (App.chatOpen) App.sidePanelCollapsed = false;
+      if (App.chatOpen && !App.logOpen) App.activeSideTab = 'chat';
+      else if (!App.chatOpen && App.logOpen) App.activeSideTab = 'log';
+      updateSidePanel();
+    };
+    $('#tab-log').onclick = () => {
+      App.logOpen = true;
+      App.activeSideTab = 'log';
+      App.sidePanelCollapsed = false;
+      updateSidePanel();
+    };
+    $('#tab-chat').onclick = () => {
+      App.chatOpen = true;
+      App.activeSideTab = 'chat';
+      App.sidePanelCollapsed = false;
+      updateSidePanel();
+    };
+    $('#btn-chat').onclick = openChatComposer;
+    $('#chat-close').onclick = closeChatComposer;
+    // 语音按钮一键两用：没加入时加入，已加入时开麦/静音（退出语音在语音面板里）。
+    $('#btn-voice').onclick = () => Voice.toggleMute();
+    $('#tab-voice').onclick = () => {
+      App.voiceOpen = true;
+      App.activeSideTab = 'voice';
+      App.sidePanelCollapsed = false;
+      updateSidePanel();
+    };
+    $('#chat-composer').onsubmit = e => {
+      e.preventDefault();
+      const input = $('#chat-input');
+      const text = input ? input.value.trim() : '';
+      if (!text) { closeChatComposer(); return; }
+      Net.send({ t: 'chat', text: text });
+      closeChatComposer();
+    };
+    // 再来一局：单机房间由服务器重新开局（handle 收到大厅态会补发 startGame）；
+    // 联机房间服务器回到大厅，handle 会把 socket 交还组件显示房间。
+    $('#btn-again').onclick = () => {
+      App.leavingNetGame = false;
+      Net.send({ t: 'restart' });
+    };
+    window.addEventListener('resize', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
+    window.addEventListener('orientationchange', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
+    document.addEventListener('keydown', e => {
+      const composer = $('#chat-composer');
+      const target = e.target;
+      const interactive = target && target.closest &&
+        target.closest('button, input, textarea, select, a, [contenteditable="true"]');
+      if (e.ctrlKey && e.shiftKey && String(e.key).toLowerCase() === 'i' &&
+          gameScreen && gameScreen.classList.contains('active')) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleBotDebug();
+        return;
+      }
+      if (e.key === 'Enter' && !e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey &&
+          !interactive && gameScreen && gameScreen.classList.contains('active') &&
+          composer && composer.hidden && App.mode === 'net' && App.state &&
+          App.state.phase !== 'gameover') {
+        e.preventDefault();
+        openChatComposer();
+        return;
+      }
+      if (e.key !== 'Escape') return;
+      if (composer && !composer.hidden) { closeChatComposer(); return; }
+      if (!$('#mobile-detail').hidden) { mobileDetailBack(); return; }
+      // 展开的菜单优先级高于弹层：Esc 先收起菜单，再关弹层。
+      if (gameScreen && gameScreen.classList.contains('mobile-menu-open')) { setMenuOpen(false); return; }
+      closeModal();
+    });
+  }
+
+  bind();
+  // 首页 / 单人设置 / 联机大厅由共享组件驱动；开局时组件把 socket 交过来。
+  // 刷新后的自动 resume 也由组件完成（它挂载时用本地令牌重连）。
+  const lobbyEl = $('#lobby');
+  if (lobbyEl && customElements.get('c-citadels-lobby')) {
+    lobbyEl.onGameStart = handle => {
+      App.mode = 'net';
+      App.localServerGame = !!handle.localServerGame;
+      App.state = handle.state || null;
+      App.myId = handle.myId || null;
+      App.name = handle.name || App.name;
+      App.leavingNetGame = false;
+      App.botDebugEntries = [];
+      // 中途接管（刷新恢复 / 断线重连）时对齐到最新事件，不回放历史。
+      if (App.state && App.state.notices && App.state.notices.length) {
+        App.noticeSeen = App.state.notices[App.state.notices.length - 1].seq;
+      }
+      App.paused = false; hideEvent(true);
+      Net.install(handle);
+      showScreen('screen-game');
+      render();
+      if (App.state && App.state.phase === 'gameover') showOver(App.state);
+    };
+  }
+  // 供自动化测试驱动使用
+  App.__net = Net;
+  App.__voice = Voice;
+  window.__CitadelsApp = App;
+  // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
+  if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('./sw.js?v=16', { scope: './' }).then(registration => {
+      // GitHub Pages 上的 PWA 可能长时间保持旧 worker，启动时主动检查一次新版本。
+      registration.update().catch(() => {});
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    }).catch(() => {});
+    // 首次安装 worker 时页面并没有旧版本要替换，此时重载只会把用户刚做的操作吞掉
+    // （HTTPS 首访尤其明显），所以首次接管不重载，只有真正的版本更新才刷新。
+    let pwaRefreshing = false;
+    let pwaHadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!pwaHadController) { pwaHadController = true; return; }
+      if (pwaRefreshing) return;
+      pwaRefreshing = true;
+      window.location.reload();
+    });
+  }
+
+  // PWA 游戏页不允许浏览器接管双指缩放，避免 viewport 变化触发页面重载；
+  // 高清卡图查看器由自身逻辑处理双指缩放，因此保留该区域的手势。
+  if (typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(display-mode:standalone), (display-mode:fullscreen)').matches) {
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport) viewport.setAttribute('content',
+      'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
+    const blockPagePinch = e => {
+      if (e.touches && e.touches.length > 1 &&
+          !(e.target && e.target.closest && e.target.closest('.card-hd-stage'))) e.preventDefault();
+    };
+    document.addEventListener('touchstart', blockPagePinch, { passive: false });
+    document.addEventListener('touchmove', blockPagePinch, { passive: false });
+  }
+})();

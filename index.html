@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050a12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="富饶之城">
+<link rel="manifest" href="./manifest.json">
+<title>富饶之城 · 荣耀之城 Citadels</title>
+  <link rel="stylesheet" href="./style.css?v=68">
+<link rel="stylesheet" href="./themes/neon/theme.css?v=16">
+</head>
+<body>
+
+<!-- 首页 / 单人设置 / 联机大厅：与移动端共用同一个组件（public/components/citadels-lobby.js） -->
+<c-citadels-lobby id="lobby" mode="desktop"></c-citadels-lobby>
+
+<!-- ============================ 对局 ============================ -->
+<section id="screen-game" class="screen">
+  <div class="mobile-fit-root" id="mobile-fit-root">
+  <header class="topbar" id="topbar">
+    <div class="tb-left">
+      <button class="btn tiny ghost" id="btn-back-home">返回主菜单</button>
+      <button class="btn tiny" id="btn-speed" title="点击切换电脑行动速度">标准</button>
+      <span class="tb-title" id="tb-room">富饶之城</span>
+    </div>
+    <div class="tb-mid">
+      <span class="chip">第 <b id="tb-round">1</b> 轮</span>
+      <span class="chip">结束条件 <b id="tb-target">8</b> 栋</span>
+      <span class="chip">牌堆 <b id="tb-deck">0</b></span>
+      <span class="chip crown-chip" id="tb-crown" title="当前皇冠持有者"><i class="crown-icon" aria-hidden="true">♛</i><span class="crown-owner">—</span></span>
+      <span class="chip danger" id="tb-effects" hidden></span>
+    </div>
+    <div class="tb-right">
+      <button class="btn tiny" id="btn-theme" type="button" title="切换界面主题">主题 · 经典</button>
+      <button class="btn tiny" id="btn-chars">角色一览</button>
+      <button class="btn tiny" id="btn-buildings">建筑一览</button>
+      <button class="btn tiny" id="btn-rules-top">游戏规则</button>
+      <button class="btn tiny" id="btn-log-toggle">战报</button>
+      <button class="btn tiny" id="btn-chat-log-toggle" type="button" title="聊天记录侧栏">聊天记录</button>
+      <button class="btn tiny" id="btn-chat" type="button" hidden>发言</button>
+      <button class="btn tiny" id="btn-voice" type="button" hidden
+        aria-pressed="false" title="加入房间语音">语音</button>
+    </div>
+  </header>
+  <c-citadels-spectator id="spectator-control" hidden></c-citadels-spectator>
+
+  <div class="mobile-phase-status" id="mobile-phase-status" hidden>
+    <strong id="mobile-phase-title"></strong><span id="mobile-phase-sub"></span>
+  </div>
+
+  <main class="board">
+    <div class="board-main" id="board-main">
+      <!-- 选角阶段 -->
+      <div id="draft-area" class="draft-area" hidden>
+        <div class="draft-head">
+          <div class="mobile-draft-title-left"><h3 id="draft-title">选择角色</h3><span>点击卡图查看 / 选择</span></div>
+          <button class="btn tiny ghost mobile-draft-toggle" id="mobile-draft-toggle" type="button" aria-expanded="true">收起</button>
+          <p class="dim small" id="draft-sub"></p>
+        </div>
+        <div class="mobile-draft-summary" id="mobile-draft-summary" hidden></div>
+        <div class="draft-pool" id="draft-pool"></div>
+      </div>
+
+      <!-- 行动阶段 -->
+      <div id="play-area" class="play-area">
+        <div class="turn-banner" id="turn-banner"></div>
+        <section class="mobile-choice-shelf" id="mobile-choice-shelf" hidden aria-live="polite">
+          <div class="mobile-choice-head"><h3 id="mobile-choice-title"></h3><span id="mobile-choice-count"></span></div>
+          <div class="mobile-choice-cards" id="mobile-choice-cards"></div>
+        </section>
+        <div class="table-arena" id="table-arena">
+          <div class="turn-order-guide" id="turn-order-guide" aria-label="行动顺序"></div>
+          <div class="removed-corner" id="removed-corner" aria-label="本轮出局角色" hidden>
+            <button class="removed-widget-toggle" id="removed-widget-toggle" type="button" aria-expanded="false" title="展开查看本轮被移除的角色">
+              <span class="removed-widget-icon" aria-hidden="true">◈</span>
+              <span>本轮出局角色</span><span class="removed-widget-count" id="removed-widget-count">0</span>
+            </button>
+            <div class="removed-widget-content">
+              <span class="removed-widget-empty" id="removed-widget-empty">本轮暂无出局角色</span>
+              <div class="removed-widget-group" id="removed-faceup-group" hidden>
+                <span class="removed-widget-group-label">明置</span>
+                <div class="rs-cards" id="rs-faceup-corner"></div>
+              </div>
+              <div class="removed-widget-group" id="removed-facedown-group" hidden>
+                <span class="removed-widget-group-label">暗置</span>
+                <div class="rs-cards" id="rs-facedown-corner"></div>
+              </div>
+            </div>
+          </div>
+          <div class="mobile-public-heading" id="mobile-public-heading"><strong>公开局面 <span id="mobile-public-count"></span></strong><span id="mobile-public-status">顺时针排列</span></div>
+          <div class="opponents" id="opponents"></div>
+          <div class="me-area" id="me-area">
+          <div class="zone-head"><span class="dim small" id="my-city-count"></span><span class="me-stats">
+              <span class="opp-gold" id="my-gold"><i class="coin-icon" aria-hidden="true"></i><span>0</span></span>
+              <button type="button" class="score-badge" id="btn-my-score" title="显示我的得分与计算过程"><i class="score-icon" aria-hidden="true"></i><span class="score-val" id="my-score-val">0</span></button>
+            </span></div>
+          <div class="me-role-row">
+            <div class="me-char" id="my-char-status"></div>
+            <div class="me-char-stats" id="my-char-stats"></div>
+          </div>
+          <div class="city-row" id="my-city"></div>
+          <div class="zone-head" id="mobile-hand-head"><div class="mobile-hand-title-left"><h3>我的手牌</h3><span class="dim small" id="my-hand-count"></span></div>
+            <span class="dim small" id="my-chars-tip"></span><button class="btn tiny ghost mobile-hand-toggle" id="mobile-hand-toggle" type="button" aria-expanded="false">展开</button></div>
+          <div class="mobile-hand-summary" id="mobile-hand-summary"></div>
+          <div class="hand-row" id="my-hand"></div>
+          </div>
+        </div>
+      </div>
+      <section class="mobile-removed" id="mobile-removed" hidden>
+        <div class="mobile-removed-title"><strong>本轮弃置角色</strong><span>明置可查看 · 暗置仅牌背</span></div>
+        <div class="mobile-removed-cards" id="mobile-removed-cards"></div>
+      </section>
+    </div>
+
+    <aside class="side-panel" id="side-panel">
+      <div class="side-panel-head">
+        <div class="side-tabs" id="side-tabs">
+          <button class="side-tab is-active" type="button" data-tab="log" id="tab-log">战报</button>
+          <button class="side-tab" type="button" data-tab="chat" id="tab-chat">聊天记录</button>
+          <button class="side-tab" type="button" data-tab="voice" id="tab-voice" hidden>语音</button>
+        </div>
+        <button class="side-panel-toggle" id="btn-side-panel-toggle" type="button"
+          aria-expanded="true" aria-controls="side-panel-body" title="收起右侧边栏">
+          <span class="side-panel-toggle-icon" aria-hidden="true">›</span>
+        </button>
+      </div>
+      <div class="side-panel-body" id="side-panel-body">
+        <div class="side-pane" id="pane-log">
+          <div class="log" id="log"></div>
+        </div>
+        <div class="side-pane" id="pane-chat" hidden>
+          <div class="chat-log" id="chat-log"></div>
+        </div>
+        <div class="side-pane" id="pane-voice" hidden>
+          <div class="voice-pane" id="voice-pane"></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="actionbar">
+    <div class="prompt" id="prompt">等待开始…</div>
+    <div class="actions" id="actions"></div>
+  </footer>
+  </div>
+  <form class="chat-composer" id="chat-composer" hidden autocomplete="off">
+    <label class="sr-only" for="chat-input">输入发言内容</label>
+    <input id="chat-input" type="text" maxlength="120" enterkeyhint="send" placeholder="输入要说的话…">
+    <button class="btn primary" id="chat-send" type="submit">发送</button>
+    <button class="btn ghost tiny" id="chat-close" type="button" title="关闭发言框" aria-label="关闭发言框">×</button>
+  </form>
+  <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
+    <span aria-hidden="true">☰</span><span>菜单</span>
+  </button>
+  <button class="mobile-side-expand" id="btn-side-panel-mobile-toggle" type="button" hidden
+    aria-label="展开右侧边栏" aria-controls="side-panel-body" title="展开右侧边栏">‹</button>
+  <aside class="bot-debug-console" id="bot-debug-console" hidden aria-label="电脑决策调试控制台">
+    <div class="bot-debug-head">
+      <h3>电脑决策调试</h3>
+      <div class="bot-debug-head-actions">
+        <button class="btn tiny ghost" id="bot-debug-clear" type="button">清空</button>
+        <button class="btn tiny ghost" id="bot-debug-close" type="button" aria-label="关闭调试控制台">×</button>
+      </div>
+    </div>
+    <div class="bot-debug-log" id="bot-debug-log" role="log" aria-live="polite"></div>
+    <div class="bot-debug-foot">Ctrl+Shift+I 打开/关闭 · 仅保留最近 300 条</div>
+  </aside>
+</section>
+
+<!-- ============================ 结算 ============================ -->
+<section id="screen-over" class="screen">
+  <div class="panel wide-panel">
+    <h2 id="over-title">游戏结束</h2>
+    <table class="score-table" id="score-table"></table>
+    <div class="btn-row">
+      <button class="btn ghost" data-goto="home">回主菜单</button>
+      <button class="btn primary" id="btn-again">再来一局</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 弹层 ============================ -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="modal-title">标题</h3><button class="btn tiny ghost" id="modal-close">关闭</button></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- 移动端玩家详情与确认卡图，公开区的整个玩家框进入这里 -->
+<div class="mobile-detail" id="mobile-detail" hidden role="dialog" aria-modal="true" aria-labelledby="mobile-detail-title">
+  <div class="mobile-detail-sheet">
+    <header class="mobile-detail-head">
+      <div><span class="mobile-detail-kicker" id="mobile-detail-kicker">玩家详情</span><h2 id="mobile-detail-title"></h2></div>
+      <button class="btn tiny ghost" id="mobile-detail-close" type="button">返回重选</button>
+    </header>
+    <div class="mobile-detail-body" id="mobile-detail-body"></div>
+    <div class="mobile-detail-actions" id="mobile-detail-actions"></div>
+  </div>
+</div>
+
+<!-- 关键事件提示（被刺杀 / 被施咒 / 被摧毁…） -->
+<div class="event-overlay" id="event-overlay" hidden>
+  <div class="event-box" id="event-box">
+    <div class="event-icon" id="event-icon">!</div>
+    <h3 class="event-title" id="event-title">标题</h3>
+    <p class="event-text" id="event-text"></p>
+    <button class="btn primary block" id="event-ok">知道了，继续</button>
+    <div class="event-bar"><i id="event-bar-fill"></i></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- 卡牌预览浮窗（触屏：点击放大 + 确认/取消） -->
+<div class="char-zoom-bg" id="char-zoom-bg" hidden></div>
+<div class="char-zoom" id="char-zoom" hidden>
+  <img id="char-zoom-img" alt="角色卡放大">
+  <div id="char-zoom-back" class="char-zoom-back">▧</div>
+  <button class="btn cz-hd-btn" id="cz-hd-btn" type="button" hidden>查看高清大图</button>
+  <div class="cz-actions" id="cz-actions" hidden>
+    <button class="btn cz-btn cz-cancel" id="cz-cancel" type="button">取消</button>
+    <button class="btn cz-btn cz-ok" id="cz-ok" type="button">确认选择</button>
+  </div>
+</div>
+
+<!-- 高清卡图查看器：加载 full 资源，适合查看卡框、标题与规则文字 -->
+<div class="card-hd-overlay" id="card-hd-overlay" hidden>
+  <div class="card-hd-box" role="dialog" aria-modal="true" aria-labelledby="card-hd-title">
+    <div class="card-hd-head">
+      <div>
+        <div class="card-hd-kicker">高清卡图</div>
+        <h3 id="card-hd-title" aria-live="polite">卡牌</h3>
+      </div>
+      <button class="btn tiny ghost" id="card-hd-close" type="button" title="关闭高清卡图">关闭</button>
+    </div>
+    <div class="card-hd-stage">
+      <img id="card-hd-img" alt="卡牌高清大图" draggable="false">
+    </div>
+    <div class="card-hd-controls" aria-label="卡牌缩放控制">
+      <button class="btn tiny ghost" id="card-hd-zoom-out" type="button" title="缩小卡图">−</button>
+      <span id="card-hd-zoom-value" aria-live="polite">100%</span>
+      <button class="btn tiny ghost" id="card-hd-zoom-reset" type="button" title="恢复适合窗口大小">重置</button>
+      <button class="btn tiny ghost" id="card-hd-zoom-in" type="button" title="放大卡图">＋</button>
+    </div>
+    <div class="card-hd-foot">拖动画面查看细节 · 滚轮或双指缩放 · 点击背景或按 Esc 关闭</div>
+  </div>
+</div>
+
+<!-- 得分明细浮动窗口 -->
+<div class="score-popup" id="score-popup" hidden>
+  <div class="score-box">
+    <div class="score-head">
+      <span class="score-name" id="score-name">玩家</span>
+      <button class="btn tiny ghost" id="score-close" title="关闭">✕</button>
+    </div>
+    <div class="score-total"><span id="score-total">0</span> 分</div>
+    <div class="score-sub" id="score-sub"></div>
+    <ul class="score-detail" id="score-detail"></ul>
+    <div class="score-foot" id="score-foot"></div>
+  </div>
+</div>
+
+<!-- 远端语音音轨挂载点。必须留在 DOM 里（不能用 display:none），
+     浏览器只在元素处于文档中时才保证音频持续播放。 -->
+<div id="voice-audio" aria-hidden="true"></div>
+
+<script src="./themes/neon/manifest.js?v=11"></script>
+<script src="./themes/theme-manager.js?v=3"></script>
+<script src="./src/cards.js?v=4"></script>
+<script src="./components/citadels-lobby.js?v=8"></script>
+<script src="./components/citadels-spectator.js?v=2"></script>
+<script src="./app.js?v=95"></script>
+</body>
+</html>
