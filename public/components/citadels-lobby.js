@@ -650,6 +650,7 @@
         }
         App.localServerGame = true;
         App.mode = 'net'; App.leavingNetGame = false;
+        Net.startGameRequested = false;
         App.state = null; App.myId = null; App.noticeSeen = 0;
         App.botDebugEntries = [];
         clearGameBoardView();
@@ -666,6 +667,7 @@
       /* ============================== 联机驱动（开局前） ============================== */
       const Net = {
         autoStart: false,
+        startGameRequested: false,
         ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
         reconnectTimer: null, reconnectDelay: 1000, heartbeatTimer: null,
         handedOver: false,   // 已把 socket 交给页面接管
@@ -743,7 +745,7 @@
               App.paused = false; hideEvent(true);
               if (m.state.phase === 'lobby') {
                 if (!App.localServerGame) { renderLobbyRoom(m.state); showScreen('lobby'); }
-                if (this.autoStart) { this.autoStart = false; this.send({ t: 'startGame' }); }
+                if (this.autoStart) { this.autoStart = false; this.requestAutoStart(); }
               } else {
                 this.autoStart = false;
                 handOver(m.state);
@@ -756,7 +758,7 @@
               if (m.state.phase === 'lobby' && App.localServerGame) {
                 App.chatHistory = [];
                 clearGameBoardView();
-                this.send({ t: 'startGame' });
+                this.requestAutoStart();
               } else if (m.state.phase === 'lobby') {
                 App.chatHistory = [];
                 renderLobbyRoom(m.state); showScreen('lobby');
@@ -766,7 +768,12 @@
               break;
             case 'error': this.autoStart = false; toast('✗ ' + m.error); break;
           }
-        }
+        },
+        requestAutoStart() {
+          if (this.startGameRequested) return;
+          this.startGameRequested = true;
+          this.send({ t: 'startGame' });
+        },
       };
 
       /* ============================== 大厅渲染 ============================== */
@@ -950,6 +957,7 @@
         clearNetSession();
         Net.roomId = null;
         Net.handedOver = false;
+        Net.startGameRequested = false;
         started = false;
         App.state = null; App.myId = null; App.leavingNetGame = false;
         App.localServerGame = false; App.lobbyState = null;
