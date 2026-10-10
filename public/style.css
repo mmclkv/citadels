@@ -41,6 +41,7 @@ a{color:var(--gold-d, #a97c15)}
 .screen.active{display:flex;flex-direction:column}
 .mobile-fit-root{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;transform-origin:top left}
 .mobile-menu-toggle{display:none}
+.mobile-top-controls{display:contents}
 #screen-home.active,#screen-setup.active,#screen-lobby.active,#screen-over.active{
   align-items:center;overflow:auto;
   /* 首页/设置/大厅在移动端铺满到刘海下方，用安全区内边距把内容推回可见区（桌面端 env 为 0） */
@@ -1853,7 +1854,7 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
     display:flex!important;flex-direction:column!important;height:auto!important;min-height:0!important;
     overflow-y:auto!important;padding:7px 7px 14px!important;gap:7px}
   #screen-game .mobile-phase-status{order:0;display:flex;flex-direction:column;justify-content:center;
-    min-height:36px;padding:3px 80px 3px 7px;gap:2px;border-bottom:1px solid var(--line)}
+    min-height:46px;padding:3px 120px 3px 7px;gap:2px;border-bottom:1px solid var(--line)}
   #screen-game .mobile-phase-status[hidden]{display:none!important}
   #screen-game .mobile-phase-status strong{font-size:13px;line-height:1.2}
   #screen-game .mobile-phase-status span{font-size:9px;color:var(--gold-d)}
@@ -1999,7 +2000,10 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
     padding:0 4px;border:1px solid var(--line2);border-radius:99px;font-size:8px}
   #screen-game .actionbar{padding:6px 7px calc(7px + env(safe-area-inset-bottom))!important;
     max-height:34dvh;box-shadow:0 -14px 34px rgba(0,0,0,.35)}
-  #screen-game .mobile-menu-toggle{top:8px;bottom:auto;right:8px}
+  #screen-game .mobile-top-controls{position:fixed;top:calc(4px + env(safe-area-inset-top));
+    right:calc(8px + env(safe-area-inset-right));z-index:80;display:flex;align-items:center;gap:6px}
+  #screen-game .mobile-top-controls .mobile-menu-toggle,
+  #screen-game .mobile-top-controls .mobile-side-expand{position:static;flex:0 0 auto;height:38px;margin:0}
   #screen-game .mobile-choice-shelf{margin:0 0 7px}
 
   .mobile-detail{background:rgba(0,4,9,.84)!important;padding:calc(8px + env(safe-area-inset-top)) 7px calc(8px + env(safe-area-inset-bottom))!important}

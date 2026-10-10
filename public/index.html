@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=71">
+  <link rel="stylesheet" href="./style.css?v=72">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=16">
 </head>
 <body>
@@ -154,11 +154,13 @@
     <button class="btn primary" id="chat-send" type="submit">发送</button>
     <button class="btn ghost tiny" id="chat-close" type="button" title="关闭发言框" aria-label="关闭发言框">×</button>
   </form>
-  <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
-    <span aria-hidden="true">☰</span><span>菜单</span>
-  </button>
-  <button class="mobile-side-expand" id="btn-side-panel-mobile-toggle" type="button" hidden
-    aria-label="展开右侧边栏" aria-controls="side-panel-body" title="展开右侧边栏">‹</button>
+  <div class="mobile-top-controls">
+    <button class="mobile-side-expand" id="btn-side-panel-mobile-toggle" type="button" hidden
+      aria-label="展开右侧边栏" aria-controls="side-panel-body" title="展开右侧边栏">‹</button>
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="topbar" title="展开游戏菜单">
+      <span aria-hidden="true">☰</span><span>菜单</span>
+    </button>
+  </div>
   <aside class="bot-debug-console" id="bot-debug-console" hidden aria-label="电脑决策调试控制台">
     <div class="bot-debug-head">
       <h3>电脑决策调试</h3>
