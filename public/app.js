@@ -3173,10 +3173,47 @@
   function mobileDistrictName(name) {
     return String(name || '').slice(0, 3);
   }
+  function mobilePublicEffectItems(s) {
+    const effects = s.effects || {};
+    if (!App.mobileEffectMemo || App.mobileEffectMemo.roomId !== s.roomId || App.mobileEffectMemo.round !== s.round) {
+      App.mobileEffectMemo = { roomId: s.roomId, round: s.round };
+    }
+    const memo = App.mobileEffectMemo;
+    const items = [];
+    const label = number => {
+      const character = (s.charDeck || []).find(c => Number(c.num) === Number(number));
+      return number + ' 号' + (character ? '·' + character.name : '');
+    };
+    [['assassinated', '被刺杀', 'danger'], ['thief', '被盗贼盯上', 'warn'],
+     ['bewitched', '被施咒', 'magic']].forEach(([key, text, tone]) => {
+      const live = effects[key] != null;
+      if (live) memo[key] = effects[key];
+      if (memo[key] != null) items.push({ tone, text: label(memo[key]) + ' ' + text + (live ? '' : '（已生效）') });
+    });
+    [['magistrate', '逮捕令', 'magic'], ['blackmailer', '威胁标记', 'warn']].forEach(([key, text, tone]) => {
+      const nums = effects[key] && effects[key].nums;
+      // 只使用公开号码，并排序，避免宣告顺序透露真标记。
+      if (nums && nums.length) memo[key] = nums.filter(n => n != null).slice().sort((a, b) => Number(a) - Number(b));
+      if (memo[key] && memo[key].length) items.push({ tone, text: text + ' ' + memo[key].map(label).join('、') });
+    });
+    if ((s.charDeck || []).some(c => c.id === 'tax_collector')) {
+      items.push({ tone: 'warn', text: '累计建筑税：' + (effects.taxCollectorGold || 0) + ' 枚金币' });
+    }
+    return items;
+  }
+  function renderMobilePublicEffects(s) {
+    const box = $('#mobile-public-effects');
+    if (!box) return;
+    const items = mobilePublicEffectItems(s);
+    box.hidden = !items.length;
+    box.innerHTML = items.map(item => '<span class="mobile-public-effect ' + item.tone + '">' +
+      escapeHtml(item.text) + '</span>').join('');
+  }
   function renderMobilePlayers(s) {
     const wrap = $('#opponents');
     const arena = $('#table-arena');
     if (!wrap) return;
+    renderMobilePublicEffects(s);
     wrap.dataset.layout = 'mobile-grid';
     wrap.dataset.players = String(s.players.length);
     wrap.style.height = '';
