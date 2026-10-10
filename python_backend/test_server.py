@@ -1044,6 +1044,17 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             "type": "http", "domain": "game.example", "remotePort": None})
         self.assertNotIn("private-token", body.decode("utf-8"))
 
+    async def test_version_endpoint_matches_startup_identity(self) -> None:
+        headers: dict[str, str] = {}
+        code, body = await _request(self.port, "/api/version", response_headers=headers)
+        self.assertEqual(code, 200)
+        self.assertEqual(headers.get("cache-control"), "no-store")
+        release = json.loads(body)
+        self.assertIn(release["channel"], ("stable", "development"))
+        self.assertEqual(set(release), {"version", "baseVersion", "channel", "commit", "tag", "dirty"})
+        _, startup = await _request(self.port, "/api/server/startup")
+        self.assertEqual(json.loads(startup)["release"], release)
+
     async def test_loopback_codex_gateway_protocol_and_input_validation(self) -> None:
         calls = []
         async def fake_runner(prompt):

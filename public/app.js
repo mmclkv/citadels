@@ -4955,6 +4955,8 @@
         ? '游戏后端：Python（不使用独立原生 worker）'
         : 'worker：' + (state.running ? '运行中' : state.exists ? '已编译但未运行' : '未找到编译产物');
       if (frp.enabled) summary.textContent += '　FRP：' + (frp.running ? '运行中' : '未运行');
+      if (data.release) summary.textContent += '　版本：' + data.release.version +
+        '（' + (data.release.channel === 'stable' ? '稳定版' : '开发版') + '）';
       const log = el('div', 'server-console-log');
       const entries = Array.isArray(data.logs) ? data.logs : [];
       if (!entries.length) log.textContent = '暂无启动阶段日志。';
