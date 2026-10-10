@@ -3250,7 +3250,8 @@
       d.dataset.seat = p.seat;
       d.setAttribute('role', 'button'); d.tabIndex = 0;
       d.setAttribute('aria-label', '查看' + p.name + '的详细信息');
-      const role = s.phase === 'action' && p.revealedCharNum != null
+      // 本轮已公开的角色保留到轮末确认；下一轮选角才隐藏。
+      const role = s.phase !== 'draft' && p.revealedCharNum != null
         ? '<span class="mobile-role-tag"><span class="mobile-role-no">' + p.revealedCharNum + '</span><span>' +
           escapeHtml((charMeta(p.revealedCharId, p.revealedCharNum) || {}).name || '') + '</span></span>'
         : s.phase === 'draft' && p.hasChosen && p.draftComplete !== false
@@ -3423,7 +3424,7 @@
       player.handCount + '</b></span>';
     body.appendChild(stats);
     const knownRoles = player.id === App.myId ? (player.chars || []) :
-      s.phase === 'action' && player.revealedCharNum != null
+      s.phase !== 'draft' && player.revealedCharNum != null
         ? [charMeta(player.revealedCharId, player.revealedCharNum)].filter(Boolean) : [];
     const scorePanel = el('div', 'mobile-detail-score-panel' + (!knownRoles.length ? ' no-role' : ''));
     if (knownRoles.length) {
