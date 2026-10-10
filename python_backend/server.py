@@ -1133,8 +1133,6 @@ class PythonServer:
         if action.get("type") != "ability":
             return
         turn = previous.get("turn") or {}
-        for card in (turn.get("pending") or {}).get("cards") or []:
-            cards_by_uid[card.get("uid")] = card
         role_id = turn.get("charId")
         if not isinstance(role_id, str):
             return
@@ -1183,8 +1181,6 @@ class PythonServer:
         kind = action.get("type")
         turn = previous.get("turn") or {}
         pending = turn.get("pending") or {}
-        for card in (turn.get("pending") or {}).get("cards") or []:
-            cards_by_uid[card.get("uid")] = card
         role_id = turn.get("charId")
         if not isinstance(role_id, str):
             role_id = None
@@ -1470,23 +1466,13 @@ class PythonServer:
             return f"税务官收取了{amount}枚建筑税"
         if kind == "district_effect":
             mode = action.get("name")
-            uid = action.get("uid")
-            card_uid = action.get("secondaryUid") or action.get("cardUid")
-            district = cards_by_uid.get(card_uid or uid, {})
-            card_name = district.get("name", "建筑")
-            target = by_id.get(action.get("target"), {}).get("name", "对方")
-            names = {"framework": f"拆除脚手架，免费建造『{card_name}』",
-                     "necropolis": f"拆除『{cards_by_uid.get(uid, {}).get('name', '建筑')}』，免费建造大墓园",
-                     "armory": f"牺牲军械库，摧毁{target}的『{card_name}』",
-                     "thieves_begin": "盗贼巢穴：选择用手牌抵扣造价",
-                     "thieves_discard": f"用『{card_name}』抵扣1金币",
-                     "thieves_pay": "确认支付并建造盗贼巢穴", "thieves_cancel": "取消建造",
-                     "lighthouse_pick": f"灯塔：取得『{card_name}』并洗牌", "lighthouse_skip": "灯塔：放弃选牌并洗牌",
-                     "bell_enable": "钟楼：将完工门槛设为7栋", "bell_skip": "钟楼：保持当前完工门槛",
-                     "ballroom_thanks": "舞厅：向皇冠持有者致谢，继续回合", "ballroom_skip": "舞厅：不致谢，跳过本回合",
-                     "theater_swap": f"剧院：用你的第{int(uid)+1 if str(uid).isdigit() else 1}个角色交换{target}的随机角色",
-                     "theater_skip": "剧院：不交换角色"}
-            label = names.get(mode, "发动建筑效果")
+            # Legal-action labels may contain private choices; public battle
+            # reports must not reveal the card selected into a player's hand.
+            if mode == "lighthouse_pick":
+                return "灯塔：取得1张建筑牌并洗牌（牌面不公开）"
+            if mode == "thieves_discard":
+                return "盗贼巢穴：弃1张手牌抵扣1金币"
+            return PythonServer._native_action_view(state, action)["label"]
         elif kind in ("draft_pick", "draft_discard"):
             return "选取了一个角色" if kind == "draft_pick" else "弃置了一个角色"
         if kind in ("assassin_declare", "thief_declare", "witch_declare"):

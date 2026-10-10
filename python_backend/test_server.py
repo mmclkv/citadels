@@ -210,6 +210,38 @@ class ServerArgumentTests(unittest.TestCase):
         self.assertEqual(PythonServer._game_action_log_text(state, {"type": "tax_collect"}),
                          "税务官收取了7枚建筑税")
 
+    def test_wizard_notices_with_visible_pending_cards_do_not_crash_or_leak(self):
+        for name in ("庄园", "秘密宝库", "灯塔"):
+            for kind in ("wizard_card", "wizard_take", "wizard_build", "ability"):
+                with self.subTest(name=name, kind=kind):
+                    previous = {"turn": {"charId": "wizard", "pending": {
+                        "kind": "wizard_card", "cards": [{"uid": "secret", "name": name}]}},
+                        "players": [{"id": "p1", "name": "法师"}], "notices": []}
+                    updated = {"players": previous["players"], "notices": []}
+                    action = {"type": kind, "uid": "secret"}
+                    PythonServer._append_role_ability_notice(previous, updated, "p1", action)
+                    PythonServer._append_role_effect_detail_notice(previous, updated, "p1", action)
+                    self.assertNotIn(name, json.dumps(updated["notices"], ensure_ascii=False))
+
+    def test_new_district_battle_reports_resolve_labels_without_private_cards(self):
+        state = {"players": [{"id": "p1", "name": "甲", "hand": [
+            {"uid": "secret", "name": "秘密宝库"}], "city": []}],
+            "turn": {"pending": {"kind": "lighthouse", "cards": [
+                {"uid": "secret", "name": "秘密宝库"}]}}}
+        modes = ["framework", "necropolis", "armory", "thieves_begin", "thieves_discard",
+                 "thieves_pay", "thieves_cancel", "lighthouse_pick", "lighthouse_skip",
+                 "bell_enable", "bell_skip", "ballroom_thanks", "ballroom_skip",
+                 "theater_swap", "theater_skip"]
+        for mode in modes:
+            with self.subTest(mode=mode):
+                action = {"type": "district_effect", "name": mode,
+                          "uid": "0" if mode == "theater_swap" else "secret", "target": "p1"}
+                text = PythonServer._game_action_log_text(state, action)
+                self.assertTrue(text)
+                self.assertNotEqual(text, "district_effect")
+                if mode in ("lighthouse_pick", "thieves_discard"):
+                    self.assertNotIn("秘密宝库", text)
+
     def test_role_ability_notice_restores_public_popup_payload(self) -> None:
         previous = {"noticeSeq": 2, "notices": [], "turn": {"charId": "merchant"},
                     "players": [{"id": "p1", "name": "甲"}]}
@@ -959,6 +991,40 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("拒绝处理游戏行动", result["error"])
         room = app.rooms.create_room("Host", {"playerCount": 2})
         self.assertFalse(hasattr(app.rooms, "start_room"))
+
+    async def test_npc_wizard_continues_after_selecting_new_district(self):
+        state = create_game({"seed": 1, "endDistricts": 8, "charSetMode": "dark",
+            "seats": [{"id": "bot", "name": "困难电脑"}, {"id": "human", "name": "人类"}]})
+        card = {**next(card for card in cards.DISTRICTS if card["en"] == "Secret Vault"),
+                "uid": "d81", "purpleEffect": "secretVault"}
+        state["phase"] = "action"
+        state["players"][0].update(isBot=True, botType="npc", botLevel="hard", chars=["wizard"])
+        state["players"][1]["hand"] = [card]
+        state["turn"] = {"playerIdx": 0, "charId": "wizard", "num": 3, "phase": "main",
+                         "pending": {"kind": "wizard_card", "targetIdx": 1, "cards": [card]}}
+        selected = json.loads(json.dumps(state))
+        selected["turn"]["pending"].update(kind="wizard_choice", uid="d81")
+        taken = json.loads(json.dumps(selected))
+        taken["turn"]["pending"] = None
+        taken["players"][1]["hand"] = []
+        taken["players"][0]["hand"].append(card)
+        # The native protocol does not contain Python's retained battle log.
+        for snapshot in (selected, taken):
+            snapshot.pop("log", None)
+        room = {"id": "wizard-regression", "state": state, "config": {"botPace": 0}}
+        actions = [{"type": "wizard_card", "uid": "d81"}, {"type": "wizard_take"}]
+        worker = self.app.native_worker_manager.game_worker
+        with mock.patch.object(worker, "apply", side_effect=[selected, taken]), \
+             mock.patch.object(worker, "decide_npc", side_effect=[*actions, None]), \
+             mock.patch.object(self.app, "_bot_available_actions", new=mock.AsyncMock(
+                 side_effect=[{"actions": [action]} for action in actions] + [{"actions": []}])), \
+             mock.patch.object(self.app, "_broadcast_state", new=mock.AsyncMock()):
+            self.app._schedule_bot(room)
+            await asyncio.wait_for(room["botTask"], 3)
+        self.assertIsNone(state["turn"]["pending"])
+        self.assertTrue(any(item["uid"] == "d81" for item in state["players"][0]["hand"]))
+        self.assertEqual(len(state["log"]), 2)
+        self.assertFalse(any(item["kind"] == "decision_error" for item in room["botDebug"]))
 
     async def test_http_static_and_python_api(self) -> None:
         code, body = await _request(self.port, "/api/rooms")
