@@ -3250,8 +3250,10 @@
       d.dataset.seat = p.seat;
       d.setAttribute('role', 'button'); d.tabIndex = 0;
       d.setAttribute('aria-label', '查看' + p.name + '的详细信息');
-      // 本轮已公开的角色保留到轮末确认；下一轮选角才隐藏。
-      const role = s.phase !== 'draft' && p.revealedCharNum != null
+      // 选角完成后本人可见自己的角色；其他玩家仍只显示已选择。
+      // 本轮已公开的角色保留到轮末确认。
+      const role = p.revealedCharNum != null && (s.phase !== 'draft' ||
+        p.id === App.myId && p.hasChosen && p.draftComplete !== false)
         ? '<span class="mobile-role-tag"><span class="mobile-role-no">' + p.revealedCharNum + '</span><span>' +
           escapeHtml((charMeta(p.revealedCharId, p.revealedCharNum) || {}).name || '') + '</span></span>'
         : s.phase === 'draft' && p.hasChosen && p.draftComplete !== false

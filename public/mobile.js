@@ -268,7 +268,7 @@
     const candidates=legal().filter(a=>a.type===M.targetType);const targetIds=new Set(candidates.map(a=>a.target));
     $('players').classList.toggle('targeting',!!M.targetType||!!stagePlayers);
     $('players').innerHTML=orderedPlayers(s.players).map(p=>{
-      const ch=s.phase!=='draft'&&p.revealedCharId?role(p.revealedCharId):null;
+      const ch=p.revealedCharId&&(s.phase!=='draft'||p.id===M.id&&p.hasChosen&&p.draftComplete!==false)?role(p.revealedCharId):null;
       const isTarget=stagePlayers?stagePlayers.has(String(p.id)):targetIds.has(p.id);
       const bub=bubbleFor(p.id);
       return `<article class="player-row ${p.id===M.id?'self ':''}${p.id===active?'active-turn ':''}${p.threat?'threat ':''}${M.targetType||stagePlayers?(isTarget?'target-selectable':'target-ineligible'):''}" data-player="${attr(p.id)}">
