@@ -1069,13 +1069,15 @@ class PythonServer:
         threat = (previous.get("effects") or {}).get("blackmailer") or {}
         is_real = (bool(pending.get("signed")) if pending.get("kind") == "blackmailer_threat"
                    else "signed" in threat and threat["signed"] == reaction.get("num"))
-        amount = max(0, int(players_before[victim_idx].get("gold") or 0) -
-                     int(players_after[victim_idx].get("gold") or 0)) if revealed and is_real else 0
+        amount = max(0, int(players_after[blackmailer_idx].get("gold") or 0) -
+                     int(players_before[blackmailer_idx].get("gold") or 0)) if revealed and is_real and victim_idx != blackmailer_idx else 0
         if revealed and is_real:
             # Only report successful confiscation; keep this event tied to the
             # actual authoritative balance change rather than the declaration.
-            if (int(players_after[blackmailer_idx].get("gold") or 0) -
-                    int(players_before[blackmailer_idx].get("gold") or 0) != amount):
+            # The victim may already have received its post-threat character
+            # bonus, so its net balance decrease is not the confiscated amount.
+            expected = int(players_before[victim_idx].get("gold") or 0) if victim_idx != blackmailer_idx else 0
+            if amount != expected:
                 return
         victim = players_before[victim_idx]
         blackmailer = players_before[blackmailer_idx]
@@ -1418,9 +1420,11 @@ class PythonServer:
             before = state.get("players") or []
             after = (updated or {}).get("players") or []
             amount = 0
-            if isinstance(target_idx, int) and 0 <= target_idx < len(before) and target_idx < len(after):
-                amount = max(0, int(before[target_idx].get("gold") or 0) -
-                             int(after[target_idx].get("gold") or 0))
+            owner_idx = reaction.get("playerIdx")
+            if (isinstance(owner_idx, int) and 0 <= owner_idx < len(before) and
+                    owner_idx < len(after) and owner_idx != target_idx):
+                amount = max(0, int(after[owner_idx].get("gold") or 0) -
+                             int(before[owner_idx].get("gold") or 0))
             return (f"【勒索者】对{target}发动勒索，翻开真威胁标记『带血的刀』；"
                     f"没收目标的全部{amount}枚金币，交给{owner}。")
         if kind == "monk_take":

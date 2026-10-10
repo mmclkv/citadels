@@ -233,23 +233,25 @@ int main() {
     require(game.apply(tax, 0, collect), "collect tax");
     require(tax.players[0].gold == 3 && tax.tax_collector_gold == 0, "tax bank claimed");
 
-    // Blackmailer: pause the marked role before resources; refuse, then resolve at owner decision.
+    // Blackmailer: gather resources first; refuse, then resolve at owner decision.
     NativeGameState black;
     black.phase = NativePhase::Action; black.active_player = 0; black.turn_phase = "main";
     black.players = {player("blackmailer", "blackmailer", 2), player("marked", "wizard", 6)};
     black.blackmailer_nums = {3}; black.blackmailer_signed = 3; black.blackmailer_player = 0;
     black.call_queue = {{"wizard", 3, 1}}; black.call_index = -1;
-    require(black.end_turn() && black.pending_kind == "blackmailer_threat" && game.next_player(black) == 1,
-      "blackmailer blocks marked turn before resources");
+    require(black.end_turn() && black.pending_kind.empty() && game.next_player(black) == 1,
+      "blackmailer does not interrupt resource gathering");
+    require(black.take_gold() && black.pending_kind == "blackmailer_threat",
+      "blackmailer interrupts immediately after resources");
     NativeSearchAction refuse; refuse.type = ActionType::BlackmailerRefuse;
     require(game.apply(black, 1, refuse) && game.next_player(black) == 0, "blackmailer refusal response");
     NativeSearchAction reveal; reveal.type = ActionType::Reaction; reveal.name = "use";
     require(game.apply(black, 0, reveal), "blackmailer reveals real token");
-    require(black.players[0].gold == 8 && black.players[1].gold == 0 && black.pending_kind.empty(),
+    require(black.players[0].gold == 10 && black.players[1].gold == 0 && black.pending_kind.empty() && black.resources_taken,
       "real threat takes all gold and unfreezes target");
 
     // Calling the King transfers the crown immediately, even when Blackmailer
-    // pauses that role before it can take resources.
+    // pauses that role after it takes resources.
     NativeGameState blackmailed_king;
     blackmailed_king.phase = NativePhase::Action; blackmailed_king.active_player = 0;
     blackmailed_king.players = {player("previous", "assassin", 2), player("king", "assassin", 2),
@@ -258,10 +260,12 @@ int main() {
     blackmailed_king.blackmailer_nums = {4}; blackmailed_king.blackmailer_signed = 4;
     blackmailed_king.blackmailer_player = 2;
     blackmailed_king.call_queue = {{"king", 4, 1}}; blackmailed_king.call_index = -1;
-    require(blackmailed_king.end_turn() && blackmailed_king.pending_kind == "blackmailer_threat",
-      "Blackmailer should pause the called King before resources");
+    require(blackmailed_king.end_turn() && blackmailed_king.pending_kind.empty(),
+      "called King must gather resources before Blackmailer pauses it");
     require(!blackmailed_king.players[0].has_crown && blackmailed_king.players[1].has_crown,
       "King should receive the crown before Blackmailer interruption");
+    require(blackmailed_king.take_gold() && blackmailed_king.pending_kind == "blackmailer_threat",
+      "King resolves threat after gathering resources");
 
     std::cout << "dark-role-native-rules-ok\n";
     return 0;

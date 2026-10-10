@@ -313,6 +313,7 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
     if (build && build->is_object()) {
       state.reaction_uid = string_field(*build, "uid");
       state.reaction_build = true;
+      state.building_mode = string_field(*build, "mode");
     }
     state.reaction_num = int_field(*reaction, "num", -1);
     if (state.reaction_kind == "blackmailer") {

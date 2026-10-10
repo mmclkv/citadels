@@ -139,6 +139,7 @@ struct NativeGameState {
   int reaction_num = -1;
   std::string reaction_uid;
   bool reaction_build = false;
+  std::string building_mode;
   int pending_target = -1;
   int pending_amount = 0;
   int pending_from_crown = -1;
@@ -478,6 +479,8 @@ struct NativeGameState {
     if (!p || resources_taken) return false;
     p->gold += plan_take_gold(p->role_id,
       turn_phase == "witch_resume" ? ResourcePhase::WitchResume : ResourcePhase::Main).gold;
+    // Character bonuses must wait until any post-resource threat is resolved.
+    if (turn_phase == "main" || turn_phase.empty()) p->gold -= role_gold_bonus(p->role_id);
     resources_taken = true;
     if (turn_phase == "bewitched") return finish_bewitched_turn();
     after_resources();
@@ -496,6 +499,7 @@ struct NativeGameState {
       draw_three ? DistrictDrawEffect::Observatory : (keep_both ? DistrictDrawEffect::Library : effect));
     auto cards = deck.draw(plan.drawn, rng);
     p->gold += plan.gold;
+    if (turn_phase == "main" || turn_phase.empty()) p->gold -= role_gold_bonus(p->role_id);
     resources_taken = true;
     if (plan.keep_all || cards.empty()) {
       p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()),
@@ -509,9 +513,53 @@ struct NativeGameState {
     return true;
   }
 
+  bool awaiting_blackmail() const {
+    const auto* p = active();
+    if (!p) return false;
+    const int number = role_number(p->role_id);
+    return (turn_phase == "main" || turn_phase.empty()) && blackmailer_player >= 0 &&
+        blackmailer_player < static_cast<int>(players.size()) &&
+        assassinated != number && bewitched != number &&
+        std::find(blackmailer_nums.begin(), blackmailer_nums.end(), number) != blackmailer_nums.end() &&
+        std::find(blackmailer_done.begin(), blackmailer_done.end(), number) == blackmailer_done.end();
+  }
+
   void after_resources() {
     auto* p = active();
-    if (!p || turn_phase == "witch_resume" || ability_used || !pending_kind.empty()) return;
+    if (!p || !resources_taken || !pending_kind.empty() || !reaction_kind.empty() ||
+        turn_phase == "hospital" || turn_phase == "bewitched") return;
+    if (awaiting_blackmail()) {
+      const int number = role_number(p->role_id);
+      pending_kind = "blackmailer_threat"; pending_target = active_player;
+      pending_first = number; pending_signed = blackmailer_signed == number;
+      return;
+    }
+    if (turn_phase == "witch_resume" || ability_used) return;
+    if (p->role_id == "merchant" && !bonus_done) {
+      p->gold += role_gold_bonus(p->role_id);
+      bonus_done = true;
+    }
+    if (p->role_id == "noble" && !income_taken) {
+      const int count = static_cast<int>(std::count_if(p->city.begin(), p->city.end(),
+        [](const NativeDistrict& d) { return d.card.color == "yellow" || d.effect == "anyColorIncome"; }));
+      auto cards = deck.draw(count, rng);
+      p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
+      income_taken = true;
+    }
+    if (p->role_id == "queen" && !bonus_done) {
+      int holder = -1;
+      for (size_t i = 0; i < players.size(); ++i)
+        if (std::any_of(players[i].role_ids.begin(), players[i].role_ids.end(),
+            [&](const std::string& role) { return role_number(role) == 4; })) holder = static_cast<int>(i);
+      if (holder >= 0) {
+        if (assassinated == 4) pending_queen = active_player;
+        else {
+          const int distance = std::abs(active_player - holder);
+          if (distance == 1 || distance == static_cast<int>(players.size()) - 1) p->gold += 3;
+        }
+      }
+      bonus_done = true;
+    }
     if (p->role_id == "architect" && !bonus_done) {
       auto bonus = deck.draw(2, rng);
       p->hand.insert(p->hand.end(), std::make_move_iterator(bonus.begin()),
@@ -616,17 +664,36 @@ struct NativeGameState {
     auto& source = players[pending_target].hand;
     auto it = std::find_if(source.begin(), source.end(), [&](const DistrictCard& card) { return card.uid == pending_uid; });
     if (it == source.end()) return false;
-    if (!build_now) p->hand.push_back(*it);
-    else {
-      if (p->gold < it->cost) return false;
-      DistrictCard card = *it;
-      p->gold -= card.cost; spent_on_build += card.cost;
-      p->city.push_back({card, card.name, card.purple_effect, {},
-                         card.purple_effect == "immune", false, round});
-      charge_build_tax(active_player);
-      if (first_to_finish < 0 && p->city.size() >= static_cast<size_t>(end_districts)) first_to_finish = active_player;
-    }
+    const DistrictCard card = *it;
+    if (build_now && p->gold < card.cost) return false;
+    p->hand.push_back(card);
     source.erase(it); pending_cards.clear(); pending_uid.clear(); pending_target = -1; pending_kind.clear(); ability_used = true;
+    if (!build_now) return true;
+    if (magistrate_player >= 0 && magistrate_player < static_cast<int>(players.size()) &&
+        magistrate_player != active_player && !magistrate_claimed && magistrate_signed == role_number(p->role_id)) {
+      magistrate_claimed = true;
+      if (std::none_of(players[magistrate_player].city.begin(), players[magistrate_player].city.end(),
+          [&](const NativeDistrict& d) { return d.name == card.name; })) {
+        reaction_kind = "magistrate"; reaction_player = magistrate_player;
+        reaction_target = magistrate_player; reaction_uid = card.uid; reaction_build = true;
+        building_mode = "wizard";
+        return true;
+      }
+    }
+    return build_wizard_card(card.uid);
+  }
+
+  bool build_wizard_card(const std::string& uid, int tax_payer = -1, bool suppress_finish = false) {
+    auto* p = active();
+    if (!p) return false;
+    auto card = std::find_if(p->hand.begin(), p->hand.end(), [&](const DistrictCard& c) { return c.uid == uid; });
+    if (card == p->hand.end() || p->gold < card->cost) return false;
+    const DistrictCard copy = *card;
+    p->gold -= copy.cost; spent_on_build += copy.cost;
+    p->city.push_back({copy, copy.name, copy.purple_effect, {}, copy.purple_effect == "immune", false, round});
+    p->hand.erase(card);
+    charge_build_tax(tax_payer < 0 ? active_player : tax_payer);
+    if (!suppress_finish && first_to_finish < 0 && p->city.size() >= static_cast<size_t>(end_districts)) first_to_finish = active_player;
     return true;
   }
 
@@ -639,30 +706,32 @@ struct NativeGameState {
       const int owner = blackmailer_player;
       const bool real = pending_signed;
       if (real) blackmailer_revealed_real.push_back(pending_first);
-      if (real && owner >= 0 && owner < static_cast<int>(players.size())) {
+      if (real && owner >= 0 && owner < static_cast<int>(players.size()) && owner != active_player) {
         players[owner].gold += target->gold; target->gold = 0;
       }
       blackmailer_done.push_back(pending_first);
       pending_kind.clear(); pending_target = -1; pending_first = -1; pending_signed = -1;
       reaction_kind.clear(); reaction_player = -1;
-      resources_taken = false;
+      after_resources();
       return true;
     }
     // The marked player refused the ransom; this branch is the blackmailer's
     // subsequent choice not to expose the token (the mark expires this round).
     blackmailer_done.push_back(pending_first);
     pending_kind.clear(); pending_target = -1; pending_first = -1; pending_signed = -1;
-    reaction_kind.clear(); reaction_player = -1; resources_taken = false; return true;
+    reaction_kind.clear(); reaction_player = -1; after_resources(); return true;
   }
 
   bool blackmailer_bribe() {
     auto* target = active();
-    if (!target || pending_kind != "blackmailer_threat") return false;
-    target->gold -= target->gold / 2;
+    if (!target || pending_kind != "blackmailer_threat" || blackmailer_player < 0 ||
+        blackmailer_player >= static_cast<int>(players.size())) return false;
+    const int amount = target->gold / 2;
+    target->gold -= amount; players[blackmailer_player].gold += amount;
     blackmailer_nums.erase(std::remove(blackmailer_nums.begin(), blackmailer_nums.end(), pending_first), blackmailer_nums.end());
     blackmailer_done.push_back(pending_first);
     pending_kind.clear(); pending_target = -1; pending_first = -1; pending_signed = -1;
-    resources_taken = false; return true;
+    after_resources(); return true;
   }
 
   bool blackmailer_refuse() {
@@ -900,7 +969,11 @@ struct NativeGameState {
     const bool take = confiscate && !std::any_of(players[magistrate].city.begin(), players[magistrate].city.end(),
       [&](const NativeDistrict& d) { return d.name == copy.name; });
     reaction_kind.clear(); reaction_build = false; reaction_uid.clear(); reaction_target = -1; reaction_player = -1;
-    if (!build(copy.uid, copy.name, copy.purple_effect, take ? magistrate : builder, true)) return false;
+    const bool wizard_build = building_mode == "wizard";
+    building_mode.clear();
+    if (wizard_build) {
+      if (!build_wizard_card(copy.uid, take ? magistrate : builder, true)) return false;
+    } else if (!build(copy.uid, copy.name, copy.purple_effect, take ? magistrate : builder, true)) return false;
     if (take) {
       auto& city = players[builder].city;
       auto built = std::find_if(city.begin(), city.end(), [&](const NativeDistrict& d) { return d.card.uid == copy.uid; });
@@ -1034,46 +1107,9 @@ struct NativeGameState {
         ability_used = false; bonus_done = false;
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
         // The crown changes hands as soon as role 4 is called. Resolve it
-        // before interrupting the turn for a Blackmailer threat; that
-        // response pauses the role but must not postpone its crown effect.
+        // before resources and any subsequent Blackmailer threat.
         if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
           for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
-        }
-        if (blackmailer_player >= 0 &&
-            bewitched != entry.number &&
-            std::find(blackmailer_nums.begin(), blackmailer_nums.end(), entry.number) != blackmailer_nums.end() &&
-            std::find(blackmailer_done.begin(), blackmailer_done.end(), entry.number) == blackmailer_done.end()) {
-          active_player = entry.player;
-          players[active_player].role_id = entry.char_id;
-          turn_phase = "main";
-          resources_taken = false; income_taken = false; monk_extra_taken = false;
-          builds = 0; spent_on_build = 0; ability_used = false;
-          used_lab = false; used_smithy = false; used_museum = false;
-          pending_kind = "blackmailer_threat"; pending_target = entry.player;
-          pending_first = entry.number; pending_signed = blackmailer_signed == entry.number;
-          return true;
-        }
-        if (entry.char_id == "noble") {
-          const int count = static_cast<int>(std::count_if(players[entry.player].city.begin(), players[entry.player].city.end(),
-            [](const NativeDistrict& district) { return district.card.color == "yellow" || district.effect == "anyColorIncome"; }));
-          auto cards = deck.draw(count, rng);
-          players[entry.player].hand.insert(players[entry.player].hand.end(),
-            std::make_move_iterator(cards.begin()), std::make_move_iterator(cards.end()));
-          income_taken = true;
-        }
-        if (entry.char_id == "queen") {
-          int holder = -1;
-          for (size_t i = 0; i < players.size(); ++i)
-            if (std::any_of(players[i].role_ids.begin(), players[i].role_ids.end(), [&](const std::string& role) {
-              return role_number(role) == 4;
-            })) holder = static_cast<int>(i);
-          if (holder >= 0) {
-            if (assassinated == 4) pending_queen = entry.player;
-            else {
-              const int distance = std::abs(entry.player - holder);
-              if (distance == 1 || distance == static_cast<int>(players.size()) - 1) players[entry.player].gold += 3;
-            }
-          }
         }
         return true;
       }

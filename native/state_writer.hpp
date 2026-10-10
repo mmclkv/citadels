@@ -256,6 +256,10 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     out << ",\"playerIdx\":" << state.reaction_player << ",\"targetIdx\":" << state.reaction_target
         << ",\"num\":" << state.reaction_num << ",\"prompt\":";
     write_json_string(out, state.reaction_kind == "graveyard" ? "是否支付 1 金将建筑收入手牌？" : "请选择是否发动响应效果");
+    if (state.reaction_build) {
+      out << ",\"build\":{\"uid\":"; write_json_string(out, state.reaction_uid);
+      out << ",\"mode\":"; write_json_string(out, state.building_mode); out << '}';
+    }
     out << ",\"queue\":[";
     for (size_t i = 0; i < state.reaction_queue.size(); ++i) { if (i) out << ','; out << state.reaction_queue[i]; }
     out << ']';
