@@ -26,6 +26,13 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
   result.rng = JsRng(seed ^ 0xA511E9B3u);
 
   std::vector<DistrictCard*> hidden_cards;
+  std::vector<size_t> building_payment_slots;
+  if (result.active_player >= 0 && result.active_player != viewer && result.building_mode == "thievesDen") {
+    const auto& hand = result.players[result.active_player].hand;
+    for (size_t slot = 0; slot < hand.size(); ++slot)
+      if (std::find(result.building_cards.begin(), result.building_cards.end(), hand[slot].uid) != result.building_cards.end())
+        building_payment_slots.push_back(slot);
+  }
   const bool viewer_has_seen_wizard_hand = result.active_player == viewer &&
       (result.pending_kind == "wizard_card" || result.pending_kind == "wizard_choice") &&
       result.pending_target >= 0 && result.pending_target < static_cast<int>(result.players.size());
@@ -45,9 +52,10 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
     for (auto& district : result.players[player].city)
       for (auto& card : district.museum_cards) hidden_cards.push_back(&card);
   }
-  for (auto& card : result.deck.deck_cards()) hidden_cards.push_back(&card);
+  const bool lighthouse_viewer = result.pending_kind == "lighthouse" && result.pending_target == viewer;
+  if (!lighthouse_viewer) for (auto& card : result.deck.deck_cards()) hidden_cards.push_back(&card);
   for (auto& card : result.deck.discard_cards()) hidden_cards.push_back(&card);
-  if (result.active_player != viewer)
+  if (result.active_player != viewer && result.pending_kind != "lighthouse")
     for (auto& card : result.pending_cards) hidden_cards.push_back(&card);
 
   std::vector<DistrictCard> shuffled_cards;
@@ -60,6 +68,11 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
   std::shuffle(shuffled_cards.begin(), shuffled_cards.end(), rng);
   for (size_t i = 0; i < hidden_cards.size(); ++i) *hidden_cards[i] = std::move(shuffled_cards[i]);
 
+  if (result.pending_kind == "lighthouse") result.pending_cards = result.deck.deck_cards();
+  if (!building_payment_slots.empty()) {
+    result.building_cards.clear();
+    for (size_t slot : building_payment_slots) result.building_cards.push_back(result.players[result.active_player].hand[slot].uid);
+  }
   std::vector<std::string*> hidden_roles;
   std::vector<std::string> publicly_called_roles;
   if (result.phase == NativePhase::Action && !result.call_queue.empty()) {

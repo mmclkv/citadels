@@ -28,7 +28,7 @@ inline bool can_build(const BuildCard& card, const BuildContext& context) {
   const bool green_free = context.role_id == "businessman" &&
                           !context.witch_resume && card.color == "green";
   if (!green_free && context.builds >= context.build_limit) return false;
-  return context.same_name_count < 1 + context.quarry_count;
+  return context.same_name_count == 0 || context.quarry_count > 0 || context.role_id == "wizard";
 }
 
 }  // namespace citadels::native

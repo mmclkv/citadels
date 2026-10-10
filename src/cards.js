@@ -28,7 +28,7 @@
    *   anyColorScore 鬼城：计分时视为任意颜色
    *   anyColorIncome 魔法学院：收入时视为任意颜色
    *   smithy        铁匠铺：付2金抽3张（每回合一次）
-   *   lab           实验室：弃1张手牌换1金（每回合一次）
+   *   lab           实验室：弃1张手牌换2金（每回合一次）
    *   immune        堡垒：不可被领主摧毁
    *   wallCost      长城：领主摧毁你其它建筑多付1金
    *   graveyard     墓地：领主摧毁建筑时付1金将其收入手牌
@@ -36,74 +36,538 @@
    *   museum        博物馆：每回合可将1张手牌放在其下，计分时每张+1
    * ------------------------------------------------------------------- */
   const DISTRICTS = [
-    /* ---------- 黄色 · 皇家建筑 12 张（4号角色收入） ---------- */
-    { name: '庄园',   en: 'Manor',   color: 'yellow', cost: 3, count: 5 },
-    { name: '城堡',   en: 'Castle',  color: 'yellow', cost: 4, count: 4 },
-    { name: '宫殿',   en: 'Palace',  color: 'yellow', cost: 5, count: 3 },
-
-    /* ---------- 蓝色 · 宗教建筑 11 张（5号角色收入） ---------- */
-    { name: '神庙',   en: 'Temple',     color: 'blue', cost: 1, count: 3 },
-    { name: '教堂',   en: 'Church',     color: 'blue', cost: 2, count: 3 },
-    { name: '修道院', en: 'Monastery',  color: 'blue', cost: 3, count: 3 },
-    { name: '大教堂', en: 'Cathedral',  color: 'blue', cost: 5, count: 2 },
-
-    /* ---------- 绿色 · 商业建筑 20 张（6号角色收入） ---------- */
-    { name: '酒馆',   en: 'Tavern',       color: 'green', cost: 1, count: 5 },
-    { name: '集市',   en: 'Market',       color: 'green', cost: 2, count: 4 },
-    { name: '商栈',   en: 'Trading Post', color: 'green', cost: 3, count: 3,
-      desc: '商业建筑。建造费用3金币，计分价值3分。' },
-    { name: '船坞',   en: 'Docks',        color: 'green', cost: 4, count: 3 },
-    { name: '港口',   en: 'Harbor',       color: 'green', cost: 4, count: 3 },
-    { name: '市政厅', en: 'Town Hall',    color: 'green', cost: 5, scoreValue: 6, count: 2,
-      desc: '商业建筑。建造费用5金币，计分价值6分。' },
-
-    /* ---------- 红色 · 军事建筑 11 张（8号角色收入） ---------- */
-    { name: '了望塔', en: 'Watchtower',  color: 'red', cost: 1, count: 3 },
-    { name: '监狱',   en: 'Prison',      color: 'red', cost: 2, count: 3 },
-    { name: '战场',   en: 'Battlefield', color: 'red', cost: 3, count: 3 },
-    { name: '要塞',   en: 'Fortress',    color: 'red', cost: 5, count: 2 },
-
-    /* ---------- 紫色 · 独特建筑 14 张（基本版） ---------- */
-    { name: '鬼城', en: 'Ghost Town', color: 'purple', cost: 2, count: 1,
-      purple: { effect: 'anyColorScore' },
-      desc: '计分时鬼城可视为任意一种颜色（若在最后一轮才建成则不可使用）。' },
-    { name: '堡垒', en: 'Keep', color: 'purple', cost: 3, count: 2,
-      purple: { effect: 'immune' },
-      desc: '堡垒不会被领主/外交官摧毁或交换。' },
-    { name: '博物馆', en: 'Museum', color: 'purple', cost: 4, count: 1,
-      purple: { effect: 'museum' },
-      desc: '你的回合中可将1张手牌面朝下放到博物馆下；计分时其下每张牌+1分。' },
-    { name: '墓地', en: 'Graveyard', color: 'purple', cost: 5, count: 1,
-      purple: { effect: 'graveyard' },
-      desc: '当领主摧毁一栋建筑时，你可支付1枚金币将被摧毁的建筑收入手牌（若你本人是领主则不可用）。' },
-    { name: '实验室', en: 'Laboratory', color: 'purple', cost: 5, count: 1,
-      purple: { effect: 'lab' },
-      desc: '你的回合中可弃掉1张手牌换取1枚金币，每回合限一次。' },
-    { name: '铁匠铺', en: 'Smithy', color: 'purple', cost: 5, count: 1,
-      purple: { effect: 'smithy' },
-      desc: '你的回合中可支付2枚金币抽3张建筑牌，每回合限一次。' },
-    { name: '天文台', en: 'Observatory', color: 'purple', cost: 5, count: 1,
-      purple: { effect: 'draw3keep1' },
-      desc: '若选择抽牌作为行动，则抽3张留1张，其余2张放回牌堆底。' },
-    { name: '图书馆', en: 'Library', color: 'purple', cost: 6, count: 1,
-      purple: { effect: 'keepBoth' },
-      desc: '若选择抽牌作为行动，抽到的2张都可保留。' },
-    { name: '魔法学院', en: 'School of Magic', color: 'purple', cost: 6, count: 1,
-      purple: { effect: 'anyColorIncome' },
-      desc: '计算角色收入时，魔法学院可视为任意一种颜色（收入+1）。' },
-    { name: '巨龙门', en: 'Dragon Gate', color: 'purple', cost: 6, count: 1,
-      purple: { effect: 'scoreAs', scoreAs: 8 },
-      desc: '建造花费6金，但计分时价值8分。' },
-    { name: '大学', en: 'University', color: 'purple', cost: 6, count: 1,
-      purple: { effect: 'scoreAs', scoreAs: 8 },
-      desc: '建造花费6金，但计分时价值8分。' },
-    { name: '长城', en: 'Great Wall', color: 'purple', cost: 6, count: 1,
-      purple: { effect: 'wallCost' },
-      desc: '领主摧毁你的其它建筑时需多支付1枚金币。' },
-    { name: '采石场', en: 'Quarry', color: 'purple', cost: 5, count: 1,
-      purple: { effect: 'quarry' },
-      desc: '你城市中每种建筑可以多建造一栋同名建筑。' }
-  ];
+  {
+    "name": "庄园",
+    "en": "Manor",
+    "color": "yellow",
+    "cost": 3,
+    "count": 5
+  },
+  {
+    "name": "城堡",
+    "en": "Castle",
+    "color": "yellow",
+    "cost": 4,
+    "count": 4
+  },
+  {
+    "name": "宫殿",
+    "en": "Palace",
+    "color": "yellow",
+    "cost": 5,
+    "count": 3
+  },
+  {
+    "name": "神庙",
+    "en": "Temple",
+    "color": "blue",
+    "cost": 1,
+    "count": 3
+  },
+  {
+    "name": "教堂",
+    "en": "Church",
+    "color": "blue",
+    "cost": 2,
+    "count": 3
+  },
+  {
+    "name": "修道院",
+    "en": "Monastery",
+    "color": "blue",
+    "cost": 3,
+    "count": 3
+  },
+  {
+    "name": "大教堂",
+    "en": "Cathedral",
+    "color": "blue",
+    "cost": 5,
+    "count": 2
+  },
+  {
+    "name": "酒馆",
+    "en": "Tavern",
+    "color": "green",
+    "cost": 1,
+    "count": 5
+  },
+  {
+    "name": "集市",
+    "en": "Market",
+    "color": "green",
+    "cost": 2,
+    "count": 4
+  },
+  {
+    "name": "商栈",
+    "en": "Trading Post",
+    "color": "green",
+    "cost": 3,
+    "count": 3,
+    "desc": "商业建筑。建造费用3金币，计分价值3分。"
+  },
+  {
+    "name": "船坞",
+    "en": "Docks",
+    "color": "green",
+    "cost": 4,
+    "count": 3
+  },
+  {
+    "name": "港口",
+    "en": "Harbor",
+    "color": "green",
+    "cost": 4,
+    "count": 3
+  },
+  {
+    "name": "市政厅",
+    "en": "Town Hall",
+    "color": "green",
+    "cost": 5,
+    "scoreValue": 6,
+    "count": 2,
+    "desc": "商业建筑。建造费用5金币，计分价值6分。"
+  },
+  {
+    "name": "了望塔",
+    "en": "Watchtower",
+    "color": "red",
+    "cost": 1,
+    "count": 3
+  },
+  {
+    "name": "监狱",
+    "en": "Prison",
+    "color": "red",
+    "cost": 2,
+    "count": 3
+  },
+  {
+    "name": "战场",
+    "en": "Battlefield",
+    "color": "red",
+    "cost": 3,
+    "count": 3
+  },
+  {
+    "name": "要塞",
+    "en": "Fortress",
+    "color": "red",
+    "cost": 5,
+    "count": 2
+  },
+  {
+    "name": "鬼城",
+    "en": "Ghost Town",
+    "color": "purple",
+    "cost": 2,
+    "count": 1,
+    "purple": {
+      "effect": "anyColorScore"
+    },
+    "desc": "终局计分时可视为任意一种颜色，包括最后一轮建成时。"
+  },
+  {
+    "name": "堡垒",
+    "en": "Keep",
+    "color": "purple",
+    "cost": 3,
+    "count": 2,
+    "purple": {
+      "effect": "immune"
+    },
+    "desc": "堡垒不会被领主/外交官摧毁或交换。"
+  },
+  {
+    "name": "博物馆",
+    "en": "Museum",
+    "color": "purple",
+    "cost": 4,
+    "count": 1,
+    "purple": {
+      "effect": "museum"
+    },
+    "desc": "你的回合中可将1张手牌面朝下放到博物馆下；计分时其下每张牌+1分。"
+  },
+  {
+    "name": "墓地",
+    "en": "Graveyard",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "graveyard"
+    },
+    "desc": "当领主摧毁一栋建筑时，你可支付1枚金币将被摧毁的建筑收入手牌（若你本人是领主则不可用）。"
+  },
+  {
+    "name": "实验室",
+    "en": "Laboratory",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "lab"
+    },
+    "desc": "你的回合中可弃一张手牌换取2金币，每回合一次。"
+  },
+  {
+    "name": "铁匠铺",
+    "en": "Smithy",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "smithy"
+    },
+    "desc": "你的回合中可支付2枚金币抽3张建筑牌，每回合限一次。"
+  },
+  {
+    "name": "天文台",
+    "en": "Observatory",
+    "color": "purple",
+    "cost": 4,
+    "count": 1,
+    "purple": {
+      "effect": "draw3keep1"
+    },
+    "desc": "领取资源选择抽牌时抽三张而非两张。"
+  },
+  {
+    "name": "图书馆",
+    "en": "Library",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "keepBoth"
+    },
+    "desc": "领取资源选择抽牌时保留全部所抽卡牌，可与天文台叠加。"
+  },
+  {
+    "name": "魔法学院",
+    "en": "School of Magic",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "anyColorIncome"
+    },
+    "desc": "计算角色收入时，魔法学院可视为任意一种颜色（收入+1）。"
+  },
+  {
+    "name": "巨龙门",
+    "en": "Dragon Gate",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "scoreAs",
+      "scoreAs": 8
+    },
+    "desc": "建造花费6金，但计分时价值8分。"
+  },
+  {
+    "name": "大学",
+    "en": "University",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "scoreAs",
+      "scoreAs": 8
+    },
+    "desc": "建造花费6金，但计分时价值8分。"
+  },
+  {
+    "name": "长城",
+    "en": "Great Wall",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "wallCost"
+    },
+    "desc": "八号角色对你的其他建筑使用能力时多付1金币。"
+  },
+  {
+    "name": "采石场",
+    "en": "Quarry",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "quarry"
+    },
+    "desc": "可建造任意数量的同名建筑；不放宽行政官、外交官或元帅获取同名建筑的限制。"
+  },
+  {
+    "name": "军械库",
+    "en": "Armory",
+    "color": "purple",
+    "cost": 3,
+    "count": 1,
+    "purple": {
+      "effect": "armory"
+    },
+    "desc": "你的回合中可摧毁军械库，再摧毁一栋未完成城市中的建筑。"
+  },
+  {
+    "name": "圣殿",
+    "en": "Basilica",
+    "color": "purple",
+    "cost": 4,
+    "count": 1,
+    "purple": {
+      "effect": "basilica"
+    },
+    "desc": "终局时，每栋建造费用为奇数的建筑额外得1分。"
+  },
+  {
+    "name": "国会大厦",
+    "en": "Capitol",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "capitol"
+    },
+    "desc": "终局时若有至少三栋同类型建筑，额外得3分，只计一次。"
+  },
+  {
+    "name": "工厂",
+    "en": "Factory",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "factory"
+    },
+    "desc": "建造其他紫色建筑少付1金币。"
+  },
+  {
+    "name": "脚手架",
+    "en": "Framework",
+    "color": "purple",
+    "cost": 3,
+    "count": 1,
+    "purple": {
+      "effect": "framework"
+    },
+    "desc": "可摧毁脚手架代替支付另一栋建筑的费用，仍占建造次数。"
+  },
+  {
+    "name": "金矿",
+    "en": "Gold Mine",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "goldMine"
+    },
+    "desc": "领取资源时选择金币，额外获得1金币。"
+  },
+  {
+    "name": "帝国金库",
+    "en": "Imperial Treasury",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "treasury"
+    },
+    "desc": "终局时，每枚持有的金币额外得1分。"
+  },
+  {
+    "name": "象牙塔",
+    "en": "Ivory Tower",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "ivoryTower"
+    },
+    "desc": "终局时若它是城中唯一紫色建筑，额外得5分。"
+  },
+  {
+    "name": "地图室",
+    "en": "Map Room",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "mapRoom"
+    },
+    "desc": "终局时，每张手牌额外得1分。"
+  },
+  {
+    "name": "纪念碑",
+    "en": "Monument",
+    "color": "purple",
+    "cost": 4,
+    "count": 1,
+    "purple": {
+      "effect": "monument"
+    },
+    "desc": "已有五栋或更多建筑时不能建造；计算城市完成条件时视为两栋。"
+  },
+  {
+    "name": "大墓园",
+    "en": "Necropolis",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "necropolis"
+    },
+    "desc": "可摧毁自己的一栋建筑代替支付本建筑费用，仍占建造次数。"
+  },
+  {
+    "name": "公园",
+    "en": "Park",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "park"
+    },
+    "desc": "你的回合结束时若没有手牌，获得两张建筑牌。"
+  },
+  {
+    "name": "救济院",
+    "en": "Poor House",
+    "color": "purple",
+    "cost": 4,
+    "count": 1,
+    "purple": {
+      "effect": "poorHouse"
+    },
+    "desc": "你的回合结束时若没有金币，获得1金币，在炼金术士退款前结算。"
+  },
+  {
+    "name": "秘密宝库",
+    "en": "Secret Vault",
+    "color": "purple",
+    "cost": 0,
+    "count": 1,
+    "purple": {
+      "effect": "secretVault"
+    },
+    "desc": "不能建造；终局时展示手中的秘密宝库，额外得3分。"
+  },
+  {
+    "name": "马厩",
+    "en": "Stables",
+    "color": "purple",
+    "cost": 2,
+    "count": 1,
+    "purple": {
+      "effect": "stables"
+    },
+    "desc": "建造本建筑不占本回合的建造次数。"
+  },
+  {
+    "name": "雕像",
+    "en": "Statue",
+    "color": "purple",
+    "cost": 3,
+    "count": 1,
+    "purple": {
+      "effect": "statue"
+    },
+    "desc": "终局时若持有王冠，额外得5分。"
+  },
+  {
+    "name": "剧院",
+    "en": "Theater",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "theater"
+    },
+    "desc": "选角结束时，可盲选另一名玩家的一张角色牌与自己的一张角色牌交换。"
+  },
+  {
+    "name": "盗贼巢穴",
+    "en": "Thieves’ Den",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "thievesDen"
+    },
+    "desc": "可弃手牌抵付部分或全部建造费，每张抵1金币；被没收时只退金币。"
+  },
+  {
+    "name": "许愿井",
+    "en": "Wishing Well",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "wishingWell"
+    },
+    "desc": "终局时，每栋紫色建筑额外得1分，包括许愿井自己。"
+  },
+  {
+    "name": "灯塔",
+    "en": "Lighthouse",
+    "color": "purple",
+    "cost": 3,
+    "count": 1,
+    "purple": {
+      "effect": "lighthouse"
+    },
+    "desc": "建成时可查看建筑牌堆，选择一张加入手牌，然后洗牌。"
+  },
+  {
+    "name": "钟楼",
+    "en": "Bell Tower",
+    "color": "purple",
+    "cost": 5,
+    "count": 1,
+    "purple": {
+      "effect": "bellTower"
+    },
+    "desc": "建成时可宣布城市完成条件为七栋；钟楼被摧毁后恢复原条件。"
+  },
+  {
+    "name": "舞厅",
+    "en": "Ballroom",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "ballroom"
+    },
+    "desc": "你持有王冠时，其他玩家开始回合须选择致谢，否则跳过本回合。"
+  },
+  {
+    "name": "医院",
+    "en": "Hospital",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "hospital"
+    },
+    "desc": "被刺杀时仍可领取基础资源，但不能建造或发动能力。"
+  },
+  {
+    "name": "王座厅",
+    "en": "Throne Room",
+    "color": "purple",
+    "cost": 6,
+    "count": 1,
+    "purple": {
+      "effect": "throneRoom"
+    },
+    "desc": "每次王冠更换持有人时获得1金币。"
+  }
+];
 
   /* ----------------------------- 角色定义 -----------------------------
    * num        行动顺序编号

@@ -71,7 +71,7 @@ inline std::string cfr_card_reference(const NativeGameState& s, int me,
       key.text("city"); key.number(cfr_relative(s, me, static_cast<int>(i)));
       key.text(cfr_district_key(d)); return key.value;
     }
-  if (me == s.active_player) {
+  if ((s.pending_kind == "lighthouse" ? s.pending_target : s.active_player) == me) {
     for (const auto& c : s.pending_cards) if (c.uid == uid) {
       key.text("pending"); key.text(cfr_card_key(c)); return key.value;
     }
@@ -85,7 +85,7 @@ inline std::string cfr_card_reference(const NativeGameState& s, int me,
 inline std::string cfr_action_key(const NativeGameState& s, int me,
                                   const NativeSearchAction& a) {
   CfrKey k; k.text(std::string(action_type_name(a.type)));
-  k.text(cfr_card_reference(s, me, a.uid));
+  k.text(a.type == ActionType::DistrictEffect && a.name == "theater_swap" ? a.uid : cfr_card_reference(s, me, a.uid));
   k.text(cfr_card_reference(s, me, a.secondary_uid));
   std::vector<std::string> selected;
   for (const auto& uid : a.selected_uids) selected.push_back(cfr_card_reference(s, me, uid));
@@ -124,7 +124,8 @@ inline std::string cfr_observation(const NativeGameState& s, int me) {
   if (me < 0 || me >= static_cast<int>(s.players.size()))
     throw std::runtime_error("Invalid CFR observer");
   CfrKey k; k.text("cfr-observation-v1"); k.number(static_cast<int>(s.players.size()));
-  k.number(static_cast<int>(s.phase)); k.number(s.round); k.number(s.end_districts);
+  k.number(static_cast<int>(s.phase)); k.number(s.round); k.number(s.end_districts); k.number(s.completion_limit());
+  k.list(s.enabled_bell_towers); for (int owner : s.first_finishers) k.number(cfr_relative(s, me, owner));
   k.number(cfr_relative(s, me, s.first_to_finish));
   k.number(cfr_relative(s, me, s.active_player)); k.number(s.has_turn);
   k.number(static_cast<int>(s.deck.deck_count())); k.number(static_cast<int>(s.deck.discard_count()));
@@ -142,7 +143,7 @@ inline std::string cfr_observation(const NativeGameState& s, int me) {
     k.number(p.gold); k.number(static_cast<int>(p.hand.size())); k.number(p.has_crown);
     k.number(!p.role_ids.empty()); k.list(p.played);
     // A role is public only when called, never merely because role_id is set.
-    k.text(s.has_turn && s.phase != NativePhase::Draft &&
+    k.text(s.has_turn && s.phase != NativePhase::Draft && s.turn_phase != "setup" &&
            static_cast<int>(absolute) == s.active_player ? p.role_id : "");
     std::vector<std::string> city;
     for (const auto& d : p.city) city.push_back(cfr_district_key(d));
@@ -166,7 +167,9 @@ inline std::string cfr_observation(const NativeGameState& s, int me) {
   k.text(s.reaction_kind); k.number(cfr_relative(s, me, s.reaction_player));
   k.number(cfr_relative(s, me, s.reaction_target)); k.number(s.reaction_num); k.number(s.reaction_build);
   if (s.has_reaction_card) k.text(cfr_card_key(s.reaction_card));
-  if (me == s.active_player) {
+  k.text(s.pending_kind);
+  if ((s.pending_kind == "lighthouse" ? s.pending_target : s.active_player) == me) {
+    k.text(s.building_mode); k.text(s.building_source); k.list(s.building_cards);
     k.text(s.pending_kind); k.number(cfr_relative(s, me, s.pending_target));
     k.number(s.pending_amount); k.number(cfr_relative(s, me, s.pending_from_crown));
     k.number(s.pending_first);

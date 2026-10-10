@@ -51,9 +51,9 @@ inline std::string cfr_abstract_information(const NativeGameState& s,int me,cons
   k.text(s.phase==NativePhase::Draft?s.draft_sub:s.turn_phase);k.text(s.phase==NativePhase::Draft?"":p.role_id);
   k.text(me==s.active_player?s.pending_kind:"");k.text(s.reaction_kind);
   k.number(cfr_amount_band(p.gold));k.number(std::min<int>(3,p.hand.size()));
-  k.number(p.city.size()+2<static_cast<size_t>(s.end_districts)?0:
-           p.city.size()+1<static_cast<size_t>(s.end_districts)?1:
-           p.city.size()<static_cast<size_t>(s.end_districts)?2:3);
+  k.number(s.city_count(me)+2<s.completion_limit()?0:
+           s.city_count(me)+1<s.completion_limit()?1:
+           s.city_count(me)<s.completion_limit()?2:3);
   k.number(p.has_crown);k.number(s.first_to_finish>=0);
   int next_cost=1000;
   for(const auto& c:p.hand)if(std::none_of(p.city.begin(),p.city.end(),[&](const auto& d){return d.name==c.name;}))

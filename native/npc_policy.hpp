@@ -123,7 +123,7 @@ class NativeNpcPolicy {
              c.purple_effect == "smithy" || c.purple_effect == "lab" || c.purple_effect == "immune") value += 1.0;
     else if (c.purple_effect == "anyColorIncome") value += color_count(p, "blue") == 0 ? 1.8 : 0.8;
     else if (c.purple_effect == "extraBuild") value += 1.8;
-    const int left = std::max(0, s.end_districts - static_cast<int>(p.city.size()));
+    const int left = std::max(0, s.completion_limit() - s.city_count(s.find_player(p.id)));
     if (left <= 2) value += c.cost * 0.35;
     if (left == 0) value -= 8;
     return value;
@@ -133,7 +133,7 @@ class NativeNpcPolicy {
       [&](const auto& d) { return d.name == c.name; }));
     const int quarry = static_cast<int>(std::count_if(p.city.begin(), p.city.end(),
       [](const auto& d) { return d.effect == "quarry"; }));
-    if (same >= 1 + quarry) return 0.15;
+    if (same > 0 && quarry == 0 && p.role_id != "wizard") return 0.15;
     return std::max(0.2, card_value(s, p, c) * 0.55 - std::max(0, c.cost - p.gold - 2) * 0.35);
   }
   static double money_value(const NativePlayer& p) { return p.gold < 3 ? 1.5 : p.gold < 6 ? 0.9 : 0.45; }
@@ -405,7 +405,7 @@ class NativeNpcPolicy {
       const bool hand_poor = p.hand.size() <= 1;
       const bool gold_hungry = p.gold < 3;
       const int best_cost = [&] { int value=1000; for(const auto& c:p.hand) if(c.cost<=p.gold+2) value=std::min(value,c.cost); return value; }();
-      const bool near_finish = p.city.size() >= static_cast<size_t>(std::max(0,s.end_districts-2));
+      const bool near_finish = s.city_count(index) >= std::max(0,s.completion_limit()-2);
       const double gold_score = (p.gold < 2 ? 1.2 : 0) + (near_finish ? 2 : 0) + (gold_hungry && best_cost < 1000 ? 1.0 : 0);
       const double card_score = (hand_poor ? 2.6 : 0) + (p.hand.size() <= 2 ? 1.0 : 0);
       const auto wanted = gold_score > card_score || (gold_hungry && best_cost < 1000)
@@ -466,7 +466,7 @@ class NativeNpcPolicy {
     if (type == ActionType::Lab || type == ActionType::Museum) {
       const auto* c = card_by_uid(p.hand, a.secondary_uid);
       if (!c) return -30;
-      const double benefit = (type == ActionType::Lab ? money_value(p) : 1.0) - hand_value(s,p,*c);
+      const double benefit = (type == ActionType::Lab ? 2 * money_value(p) : 1.0) - hand_value(s,p,*c);
       return benefit > 0 ? 100 + benefit : -30;
     }
     if (type == ActionType::DrawKeep || type == ActionType::ScholarPick || type == ActionType::WizardCard) {
@@ -491,6 +491,36 @@ class NativeNpcPolicy {
       if (!d) return 0;
       if (s.pending_kind == "artist") return 1-money_value(p);
       return district_payoff(s,index,a);
+    }
+    if (type == ActionType::DistrictEffect) {
+      if (a.name == "ballroom_thanks") return 100;
+      if (a.name == "ballroom_skip") return -100;
+      if (a.name == "lighthouse_pick") { const auto* c = card_by_uid(s.pending_cards,a.uid); return c ? card_value(s,p,*c) + 10 : 0; }
+      if (a.name == "lighthouse_skip" || a.name == "thieves_cancel") return -10;
+      if (a.name == "thieves_discard") { const auto* c = card_by_uid(p.hand,a.uid); return c ? 1.0 - hand_value(s,p,*c) : -10; }
+      if (a.name == "thieves_pay") return 10;
+      if (a.name == "framework" || a.name == "necropolis") {
+        const auto* built = card_by_uid(p.hand, a.secondary_uid);
+        const auto source = std::find_if(p.city.begin(), p.city.end(), [&](const NativeDistrict& d) { return d.card.uid == a.uid; });
+        if (!built || source == p.city.end()) return -20;
+        const double lost = source->card.cost + source->museum_cards.size() + int(source->beautified);
+        return card_value(s,p,*built) - lost + built->cost * money_value(p) * .4;
+      }
+      if (a.name == "thieves_begin") {
+        const auto* den = card_by_uid(p.hand,a.uid);
+        return den ? card_value(s,p,*den) - s.building_cost(p,*den) * money_value(p) * .3 : -10;
+      }
+      if (a.name == "theater_skip") return 5;
+      if (a.name == "theater_swap") return 0;
+      if (a.name == "bell_enable") return s.city_count(index) >= 7 ? 20 : -2;
+      if (a.name == "bell_skip") return 0;
+      if (a.name == "armory") {
+        const int target = s.find_player(a.target);
+        if (target == index) return -20;
+        const auto it = std::find_if(s.players[target].city.begin(), s.players[target].city.end(), [&](const NativeDistrict& d) { return d.card.uid == a.secondary_uid; });
+        const auto* victim = it == s.players[target].city.end() ? nullptr : &*it;
+        return victim ? victim->card.cost - 3.5 : -20;
+      }
     }
     if (type == ActionType::ArtistDone) return 0;
     if (type == ActionType::MonkTake) {

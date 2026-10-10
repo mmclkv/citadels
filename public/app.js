@@ -4570,7 +4570,7 @@
       button.disabled = !!selecting;
       if (!selecting) onTap(button, () => {
         App.sel = { kind: 'labpick', buildingUid: buildingUid, actions: actions,
-          label: label + '：点击一张手牌弃掉，换取 1 金' };
+          label: label + '：点击一张手牌弃掉，换取 2 金' };
         render();
       });
       actionsEl.appendChild(button);
@@ -4696,7 +4696,7 @@
       case 'lab':
         App.sel = { kind: 'labpick', buildingUid: a.uid,
           actions: (App.state.available.actions || []).filter(item => item.type === 'lab' && item.uid === a.uid),
-          label: '【实验室】点击一张手牌弃掉，换取 1 金' };
+          label: '【实验室】点击一张手牌弃掉，换取 2 金' };
         render(); return;
       case 'museum':
         if (a.cardUid) { send(a); return; }

@@ -21,6 +21,7 @@ def _public_character_numbers(state: dict, player_index: int, viewer_index: int)
         return [CHAR_MAP[character_id]["num"] for character_id in player["chars"]]
     result = []
     turn = state.get("turn")
+    setup = bool(turn and turn.get("phase") == "setup")
     if state["phase"] == "action" and turn and turn["playerIdx"] == player_index:
         result.append(CHAR_MAP[turn["charId"]]["num"])
     result.extend(CHAR_MAP[character_id]["num"] for character_id in player["played"])
@@ -73,6 +74,11 @@ def _hand_card_public(card: dict, buildable_uids: set[str]) -> dict:
 
 
 PENDING_PROMPTS = {
+    "lighthouse": "灯塔：从牌堆选一张建筑牌，随后洗牌",
+    "bell_tower": "钟楼：决定是否改为7栋完工",
+    "theater_exchange": "剧院：选择交换角色的玩家，或跳过",
+    "ballroom": "舞厅：向皇冠持有者致谢才能继续回合",
+    "thieves_den": "盗贼巢穴：选择抵扣费用的手牌，再确认建造",
     "assassin": "选择要刺杀的角色", "thief": "选择要偷窃的角色",
     "witch_target": "选择要施咒的角色", "magician_choice": "选择魔术师的能力",
     "magician_swap": "选择交换手牌的对象", "magician_redraw": "选择要弃掉的手牌",
@@ -100,7 +106,9 @@ def _small_card(card: dict) -> dict:
 
 def _pending_public(pending: dict, is_actor: bool) -> dict:
     kind = pending["kind"]
-    if kind in ("draw_keep", "scholar_pick", "wizard_card"):
+    if kind == "theater_exchange":
+        return {"kind": kind, "queue": list(pending.get("queue") or []), "prompt": "剧院：选择交换角色或跳过"}
+    if kind in ("draw_keep", "scholar_pick", "wizard_card", "lighthouse"):
         result = {"kind": kind, "targetIdx": pending.get("targetIdx"),
                   "count": len(pending.get("cards") or []),
                   "cards": [_small_card(card) for card in pending.get("cards", [])] if is_actor else []}
@@ -170,12 +178,12 @@ def sanitize(state: dict, player_id: str | None,
     for index, player in enumerate(state["players"]):
         revealed_id = (player["chars"][0] if index == viewer_index and player["chars"] else
                        turn["charId"] if state["phase"] == "action" and turn and
-                       turn["playerIdx"] == index else
+                       turn["playerIdx"] == index and not setup else
                        player["played"][0] if player["played"] else None)
         row = {"id": player["id"], "name": player["name"], "seat": player["seat"],
                "isBot": player["isBot"], "botType": player["botType"], "gold": player["gold"],
                "city": [_card_public(card) for card in player["city"]],
-               "cityCount": len(player["city"]), "handCount": len(player["hand"]),
+               "cityCount": len(player["city"]) + sum(card.get("purpleEffect") == "monument" for card in player["city"]), "handCount": len(player["hand"]),
                "hasCrown": player["hasCrown"], "connected": player["connected"],
                "played": list(player["played"]),
                "threat": _threat_mark(state, index, viewer_index),
@@ -198,11 +206,20 @@ def sanitize(state: dict, player_id: str | None,
     threat = effects.get("blackmailer")
     warrant = effects.get("magistrate")
     draft = state.get("draft")
-    scores = state.get("scores") or []
+    scores = []
+    for original in state.get("scores") or []:
+        row = {**original, "detail": [dict(d) for d in original.get("detail") or []]}
+        owner = row.get("playerIdx", -1)
+        if state["phase"] != "gameover" and owner != viewer_index and 0 <= owner < len(state["players"]):
+            hidden = 3 * sum(c.get("purpleEffect") == "secretVault" for c in state["players"][owner]["hand"])
+            row["bonus"] -= hidden; row["total"] -= hidden
+            for detail in row["detail"]:
+                if detail.get("label") == "建筑效果与完工奖励": detail["value"] -= hidden
+        scores.append(row)
     result = {
         "roomId": state["roomId"], "phase": state["phase"], "round": state["round"],
         "config": state["config"], "you": player_id if viewer_index >= 0 else None,
-        "endDistricts": state["config"]["endDistricts"], "players": players,
+        "endDistricts": state.get("completionDistricts", state["config"]["endDistricts"]), "players": players,
         "deckCount": len(state["deck"]), "discardCount": len(state["discard"]),
         "callIdx": state.get("callIdx") or 0, "turnsCompleted": state.get("turnsCompleted") or 0,
         "charDeck": [_role(character_id, True) for character_id in state["charDeck"]],
@@ -235,17 +252,17 @@ def sanitize(state: dict, player_id: str | None,
                            "pool": [_role(character_id) for character_id in draft["pool"]]
                            if step and step["player"] == viewer_index else []}
     if turn:
-        character = CHAR_MAP[turn["charId"]]
+        character = CHAR_MAP.get(turn["charId"], {"name": "剧院交换"})
         turn_view = {"playerIdx": turn["playerIdx"],
                      "playerId": state["players"][turn["playerIdx"]]["id"],
-                     "charId": turn["charId"], "charName": character["name"],
-                     "charNum": turn["num"], "phase": turn["phase"],
+                     "charId": None if setup else turn["charId"], "charName": "剧院交换" if setup else character["name"],
+                     "charNum": None if setup else turn["num"], "phase": turn["phase"],
                      "takenResources": turn["takenResources"], "incomeTaken": turn["incomeTaken"],
                      "abilityUsed": turn["abilityUsed"], "spentOnBuild": turn["spentOnBuild"],
                      "usedLab": turn["usedLab"], "usedSmithy": turn["usedSmithy"],
                      "usedMuseum": turn["usedMuseum"], "bonusDone": turn["bonusDone"],
                      "buildLimit": turn.get("buildLimit", 0), "builds": turn["builds"],
-                     "pending": _pending_public(turn["pending"], turn["playerIdx"] == viewer_index)
+                     "pending": _pending_public(turn["pending"], (turn["pending"].get("targetIdx") if turn["pending"].get("kind") in ("lighthouse", "bell_tower") else turn["playerIdx"]) == viewer_index)
                      if turn.get("pending") else None}
         if "monkExtraTaken" in turn:
             turn_view["monkExtraTaken"] = turn["monkExtraTaken"]

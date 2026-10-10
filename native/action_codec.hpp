@@ -49,7 +49,8 @@ enum class ActionType {
   WizardBuild,
   WizardCard,
   WizardTake,
-  WizardTarget
+  WizardTarget,
+  DistrictEffect
 };
 
 struct Action {
@@ -108,12 +109,14 @@ inline std::optional<ActionType> action_type_from_string(std::string_view value)
   CITADELS_ACTION(WizardCard, "wizard_card")
   CITADELS_ACTION(WizardTake, "wizard_take")
   CITADELS_ACTION(WizardTarget, "wizard_target")
+  CITADELS_ACTION(DistrictEffect, "district_effect")
 #undef CITADELS_ACTION
   return std::nullopt;
 }
 
 inline std::string_view action_type_name(ActionType type) {
   switch (type) {
+    case ActionType::DistrictEffect: return "district_effect";
     case ActionType::AbbotResource: return "abbot_resource";
     case ActionType::AbilitySkip: return "ability_skip";
     case ActionType::Ability: return "ability";

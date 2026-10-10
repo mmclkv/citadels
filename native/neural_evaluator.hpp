@@ -52,6 +52,9 @@ inline std::array<float, 2> uid_bytes(const std::string& uid) {
 }
 
 inline int action_type_feature_index(ActionType type) {
+  // Preserve the deployed model's feature dimensions; building actions share
+  // the ability category and retain their card/target/UID features.
+  if (type == ActionType::DistrictEffect) return action_type_feature_index(ActionType::Ability);
   // Historical model action feature order. Enum declaration order is
   // intentionally independent from the model feature order.
   static constexpr std::array<ActionType, 43> types = {
@@ -184,6 +187,39 @@ inline std::vector<float> encode_network_action(const NativeSearchAction& action
     reference(action.uid, 182);
     reference(!action.secondary_uid.empty() ? action.secondary_uid
       : state->pending_kind == "diplomat_theirs" ? state->pending_uid : std::string{}, 213);
+    // The twelve previously unused suffix features keep the deployed width
+    // while giving newly trainable policies distinct building choices.
+    static constexpr std::array<const char*, 24> effects = {
+      "armory", "basilica", "capitol", "factory", "framework", "goldMine",
+      "treasury", "ivoryTower", "mapRoom", "monument", "necropolis", "park",
+      "poorHouse", "secretVault", "stables", "statue", "theater", "thievesDen",
+      "wishingWell", "lighthouse", "bellTower", "ballroom", "hospital", "throneRoom"
+    };
+    const auto identity = [&](const std::string& uid, size_t offset) {
+      if (uid.empty()) return;
+      const DistrictCard* c = nullptr;
+      // Only the observer's hand, public cities, and a visible pending choice.
+      if (perspective_player >= 0 && perspective_player < static_cast<int>(state->players.size()))
+        for (const auto& held : state->players[perspective_player].hand) if (held.uid == uid) c = &held;
+      for (const auto& owner : state->players) for (const auto& built : owner.city) if (built.card.uid == uid) c = &built.card;
+      if ((state->pending_kind == "lighthouse" ? state->pending_target : state->active_player) == perspective_player)
+        for (const auto& pending : state->pending_cards) if (pending.uid == uid) c = &pending;
+      if (!c) return;
+      for (size_t i = 0; i < effects.size(); ++i) if (c->purple_effect == effects[i]) {
+        for (size_t bit = 0; bit < 5; ++bit) result[offset + bit] = ((i + 1) >> bit) & 1;
+        break;
+      }
+    };
+    identity(action.uid, 244); identity(action.secondary_uid, 249);
+    if (action.type == ActionType::DistrictEffect) {
+      static constexpr std::array<const char*, 15> modes = {
+        "framework", "necropolis", "armory", "thieves_begin", "thieves_discard",
+        "thieves_pay", "thieves_cancel", "lighthouse_pick", "lighthouse_skip",
+        "bell_enable", "bell_skip", "ballroom_thanks", "ballroom_skip", "theater_swap", "theater_skip"
+      };
+      for (size_t i = 0; i < modes.size(); ++i) if (action.name == modes[i]) result[254] = float(i + 1) / 15;
+      if (perspective_player == state->active_player) result[255] = std::min(1.0f, float(state->building_cards.size()) / 6);
+    }
   }
   return result;
 }

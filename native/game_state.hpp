@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -147,6 +148,137 @@ struct NativeGameState {
   std::vector<std::string> pending_selected;
   int pending_cursor = 0;
   std::vector<int> pending_queue;
+  std::string building_mode;
+  std::string building_source;
+  std::vector<std::string> building_cards;
+  std::vector<std::string> enabled_bell_towers;
+  std::vector<int> first_finishers;
+
+  bool has_effect(int owner, const std::string& effect) const {
+    return owner >= 0 && owner < static_cast<int>(players.size()) &&
+      std::any_of(players[owner].city.begin(), players[owner].city.end(),
+        [&](const NativeDistrict& d) { return d.effect == effect; });
+  }
+  int city_count(int owner) const {
+    int count = static_cast<int>(players[owner].city.size());
+    for (const auto& d : players[owner].city) if (d.effect == "monument") ++count;
+    return count;
+  }
+  int completion_limit() const {
+    for (const auto& p : players) for (const auto& d : p.city)
+      if (d.effect == "bellTower" && std::find(enabled_bell_towers.begin(), enabled_bell_towers.end(), d.card.uid) != enabled_bell_towers.end())
+        return std::min(7, end_districts);
+    return end_districts;
+  }
+  bool first_finisher(int owner) const {
+    return first_to_finish == owner || std::find(first_finishers.begin(), first_finishers.end(), owner) != first_finishers.end();
+  }
+  void check_completion(int owner) {
+    if (first_to_finish < 0 && city_count(owner) >= completion_limit()) first_to_finish = owner;
+  }
+  int building_cost(const NativePlayer& player, const DistrictCard& card) const {
+    const bool factory = card.color == "purple" && std::any_of(player.city.begin(), player.city.end(),
+      [&](const NativeDistrict& d) { return d.effect == "factory" && d.card.uid != card.uid; });
+    return std::max(0, card.cost - int(factory));
+  }
+  bool can_build_card(const NativePlayer& player, const DistrictCard& card, bool free = false, bool extra = false, const std::string& sacrifice = {}) const {
+    if (card.name.empty() || card.purple_effect == "secretVault" || player.role_id == "navigator") return false;
+    const auto& source = sacrifice.empty() ? building_source : sacrifice;
+    const int removed = free && std::any_of(player.city.begin(), player.city.end(), [&](const NativeDistrict& d) { return d.card.uid == source; }) ? 1 : 0;
+    if (card.purple_effect == "monument" && player.city.size() - removed >= 5) return false;
+    int limit = turn_phase == "witch_resume" ? 1 : player.role_id == "architect" ? 3 :
+      (player.role_id == "prophet" || player.role_id == "scholar" ? 2 : 1);
+    const bool unlimited = card.purple_effect == "stables" || extra ||
+      (player.role_id == "businessman" && turn_phase != "witch_resume" && card.color == "green");
+    if (!unlimited && builds >= limit) return false;
+    const bool duplicates = player.role_id == "wizard" || std::any_of(player.city.begin(), player.city.end(),
+      [&](const NativeDistrict& d) { return d.effect == "quarry" && (!free || d.card.uid != source); });
+    if (!duplicates && std::any_of(player.city.begin(), player.city.end(),
+      [&](const NativeDistrict& d) { return d.name == card.name && (!free || d.card.uid != source); })) return false;
+    return free || building_cost(player, card) <= player.gold;
+  }
+  void discard_district(int owner, const std::string& uid) {
+    auto& city = players[owner].city;
+    auto it = std::find_if(city.begin(), city.end(), [&](const NativeDistrict& d) { return d.card.uid == uid; });
+    if (it == city.end()) return;
+    deck.put_bottom(std::move(it->museum_cards));
+    deck.put_bottom({it->card});
+    city.erase(it);
+  }
+  void move_crown(int target) {
+    int previous = -1;
+    for (size_t i = 0; i < players.size(); ++i) if (players[i].has_crown) previous = static_cast<int>(i);
+    if (previous == target) return;
+    for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == target;
+    for (size_t i = 0; i < players.size(); ++i) if (has_effect(static_cast<int>(i), "throneRoom")) ++players[i].gold;
+  }
+  void built_effect(int owner, const DistrictCard& card) {
+    check_completion(owner);
+    if (card.purple_effect == "lighthouse" && deck.deck_count()) {
+      pending_kind = "lighthouse"; pending_target = owner; pending_cards = deck.deck_cards();
+    } else if (card.purple_effect == "bellTower") {
+      pending_kind = "bell_tower"; pending_target = owner; pending_uid = card.uid;
+    }
+  }
+  bool start_build(const std::string& uid) {
+    auto* p = active();
+    if (!p) return false;
+    auto it = std::find_if(p->hand.begin(), p->hand.end(), [&](const DistrictCard& c) { return c.uid == uid; });
+    if (it == p->hand.end()) return false;
+    const bool free = building_mode == "framework" || building_mode == "necropolis";
+    const bool card_payment = building_mode == "thievesDen";
+    if (!can_build_card(*p, *it, free || card_payment, building_mode == "wizard")) return false;
+    if (!free && magistrate_player >= 0 && magistrate_player != active_player && !magistrate_claimed &&
+        magistrate_signed == role_number(p->role_id)) {
+      magistrate_claimed = true;
+      if (std::none_of(players[magistrate_player].city.begin(), players[magistrate_player].city.end(),
+          [&](const NativeDistrict& d) { return d.name == it->name; })) {
+        reaction_kind = "magistrate"; reaction_player = magistrate_player;
+        reaction_target = magistrate_player; reaction_uid = uid; reaction_build = true;
+        return true;
+      }
+    }
+    return build(uid, it->name);
+  }
+  int score_bonus(int owner) const {
+    const auto& p = players[owner];
+    int bonus = 0, ghosts = 0, odd = 0;
+    std::array<int, 5> counts{};
+    constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
+    for (const auto& d : p.city) {
+      bonus += static_cast<int>(d.museum_cards.size()) + int(d.beautified);
+      odd += (d.card.cost + int(d.beautified)) % 2;
+      if (d.effect == "anyColorScore") ++ghosts;
+      else for (size_t c = 0; c < colors.size(); ++c) if (d.card.color == colors[c]) ++counts[c];
+    }
+    int best = 0;
+    // Select the legal haunted-quarter colors that maximize all scoring effects together.
+    const auto evaluate = [&]() {
+      const int purple = counts[4];
+      int value = std::all_of(counts.begin(), counts.end(), [](int n) { return n > 0; }) ? 3 : 0;
+      const bool triple = std::any_of(counts.begin(), counts.end(), [](int n) { return n >= 3; });
+      for (const auto& d : p.city) {
+        if (d.effect == "basilica") value += odd;
+        if (d.effect == "capitol" && triple) value += 3;
+        if (d.effect == "treasury") value += p.gold;
+        if (d.effect == "mapRoom") value += static_cast<int>(p.hand.size());
+        if (d.effect == "ivoryTower" && purple == 1) value += 5;
+        if (d.effect == "statue" && p.has_crown) value += 5;
+        if (d.effect == "wishingWell") value += std::max(0, purple - 1);
+      }
+      best = std::max(best, value);
+    };
+    const auto assign = [&](const auto& self, int remaining) -> void {
+      if (!remaining) { evaluate(); return; }
+      for (auto& count : counts) { ++count; self(self, remaining - 1); --count; }
+    };
+    assign(assign, ghosts);
+    bonus += best;
+    for (const auto& card : p.hand) if (card.purple_effect == "secretVault") bonus += 3;
+    if (first_finisher(owner)) bonus += 4;
+    else if (city_count(owner) >= completion_limit()) bonus += 2;
+    return bonus;
+  }
 
   bool draft_remove(const std::string& id) {
     auto remove = [&](std::vector<std::string>& values) {
@@ -169,17 +301,23 @@ struct NativeGameState {
         call_queue.push_back({role, role_number(role), static_cast<int>(i)});
       std::stable_sort(call_queue.begin(), call_queue.end(),
         [](const NativeCallEntry& left, const NativeCallEntry& right) { return left.number < right.number; });
-      call_index = 0;
-      if (call_queue.empty()) { active_player = -1; has_turn = false; }
-      else {
-        active_player = call_queue.front().player;
-        players[active_player].role_id = call_queue.front().char_id;
-        has_turn = true;
-        turn_phase = "main";
-        resources_taken = false; income_taken = false; monk_extra_taken = false;
-        ability_used = false; bonus_done = false;
-        builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
+      active_player = call_queue.empty() ? -1 : call_queue.front().player;
+      for (size_t offset = 0; offset < players.size(); ++offset) {
+        int crown = 0;
+        for (size_t i = 0; i < players.size(); ++i) if (players[i].has_crown) crown = static_cast<int>(i);
+        const int owner = (crown + static_cast<int>(offset)) % static_cast<int>(players.size());
+        if (has_effect(owner, "theater")) pending_queue.push_back(owner);
       }
+      call_index = -1; turn_phase = "setup";
+      resources_taken = false; income_taken = false; ability_used = false; bonus_done = false;
+      builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
+      if (!pending_queue.empty()) {
+        pending_kind = "theater_exchange"; has_turn = true;
+        // Do not expose the owner of the lowest uncalled role during selection.
+        active_player = pending_queue.front(); players[active_player].role_id.clear();
+      }
+      else if (active_player >= 0) return end_turn();
+      else has_turn = false;
     } else draft_current_player = draft_steps[draft_step].player;
     return true;
   }
@@ -191,8 +329,7 @@ struct NativeGameState {
 
   bool transfer_crown(int target) {
     if (!active() || target < 0 || target >= static_cast<int>(players.size()) || target == active_player) return false;
-    for (auto& player : players) player.has_crown = false;
-    players[target].has_crown = true;
+    move_crown(target);
     pending_target = target;
     pending_from_crown = active_player;
     return true;
@@ -215,7 +352,7 @@ struct NativeGameState {
     int target = -1;
     for (size_t i = 0; i < players.size(); ++i)
       if (players[i].id == target_id) target = static_cast<int>(i);
-    if (target < 0 || target == active_player || protected_from_rank8(target)) return false;
+    if (target < 0 || target == active_player || city_count(target) >= completion_limit() || protected_from_rank8(target)) return false;
     auto own_it = std::find_if(active()->city.begin(), active()->city.end(), [&](const NativeDistrict& d) { return d.card.uid == pending_uid; });
     auto their_it = std::find_if(players[target].city.begin(), players[target].city.end(), [&](const NativeDistrict& d) { return d.card.uid == target_uid; });
     if (own_it == active()->city.end() || their_it == players[target].city.end() || own_it->fortress || their_it->fortress) return false;
@@ -225,11 +362,14 @@ struct NativeGameState {
       [&](const NativeDistrict& district) {
         return district.card.uid != pending_uid && district.name == their_it->name;
       }));
-    // Match legal_actions/build rules: each Quarry permits one additional
-    // district with the same name. The selected own district is removed by
-    // the swap, so it must not count toward the post-swap duplicate limit.
-    if (same_name_count >= 1 + quarry_count) return false;
-    const int difference = std::max(0, their_it->card.cost - own_it->card.cost);
+    // Acquisition by a role cannot create duplicate districts, even with a Quarry.
+    if (same_name_count > 0) return false;
+    if (std::any_of(players[target].city.begin(), players[target].city.end(), [&](const NativeDistrict& d) {
+      return d.card.uid != target_uid && d.name == own_it->name;
+    })) return false;
+    const bool target_wall = std::any_of(players[target].city.begin(), players[target].city.end(),
+      [&](const NativeDistrict& d) { return d.effect == "wallCost" && d.card.uid != target_uid; });
+    const int difference = std::max(0, their_it->card.cost + int(their_it->beautified) + int(target_wall) - own_it->card.cost - int(own_it->beautified));
     if (difference > active()->gold) return false;
     active()->gold -= difference; players[target].gold += difference;
     NativeDistrict own = std::move(*own_it);
@@ -238,7 +378,7 @@ struct NativeGameState {
     players[target].city.erase(their_it);
     active()->city.push_back(std::move(theirs));
     players[target].city.push_back(std::move(own));
-    pending_uid.clear(); pending_target = -1; pending_kind.clear();
+    pending_uid.clear(); pending_target = -1; pending_kind.clear(); check_completion(active_player); check_completion(target);
     return true;
   }
 
@@ -261,7 +401,7 @@ struct NativeGameState {
   bool warlord_destroy(const std::string& target_id, const std::string& uid) {
     if (!active()) return false;
     const int target = find_player(target_id);
-    if (target < 0 || players[target].city.size() >= static_cast<size_t>(end_districts) ||
+    if (target < 0 || city_count(target) >= completion_limit() ||
         (target != active_player && protected_from_rank8(target))) return false;
     auto it = std::find_if(players[target].city.begin(), players[target].city.end(),
       [&](const NativeDistrict& d) { return d.card.uid == uid; });
@@ -275,6 +415,7 @@ struct NativeGameState {
     if (active()->gold < cost) return false;
     active()->gold -= cost;
     DistrictCard destroyed = it->card;
+    deck.put_bottom(std::move(it->museum_cards));
     players[target].city.erase(it);
     reaction_card = destroyed; has_reaction_card = true;
     reaction_queue.clear();
@@ -291,21 +432,23 @@ struct NativeGameState {
   bool marshal_seize(const std::string& target_id, const std::string& uid) {
     if (!active()) return false;
     const int target = find_player(target_id);
-    if (target < 0 || target == active_player || players[target].city.size() >= static_cast<size_t>(end_districts) ||
+    if (target < 0 || target == active_player || city_count(target) >= completion_limit() ||
         protected_from_rank8(target)) return false;
     auto it = std::find_if(players[target].city.begin(), players[target].city.end(),
       [&](const NativeDistrict& d) { return d.card.uid == uid; });
-    if (it == players[target].city.end() || it->fortress || it->card.cost > 3 || active()->gold < it->card.cost) return false;
+    if (it == players[target].city.end() || it->fortress || it->card.cost + int(it->beautified) > 3 || active()->gold < it->card.cost) return false;
     const int quarry_count = static_cast<int>(std::count_if(active()->city.begin(), active()->city.end(),
       [](const NativeDistrict& district) { return district.effect == "quarry"; }));
     const int same_name_count = static_cast<int>(std::count_if(active()->city.begin(), active()->city.end(),
       [&](const NativeDistrict& district) { return district.name == it->name; }));
-    if (same_name_count >= 1 + quarry_count) return false;
-    const int cost = it->card.cost;
+    if (same_name_count > 0) return false;
+    const int cost = it->card.cost + int(it->beautified) + int(std::any_of(players[target].city.begin(), players[target].city.end(),
+      [&](const NativeDistrict& d) { return d.effect == "wallCost" && d.card.uid != uid; }));
+    if (cost > 3 || active()->gold < cost) return false;
     active()->gold -= cost; players[target].gold += cost;
     NativeDistrict seized = std::move(*it);
     players[target].city.erase(it); active()->city.push_back(std::move(seized));
-    pending_kind.clear();
+    pending_kind.clear(); check_completion(active_player);
     return true;
   }
 
@@ -460,7 +603,7 @@ struct NativeGameState {
     pending_queue.clear();
     pending_target = -1;
     if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
-      for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
+      move_crown(entry.player);
     }
     if (entry.char_id == "noble" && entry.player >= 0 && entry.player < static_cast<int>(players.size())) {
       const int count = static_cast<int>(std::count_if(players[entry.player].city.begin(), players[entry.player].city.end(),
@@ -476,8 +619,9 @@ struct NativeGameState {
   bool take_gold() {
     auto* p = active();
     if (!p || resources_taken) return false;
-    p->gold += plan_take_gold(p->role_id,
+    p->gold += plan_take_gold(turn_phase == "hospital" ? "" : p->role_id,
       turn_phase == "witch_resume" ? ResourcePhase::WitchResume : ResourcePhase::Main).gold;
+    if (turn_phase != "hospital" && has_effect(active_player, "goldMine")) ++p->gold;
     resources_taken = true;
     if (turn_phase == "bewitched") return finish_bewitched_turn();
     after_resources();
@@ -487,17 +631,17 @@ struct NativeGameState {
   bool take_cards(DistrictDrawEffect effect = DistrictDrawEffect::None) {
     auto* p = active();
     if (!p || resources_taken) return false;
-    const bool keep_both = std::any_of(p->city.begin(), p->city.end(),
+    const bool keep_both = turn_phase != "hospital" && std::any_of(p->city.begin(), p->city.end(),
       [](const NativeDistrict& d) { return d.effect == "keepBoth"; });
-    const bool draw_three = !keep_both && std::any_of(p->city.begin(), p->city.end(),
+    const bool draw_three = turn_phase != "hospital" && std::any_of(p->city.begin(), p->city.end(),
       [](const NativeDistrict& d) { return d.effect == "draw3keep1"; });
-    const auto plan = plan_take_cards(p->role_id,
+    const auto plan = plan_take_cards(turn_phase == "hospital" ? "" : p->role_id,
       turn_phase == "witch_resume" ? ResourcePhase::WitchResume : ResourcePhase::Main,
       draw_three ? DistrictDrawEffect::Observatory : (keep_both ? DistrictDrawEffect::Library : effect));
-    auto cards = deck.draw(plan.drawn, rng);
+    auto cards = deck.draw(draw_three ? 3 : plan.drawn, rng);
     p->gold += plan.gold;
     resources_taken = true;
-    if (plan.keep_all || cards.empty()) {
+    if (keep_both || plan.keep_all || cards.empty()) {
       p->hand.insert(p->hand.end(), std::make_move_iterator(cards.begin()),
                      std::make_move_iterator(cards.end()));
     } else {
@@ -511,7 +655,7 @@ struct NativeGameState {
 
   void after_resources() {
     auto* p = active();
-    if (!p || turn_phase == "witch_resume" || ability_used || !pending_kind.empty()) return;
+    if (!p || turn_phase == "hospital" || turn_phase == "witch_resume" || ability_used || !pending_kind.empty()) return;
     if (p->role_id == "architect" && !bonus_done) {
       auto bonus = deck.draw(2, rng);
       p->hand.insert(p->hand.end(), std::make_move_iterator(bonus.begin()),
@@ -616,18 +760,13 @@ struct NativeGameState {
     auto& source = players[pending_target].hand;
     auto it = std::find_if(source.begin(), source.end(), [&](const DistrictCard& card) { return card.uid == pending_uid; });
     if (it == source.end()) return false;
-    if (!build_now) p->hand.push_back(*it);
-    else {
-      if (p->gold < it->cost) return false;
-      DistrictCard card = *it;
-      p->gold -= card.cost; spent_on_build += card.cost;
-      p->city.push_back({card, card.name, card.purple_effect, {},
-                         card.purple_effect == "immune", false, round});
-      charge_build_tax(active_player);
-      if (first_to_finish < 0 && p->city.size() >= static_cast<size_t>(end_districts)) first_to_finish = active_player;
-    }
-    source.erase(it); pending_cards.clear(); pending_uid.clear(); pending_target = -1; pending_kind.clear(); ability_used = true;
-    return true;
+    if (build_now && !can_build_card(*p, *it, false, true)) return false;
+    const std::string uid = it->uid;
+    p->hand.push_back(*it); source.erase(it);
+    pending_cards.clear(); pending_uid.clear(); pending_target = -1; pending_kind.clear(); ability_used = true;
+    if (!build_now) return true;
+    building_mode = "wizard";
+    return start_build(uid);
   }
 
   bool resolve_blackmailer(bool reveal) {
@@ -831,7 +970,7 @@ struct NativeGameState {
     round_confirm_count = static_cast<int>(std::count(round_confirmed.begin(), round_confirmed.end(), true));
     if (round_confirm_count == static_cast<int>(players.size())) {
       const bool finished = std::any_of(players.begin(), players.end(), [&](const NativePlayer& value) {
-        return value.city.size() >= static_cast<size_t>(end_districts);
+        return city_count(static_cast<int>(&value - players.data())) >= completion_limit();
       });
       if (finished) { phase = NativePhase::GameOver; has_turn = false; active_player = -1; return true; }
       return begin_next_round();
@@ -863,27 +1002,34 @@ struct NativeGameState {
     if (it == p->hand.end()) return false;
     const std::string resolved_name = name.empty() ? it->name : name;
     if (resolved_name.empty()) return false;
-    int same = 0, quarry = 0;
-    for (const auto& d : p->city) {
-      if (d.name == resolved_name) ++same;
-      if (d.effect == "quarry") ++quarry;
+    const bool free = building_mode == "framework" || building_mode == "necropolis";
+    const bool extra = building_mode == "wizard";
+    if (!can_build_card(*p, *it, free || building_mode == "thievesDen", extra)) return false;
+    int paid = free ? 0 : std::max(0, building_cost(*p, *it) - static_cast<int>(building_cards.size()));
+    if (paid > p->gold) return false;
+    const DistrictCard built_card = *it;
+    auto selected = building_cards;
+    std::sort(selected.begin(), selected.end());
+    if (std::adjacent_find(selected.begin(), selected.end()) != selected.end()) return false;
+    for (const auto& discard_uid : building_cards) {
+      auto discard = std::find_if(p->hand.begin(), p->hand.end(), [&](const DistrictCard& c) { return c.uid == discard_uid && c.uid != uid; });
+      if (discard == p->hand.end()) return false;
     }
-    BuildCard card{resolved_name, it->color, it->cost};
-    int build_limit = 1;
-    if (p->role_id == "architect") build_limit = 3;
-    else if (p->role_id == "prophet" || p->role_id == "scholar") build_limit = 2;
-    else if (p->role_id == "navigator") build_limit = 0;
-    BuildContext context{p->role_id, turn_phase == "witch_resume", p->gold, builds, build_limit, same, quarry};
-    if (!can_build(card, context)) return false;
-    p->gold -= it->cost;
-    spent_on_build += it->cost;
+    for (const auto& discard_uid : building_cards) {
+      auto discard = std::find_if(p->hand.begin(), p->hand.end(), [&](const DistrictCard& c) { return c.uid == discard_uid; });
+      deck.put_bottom({*discard}); p->hand.erase(discard);
+    }
+    if (!building_source.empty()) discard_district(active_player, building_source);
+    it = std::find_if(p->hand.begin(), p->hand.end(), [&](const DistrictCard& c) { return c.uid == uid; });
+    p->gold -= paid;
+    spent_on_build += paid;
     const std::string resolved_effect = effect.empty() ? it->purple_effect : effect;
     p->city.push_back({*it, resolved_name, resolved_effect, {},
                        resolved_effect == "immune", false, round});
     p->hand.erase(it);
-    ++builds;
-    if (!suppress_finish && first_to_finish < 0 && p->city.size() >= static_cast<size_t>(end_districts))
-      first_to_finish = active_player;
+    if (!extra && resolved_effect != "stables" && !(p->role_id == "businessman" && turn_phase != "witch_resume" && built_card.color == "green")) ++builds;
+    building_mode.clear(); building_source.clear(); building_cards.clear();
+    if (!suppress_finish) built_effect(active_player, built_card);
     charge_build_tax(tax_payer < 0 ? active_player : tax_payer);
     return true;
   }
@@ -900,18 +1046,20 @@ struct NativeGameState {
     const bool take = confiscate && !std::any_of(players[magistrate].city.begin(), players[magistrate].city.end(),
       [&](const NativeDistrict& d) { return d.name == copy.name; });
     reaction_kind.clear(); reaction_build = false; reaction_uid.clear(); reaction_target = -1; reaction_player = -1;
+    const int paid_before = spent_on_build;
     if (!build(copy.uid, copy.name, copy.purple_effect, take ? magistrate : builder, true)) return false;
     if (take) {
       auto& city = players[builder].city;
       auto built = std::find_if(city.begin(), city.end(), [&](const NativeDistrict& d) { return d.card.uid == copy.uid; });
       if (built == city.end()) return false;
-      players[builder].gold += copy.cost;
+      players[builder].gold += spent_on_build - paid_before;
+      spent_on_build = paid_before;
       NativeDistrict seized = std::move(*built);
       city.erase(built);
       players[magistrate].city.push_back(std::move(seized));
-      if (first_to_finish < 0 && players[magistrate].city.size() >= static_cast<size_t>(end_districts)) first_to_finish = magistrate;
+      built_effect(magistrate, copy);
     }
-    if (first_to_finish < 0 && players[builder].city.size() >= static_cast<size_t>(end_districts)) first_to_finish = builder;
+    if (!take) built_effect(builder, copy);
     return true;
   }
 
@@ -960,6 +1108,11 @@ struct NativeGameState {
 
   bool end_turn() {
     if (!active()) return false;
+    if (turn_phase != "setup") {
+    if (has_effect(active_player, "poorHouse") && active()->gold == 0 && turn_phase != "witch_declared" && turn_phase != "hospital" && turn_phase != "skipped") ++active()->gold;
+    if (has_effect(active_player, "park") && active()->hand.empty() && turn_phase != "witch_declared" && turn_phase != "hospital" && turn_phase != "skipped") {
+      auto drawn = deck.draw(2, rng); active()->hand.insert(active()->hand.end(), drawn.begin(), drawn.end());
+    }
     TurnState turn{active()->role_id, false, active()->gold, spent_on_build,
                    0, 0, false};
     if (!citadels::native::end_turn(turn)) return false;
@@ -993,21 +1146,22 @@ struct NativeGameState {
     // 与 JS 引擎一致：行动结束才把该角色登记为「已打出」，住持保护等公开判定读这个列表。
     if (!active()->role_id.empty()) active()->played.push_back(active()->role_id);
     ++turns_completed;
+    }
     if (!call_queue.empty()) {
       ++call_index;
       while (call_index < static_cast<int>(call_queue.size())) {
         const auto& entry = call_queue[call_index];
-        if (assassinated == entry.number) {
+        if (assassinated == entry.number && !has_effect(entry.player, "hospital")) {
           if (entry.number == 4) {
             if (entry.char_id == "king" || entry.char_id == "noble") {
-              for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
+              move_crown(entry.player);
             } else if (entry.char_id == "emperor") {
               std::vector<int> others;
               for (size_t i = 0; i < players.size(); ++i)
                 if (static_cast<int>(i) != entry.player) others.push_back(static_cast<int>(i));
               if (!others.empty()) {
                 const int crown = others[static_cast<size_t>(rng.next() * others.size())];
-                for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == crown;
+                move_crown(crown);
               }
             }
             if (pending_queen >= 0) {
@@ -1020,7 +1174,7 @@ struct NativeGameState {
           ++call_index;
           continue;
         }
-        if (thief_target == entry.number && thief_player >= 0 && thief_player < static_cast<int>(players.size()) &&
+        if (assassinated != entry.number && thief_target == entry.number && thief_player >= 0 && thief_player < static_cast<int>(players.size()) &&
             entry.player >= 0 && entry.player < static_cast<int>(players.size())) {
           players[thief_player].gold += players[entry.player].gold;
           players[entry.player].gold = 0;
@@ -1029,7 +1183,7 @@ struct NativeGameState {
         active_player = entry.player;
         players[active_player].role_id = entry.char_id;
         has_turn = true; phase = NativePhase::Action;
-        turn_phase = bewitched == entry.number ? "bewitched" : "main";
+        turn_phase = assassinated == entry.number ? "hospital" : bewitched == entry.number ? "bewitched" : "main";
         resources_taken = false; income_taken = false; monk_extra_taken = false;
         ability_used = false; bonus_done = false;
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
@@ -1037,9 +1191,14 @@ struct NativeGameState {
         // before interrupting the turn for a Blackmailer threat; that
         // response pauses the role but must not postpone its crown effect.
         if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
-          for (size_t i = 0; i < players.size(); ++i) players[i].has_crown = static_cast<int>(i) == entry.player;
+          move_crown(entry.player);
         }
-        if (blackmailer_player >= 0 &&
+        if (turn_phase == "hospital") return true;
+        for (size_t owner = 0; owner < players.size(); ++owner)
+          if (static_cast<int>(owner) != active_player && players[owner].has_crown && has_effect(static_cast<int>(owner), "ballroom")) {
+            pending_kind = "ballroom"; break;
+          }
+        if (pending_kind.empty() && blackmailer_player >= 0 &&
             bewitched != entry.number &&
             std::find(blackmailer_nums.begin(), blackmailer_nums.end(), entry.number) != blackmailer_nums.end() &&
             std::find(blackmailer_done.begin(), blackmailer_done.end(), entry.number) == blackmailer_done.end()) {
@@ -1079,7 +1238,7 @@ struct NativeGameState {
       }
       active_player = -1; has_turn = false; turn_phase.clear();
       const bool finished = std::any_of(players.begin(), players.end(), [&](const NativePlayer& value) {
-        return value.city.size() >= static_cast<size_t>(end_districts);
+        return city_count(static_cast<int>(&value - players.data())) >= completion_limit();
       });
       phase = finished ? NativePhase::GameOver : NativePhase::RoundConfirm;
       round_confirmed.assign(players.size(), false); round_confirm_count = 0;

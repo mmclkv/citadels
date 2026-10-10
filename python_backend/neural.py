@@ -108,7 +108,10 @@ class NeuralPolicy:
             raise RuntimeError(self.error or "策略网络未加载")
         if not isinstance(available, dict):
             raise RuntimeError("策略网络必须接收 C++ 游戏引擎生成的合法动作")
-        candidates = available.get("actions") or []
+        # Human navigation remains available in the UI; a policy committing to
+        # the Den must finish paying instead of reopening the same decision.
+        candidates = [a for a in available.get("actions") or []
+                      if not (a.get("type") == "district_effect" and a.get("name") == "thieves_cancel")]
         if not candidates:
             raise RuntimeError("当前局面没有可评估的合法行动")
         options = mcts or {}

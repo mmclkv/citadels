@@ -24,14 +24,8 @@ inline float native_player_score(const NativeGameState& state, int index) {
   for (const auto& d : player.city) {
     total += d.card.score_as > 0 ? d.card.score_as
       : d.card.score_value > 0 ? d.card.score_value : d.card.cost;
-    total += static_cast<int>(d.museum_cards.size()) + int(d.beautified);
-    for (size_t c = 0; c < colors.size(); ++c) if (d.card.color == colors[c]) have[c] = true;
-    if (d.effect == "anyColorScore" && d.built_round != state.round) ++ghosts;
   }
-  const int missing = static_cast<int>(std::count(have.begin(), have.end(), false));
-  if (missing == 0 || missing <= ghosts) total += 3;
-  if (state.first_to_finish == index) total += 4;
-  else if (player.city.size() >= static_cast<size_t>(state.end_districts)) total += 2;
+  total += state.score_bonus(index);
   return total;
 }
 
@@ -155,19 +149,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   static bool can_build(const NativeGameState& state, const NativePlayer& player,
                         const DistrictCard& card) {
-    int same = 0, quarry = 0;
-    for (const auto& district : player.city) {
-      if (district.name == card.name) ++same;
-      if (district.effect == "quarry") ++quarry;
-    }
-    int build_limit = 1;
-    if (player.role_id == "architect") build_limit = 3;
-    else if (player.role_id == "prophet" || player.role_id == "scholar") build_limit = 2;
-    else if (player.role_id == "navigator") build_limit = 0;
-    BuildCard build_card{card.name, card.color, card.cost};
-    BuildContext context{player.role_id, state.turn_phase == "witch_resume",
-                         player.gold, state.builds, build_limit, same, quarry};
-    return !card.name.empty() && citadels::native::can_build(build_card, context);
+    return state.can_build_card(player, card);
   }
 
   static std::vector<std::vector<std::string>> exact_hand_choices(const NativePlayer& player,
@@ -192,7 +174,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   std::vector<NativeSearchAction> ai_actions(const NativeGameState& state, int player) const override {
     auto actions = legal_actions(state, player);
     actions.erase(std::remove_if(actions.begin(), actions.end(), [](const NativeSearchAction& action) {
-      return action.type == ActionType::PendingBack;
+      return action.type == ActionType::PendingBack ||
+        (action.type == ActionType::DistrictEffect && action.name == "thieves_cancel");
     }), actions.end());
     return actions;
   }
@@ -219,8 +202,15 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     return key.finish();
   }
 
+#include "district_actions.hpp"
+
   std::vector<NativeSearchAction> legal_actions(const NativeGameState& state,
                                                 int player) const override {
+    if (state.pending_kind == "lighthouse" || state.pending_kind == "bell_tower" || state.pending_kind == "theater_exchange" || state.pending_kind == "thieves_den" || state.pending_kind == "ballroom") return district_actions(state, player);
+    if (state.turn_phase == "hospital" && state.pending_kind.empty()) {
+      if (player != state.active_player) return {};
+      return state.resources_taken ? std::vector<NativeSearchAction>{{ActionType::EndTurn}} : std::vector<NativeSearchAction>{{ActionType::TakeGold}, {ActionType::TakeCards}};
+    }
     if (state.phase == NativePhase::RoundConfirm) {
       if (player < 0 || player >= static_cast<int>(state.players.size()) ||
           (state.round_confirmed.size() == state.players.size() && state.round_confirmed[player])) return {};
@@ -330,7 +320,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       const auto selected = std::find_if(state.pending_cards.begin(), state.pending_cards.end(),
         [&](const DistrictCard& card) { return card.uid == state.pending_uid; });
       if (selected != state.pending_cards.end() && state.active() &&
-          state.active()->gold >= selected->cost) actions.push_back({ActionType::WizardBuild});
+          state.can_build_card(*state.active(), *selected, false, true)) actions.push_back({ActionType::WizardBuild});
       actions.push_back({ActionType::PendingBack});
       return actions;
     }
@@ -453,13 +443,14 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       if (mine_it != state.players[player].city.end()) {
         const int quarry = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
           [](const NativeDistrict& own) { return own.effect == "quarry"; }));
-        for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player && !state.protected_from_rank8(static_cast<int>(i)))
+        for (size_t i = 0; i < state.players.size(); ++i) if (static_cast<int>(i) != player && state.city_count(static_cast<int>(i)) < state.completion_limit() && !state.protected_from_rank8(static_cast<int>(i)))
           for (const auto& district : state.players[i].city) {
-            if (district.fortress) continue;
+            if (district.fortress || std::any_of(state.players[i].city.begin(), state.players[i].city.end(), [&](const NativeDistrict& d) { return d.card.uid != district.card.uid && d.name == mine_it->name; })) continue;
             const int same_name = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
-              [&](const NativeDistrict& own) { return own.name == district.name; }));
-            if (same_name >= 1 + quarry) continue;
-            if (std::max(0, district.card.cost - mine_it->card.cost) > state.players[player].gold) continue;
+              [&](const NativeDistrict& own) { return own.card.uid != state.pending_uid && own.name == district.name; }));
+            if (same_name > 0) continue;
+            const bool wall = std::any_of(state.players[i].city.begin(), state.players[i].city.end(), [&](const NativeDistrict& d) { return d.effect == "wallCost" && d.card.uid != district.card.uid; });
+            if (std::max(0, district.card.cost + int(district.beautified) + int(wall) - mine_it->card.cost - int(mine_it->beautified)) > state.players[player].gold) continue;
             actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[i].id});
           }
       }
@@ -471,10 +462,10 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       std::vector<NativeSearchAction> actions;
       for (size_t i = 0; i < state.players.size(); ++i) {
         if (state.pending_kind == "marshal_seize" && static_cast<int>(i) == player) continue;
-        if (state.players[i].city.size() >= static_cast<size_t>(state.end_districts)) continue;
+        if (state.city_count(static_cast<int>(i)) >= state.completion_limit()) continue;
         if (static_cast<int>(i) != player && state.protected_from_rank8(static_cast<int>(i))) continue;
         for (const auto& district : state.players[i].city) {
-          if (district.fortress || (state.pending_kind == "marshal_seize" && district.card.cost > 3)) continue;
+          if (district.fortress || (state.pending_kind == "marshal_seize" && district.card.cost + int(district.beautified) > 3)) continue;
           if (state.pending_kind == "warlord_destroy") {
             const bool other_wall = std::any_of(state.players[i].city.begin(), state.players[i].city.end(),
               [&](const NativeDistrict& other) {
@@ -483,12 +474,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
             MilitaryCard military{district.name, district.card.cost, district.fortress, district.beautified};
             if (destroy_cost(military, other_wall) > state.players[player].gold) continue;
           } else {
-            if (district.card.cost > state.players[player].gold) continue;
+            const bool wall = std::any_of(state.players[i].city.begin(), state.players[i].city.end(), [&](const NativeDistrict& d) { return d.effect == "wallCost" && d.card.uid != district.card.uid; });
+            if (district.card.cost + int(district.beautified) + int(wall) > 3 || district.card.cost + int(district.beautified) + int(wall) > state.players[player].gold) continue;
             const int same_name = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
-              [&](const NativeDistrict& own) { return own.name == district.name; }));
+              [&](const NativeDistrict& own) { return own.card.uid != state.pending_uid && own.name == district.name; }));
             const int quarry = static_cast<int>(std::count_if(state.players[player].city.begin(), state.players[player].city.end(),
               [](const NativeDistrict& own) { return own.effect == "quarry"; }));
-            if (same_name >= 1 + quarry) continue;
+            if (same_name > 0) continue;
           }
           actions.push_back({ActionType::ChooseDistrict, district.card.uid, {}, {}, state.players[i].id});
         }
@@ -629,6 +621,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
         if (d.effect == "museum" && !state.used_museum && !p->hand.empty())
           for (const auto& card : p->hand) actions.push_back({ActionType::Museum, d.card.uid, {}, {}, {}, {}, card.uid});
       }
+      auto buildings = district_actions(state, player);
+      actions.insert(actions.end(), buildings.begin(), buildings.end());
       actions.push_back({ActionType::EndTurn});
     }
     return actions;
@@ -636,6 +630,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   bool apply(NativeGameState& state, int player,
              const NativeSearchAction& action) const override {
+    if (action.type == ActionType::DistrictEffect) return apply_district(state, player, action);
     if (action.type == ActionType::ConfirmRound)
       return state.confirm_round(player);
     if (action.type == ActionType::AbilitySkip) {
@@ -967,22 +962,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
             return true;
           }
         }
-        const int builder_num = char_number(state.players[player].role_id);
-        if (state.magistrate_player >= 0 && !state.magistrate_claimed && state.magistrate_signed == builder_num &&
-            state.magistrate_player != player) {
-          state.magistrate_claimed = true;
-          auto card = std::find_if(state.players[player].hand.begin(), state.players[player].hand.end(),
-            [&](const DistrictCard& c) { return c.uid == action.uid; });
-          const bool duplicate = card != state.players[player].hand.end() &&
-            std::any_of(state.players[state.magistrate_player].city.begin(), state.players[state.magistrate_player].city.end(),
-              [&](const NativeDistrict& d) { return d.name == card->name; });
-          if (card != state.players[player].hand.end() && !duplicate) {
-            state.reaction_kind = "magistrate"; state.reaction_player = state.magistrate_player;
-            state.reaction_target = state.magistrate_player; state.reaction_uid = card->uid; state.reaction_build = true;
-            return true;
-          }
-        }
-        return state.build(action.uid, action.name);
+        return state.start_build(action.uid);
       }
       case ActionType::Lab: return state.use_lab(action.uid, action.secondary_uid);
       case ActionType::Smithy: return state.use_smithy(action.uid);
@@ -993,6 +973,8 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   }
 
   int next_player(const NativeGameState& state) const override {
+    if (state.pending_kind == "theater_exchange" && !state.pending_queue.empty()) return state.pending_queue.front();
+    if (state.pending_kind == "lighthouse" || state.pending_kind == "bell_tower") return state.pending_target;
     if (!state.reaction_kind.empty()) return state.reaction_player;
     if (state.phase == NativePhase::Draft) return state.draft_current_player;
     if (state.phase == NativePhase::RoundConfirm) {
@@ -1021,6 +1003,16 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
     // 避免 ostringstream、浮点格式化、大字符串分配和字符串线性查找。
     InformationSetKeyBuilder builder;
     builder.i32(player);
+    builder.string(state.pending_kind); builder.string(state.turn_phase);
+    builder.i32(state.completion_limit()); builder.i32(state.first_to_finish);
+    builder.u64(state.first_finishers.size());
+    for (int owner : state.first_finishers) builder.i32(owner);
+    builder.u64(state.enabled_bell_towers.size());
+    for (const auto& uid : state.enabled_bell_towers) builder.string(uid);
+    if (player == state.active_player) {
+      builder.string(state.building_mode); builder.string(state.building_source);
+      for (const auto& uid : state.building_cards) builder.string(uid);
+    }
     if (state.pending_kind == "magician_redraw" && player == state.active_player) {
       builder.i32(state.pending_cursor);
       builder.u64(state.pending_selected.size());

@@ -30,7 +30,7 @@ inline bool use_lab(SpecialBuildingState& state, const std::string& discard_uid)
   if (it == state.hand.end()) return false;
   state.discard.push_back(std::move(*it));
   state.hand.erase(it);
-  ++state.gold;
+  state.gold += 2;
   state.used_lab = true;
   return true;
 }

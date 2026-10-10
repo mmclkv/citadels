@@ -112,6 +112,13 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   state.phase = load_phase(snapshot);
   state.round = int_field(snapshot, "round", 1);
   state.first_to_finish = int_field(snapshot, "firstToFinish", -1);
+  state.enabled_bell_towers = string_array_field(snapshot, "enabledBellTowers");
+  if (const auto* values = snapshot.get("firstFinishers"); values && values->is_array())
+    for (const auto& value : values->as_array()) if (value.is_number()) state.first_finishers.push_back(static_cast<int>(value.as_number()));
+  if (const auto* plan = snapshot.get("buildingPlan"); plan && plan->is_object()) {
+    state.building_mode = string_field(*plan, "mode"); state.building_source = string_field(*plan, "source");
+    state.building_cards = string_array_field(*plan, "cards");
+  }
   const auto* pending_queen = snapshot.get("pendingQueen");
   if (pending_queen && pending_queen->is_object())
     state.pending_queen = int_field(*pending_queen, "playerIdx", -1);

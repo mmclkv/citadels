@@ -525,22 +525,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
         except Exception:
             pass
         raise
-    colors = {"yellow", "blue", "green", "red", "purple"}
-    scores = []
-    for index, player in enumerate(state.get("players", [])):
-        city = player.get("city") or []
-        base = sum(int(card.get("scoreValue", card.get("cost", 0))) for card in city)
-        bonus = sum(len(card.get("museum") or []) + int(bool(card.get("beautified"))) for card in city)
-        have = {card.get("color") for card in city}
-        ghosts = sum(card.get("purpleEffect") == "anyColorScore" and
-                     int(card.get("builtRound", 0)) != int(state.get("round", 0)) for card in city)
-        if colors.issubset(have) or len(colors - have) <= ghosts:
-            bonus += 3
-        if int(state.get("firstToFinish", -1)) == index:
-            bonus += 4
-        elif len(city) >= int(config["endDistricts"]):
-            bonus += 2
-        scores.append(base + bonus)
+    scores = [int(row["total"]) for row in state.get("scores") or []]
     highest = max(scores, default=0)
     winners = [i for i, score in enumerate(scores) if score == highest] if completed else []
     # Measure the learner's strength, rather than averaging in direct-policy peers.

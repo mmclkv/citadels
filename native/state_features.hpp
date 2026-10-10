@@ -128,7 +128,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
   features[2] = static_cast<float>(state_phase_code(state.phase)) / 6.0f;
   features[3] = static_cast<float>(state.round) / 100.0f;
   features[4] = active_rel < 0 ? 0.0f : static_cast<float>(active_rel) / 8.0f;
-  features[5] = static_cast<float>(state.end_districts) / 12.0f;
+  features[5] = static_cast<float>(state.completion_limit()) / 12.0f;
   features[6] = state.first_to_finish < 0 ? 0.0f : static_cast<float>(rel(state.first_to_finish) + 1) / 9.0f;
   features[7] = static_cast<float>(state.deck.deck_count()) / 100.0f;
   features[8] = static_cast<float>(state.deck.discard_count()) / 100.0f;
@@ -184,7 +184,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     constexpr bool enhanced_context = true;
     const std::string revealed_id = enhanced_context && absolute == me && absolute == active && !p.role_id.empty() ? p.role_id
       : absolute == me && !p.role_ids.empty() ? p.role_ids.front()
-      : state.has_turn && absolute == state.active_player && !p.role_id.empty() ? p.role_id
+      : state.has_turn && absolute == state.active_player && state.turn_phase != "setup" && !p.role_id.empty() ? p.role_id
       : !p.played.empty() ? p.played.front() : std::string{};
     const int revealed = role_number(revealed_id);
     const size_t visible_chars = absolute == me ? p.role_ids.size() : p.played.size();
@@ -195,7 +195,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
     const bool draft_complete = state.phase != NativePhase::Draft || static_cast<int>(p.role_ids.size()) >= (player_count <= 3 ? 2 : 1);
     features[base] = static_cast<float>(p.gold) / 20.0f;
     features[base + 1] = static_cast<float>(p.hand.size()) / 20.0f;
-    features[base + 2] = static_cast<float>(p.city.size()) / std::max(1, state.end_districts);
+    features[base + 2] = static_cast<float>(state.city_count(absolute)) / std::max(1, state.completion_limit());
     features[base + 3] = p.has_crown ? 1.0f : 0.0f;
     features[base + 4] = absolute == active ? 1.0f : 0.0f;
     features[base + 5] = chosen ? 1.0f : 0.0f;

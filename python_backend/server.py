@@ -680,7 +680,11 @@ class PythonServer:
             if reaction:
                 return state["players"][reaction["playerIdx"]]["id"]
             turn = state.get("turn")
-            return state["players"][turn["playerIdx"]]["id"] if turn else None
+            pending = (turn or {}).get("pending") or {}
+            actor = ((pending.get("queue") or [-1])[0] if pending.get("kind") == "theater_exchange"
+                     else pending.get("targetIdx") if pending.get("kind") in ("lighthouse", "bell_tower")
+                     else (turn or {}).get("playerIdx"))
+            return state["players"][actor]["id"] if isinstance(actor, int) and 0 <= actor < len(state["players"]) else None
         return None
 
     @staticmethod
@@ -724,6 +728,8 @@ class PythonServer:
         cards_by_uid = {card.get("uid"): card for player in players
                         for card in [*(player.get("hand") or []), *(player.get("city") or [])]}
         turn = state.get("turn") or {}
+        for card in (turn.get("pending") or {}).get("cards") or []:
+            cards_by_uid[card.get("uid")] = card
         role_id = turn.get("charId")
         turn_phase = turn.get("phase")
         labels = {"take_gold": "拿取金币", "take_cards": "抽取建筑牌", "income": "领取收入",
@@ -743,7 +749,26 @@ class PythonServer:
                   "blackmailer_signed": "指定真威胁目标角色", "blackmailer_char": "选择威胁标记角色",
                   "abbot_resource": "分配住持资源", "monk_resource": "分配僧侣资源",
                   "monk_take": "从最富有玩家处拿取1枚金币"}
-        if kind in ("draft_pick", "draft_discard"):
+        if kind == "district_effect":
+            mode = action.get("name")
+            uid = action.get("uid")
+            card_uid = action.get("secondaryUid") or action.get("cardUid")
+            district = cards_by_uid.get(card_uid or uid, {})
+            card_name = district.get("name", "建筑")
+            target = by_id.get(action.get("target"), {}).get("name", "对方")
+            names = {"framework": f"拆除脚手架，免费建造『{card_name}』",
+                     "necropolis": f"拆除『{cards_by_uid.get(uid, {}).get('name', '建筑')}』，免费建造大墓园",
+                     "armory": f"牺牲军械库，摧毁{target}的『{card_name}』",
+                     "thieves_begin": "盗贼巢穴：选择用手牌抵扣造价",
+                     "thieves_discard": f"用『{card_name}』抵扣1金币",
+                     "thieves_pay": "确认支付并建造盗贼巢穴", "thieves_cancel": "取消建造",
+                     "lighthouse_pick": f"灯塔：取得『{card_name}』并洗牌", "lighthouse_skip": "灯塔：放弃选牌并洗牌",
+                     "bell_enable": "钟楼：将完工门槛设为7栋", "bell_skip": "钟楼：保持当前完工门槛",
+                     "ballroom_thanks": "舞厅：向皇冠持有者致谢，继续回合", "ballroom_skip": "舞厅：不致谢，跳过本回合",
+                     "theater_swap": f"剧院：用你的第{int(uid)+1 if str(uid).isdigit() else 1}个角色交换{target}的随机角色",
+                     "theater_skip": "剧院：不交换角色"}
+            label = names.get(mode, "发动建筑效果")
+        elif kind in ("draft_pick", "draft_discard"):
             role = cards.CHAR_MAP.get(action.get("charId") or "", {})
             label = ("选取 " if kind == "draft_pick" else "弃置 ") + role.get("name", action.get("charId", "角色"))
         elif kind == "reaction":
@@ -756,18 +781,20 @@ class PythonServer:
             cost_label = f"（造价 {cost} 金币）" if isinstance(cost, int) else ""
             label = f"建造『{district.get('name') or action.get('name') or '建筑'}』{cost_label}"
         elif kind == "take_gold":
-            amount = 2 + int(role_id == "merchant" and turn_phase != "witch_resume")
-            detail = "，建筑师额外抽2张建筑牌" if role_id == "architect" and turn_phase != "witch_resume" else ""
+            active = players[turn.get("playerIdx", -1)] if isinstance(turn.get("playerIdx"), int) and 0 <= turn.get("playerIdx", -1) < len(players) else {}
+            amount = 2 + int(role_id == "merchant" and turn_phase not in ("witch_resume", "hospital"))
+            if turn_phase != "hospital" and any(card.get("purpleEffect") == "goldMine" for card in active.get("city") or []): amount += 1
+            detail = "，建筑师额外抽2张建筑牌" if role_id == "architect" and turn_phase not in ("witch_resume", "hospital") else ""
             label = f"拿取金币（{amount} 枚{detail}）"
         elif kind == "take_cards":
             active = players[turn.get("playerIdx", -1)] if isinstance(turn.get("playerIdx"), int) and 0 <= turn.get("playerIdx", -1) < len(players) else {}
             city = active.get("city") or []
-            effects = {card.get("purpleEffect") or (card.get("purple") or {}).get("effect") for card in city}
+            effects = {card.get("purpleEffect") or (card.get("purple") or {}).get("effect") for card in city} if turn_phase != "hospital" else set()
             amount = 3 if "draw3keep1" in effects else 2
-            detail = "，保留1张" if amount == 3 else "，全部保留" if "keepBoth" in effects else ""
-            if role_id == "architect" and turn_phase != "witch_resume":
+            detail = "，全部保留" if "keepBoth" in effects else "，保留1张"
+            if role_id == "architect" and turn_phase not in ("witch_resume", "hospital"):
                 detail += "，建筑师额外抽2张"
-            if role_id == "merchant" and turn_phase != "witch_resume":
+            if role_id == "merchant" and turn_phase not in ("witch_resume", "hospital"):
                 detail += "，另得1金币"
             label = f"抽取建筑牌（{amount} 张{detail}）"
         elif kind == "income":
@@ -1099,6 +1126,8 @@ class PythonServer:
         if action.get("type") != "ability":
             return
         turn = previous.get("turn") or {}
+        for card in (turn.get("pending") or {}).get("cards") or []:
+            cards_by_uid[card.get("uid")] = card
         role_id = turn.get("charId")
         if not isinstance(role_id, str):
             return
@@ -1147,6 +1176,8 @@ class PythonServer:
         kind = action.get("type")
         turn = previous.get("turn") or {}
         pending = turn.get("pending") or {}
+        for card in (turn.get("pending") or {}).get("cards") or []:
+            cards_by_uid[card.get("uid")] = card
         role_id = turn.get("charId")
         if not isinstance(role_id, str):
             role_id = None
@@ -1428,7 +1459,26 @@ class PythonServer:
         if kind == "tax_collect":
             amount = max(0, int((state.get("effects") or {}).get("taxCollectorGold") or 0))
             return f"税务官收取了{amount}枚建筑税"
-        if kind in ("draft_pick", "draft_discard"):
+        if kind == "district_effect":
+            mode = action.get("name")
+            uid = action.get("uid")
+            card_uid = action.get("secondaryUid") or action.get("cardUid")
+            district = cards_by_uid.get(card_uid or uid, {})
+            card_name = district.get("name", "建筑")
+            target = by_id.get(action.get("target"), {}).get("name", "对方")
+            names = {"framework": f"拆除脚手架，免费建造『{card_name}』",
+                     "necropolis": f"拆除『{cards_by_uid.get(uid, {}).get('name', '建筑')}』，免费建造大墓园",
+                     "armory": f"牺牲军械库，摧毁{target}的『{card_name}』",
+                     "thieves_begin": "盗贼巢穴：选择用手牌抵扣造价",
+                     "thieves_discard": f"用『{card_name}』抵扣1金币",
+                     "thieves_pay": "确认支付并建造盗贼巢穴", "thieves_cancel": "取消建造",
+                     "lighthouse_pick": f"灯塔：取得『{card_name}』并洗牌", "lighthouse_skip": "灯塔：放弃选牌并洗牌",
+                     "bell_enable": "钟楼：将完工门槛设为7栋", "bell_skip": "钟楼：保持当前完工门槛",
+                     "ballroom_thanks": "舞厅：向皇冠持有者致谢，继续回合", "ballroom_skip": "舞厅：不致谢，跳过本回合",
+                     "theater_swap": f"剧院：用你的第{int(uid)+1 if str(uid).isdigit() else 1}个角色交换{target}的随机角色",
+                     "theater_skip": "剧院：不交换角色"}
+            label = names.get(mode, "发动建筑效果")
+        elif kind in ("draft_pick", "draft_discard"):
             return "选取了一个角色" if kind == "draft_pick" else "弃置了一个角色"
         if kind in ("assassin_declare", "thief_declare", "witch_declare"):
             role_names = {"assassin_declare": "刺客", "thief_declare": "盗贼",
@@ -1567,6 +1617,11 @@ class PythonServer:
             return "选择角色" if actions else "等待其他玩家选择角色…"
         turn = state.get("turn") or {}
         active_id = turn.get("playerId")
+        pending = turn.get("pending") or {}
+        choice_index = ((pending.get("queue") or [-1])[0] if pending.get("kind") == "theater_exchange"
+                        else pending.get("targetIdx") if pending.get("kind") in ("lighthouse", "bell_tower") else None)
+        if isinstance(choice_index, int) and 0 <= choice_index < len(state.get("players", [])):
+            active_id = state["players"][choice_index]["id"]
         if active_id is None and isinstance(turn.get("playerIdx"), int):
             players = state.get("players", [])
             index = turn["playerIdx"]
@@ -1595,7 +1650,12 @@ class PythonServer:
                    "navigator_bonus": "选择额外奖励",
                    "artist": "选择要美化的建筑", "warlord_destroy": "选择要摧毁的建筑",
                    "marshal_seize": "选择要抢夺的建筑", "diplomat_mine": "选择自己的建筑",
-                   "diplomat_theirs": "选择对方的建筑"}
+                   "diplomat_theirs": "选择对方的建筑",
+                   "lighthouse": "灯塔：从牌堆选一张建筑牌，随后洗牌",
+                   "bell_tower": "钟楼：决定是否改为7栋完工",
+                   "theater_exchange": "剧院：选择交换角色的玩家，或跳过",
+                   "ballroom": "舞厅：向皇冠持有者致谢才能继续回合",
+                   "thieves_den": "盗贼巢穴：选择抵扣费用的手牌，再确认建造"}
         return prompts.get(pending.get("kind"), "请选择行动")
 
     async def _record_bot_debug(self, room: dict, actor: dict, kind: str, **details) -> None:

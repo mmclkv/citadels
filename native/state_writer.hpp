@@ -259,6 +259,9 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     out << ",\"queue\":[";
     for (size_t i = 0; i < state.reaction_queue.size(); ++i) { if (i) out << ','; out << state.reaction_queue[i]; }
     out << ']';
+    if (state.reaction_build) {
+      out << ",\"build\":{\"uid\":"; write_json_string(out, state.reaction_uid); out << '}';
+    }
     if (state.has_reaction_card) { out << ",\"card\":"; write_native_card(out, state.reaction_card); }
     out << '}';
   }
@@ -301,42 +304,27 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     }
     out << "]}";
   }
-  out << "},\"scores\":[";
+  out << "},\"buildingPlan\":{\"mode\":"; write_json_string(out, state.building_mode);
+  out << ",\"source\":"; write_json_string(out, state.building_source);
+  out << ",\"cards\":"; write_json_strings(out, state.building_cards);
+  out << "},\"enabledBellTowers\":"; write_json_strings(out, state.enabled_bell_towers);
+  out << ",\"firstFinishers\":[";
+  for (size_t i = 0; i < state.first_finishers.size(); ++i) { if (i) out << ','; out << state.first_finishers[i]; }
+  out << "],\"completionDistricts\":" << state.completion_limit();
+  out << ",\"scores\":[";
   std::vector<int> totals(state.players.size(), 0);
   for (size_t player = 0; player < state.players.size(); ++player) {
     const auto& value = state.players[player];
-    int base = 0, museum = 0, beautified = 0, ghosts = 0;
-    std::array<bool, 5> colors{};
-    for (const auto& district : value.city) {
-      base += district.card.score_as > 0 ? district.card.score_as :
-        district.card.score_value > 0 ? district.card.score_value : district.card.cost;
-      if (district.card.color == "yellow") colors[0] = true;
-      else if (district.card.color == "blue") colors[1] = true;
-      else if (district.card.color == "green") colors[2] = true;
-      else if (district.card.color == "red") colors[3] = true;
-      else if (district.card.color == "purple") colors[4] = true;
-      museum += static_cast<int>(district.museum_cards.size());
-      beautified += district.beautified ? 1 : 0;
-      ghosts += district.effect == "anyColorScore" && district.built_round != state.round ? 1 : 0;
-    }
-    int bonus = museum + beautified;
-    const int missing = static_cast<int>(std::count(colors.begin(), colors.end(), false));
-    if (missing == 0 || (missing > 0 && missing <= ghosts)) bonus += 3;
-    if (state.first_to_finish == static_cast<int>(player)) bonus += 4;
-    else if (value.city.size() >= static_cast<size_t>(state.end_districts)) bonus += 2;
+    int base = 0;
+    for (const auto& district : value.city)
+      base += district.card.score_as > 0 ? district.card.score_as : district.card.score_value > 0 ? district.card.score_value : district.card.cost;
+    const int bonus = state.score_bonus(static_cast<int>(player));
     totals[player] = base + bonus;
     if (player) out << ',';
     out << "{\"playerIdx\":" << player << ",\"name\":"; write_json_string(out, value.name);
     out << ",\"base\":" << base << ",\"bonus\":" << bonus << ",\"total\":" << totals[player]
-        << ",\"cityCount\":" << value.city.size() << ",\"detail\":[{\"label\":\"建筑总分\",\"value\":" << base << '}';
-    if (museum) out << ", {\"label\":\"博物馆\",\"value\":" << museum << '}';
-    if (beautified) out << ", {\"label\":\"美化\",\"value\":" << beautified << '}';
-    if (missing == 0 || (missing > 0 && missing <= ghosts))
-      out << ", {\"label\":\"五色齐全\",\"value\":3}";
-    if (state.first_to_finish == static_cast<int>(player))
-      out << ", {\"label\":\"率先建成 " << state.end_districts << " 栋\",\"value\":4}";
-    else if (value.city.size() >= static_cast<size_t>(state.end_districts))
-      out << ", {\"label\":\"建成 " << state.end_districts << " 栋\",\"value\":2}";
+        << ",\"cityCount\":" << state.city_count(static_cast<int>(player)) << ",\"detail\":[{\"label\":\"建筑总分\",\"value\":" << base << '}';
+    if (bonus) out << ", {\"label\":\"建筑效果与完工奖励\",\"value\":" << bonus << '}';
     out << "]}";
   }
   out << "],\"winner\":";
