@@ -692,6 +692,13 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
   border:1px solid #8e5b0c;box-shadow:inset 0 0 0 2px rgba(255,245,170,.42),0 1px 3px rgba(100,60,0,.35)}
 .coin-icon::before{content:'';position:absolute;inset:3px;border:1px solid rgba(255,247,177,.72);border-radius:50%}
 .coin-icon::after{content:'✦';position:absolute;inset:0;display:grid;place-items:center;color:#fff1a0;font-size:8px;line-height:1;text-shadow:0 1px 1px #9b650e}
+/* 手机公开局面和玩家详情中的手牌牌背。 */
+.mobile-hand-back{display:inline-block;box-sizing:border-box;flex:0 0 auto;width:14px;height:21px;
+  vertical-align:middle;border:1px solid var(--gold-l);border-radius:3px;
+  background:repeating-linear-gradient(45deg,var(--gold-l) 0 1px,var(--bg2) 1px 4px);
+  box-shadow:0 1px 3px rgba(0,0,0,.35)}
+html[data-theme="neon"] .mobile-hand-back{border-color:#9a58c4;
+  background:url("assets/themes/neon/card-back.png") center/cover no-repeat}
 /* 勒索者的威胁标记 / 行政官的逮捕令：画在金币图案左侧，宽度与金币相当 */
 /* 入场动画不挂在基础类上：玩家面板每次行动都会重建，挂上去会让标记跟着一起抖。
    只有标记本身出现/变化时才由 JS 加上 .mark-in 播一次。 */
@@ -1900,6 +1907,7 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
   #screen-game .mobile-player-head .threat-mark,#screen-game .mobile-player-head .warrant-mark{
     width:11px;height:15px;margin:0}
   #screen-game .mobile-hand-count{font-size:8px;color:var(--ink2)}
+  #screen-game .mobile-player-stats .mobile-hand-back{width:8px;height:12px;border-radius:2px}
   #screen-game .mobile-player-city{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;min-width:0}
   #screen-game .mobile-city-chip{display:flex;align-items:center;gap:2px;min-width:0;height:22px;
     padding:0 2px;border:1px solid color-mix(in srgb,var(--district-color) 58%,#1e3546);
