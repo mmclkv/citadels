@@ -1926,9 +1926,10 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
     overflow:hidden!important;background:var(--paper2)!important;box-shadow:none!important}
   #screen-game #me-area>.zone-head:first-child,#screen-game #me-area>.me-role-row,
   #screen-game #my-city{display:none!important}
-  #screen-game #me-area>.zone-head:nth-of-type(2){display:flex!important;align-items:center;
-    min-height:29px;margin:0!important;padding:5px 9px;border-bottom:1px solid var(--line)}
-  #screen-game #me-area>.zone-head:nth-of-type(2) h3{font-size:11px;font-weight:850}
+  #screen-game #mobile-hand-head{display:flex!important;align-items:center;gap:6px;
+    min-height:26px;margin:0!important;padding:3px 7px;border-bottom:1px solid var(--line)}
+  #screen-game .mobile-hand-title-left{display:flex;align-items:center;gap:7px;min-width:0;white-space:nowrap}
+  #screen-game #mobile-hand-head h3{margin:0;font-size:11px;line-height:1.2;font-weight:850}
   #screen-game #my-hand-count{font-size:9px;font-weight:650}
   #screen-game #my-chars-tip{display:none}
   #screen-game .mobile-hand-toggle,#screen-game .mobile-draft-toggle{display:inline-flex;align-items:center;
@@ -1985,7 +1986,7 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
   #screen-game.draft-phase #draft-pool .char-card .cc-num,
   #screen-game.draft-phase #draft-pool .char-card .cc-name,
   #screen-game.draft-phase #draft-pool .char-card .cc-desc{display:none}
-  #screen-game .mobile-removed{order:3;display:block;border:1px solid var(--line);
+  #screen-game .mobile-removed{order:3;display:block;flex:0 0 auto;border:1px solid var(--line);
     border-radius:13px;overflow:hidden;background:var(--paper2)}
   #screen-game .mobile-removed-title{display:flex;align-items:center;justify-content:space-between;
     min-height:29px;padding:5px 9px;border-bottom:1px solid var(--line);font-size:11px}
