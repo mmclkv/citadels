@@ -214,6 +214,9 @@ def sanitize(state: dict, player_id: str | None,
         if state["phase"] != "gameover" and owner != viewer_index and 0 <= owner < len(state["players"]):
             hidden = 3 * sum(c.get("purpleEffect") == "secretVault" for c in state["players"][owner]["hand"])
             row["bonus"] -= hidden; row["total"] -= hidden
+            vault_labels = {c["name"] + "加成奖励" for c in state["players"][owner]["hand"]
+                            if c.get("purpleEffect") == "secretVault"}
+            row["detail"] = [d for d in row["detail"] if d.get("label") not in vault_labels]
             for detail in row["detail"]:
                 if detail.get("label") == "建筑效果与完工奖励": detail["value"] -= hidden
         scores.append(row)

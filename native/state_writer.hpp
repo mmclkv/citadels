@@ -318,13 +318,17 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     int base = 0;
     for (const auto& district : value.city)
       base += district.card.score_as > 0 ? district.card.score_as : district.card.score_value > 0 ? district.card.score_value : district.card.cost;
-    const int bonus = state.score_bonus(static_cast<int>(player));
+    std::vector<std::pair<std::string, int>> bonus_detail;
+    const int bonus = state.score_bonus(static_cast<int>(player), &bonus_detail);
     totals[player] = base + bonus;
     if (player) out << ',';
     out << "{\"playerIdx\":" << player << ",\"name\":"; write_json_string(out, value.name);
     out << ",\"base\":" << base << ",\"bonus\":" << bonus << ",\"total\":" << totals[player]
         << ",\"cityCount\":" << state.city_count(static_cast<int>(player)) << ",\"detail\":[{\"label\":\"建筑总分\",\"value\":" << base << '}';
-    if (bonus) out << ", {\"label\":\"建筑效果与完工奖励\",\"value\":" << bonus << '}';
+    for (const auto& item : bonus_detail) {
+      out << ",{\"label\":"; write_json_string(out, item.first);
+      out << ",\"value\":" << item.second << '}';
+    }
     out << "]}";
   }
   out << "],\"winner\":";

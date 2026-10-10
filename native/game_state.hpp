@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "action_codec.hpp"
@@ -240,43 +241,62 @@ struct NativeGameState {
     }
     return build(uid, it->name);
   }
-  int score_bonus(int owner) const {
+  int score_bonus(int owner, std::vector<std::pair<std::string, int>>* detail = nullptr) const {
     const auto& p = players[owner];
+    const auto record = [&](const std::string& label, int value) {
+      if (detail && value) detail->emplace_back(label, value);
+    };
     int bonus = 0, ghosts = 0, odd = 0;
     std::array<int, 5> counts{};
     constexpr std::array<const char*, 5> colors = {"yellow", "blue", "green", "red", "purple"};
     for (const auto& d : p.city) {
       bonus += static_cast<int>(d.museum_cards.size()) + int(d.beautified);
+      if (detail) {
+        record(d.name + "加成奖励", static_cast<int>(d.museum_cards.size()));
+        record(d.name + "美化奖励", int(d.beautified));
+      }
       odd += (d.card.cost + int(d.beautified)) % 2;
       if (d.effect == "anyColorScore") ++ghosts;
       else for (size_t c = 0; c < colors.size(); ++c) if (d.card.color == colors[c]) ++counts[c];
     }
-    int best = 0;
+    int best = -1;
+    std::array<int, 5> best_counts{};
     // Select the legal haunted-quarter colors that maximize all scoring effects together.
-    const auto evaluate = [&]() {
+    const auto evaluate = [&](bool record_detail = false) {
       const int purple = counts[4];
       int value = std::all_of(counts.begin(), counts.end(), [](int n) { return n > 0; }) ? 3 : 0;
+      if (record_detail) record("五色齐全奖励", value);
+      const auto add = [&](const NativeDistrict& district, int points) {
+        value += points;
+        if (record_detail) record(district.name + "加成奖励", points);
+      };
       const bool triple = std::any_of(counts.begin(), counts.end(), [](int n) { return n >= 3; });
       for (const auto& d : p.city) {
-        if (d.effect == "basilica") value += odd;
-        if (d.effect == "capitol" && triple) value += 3;
-        if (d.effect == "treasury") value += p.gold;
-        if (d.effect == "mapRoom") value += static_cast<int>(p.hand.size());
-        if (d.effect == "ivoryTower" && purple == 1) value += 5;
-        if (d.effect == "statue" && p.has_crown) value += 5;
-        if (d.effect == "wishingWell") value += std::max(0, purple - 1);
+        if (d.effect == "basilica") add(d, odd);
+        if (d.effect == "capitol" && triple) add(d, 3);
+        if (d.effect == "treasury") add(d, p.gold);
+        if (d.effect == "mapRoom") add(d, static_cast<int>(p.hand.size()));
+        if (d.effect == "ivoryTower" && purple == 1) add(d, 5);
+        if (d.effect == "statue" && p.has_crown) add(d, 5);
+        if (d.effect == "wishingWell") add(d, std::max(0, purple - 1));
       }
-      best = std::max(best, value);
+      if (!record_detail && value > best) { best = value; best_counts = counts; }
     };
     const auto assign = [&](const auto& self, int remaining) -> void {
       if (!remaining) { evaluate(); return; }
       for (auto& count : counts) { ++count; self(self, remaining - 1); --count; }
     };
     assign(assign, ghosts);
+    if (detail) { counts = best_counts; evaluate(true); }
     bonus += best;
-    for (const auto& card : p.hand) if (card.purple_effect == "secretVault") bonus += 3;
-    if (first_finisher(owner)) bonus += 4;
-    else if (city_count(owner) >= completion_limit()) bonus += 2;
+    for (const auto& card : p.hand) if (card.purple_effect == "secretVault") {
+      bonus += 3; if (detail) record(card.name + "加成奖励", 3);
+    }
+    if (first_finisher(owner)) {
+      bonus += 4; record("率先完工奖励", 4);
+    } else if (city_count(owner) >= completion_limit()) {
+      bonus += 2; record("完工奖励", 2);
+    }
     return bonus;
   }
 

@@ -78,12 +78,16 @@ class DistrictExpansionTests(unittest.TestCase):
         vault = next(c for c in cards.DISTRICTS if c["en"] == "Secret Vault")
         state["players"][0]["hand"] = [{**vault, "uid": "vault", "purpleEffect": "secretVault"}]
         state["scores"] = [{"playerIdx": 0, "base": 0, "bonus": 3, "total": 3,
-                            "detail": [{"label": "建筑效果与完工奖励", "value": 3}]}]
+                            "detail": [{"label": "建筑总分", "value": 0},
+                                       {"label": "秘密宝库加成奖励", "value": 3}]}]
         self.assertEqual(sanitize(state, "p1")["scores"][0]["total"], 0)
         self.assertEqual(sanitize(state, "p0")["scores"][0]["total"], 3)
-        self.assertEqual(sanitize(state, None)["scores"][0]["detail"][0]["value"], 0)
+        self.assertEqual(sanitize(state, None)["scores"][0]["detail"],
+                         [{"label": "建筑总分", "value": 0}])
+        self.assertEqual(sanitize(state, "p0")["scores"][0]["detail"][-1]["value"], 3)
         state["phase"] = "gameover"
         self.assertEqual(sanitize(state, "p1")["scores"][0]["total"], 3)
+        self.assertEqual(sanitize(state, "p1")["scores"][0]["detail"][-1]["label"], "秘密宝库加成奖励")
         self.assertEqual(state["scores"][0]["total"], 3)
 
     @unittest.skipUnless(os.environ.get("CITADELS_TEST_DISTRICT_PROBE"), "Compiled district probe required")
