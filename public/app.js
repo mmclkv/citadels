@@ -2795,6 +2795,10 @@
     if (viewerId != null) App.myId = viewerId;
     $('#spectator-control').update(s, payload => Net.send(payload));
     $('#btn-speed').hidden = !!s.spectating;
+    const hostingButton = $('#btn-hosting');
+    hostingButton.hidden = !!s.spectating || s.phase === 'gameover' || typeof s.hostingEnabled !== 'boolean';
+    hostingButton.textContent = s.hostingEnabled ? '关闭托管' : '开启托管';
+    hostingButton.setAttribute('aria-pressed', String(!!s.hostingEnabled));
     $('#btn-again').hidden = !!s.spectating;
     // 记录滚动位置，渲染完恢复（避免每次行动后画面跳动）
     const _scrollSnap = snapshotScroll();
@@ -5526,6 +5530,7 @@
     // 电脑节奏：对局内一键切换（设置页下拉已随首页/设置页移入共享组件）
     loadSpeed();
     $('#btn-speed').onclick = cycleSpeed;
+    $('#btn-hosting').onclick = () => Net.send({t: 'setHosting', enabled: !App.state?.hostingEnabled});
     syncSpeedBtn();
 
     // 对局内

@@ -518,7 +518,9 @@ class PythonServer:
                      "voiceReady": self.voice.configured and not spectator,
                      "voiceEnabled": room["config"].get("voice") is not False})
         seat = next((seat for seat in room["seats"] if seat["id"] == player_id), None)
-        if seat:
+        if seat and not seat.get("isBot"):
+            player = next((p for p in room["state"]["players"] if p["id"] == player_id), None)
+            view["hostingEnabled"] = bool(player and player.get("isBot"))
             view["autoHostEnabled"] = seat.get("autoHost", room["config"].get("autoHost")) is not False
         if player_id:
             # The synchronous sanitizer cannot query the worker. Its async caller
@@ -553,6 +555,8 @@ class PythonServer:
         # Always query native here: some action/reaction states are deliberately
         # not implemented in the Python presentation shim anymore.
         view["available"] = await self._bot_available_actions(room["state"], player_id)
+        if view.get("hostingEnabled"):
+            view["available"] = {"actions": [], "prompt": "启发式电脑托管中，可在菜单中关闭托管"}
         build_uids = {action.get("uid") for action in view["available"].get("actions", [])
                       if action.get("type") == "build"}
         for player in view.get("players", []):
@@ -573,7 +577,8 @@ class PythonServer:
                 raise ValueError("房间已关闭")
             return state
 
-    async def _apply_game_action(self, room: dict, player_id: str, action: dict) -> dict:
+    async def _apply_game_action(self, room: dict, player_id: str, action: dict,
+                                 *, hosting_version: int | None = None) -> dict:
         """Apply live rules through the authoritative C++ game engine."""
         manager = self.native_worker_manager
         worker = manager.game_worker if manager and manager.running else None
@@ -585,6 +590,10 @@ class PythonServer:
             current = room.get("state")
             if not current:
                 return {"ok": False, "error": "尚未开局"}
+            actor = next((p for p in current["players"] if p["id"] == player_id), None)
+            if hosting_version is not None and (not actor or not actor.get("isBot") or
+                    actor.get("hostingVersion", 0) != hosting_version):
+                return {"ok": False, "error": "托管状态已变化"}
             try:
                 native_state = await asyncio.to_thread(
                     worker.apply, game_id=str(room["id"]), player_id=player_id, action=action)
@@ -601,7 +610,7 @@ class PythonServer:
                 old = old_players.get(player.get("id"), {})
                 if "mcts" in old:
                     player["mcts"] = old["mcts"]
-                for key in ("heuristicMcts", "disconnected", "left"):
+                for key in ("isBot", "botType", "botLevel", "hostingVersion", "heuristicMcts", "disconnected", "left"):
                     if key in old:
                         player[key] = old[key]
             merged = {**retained, **native_state}
@@ -1704,6 +1713,9 @@ class PythonServer:
                         not state.get("roundConfirm")):
                     break
                 await asyncio.sleep(max(0, int(room["config"].get("botPace") or 0)) / 1000)
+                if not actor_now.get("isBot"):
+                    continue
+                hosting_version = actor_now.get("hostingVersion", 0)
                 started = time.perf_counter()
                 await self._record_bot_debug(room, actor_now, "decision_start")
                 inference = {"method": "round-confirm" if state.get("roundConfirm") else actor_now.get("botType", "npc")}
@@ -1783,8 +1795,14 @@ class PythonServer:
                     inference=inference, mcts=dict(inference.get("mcts") or {}))
                 if action is None:
                     break
-                result = await self._apply_game_action(room, actor_now["id"], action)
+                if (not actor_now.get("isBot") or
+                        actor_now.get("hostingVersion", 0) != hosting_version):
+                    continue
+                result = await self._apply_game_action(room, actor_now["id"], action,
+                                                       hosting_version=hosting_version)
                 if not result.get("ok"):
+                    if result.get("error") == "托管状态已变化":
+                        continue
                     await self._record_bot_debug(room, actor_now, "decision_error", error=result.get("error") or "行动未通过规则校验", action=action)
                     if actor_now.get("botType") in ("agent", "neural"):
                         room["agentStatus"] = {"playerId": actor_now["id"], "state": "error",
@@ -1794,7 +1812,7 @@ class PythonServer:
                         break
                     fallback = next((item for item in available.get("actions", [])
                                      if not item.get("disabled")), None)
-                    if not fallback or not (await self._apply_game_action(room, actor_now["id"], fallback)).get("ok"):
+                    if not fallback or not (await self._apply_game_action(room, actor_now["id"], fallback, hosting_version=hosting_version)).get("ok"):
                         break
                     action = fallback
                     await self._record_bot_debug(room, actor_now, "fallback_action", action=action)
@@ -2116,6 +2134,31 @@ class PythonServer:
             pace = message.get("pace")
             if isinstance(pace, (int, float)) and 60 <= pace <= 6000:
                 room["config"]["botPace"] = round(pace)
+            return
+        if kind == "setHosting":
+            async with self._native_action_lock:
+                state = room.get("state")
+                if not state or state["phase"] == "gameover":
+                    raise ValueError("只能在进行中的对局切换托管")
+                seat = next((s for s in room["seats"] if s["id"] == client.id
+                             and s.get("taken") and not s.get("isBot") and not s.get("left")), None)
+                player = next((p for p in state["players"] if p["id"] == client.id), None)
+                if not seat or not player:
+                    raise ValueError("只能切换自己的真人座位托管")
+                enabled = message.get("enabled") is True
+                if bool(player.get("isBot")) != enabled:
+                    player["hostingVersion"] = player.get("hostingVersion", 0) + 1
+                    player["isBot"] = enabled
+                    if enabled:
+                        player["botType"] = "npc"
+                        player["botLevel"] = "hard"
+                        player["heuristicMcts"] = _seat_heuristic_mcts()
+                    if (room.get("agentStatus") or {}).get("playerId") == client.id:
+                        room["agentStatus"] = None
+                    _append_game_log(state, player["name"] +
+                                     (" 已开启托管，由启发式电脑接管。" if enabled else " 已关闭托管，恢复手动操作。"), "sys")
+            await self._broadcast_state(room)
+            self._schedule_bot(room)
             return
         if kind == "setAutoHost":
             seat = next((seat for seat in room["seats"]

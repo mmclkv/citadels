@@ -112,7 +112,10 @@
     $('playerCount').textContent=s.players.length+' 人局';
     const voiceAvailable=s.voiceReady!==false&&s.voiceEnabled!==false&&s.config?.voice!==false;
     $('menuVoice').hidden=!voiceAvailable;$('sidebarVoiceTab').hidden=!voiceAvailable;
-    const canControlHosting=!s.spectating&&s.phase!=='lobby'&&s.phase!=='gameover'&&!!myPlayer()&&!myPlayer().isBot;
+    const canControlHosting=!s.spectating&&s.phase!=='lobby'&&s.phase!=='gameover'&&typeof s.hostingEnabled==='boolean';
+    $('menuHosting').hidden=!canControlHosting;
+    $('menuHosting').textContent=s.hostingEnabled?'关闭托管':'开启托管';
+    $('menuHosting').setAttribute('aria-pressed',String(!!s.hostingEnabled));
     $('menuAutoHost').hidden=!canControlHosting;
     const autoHostEnabled=s.autoHostEnabled??(s.config?.autoHost!==false);
     $('menuAutoHost').textContent='断线/离开后托管我 · '+(autoHostEnabled?'开启':'关闭');
@@ -703,6 +706,7 @@
   const speeds={slow:['慢速',1300],normal:['标准',820],fast:['快速',330]};
   function syncSpeed(){$('menuSpeed').textContent='电脑速度 · '+speeds[M.speed]?.[0];}syncSpeed();
   $('menuSpeed').onclick=()=>{const order=['slow','normal','fast'];M.speed=order[(order.indexOf(M.speed)+1)%3];localStorage.setItem('citadels.speed',M.speed);send({t:'setPace',pace:speeds[M.speed][1]});syncSpeed();};
+  $('menuHosting').onclick=()=>send({t:'setHosting',enabled:!M.state?.hostingEnabled});
   $('menuAutoHost').onclick=()=>send({t:'setAutoHost',enabled:!(M.state?.autoHostEnabled??(M.state?.config?.autoHost!==false))});
   const referenceParent=$('referenceOverlay').parentNode,viewerParent=$('viewer').parentNode;
   function openReference(title,html,all=false){closeMenu();M.referenceAll=all;
