@@ -283,9 +283,11 @@
     // 入场动画只在气泡出现的那一次渲染播放，避免每次状态刷新都重放造成闪动。
     M.bubbles.forEach(b=>{b.fresh=false;});
   }
-  function renderHand(own){const cards=own?.hand||[];const section=$('handSection');section.classList.toggle('collapsed',!M.handOpen);
+  function renderHand(own){const hand=own?.hand||[],pending=M.state.turn?.pending;
+    const cards=!M.state.spectating&&M.state.turn?.playerId===M.id&&pending?.kind==='bishop_repay'?hand.filter(c=>c.uid!==pending.uid):hand;
+    const section=$('handSection');section.classList.toggle('collapsed',!M.handOpen);
     section.querySelector('strong').textContent=M.state.spectating?(own?.name||'玩家')+'的手牌':'我的手牌';
-    section.querySelector('.sub').textContent=cards.length+' 张';section.querySelector('.fold-toggle').textContent=M.handOpen?'收起':'展开';
+    section.querySelector('.sub').textContent=hand.length+' 张';section.querySelector('.fold-toggle').textContent=M.handOpen?'收起':'展开';
     $('handSummary').style.setProperty('--summary-count',String(Math.max(1,cards.length)));
     $('handSummary').innerHTML=cards.map(mini).join('')||'<span class="choice-help">暂无手牌</span>';
     $('myHand').innerHTML=cards.map(c=>thumb(c,'district')).join('')||'<span class="choice-help">暂无手牌</span>';

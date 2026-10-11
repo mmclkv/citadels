@@ -4334,12 +4334,15 @@
     }
 
     const hand = $('#my-hand');
-    if (!me.hand.length) {
+    const repayment = s.turn && s.turn.playerId === App.myId && s.turn.pending &&
+      s.turn.pending.kind === 'bishop_repay' ? s.turn.pending : null;
+    const handCards = repayment ? me.hand.filter(c => c.uid !== repayment.uid) : me.hand;
+    if (!handCards.length) {
       childrenSnapshot(hand).forEach(ch => { if (ch.dataset && ch.dataset.uid && ch.parentNode) ch.parentNode.removeChild(ch); });
       if (!hand.querySelector('.empty-hint')) hand.appendChild(el('div', 'empty-hint', '（手牌为空）'));
     } else {
       const eh = hand.querySelector('.empty-hint'); if (eh) eh.remove();
-      syncCards(hand, me.hand, c => {
+      syncCards(hand, handCards, c => {
         const inSel = !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0);
         let clickable = false, disabled = false, pickable = false;
         if (App.sel && App.sel.kind === 'labpick') {
@@ -4385,8 +4388,8 @@
       toggle.setAttribute('aria-expanded', String(expanded));
       toggle.disabled = forceOpen;
       const summary = $('#mobile-hand-summary'); summary.innerHTML = '';
-      summary.style.setProperty('--summary-count', String(Math.max(1, me.hand.length)));
-      me.hand.forEach(card => {
+      summary.style.setProperty('--summary-count', String(Math.max(1, handCards.length)));
+      handCards.forEach(card => {
         const chip = el('button', 'mobile-hand-chip');
         chip.type = 'button';
         chip.style.setProperty('--district-color', mobileDistrictColor(card.color));
