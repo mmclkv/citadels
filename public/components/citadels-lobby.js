@@ -107,19 +107,28 @@
           <option value="agent">AI Agent 电脑（大模型决策，需要联网）</option>
         </select>
       </label>
-      <label class="field neural-only" hidden>
-        <span>MCTS 模拟次数</span>
-        <input id="cfg-mcts-sims" type="number" min="0" step="50" value="5000" inputmode="numeric">
+      <label class="field search-only">
+        <span>搜索时间预算（ms）</span>
+        <input id="cfg-search-time" type="number" min="1" step="1" value="10000" inputmode="numeric">
       </label>
-      <label class="field neural-only" hidden>
-        <span>MCTS 最大搜索深度</span>
-        <input id="cfg-mcts-depth" type="number" min="0" step="10" value="2000" inputmode="numeric">
-      </label>
-      <label class="field neural-only" hidden>
-        <span>MCTS 隐藏信息粒子数</span>
-        <input id="cfg-mcts-particles" type="number" min="1" step="1" value="4" inputmode="numeric">
-      </label>
-      <p class="dim small neural-only mcts-hint" hidden>策略神经网络电脑默认只按网络策略走子。填大于 0 的模拟次数后，服务器会在指定份数的隐藏信息猜测上做蒙特卡洛树搜索，粒子越多越稳但每步越慢。</p>
+      <div class="field search-only">
+        <button id="cfg-advanced-toggle" class="btn ghost" type="button" aria-expanded="false" aria-controls="cfg-mcts-advanced">高级选项</button>
+      </div>
+      <div id="cfg-mcts-advanced" class="setup-grid mcts-advanced" hidden>
+        <label class="field">
+          <span>MCTS 模拟次数</span>
+          <input id="cfg-mcts-sims" type="number" min="1" step="1" placeholder="自动" inputmode="numeric">
+        </label>
+        <label class="field">
+          <span>MCTS 最大搜索深度</span>
+          <input id="cfg-mcts-depth" type="number" min="1" step="1" placeholder="自动" inputmode="numeric">
+        </label>
+        <label class="field">
+          <span>MCTS 隐藏信息粒子数</span>
+          <input id="cfg-mcts-particles" type="number" min="1" step="1" placeholder="自动" inputmode="numeric">
+        </label>
+        <p class="dim small mcts-hint">搜索达到时间预算或模拟次数上限时结束。启发式电脑的参数留空时自动配置。</p>
+      </div>
       <label class="field">
         <span>电脑节奏</span>
         <select id="cfg-speed">
@@ -591,6 +600,20 @@
         } finally { clearTimeout(timer); }
       }
       const DEFAULT_MCTS_CONFIG = { simulations: 5000, maxDepth: 2000, particles: 4 };
+      const seatAdvancedOpen = new Set();
+      let singleAdvancedOpen = false;
+      let singleSearchType = 'npc-hard';
+      function readSearchBudget() {
+        const input = $('#cfg-search-time');
+        return Math.max(1, Math.floor(Number(input.value) || 10000));
+      }
+      function readHeuristicAdvanced() {
+        const advanced = {};
+        [['#cfg-mcts-sims', 'simulations'], ['#cfg-mcts-depth', 'maxDepth'], ['#cfg-mcts-particles', 'particles']].forEach(([id, key]) => {
+          if ($(id).value.trim() !== '') advanced[key] = Math.max(1, Math.floor(Number($(id).value) || 1));
+        });
+        return advanced;
+      }
       function readMctsConfig(simsId, depthId, particlesId) {
         const valueOrDefault = (id, fallback) => {
           const node = $(id);
@@ -605,19 +628,23 @@
           mctsMaxDepth: readInteger(depthId, DEFAULT_MCTS_CONFIG.maxDepth, 0),
           mctsParticles: readInteger(particlesId, DEFAULT_MCTS_CONFIG.particles, 1) };
       }
-      function syncNeuralOnlyFields() {
+      function syncSearchFields() {
         [['#screen-setup', '#cfg-bot-type']].forEach(pair => {
           const root = $(pair[0]);
           const select = $(pair[1]);
           if (!root || !select) return;
-          const show = select.value === 'neural';
-          Array.from(root.querySelectorAll('.neural-only')).forEach(node => { node.hidden = !show; });
-          if (show) {
+          const show = select.value !== 'agent';
+          Array.from(root.querySelectorAll('.search-only')).forEach(node => { node.hidden = !show; });
+          $('#cfg-mcts-advanced').hidden = !show || !singleAdvancedOpen;
+          $('#cfg-advanced-toggle').setAttribute('aria-expanded', String(singleAdvancedOpen));
+          $('#cfg-advanced-toggle').textContent = singleAdvancedOpen ? '收起高级选项' : '高级选项';
+          if (singleSearchType !== select.value) {
             const defaults = [
               ['#cfg-mcts-sims', DEFAULT_MCTS_CONFIG.simulations], ['#cfg-mcts-depth', DEFAULT_MCTS_CONFIG.maxDepth],
               ['#cfg-mcts-particles', DEFAULT_MCTS_CONFIG.particles]
             ];
-            defaults.forEach(([id, value]) => { const input = $(id); if (input && String(input.value).trim() === '') input.value = String(value); });
+            defaults.forEach(([id, value]) => { $(id).value = select.value === 'neural' ? String(value) : ''; });
+            singleSearchType = select.value;
           }
         });
       }
@@ -646,7 +673,13 @@
           Net.autoStart = true;
           Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
             playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
-            endDistricts: cfg.end, charSetMode: cfg.chars, scenario: cfg.scenario, botPace: pace().act, voice: false
+            endDistricts: cfg.end, charSetMode: cfg.chars, scenario: cfg.scenario, botPace: pace().act, voice: false,
+            mcts: Object.assign({ timeBudgetMs: readSearchBudget() }, cfg.botType === 'neural' ? {
+              simulations: Number($('#cfg-mcts-sims').value) || 5000,
+              maxDepth: Number($('#cfg-mcts-depth').value) || 2000,
+              particles: Number($('#cfg-mcts-particles').value) || 4
+            } : {}),
+            heuristicMcts: { timeBudgetMs: readSearchBudget(), advanced: readHeuristicAdvanced() }
           }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth', '#cfg-mcts-particles')) });
         });
       }
@@ -839,51 +872,68 @@
               type.value = s.botType === 'npc' ? 'npc-hard' : (s.botType || 'npc-hard');
               type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
               ops.appendChild(type);
-              if (s.botType === 'neural') {
-                const mcts = s.mcts || {};
+              if (s.botType === 'neural' || (s.botType === 'npc' && s.botLevel === 'hard')) {
+                const neural = s.botType === 'neural';
+                const cfg = (neural ? s.mcts : s.heuristicMcts) || {};
                 const box = el('div', 'seat-mcts');
-                box.innerHTML = '<span class="seat-mcts-title">MCTS 参数</span>';
+                const advancedKey = st.roomId + ':' + i + ':' + s.botType;
+                const sendSearchConfig = (updates) => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
+                  [neural ? 'mcts' : 'heuristicMcts']: Object.assign({}, cfg, updates) });
+                const budget = el('label', 'seat-mcts-field search-budget');
+                budget.innerHTML = '<span>搜索时间预算（ms）</span>';
+                const time = document.createElement('input');
+                time.type = 'number'; time.min = '1'; time.step = '1';
+                time.value = String(cfg.timeBudgetMs == null || cfg.timeBudgetMs < 1 ? 10000 : cfg.timeBudgetMs);
+                time.onchange = () => {
+                  if (!time.checkValidity()) { time.reportValidity(); return; }
+                  sendSearchConfig({ timeBudgetMs: time.value });
+                };
+                budget.appendChild(time); box.appendChild(budget);
+                const toggle = el('button', 'btn tiny', '高级选项');
+                toggle.type = 'button';
+                const advanced = el('div', 'seat-mcts mcts-advanced');
+                advanced.id = 'seat-advanced-' + i;
+                toggle.setAttribute('aria-controls', advanced.id);
+                const syncAdvanced = () => {
+                  const open = seatAdvancedOpen.has(advancedKey);
+                  advanced.hidden = !open;
+                  toggle.setAttribute('aria-expanded', String(open));
+                  toggle.textContent = open ? '收起高级选项' : '高级选项';
+                };
+                toggle.onclick = () => {
+                  if (seatAdvancedOpen.has(advancedKey)) seatAdvancedOpen.delete(advancedKey);
+                  else seatAdvancedOpen.add(advancedKey);
+                  syncAdvanced();
+                };
+                syncAdvanced();
+                box.appendChild(toggle);
                 const fields = [
-                  ['模拟次数', 'simulations', 5000, 0, 50],
-                  ['最大深度', 'maxDepth', 2000, 0, 10],
-                  ['粒子数', 'particles', 4, 1, 1]
+                  ['模拟次数上限', 'simulations', 5000],
+                  ['最大搜索深度', 'maxDepth', 2000],
+                  ['隐藏信息粒子数', 'particles', 4]
                 ];
-                fields.forEach(([label, key, fallback, min, step]) => {
+                fields.forEach(([label, key, fallback]) => {
                   const field = el('label', 'seat-mcts-field');
                   field.innerHTML = '<span>' + label + '</span>';
                   const input = document.createElement('input');
-                  input.type = 'number'; input.min = String(min); input.step = String(step);
+                  input.type = 'number'; input.min = '1'; input.step = '1'; input.placeholder = '自动';
+                  const current = neural ? cfg : (cfg.advanced || {});
                   const roomValue = st.config && st.config['mcts' + key[0].toUpperCase() + key.slice(1)];
-                  input.value = String(mcts[key] == null ? (roomValue == null ? fallback : roomValue) : mcts[key]);
+                  input.value = current[key] == null ? (neural ? String(roomValue == null ? fallback : roomValue) : '') : String(current[key]);
                   input.onchange = () => {
-                    const current = s.mcts || {};
-                    Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value, mcts: {
-                      simulations: key === 'simulations' ? input.value : current.simulations == null ? 5000 : current.simulations,
-                      maxDepth: key === 'maxDepth' ? input.value : current.maxDepth == null ? 2000 : current.maxDepth,
-                      particles: key === 'particles' ? input.value : current.particles == null ? 4 : current.particles
-                    }});
+                    if (!input.checkValidity()) { input.reportValidity(); return; }
+                    if (neural) sendSearchConfig({ [key]: input.value || fallback });
+                    else {
+                      const values = Object.assign({}, cfg.advanced);
+                      if (input.value.trim() === '') delete values[key];
+                      else values[key] = input.value;
+                      sendSearchConfig({ advanced: values });
+                    }
                   };
-                  field.appendChild(input); box.appendChild(field);
+                  field.appendChild(input); advanced.appendChild(field);
                 });
-                ops.appendChild(box);
-              }
-              if (s.botType === 'npc' && s.botLevel === 'hard') {
-                const cfg = s.heuristicMcts || {};
-                const box = el('div', 'seat-mcts heuristic-mcts');
-                box.innerHTML = '<span class="seat-mcts-title">启发式 MCTS</span>';
-                const field = el('label', 'seat-mcts-field');
-                field.innerHTML = '<span>搜索时间预算 ms</span>';
-                const input = document.createElement('input');
-                input.type = 'number'; input.min = '1'; input.step = '1';
-                input.value = String(cfg.timeBudgetMs == null ? 10000 : cfg.timeBudgetMs);
-                input.onchange = () => {
-                  if (!input.checkValidity()) { input.reportValidity(); return; }
-                  Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value,
-                    heuristicMcts: { timeBudgetMs: input.value } });
-                };
-                field.appendChild(input); box.appendChild(field);
-                box.appendChild(el('span', 'hint', '所有局面共用此预算；模拟次数随实际速度自适应，粒子数、深度和 rollout 自动配置。'));
-                ops.appendChild(box);
+                advanced.appendChild(el('span', 'hint seat-mcts-title', '达到时间预算或模拟次数上限时结束搜索。启发式参数留空时自动配置。'));
+                box.appendChild(advanced); ops.appendChild(box);
               }
             }
             d.appendChild(ops);
@@ -1038,10 +1088,14 @@
         };
       }
 
-      // MCTS 参数只在电脑类型选「策略神经网络」时才露出来
+      // 搜索预算默认显示，详细参数由高级选项按钮控制。
       const botTypeSel = $('#cfg-bot-type');
-      if (botTypeSel) botTypeSel.onchange = syncNeuralOnlyFields;
-      syncNeuralOnlyFields();
+      if (botTypeSel) botTypeSel.onchange = syncSearchFields;
+      $('#cfg-advanced-toggle').onclick = () => {
+        singleAdvancedOpen = !singleAdvancedOpen;
+        syncSearchFields();
+      };
+      syncSearchFields();
 
       $('#btn-start-single').onclick = () => {
         const botSelection = normalizeBotSelection($('#cfg-bot-type').value);

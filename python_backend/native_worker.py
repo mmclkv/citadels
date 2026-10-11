@@ -68,7 +68,7 @@ class NativeMctsWorker:
                batch_size: int = 32, action_encoding_version: int = 11,
                include_training_features: bool = False, policy_only: bool = False,
                include_root_diagnostics: bool = False,
-               opponent_policies: list[dict] | None = None) -> dict:
+               opponent_policies: list[dict] | None = None, time_budget_ms: int = 0) -> dict:
         with self._lock:
             if self.process.poll() is not None:
                 raise RuntimeError(f"C++ MCTS worker 已退出（exit={self.process.returncode}）")
@@ -83,6 +83,7 @@ class NativeMctsWorker:
                 "actionEncodingVersion": int(action_encoding_version), "modelPath": model_path,
                 "modelVersion": int(model_version), "simulations": int(simulations),
                 "maxDepth": int(max_depth), "cPuct": float(c_puct),
+                "timeBudgetMs": max(0, int(time_budget_ms)),
                 "includeTrainingFeatures": bool(include_training_features),
                 "policyOnly": bool(policy_only), "includeRootDiagnostics": bool(include_root_diagnostics),
                 "dirichletAlpha": float(dirichlet_alpha),

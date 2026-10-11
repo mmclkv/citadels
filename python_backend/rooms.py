@@ -23,14 +23,19 @@ def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
     fallback = fallback or {}
     return {"simulations": _int_at_least(value.get("simulations", fallback.get("mctsSimulations")), 5000, 0),
             "maxDepth": _int_at_least(value.get("maxDepth", fallback.get("mctsMaxDepth")), 2000, 0),
-            "particles": _int_at_least(value.get("particles", fallback.get("mctsParticles")), 4, 1)}
+            "particles": _int_at_least(value.get("particles", fallback.get("mctsParticles")), 4, 1),
+            "timeBudgetMs": _int_at_least(value.get("timeBudgetMs"), 10000, 1)}
 
 
 def _seat_heuristic_mcts(value: dict | None = None) -> dict:
     value = value or {}
-    # Drop legacy count/critical-budget fields, including when an old client
-    # sends them. Zero no longer means an unlimited search.
-    return {"timeBudgetMs": _int_at_least(value.get("timeBudgetMs"), 10000, 1)}
+    result = {"timeBudgetMs": _int_at_least(value.get("timeBudgetMs"), 10000, 1)}
+    advanced = value.get("advanced")
+    if isinstance(advanced, dict):
+        result["advanced"] = {key: min(2_147_483_647, _int_at_least(advanced[key], 1, 1))
+                              for key in ("simulations", "maxDepth", "particles")
+                              if key in advanced}
+    return result
 
 
 def _identity(prefix: str) -> str:

@@ -365,6 +365,7 @@ int main() {
       Mcts<NativeGameState, NativeSearchAction>::Config config;
       config.simulations = std::max(1, int_field(request, "simulations", 50));
       config.max_depth = std::max(1, int_field(request, "maxDepth", 200));
+      config.time_budget_ms = std::max(0, int_field(request, "timeBudgetMs", 0));
       config.c_puct = static_cast<float>(number_field(request, "cPuct", 1.0));
       config.dirichlet_alpha = static_cast<float>(number_field(request, "dirichletAlpha", 0.3));
       config.dirichlet_epsilon = static_cast<float>(number_field(request, "dirichletEpsilon", 0.0));

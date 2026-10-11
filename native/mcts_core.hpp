@@ -522,6 +522,10 @@ class BatchedMcts {
                 const std::vector<float>& particle_weights = {}) {
     if (batch_size < 1) batch_size = 1;
     if (root_states.empty()) return {};
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(std::max(0, config_.time_budget_ms));
+    const auto expired = [&] { return config_.time_budget_ms > 0 &&
+        std::chrono::steady_clock::now() >= deadline; };
     roots_ = &root_states;
     weights_ = &particle_weights;
     weight_total_ = 0.0f;
@@ -538,7 +542,7 @@ class BatchedMcts {
     expand(root, seed_state);
     add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
     int completed = 0;
-    while (completed < config_.simulations) {
+    while (completed < config_.simulations && !expired()) {
       const int count = std::min(batch_size, config_.simulations - completed);
       std::vector<State> states;
       std::vector<int> players;
@@ -550,6 +554,7 @@ class BatchedMcts {
       std::unordered_map<Node*, size_t> pending_evaluations;
       int pruned_attempts = 0;
       for (int i = 0; i < count; ++i) {
+        if (expired()) break;
         // 每条模拟重新抽一个粒子：世界只在本次模拟内有效
         State state = root_states[pick_particle()];
         Node* node = &root;
@@ -562,6 +567,7 @@ class BatchedMcts {
         bool pending_collision = false;
         bool cycle_cut = false;
         for (int depth = 0; depth < config_.max_depth; ++depth) {
+          if (expired()) break;
           if (game_.terminal(state)) {
             terminal.push_back(true); terminal_values.push_back(game_.terminal_value_vector(state, node->player));
             paths.push_back(std::move(path));

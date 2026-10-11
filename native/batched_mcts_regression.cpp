@@ -1,6 +1,7 @@
 // Standalone regression tests; no game rules or LibTorch installation needed.
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include "mcts_core.hpp"
 
 using namespace citadels::native;
@@ -223,6 +224,24 @@ void test_depth_cutoff() {
 }
 
 int main() {
+  {
+    ToyGame game(0, 100);
+    struct SlowEvaluator : ToyEvaluator {
+      using ToyEvaluator::ToyEvaluator;
+      Evaluation evaluate(const ToyState& s, int p, const std::vector<int>& a) override {
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        return ToyEvaluator::evaluate(s, p, a);
+      }
+    } evaluator(game);
+    Mcts<ToyState, int>::Config config;
+    config.simulations = 100000;
+    config.time_budget_ms = 15;
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = BatchedMcts<ToyState, int>(game, evaluator, config).search(ToyState{}, 0, 8);
+    if (result.visits >= config.simulations || result.policy.size() != 2 ||
+        std::chrono::steady_clock::now() - start > std::chrono::seconds(2))
+      throw std::runtime_error("Batched search ignored its time budget");
+  }
   test_fpu();
   test_opponent_fpu();
   test_pending_collisions();

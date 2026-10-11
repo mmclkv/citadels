@@ -93,6 +93,8 @@ a{color:var(--gold-d, #a97c15)}
 
 /* ------------------------------ 表单 ------------------------------ */
 .setup-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.mcts-advanced{grid-column:1/-1}
+.mcts-advanced[hidden],.search-only[hidden]{display:none!important}
 .mcts-hint{grid-column:1/-1;margin:-6px 0 10px}
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
 .field>span{font-size:12px;color:var(--ink2);font-weight:600}
@@ -151,6 +153,8 @@ input:focus,select:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,
 #screen-lobby #lobby-room .seat-mcts-title{grid-column:1/-1;font-size:11px;color:var(--dim)}
 #screen-lobby #lobby-room .seat-mcts-field{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--dim)}
 #screen-lobby #lobby-room .seat-mcts-field input{min-width:0;padding:4px 5px;font-size:11px}
+#screen-lobby #lobby-room .search-budget{grid-column:1/-1}
+#screen-lobby #lobby-room .seat-mcts > button{grid-column:1/-1;justify-self:start}
 
 /* ============================== 对局 ============================== */
 .topbar{

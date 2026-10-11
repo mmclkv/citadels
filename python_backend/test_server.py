@@ -1372,7 +1372,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(room["config"]["mctsMaxDepth"], 4000)
         self.assertEqual(room["config"]["mctsParticles"], 32)
         self.assertEqual(room["seats"][1]["mcts"],
-                         {"simulations": 25000, "maxDepth": 4000, "particles": 32})
+                         {"simulations": 25000, "maxDepth": 4000, "particles": 32, "timeBudgetMs": 10000})
         negative = rooms.create_room("Negative", {"playerCount": 2, "mctsMaxDepth": -2,
                                                     "mctsParticles": 0})
         self.assertEqual(negative["config"]["mctsMaxDepth"], 0)
@@ -1410,6 +1410,14 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         seat = room["seats"][1]
         self.assertEqual(seat["botLevel"], "hard")
         self.assertEqual(seat["heuristicMcts"], {"timeBudgetMs": 350})
+        options["advanced"] = {"simulations": 120, "maxDepth": 30, "particles": 2}
+        await self.app._handle_message(host, {"t": "setSeat", "index": 1, "kind": "bot",
+            "botType": "npc-hard", "heuristicMcts": options})
+        self.assertEqual(room["seats"][1]["heuristicMcts"],
+                         {"timeBudgetMs": 350, "advanced": options["advanced"]})
+        await self.app._handle_message(host, {"t": "setSeat", "index": 1, "kind": "bot",
+            "botType": "neural", "mcts": {"timeBudgetMs": 200, "simulations": 80, "particles": 2, "maxDepth": 20}})
+        self.assertEqual(room["seats"][1]["mcts"]["timeBudgetMs"], 200)
 
     async def test_bot_debug_reaches_websocket_and_replays_history(self) -> None:
         reader, writer = await _open_ws(self.port)

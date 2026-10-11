@@ -53,10 +53,11 @@ class MctsTests(unittest.TestCase):
         policy.device_name = "cpu"
         policy.architecture = "entity-v6"
         policy.action_version = 9
+        policy.state_version = 14
         policy.error = ""
         policy._last_mcts = {}
         action = policy.decide(state, player_id, available,
-            {"simulations": 3, "maxDepth": 8, "particles": 2, "belief": True})
+            {"simulations": 3, "maxDepth": 8, "particles": 2, "belief": True, "timeBudgetMs": 75})
         self.assertIn(action, available["actions"])
         diagnostics = policy.status()["mcts"]
         self.assertEqual(diagnostics["determinizations"], 2)
@@ -64,6 +65,7 @@ class MctsTests(unittest.TestCase):
         self.assertEqual(policy.worker.request["architecture"], "entity-v6")
         self.assertEqual(len(policy.worker.request["particles"]), 1)
         self.assertEqual(policy.worker.determinize_request["count"], 2)
+        self.assertEqual(policy.worker.request["time_budget_ms"], 75)
 
 
 if __name__ == "__main__":

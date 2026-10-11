@@ -40,6 +40,17 @@ HeuristicSearchConfig heuristic_options(const JsonValue& request) {
       derived.enabled=config.enabled;config=derived;
     }
   }
+  const auto* advanced=value->get("advanced");
+  if(advanced && advanced->is_object()) {
+    const auto read=[&](const char* key,int fallback) {
+      const auto* option=advanced->get(key);
+      if(!option || !option->is_number() || !std::isfinite(option->as_number()))return fallback;
+      return static_cast<int>(std::clamp(option->as_number(),1.0,static_cast<double>(std::numeric_limits<int>::max())));
+    };
+    config.simulations=read("simulations",config.simulations);
+    config.max_depth=read("maxDepth",config.max_depth);
+    config.particles=read("particles",config.particles);
+  }
   return config;
 }
 

@@ -177,6 +177,18 @@ class NativeHeuristicSearchTests(unittest.TestCase):
             if i:
                 self.assertGreater(stats["reusedVisits"], 0)
 
+    def test_advanced_options_override_automatic_search_sizes(self):
+        self.worker.create_game(self.new_game, "advanced")
+        actor = self.worker.current("advanced")["playerId"]
+        result = self.worker._request("npc", gameId="advanced", playerId=actor,
+            heuristicMcts={"timeBudgetMs": 500, "advanced": {
+                "simulations": 4, "maxDepth": 3, "particles": 1}})
+        stats = result["heuristicSearch"]
+        self.assertTrue(stats["searched"])
+        self.assertEqual(stats["particles"], 1)
+        self.assertLessEqual(stats["newVisits"], 4)
+        self.assertIn(result["action"], self.worker.legal_actions(game_id="advanced", player_id=actor)["actions"])
+
     def test_request_budget_is_shared_by_draft_action_and_training(self):
         self.worker.create_game(self.new_game, "unified")
         for step in range(20):

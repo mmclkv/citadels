@@ -139,7 +139,8 @@ class NeuralPolicy:
             # Root noise is a self-play exploration mechanism; live play keeps a clean prior.
             dirichlet_alpha=0.3, dirichlet_epsilon=0.0,
             seed=rng.randrange(0, 2**32), batch_size=int(options.get("batchSize", 32)),
-            action_encoding_version=self.action_version)
+            action_encoding_version=self.action_version,
+            time_budget_ms=max(0, int(options.get("timeBudgetMs", 0))))
         policy = np.asarray(result["policy"], dtype=np.float64)
         if policy.size != len(candidates) or not np.isfinite(policy).all() or policy.sum() <= 0:
             raise RuntimeError("C++ MCTS 返回了无效策略分布")
