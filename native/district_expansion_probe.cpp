@@ -126,7 +126,7 @@ int main(int argc,char** argv) {
       s=roundtrip(s); check(s.reaction_kind=="magistrate");
       auto particle=determinize_native_state(s,1,13,true); check(particle.resolve_build_reaction(true));
       check(s.resolve_build_reaction(true));
-      check(s.players[0].gold==4); check(s.players[0].hand.empty()); check(s.players[1].city.size()==1); check(s.builds==1); check(s.spent_on_build==0);
+      check(s.players[0].gold==4); check(s.players[0].hand.empty()); check(s.players[1].city.size()==1); check(s.builds==0); check(s.spent_on_build==0);
     }
     {
       auto s=base(); city(s,0,card("arm","armory")); city(s,1,card("keep","immune"));

@@ -85,10 +85,29 @@ int main() {
     s.active_player = 1;
     NativeSearchAction build; build.type = ActionType::Build; build.uid = "build-1"; build.name = "Watchtower";
     require(game.apply(s, 1, build) && s.reaction_kind == "magistrate", "signed warrant reaction");
+    const auto before_seizure = s;
     NativeSearchAction seize; seize.type = ActionType::Reaction; seize.name = "use";
     require(game.next_player(s) == 0 && game.apply(s, 0, seize), "magistrate seize response");
     require(s.players[0].city.size() == 1 && s.players[1].city.empty() && s.players[1].gold == 8 && s.tax_collector_gold == 1,
       "confiscated building, refunded build cost, and tax charged to magistrate");
+    require(s.builds == 0, "confiscated ordinary building must not consume build quota");
+    s.players[1].hand.push_back({"build-2", "green", 2, "Market"});
+    const auto remaining_actions = game.legal_actions(s, 1);
+    require(std::any_of(remaining_actions.begin(), remaining_actions.end(), [](const NativeSearchAction& action) {
+      return action.type == ActionType::Build && action.uid == "build-2";
+    }), "builder must be offered another build after confiscation");
+    build.uid = "build-2"; build.name = "Market";
+    require(game.apply(s, 1, build) && s.builds == 1 && s.reaction_kind.empty() && s.players[1].city.size() == 1,
+      "replacement building consumes quota without a second confiscation");
+
+    auto declined = before_seizure;
+    require(declined.resolve_build_reaction(false) && declined.builds == 1 && declined.players[1].city.size() == 1,
+      "declined confiscation still consumes ordinary build quota");
+    auto stables = before_seizure;
+    stables.players[1].hand[0].purple_effect = "stables";
+    stables.builds = 1;
+    require(stables.resolve_build_reaction(true) && stables.builds == 1,
+      "confiscated stables preserves previously used build quota");
 
     // Spy: investigate a color, collect matching-count cards and capped gold.
     NativeGameState spy;

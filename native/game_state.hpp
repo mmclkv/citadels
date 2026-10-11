@@ -1122,6 +1122,7 @@ struct NativeGameState {
       [&](const NativeDistrict& d) { return d.name == copy.name; });
     reaction_kind.clear(); reaction_build = false; reaction_uid.clear(); reaction_target = -1; reaction_player = -1;
     const int paid_before = spent_on_build;
+    const int builds_before = builds;
     if (!build(copy.uid, copy.name, copy.purple_effect, take ? magistrate : builder, true)) return false;
     if (take) {
       auto& city = players[builder].city;
@@ -1129,6 +1130,7 @@ struct NativeGameState {
       if (built == city.end()) return false;
       players[builder].gold += spent_on_build - paid_before;
       spent_on_build = paid_before;
+      builds = builds_before;
       NativeDistrict seized = std::move(*built);
       city.erase(built);
       players[magistrate].city.push_back(std::move(seized));
