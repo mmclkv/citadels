@@ -57,6 +57,7 @@
   // public/components/citadels-lobby.js 负责。它自己开 socket，开局时通过
   // onGameStart 把 socket 交过来，之后这个页面只处理对局内的消息。
   function adoptGame(handle){
+    hideSidebar();
     const ws=handle.ws;
     M.ws=ws; M.id=handle.myId||M.id; M.room=handle.roomId||M.room; M.name=handle.name||M.name;
     M.leavePending=false;

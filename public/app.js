@@ -31,7 +31,7 @@
     chatOpen: false,
     voiceOpen: false,
     activeSideTab: 'log',
-    sidePanelCollapsed: false,
+    sidePanelCollapsed: true,
     lastCfg: null,
     speed: 'normal',       // 电脑行动节奏：slow | normal | fast
     paused: false,         // 事件弹层展示期间暂停电脑行动
@@ -5565,6 +5565,7 @@
   const lobbyEl = $('#lobby');
   if (lobbyEl && customElements.get('c-citadels-lobby')) {
     lobbyEl.onGameStart = handle => {
+      App.sidePanelCollapsed = true;
       App.mode = 'net';
       App.localServerGame = !!handle.localServerGame;
       App.state = handle.state || null;
