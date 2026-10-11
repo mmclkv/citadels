@@ -66,6 +66,16 @@
         <div class="mode-name">规则速查</div>
         <div class="mode-tip">角色能力、建筑效果与计分方式</div>
       </button>
+      <button class="mode-card" id="btn-all-roles" type="button">
+        <div class="mode-icon">♛</div>
+        <div class="mode-name">角色一览</div>
+        <div class="mode-tip">查看全部角色卡与角色能力</div>
+      </button>
+      <button class="mode-card" id="btn-all-buildings" type="button">
+        <div class="mode-icon">▤</div>
+        <div class="mode-name">建筑一览</div>
+        <div class="mode-tip">查看全部建筑卡与特殊效果</div>
+      </button>
       <a class="mode-card training-link" href="./training.html" data-desktop-only>
         <div class="mode-icon">◇</div>
         <div class="mode-name">神经网络训练</div>
@@ -1034,7 +1044,7 @@
 
       /* ============================== 事件绑定 ============================== */
       function openExtra(kind) {
-        /* PC 专属入口（规则速查 / 服务器控制台 / 启动信息）交由宿主页面处理：
+        /* 一览、规则与控制台入口交由宿主页面处理：
            composed 事件可穿越 Shadow 边界，页面监听 citadels-extra 打开自己的弹层。 */
         host.dispatchEvent(new CustomEvent('citadels-extra', {
           detail: { kind: kind }, bubbles: true, composed: true
@@ -1078,6 +1088,8 @@
         Net.connect(() => { Net.send({ t: 'listRooms' }); });
       };
       $('#btn-rules').onclick = () => openExtra('rules');
+      $('#btn-all-roles').onclick = () => openExtra('all-roles');
+      $('#btn-all-buildings').onclick = () => openExtra('all-buildings');
       if ($('#btn-server-console')) $('#btn-server-console').onclick = () => openExtra('console');
       if ($('#btn-server-startup')) $('#btn-server-startup').onclick = () => openExtra('startup');
 

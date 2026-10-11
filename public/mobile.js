@@ -661,21 +661,31 @@
   function syncSpeed(){$('menuSpeed').textContent='电脑速度 · '+speeds[M.speed]?.[0];}syncSpeed();
   $('menuSpeed').onclick=()=>{const order=['slow','normal','fast'];M.speed=order[(order.indexOf(M.speed)+1)%3];localStorage.setItem('citadels.speed',M.speed);send({t:'setPace',pace:speeds[M.speed][1]});syncSpeed();};
   $('menuAutoHost').onclick=()=>send({t:'setAutoHost',enabled:!(M.state?.autoHostEnabled??(M.state?.config?.autoHost!==false))});
-  function openReference(title,html){closeMenu();$('referenceTitle').textContent=title;$('referenceBody').innerHTML=html;$('referenceOverlay').hidden=false;}
-  function closeReference(){$('referenceOverlay').hidden=true;$('referenceBody').innerHTML='';}
+  const referenceParent=$('referenceOverlay').parentNode,viewerParent=$('viewer').parentNode;
+  function openReference(title,html,all=false){closeMenu();M.referenceAll=all;
+    // 首页隐藏了对局容器，将一览和卡图弹层移到页面根节点。
+    if(document.documentElement.getAttribute('data-lobby-screen')!=='game'){
+      for(const id of ['referenceOverlay','viewer']){document.body.appendChild($(id));$(id).style.position='fixed';}
+    }
+    $('referenceTitle').textContent=title;$('referenceBody').innerHTML=html;$('referenceOverlay').hidden=false;}
+  function closeReference(){closeViewer();$('referenceOverlay').hidden=true;$('referenceBody').innerHTML='';
+    referenceParent.appendChild($('referenceOverlay'));viewerParent.appendChild($('viewer'));
+    $('referenceOverlay').style.position='';$('viewer').style.position='';}
   $('referenceClose').onclick=closeReference;$('referenceOverlay').onclick=e=>{if(e.target.id==='referenceOverlay')closeReference();};
   // 角色 / 建筑一览：直接沿用 PC 端 #modal 的结构与类名（app.js openCharacters / openBuildings）
-  $('menuRoles').onclick=()=>{const cards=(M.state?.charDeck?.length?M.state.charDeck:window.CitCards.CHARACTERS).slice().sort((a,b)=>a.num-b.num);
-    openReference('角色一览','<div class="section-title">本局角色（按编号）</div><div class="char-grid">'+cards.map(c=>`<button class="ref-card" type="button" data-ref-role="${attr(c.id)}"><img class="rc-art" src="${attr(roleImg(c))}" alt="${attr(c.name)}" loading="lazy" decoding="async"><h4><span class="rc-num">${esc(c.num)}</span>${esc(c.name)}<span class="rc-en">${esc(c.en||'')}</span></h4></button>`).join('')+'</div>');};
-  $('menuBuildings').onclick=()=>{const data=window.CitCards,cols=['yellow','blue','green','red','purple'];
-    const districts=data.districtsForScenario(M.state?.config?.scenario);
+  function openRoles(all=false){const cards=(!all&&M.state?.charDeck?.length?M.state.charDeck:window.CitCards.CHARACTERS).slice().sort((a,b)=>a.num-b.num);
+    openReference('角色一览','<div class="section-title">'+(all?'全部角色':'本局角色')+'（按编号）</div><div class="char-grid">'+cards.map(c=>`<button class="ref-card" type="button" data-ref-role="${attr(c.id)}"><img class="rc-art" src="${attr(roleImg(c))}" alt="${attr(c.name)}" loading="lazy" decoding="async"><h4><span class="rc-num">${esc(c.num)}</span>${esc(c.name)}<span class="rc-en">${esc(c.en||'')}</span></h4></button>`).join('')+'</div>',all);}
+  function openBuildings(all=false){const data=window.CitCards,cols=['yellow','blue','green','red','purple'];
+    const districts=all?data.DISTRICTS:data.districtsForScenario(M.state?.config?.scenario);
     const legend=`<div class="section-title">建筑颜色与收入角色</div><div class="color-legend">${cols.map(k=>{const c=data.COLORS[k];
       return `<span><i class="dot" style="background:${attr(c.hex)}"></i>${esc(c.name)}（${esc(c.en)}）${c.incomeChar?' — 提供 '+esc(c.incomeChar)+' 号角色收入':' — 独特建筑'}</span>`;}).join('')}</div>`;
     const groups=cols.map(k=>{const c=data.COLORS[k];
       return `<div class="color-sub">${esc(c.name)}（${esc(c.en)}）</div><div class="char-grid">`+districts.filter(d=>d.color===k).sort((a,b)=>a.cost-b.cost).map(d=>`<button class="ref-card c-${k}" type="button" data-ref-district="${attr(d.name)}"><img class="rc-art district-ref-art" src="${attr(districtImg(d))}" alt="${attr(d.name)}" loading="lazy" decoding="async"><h4>${esc(d.name)}<span class="rc-en">${esc(d.en||'')} · ${esc(d.cost)} 金</span></h4>${d.desc?`<p>${esc(d.desc)}</p>`:'<p class="dim">— 无特殊效果，仅计入建筑分</p>'}</button>`).join('')+'</div>';}).join('');
     const scoring=`<div class="section-title">计分方式</div><p class="small">建筑总分（建造费用之和，巨龙门/大学按 8 分计）＋ 五色齐全 +3 ＋ 率先建成 ${esc(M.state?.endDistricts??8)} 栋 +4（其余达标者 +2）＋ 博物馆/美化等特殊加分。</p>`;
-    openReference('建筑一览',legend+'<div class="section-title">本局建筑（按颜色，含特殊效果）</div>'+groups+scoring);};
-  $('referenceBody').onclick=e=>{const roleButton=e.target.closest('[data-ref-role]'),districtButton=e.target.closest('[data-ref-district]');if(roleButton){const c=(M.state?.charDeck||window.CitCards.CHARACTERS).find(x=>x.id===roleButton.dataset.refRole);if(c)openViewer('role',c);}if(districtButton){const c=window.CitCards.DISTRICTS.find(x=>x.name===districtButton.dataset.refDistrict);if(c)openViewer('district',c);}};
+    openReference('建筑一览',legend+'<div class="section-title">'+(all?'全部建筑':'本局建筑')+'（按颜色，含特殊效果）</div>'+groups+scoring,all);}
+  $('menuRoles').onclick=()=>openRoles();
+  $('menuBuildings').onclick=()=>openBuildings();
+  $('referenceBody').onclick=e=>{const roleButton=e.target.closest('[data-ref-role]'),districtButton=e.target.closest('[data-ref-district]');if(roleButton){const c=window.CitCards.CHARACTERS.find(x=>x.id===roleButton.dataset.refRole);if(c)openViewer('role',c);}if(districtButton){const c=window.CitCards.DISTRICTS.find(x=>x.name===districtButton.dataset.refDistrict);if(c)openViewer('district',c);}};
   $('menuRules').onclick=()=>openReference('游戏规则','<div class="section-title">一局总体流程</div><p>随机移除部分角色牌后，由皇冠持有者开始秘密选角。角色按编号依次被叫号并行动。本轮全部角色行动完毕后重洗角色牌，进入下一轮。</p><div class="section-title">每回合</div><p>领取资源：拿 2 枚金币，或抽 2 张建筑牌保留 1 张。之后可建造建筑、使用一次角色能力、领取对应颜色建筑收入，最后结束回合。通常每回合只能建造 1 栋，同名建筑不可重复。</p><div class="section-title">结束与计分</div><p>有人达到本局的建筑数量目标后，在本轮结束时计分。分数包括建筑费用、五色齐全奖励、达标奖励和特殊建筑奖励。总分最高者获胜。</p>');
   $('menuLog').onclick=()=>{closeMenu();showSidebar('log');};$('menuChat').onclick=()=>{closeMenu();showSidebar('chat');};
   $('menuVoice').onclick=()=>{closeMenu();showSidebar('voice');};
@@ -691,8 +701,8 @@
     if(M.viewer){const v=M.viewer;openViewer(v.kind,v.card,v.confirm,v.context,v.stageOption);}
     if(!$('referenceOverlay').hidden){
       const title=$('referenceTitle').textContent;
-      if(title==='角色一览')$('menuRoles').onclick();
-      else if(title==='建筑一览')$('menuBuildings').onclick();
+      if(title==='角色一览')openRoles(M.referenceAll);
+      else if(title==='建筑一览')openBuildings(M.referenceAll);
     }
   });
   syncTheme();
@@ -710,6 +720,11 @@
   setInterval(()=>{if(M.ws?.readyState===1)send({t:'heartbeat',ts:Date.now()});},5000);
   // 把对局入口接到共享组件上：组件收到非大厅状态时调用它，把 socket 交给本页面
   const lobbyEl=$('lobby');
+  if(lobbyEl)lobbyEl.addEventListener('citadels-extra',e=>{
+    if(e.detail?.kind==='all-roles')openRoles(true);
+    else if(e.detail?.kind==='all-buildings')openBuildings(true);
+    else if(e.detail?.kind==='rules')$('menuRules').onclick();
+  });
   if(lobbyEl&&customElements.get('c-citadels-lobby'))lobbyEl.onGameStart=adoptGame;
   else message('界面组件加载失败，请刷新页面');
 })();

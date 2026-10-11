@@ -5294,16 +5294,16 @@
   }
 
   /* ============================== 参考弹层 ============================== */
-  function openCharacters() {
+  function openCharacters(all) {
     $('#modal-title').textContent = '角色一览';
     const body = $('#modal-body');
     body.innerHTML = '';
-    const s = App.state;
+    const s = all === true ? null : App.state;
     const used = (s && s.charDeck && s.charDeck.length)
       ? s.charDeck.slice()
       : Cards.CHARACTERS.map(c => ({ id: c.id, num: c.num, name: c.name, en: c.en, desc: c.desc }));
 
-    body.appendChild(el('div', 'section-title', '本局角色（按编号）'));
+    body.appendChild(el('div', 'section-title', all === true ? '全部角色（按编号）' : '本局角色（按编号）'));
     const cg = el('div', 'char-grid');
     used.slice().sort((a, b) => a.num - b.num).forEach(c => {
       const d = el('div', 'ref-card');
@@ -5320,11 +5320,11 @@
     $('#modal').hidden = false;
   }
 
-  function openBuildings() {
+  function openBuildings(all) {
     $('#modal-title').textContent = '建筑一览';
     const body = $('#modal-body');
     body.innerHTML = '';
-    const s = App.state;
+    const s = all === true ? null : App.state;
 
     body.appendChild(el('div', 'section-title', '建筑颜色与收入角色'));
     const lg = el('div', 'color-legend');
@@ -5336,7 +5336,7 @@
     });
     body.appendChild(lg);
 
-    body.appendChild(el('div', 'section-title', '本局建筑（按颜色，含特殊效果）'));
+    body.appendChild(el('div', 'section-title', all === true ? '全部建筑（按颜色，含特殊效果）' : '本局建筑（按颜色，含特殊效果）'));
     const districts = Cards.districtsForScenario(s && s.config && s.config.scenario);
     ['yellow', 'blue', 'green', 'red', 'purple'].forEach(k => {
       const col = Cards.COLORS[k];
@@ -5408,6 +5408,8 @@
     if (lobbyHost) lobbyHost.addEventListener('citadels-extra', e => {
       const kind = e.detail && e.detail.kind;
       if (kind === 'rules') openRules();
+      else if (kind === 'all-roles') openCharacters(true);
+      else if (kind === 'all-buildings') openBuildings(true);
       else if (kind === 'console') openServerConsole();
       else if (kind === 'startup') openServerStartupInfo();
     });
