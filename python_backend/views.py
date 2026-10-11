@@ -176,6 +176,15 @@ def sanitize(state: dict, player_id: str | None,
     setup = bool(turn and turn.get("phase") == "setup")
     buildable_uids = {action.get("uid") for action in (legal_actions or [])
                       if action.get("type") == "build" and action.get("uid")}
+    # The call queue retains the original owner when the Witch becomes the actor.
+    # Publish the affected identity only once that role has actually been called.
+    taken_over = {}
+    if state["phase"] != "draft" and not setup:
+        for call_index, entry in enumerate(state.get("callQueue") or []):
+            if (call_index <= state.get("callIdx", 0) and
+                    entry["num"] == state["effects"].get("bewitched") and
+                    entry["num"] != state["effects"].get("assassinated")):
+                taken_over[entry["playerIdx"]] = entry["charId"]
     for index, player in enumerate(state["players"]):
         revealed_id = (player["chars"][0] if index == viewer_index and player["chars"] else
                        turn["charId"] if state["phase"] == "action" and turn and
@@ -192,6 +201,7 @@ def sanitize(state: dict, player_id: str | None,
                "hasChosen": bool(player["chars"]),
                "draftComplete": state["phase"] != "draft" or len(player["chars"]) >= (
                    2 if len(state["players"]) <= 3 else 1),
+               "takenOverCharId": taken_over.get(index),
                "revealedCharId": revealed_id,
                "revealedCharNum": CHAR_MAP[revealed_id]["num"] if revealed_id else None}
         if index == viewer_index:

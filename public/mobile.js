@@ -276,12 +276,12 @@
     const candidates=legal().filter(a=>a.type===M.targetType);const targetIds=new Set(candidates.map(a=>a.target));
     $('players').classList.toggle('targeting',!!M.targetType||!!stagePlayers);
     $('players').innerHTML=orderedPlayers(s.players).map(p=>{
-      const ch=p.revealedCharId&&(s.phase!=='draft'||p.id===M.id&&p.hasChosen&&p.draftComplete!==false)?role(p.revealedCharId):null;
+      const ch=p.takenOverCharId?role(p.takenOverCharId):p.revealedCharId&&(s.phase!=='draft'||p.id===M.id&&p.hasChosen&&p.draftComplete!==false)?role(p.revealedCharId):null;
       const isTarget=stagePlayers?stagePlayers.has(String(p.id)):targetIds.has(p.id);
       const bub=bubbleFor(p.id);
       return `<article class="player-row ${p.id===M.id?'self ':''}${p.id===active?'active-turn ':''}${p.threat?'threat ':''}${M.targetType||stagePlayers?(isTarget?'target-selectable':'target-ineligible'):''}" data-player="${attr(p.id)}">
         <div class="player-meta"><div class="player-headline"><div class="pname">${esc(p.name)}</div>${p.id===M.id?`<span class="you-chip">${s.spectating?'视角':'你'}</span>`:''}${p.hasCrown?'<i class="crown-icon">♛</i>':''}
-        ${ch?`<span class="public-role-inline"><button class="public-role-btn" type="button" data-kind="role" data-key="${attr(ch.id)}"><span class="role-no">${esc(ch.num)}</span><span>${esc(ch.name)}</span></button></span>`
+        ${ch?`<span class="public-role-inline"><button class="public-role-btn" type="button" data-kind="role" data-key="${attr(ch.id)}"><span class="role-no">${esc(ch.num)}</span><span>${esc(ch.name)}${p.takenOverCharId?' · 被接管':''}</span></button></span>`
           :(s.phase==='draft'&&p.hasChosen&&p.draftComplete!==false)?'<span class="draft-chosen">已选择</span>':''}
         <div class="p-stats">${coin(p.gold)}${points(score(p).total)}${hand(p.handCount)}</div></div></div>
         <div class="city-compact">${(p.city||[]).map(mini).join('')}</div>

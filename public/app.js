@@ -3125,7 +3125,9 @@
       const crownIcon = p.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '';
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
-        '<span class="opp-name">' + escapeHtml(p.name) + '</span>' + tags +
+        '<span class="opp-name">' + escapeHtml(p.name) + '</span>' +
+        (p.takenOverCharId ? '<span class="tag magic">' +
+          escapeHtml((charMeta(p.takenOverCharId) || {}).name || '') + ' · 被接管</span>' : '') + tags +
         '<span class="opp-gold">' + threatMarkHTML(p.threat) + warrantMarkHTML(p.warrant) + crownIcon +
           '<i class="coin-icon" aria-hidden="true"></i><span>' + p.gold + '</span></span>' +
         scoreBadgeHTML(i, p.name);
@@ -3357,7 +3359,10 @@
       d.setAttribute('aria-label', '查看' + p.name + '的详细信息');
       // 选角完成后本人可见自己的角色；其他玩家仍只显示已选择。
       // 本轮已公开的角色保留到轮末确认。
-      const role = p.revealedCharNum != null && (s.phase !== 'draft' ||
+      const takenOver = p.takenOverCharId && charMeta(p.takenOverCharId);
+      const role = takenOver
+        ? '<span class="mobile-role-tag" style="max-width:none">' + escapeHtml(takenOver.name) + ' · 被接管</span>'
+        : p.revealedCharNum != null && (s.phase !== 'draft' ||
         p.id === App.myId && p.hasChosen && p.draftComplete !== false)
         ? '<span class="mobile-role-tag"><span class="mobile-role-no">' + p.revealedCharNum + '</span><span>' +
           escapeHtml((charMeta(p.revealedCharId, p.revealedCharNum) || {}).name || '') + '</span></span>'
