@@ -76,6 +76,11 @@
         <div class="mode-name">建筑一览</div>
         <div class="mode-tip">查看全部建筑卡与特殊效果</div>
       </button>
+      <button class="mode-card" id="btn-scenarios" type="button">
+        <div class="mode-icon">▥</div>
+        <div class="mode-name">剧本一览</div>
+        <div class="mode-tip">查看各剧本的角色与独特建筑</div>
+      </button>
       <a class="mode-card training-link" href="./training.html" data-desktop-only>
         <div class="mode-icon">◇</div>
         <div class="mode-name">神经网络训练</div>
@@ -89,6 +94,19 @@
       启动信息
     </button>
     <footer class="home-foot">规则与卡牌资料参考 <a href="https://andyventure.com/boardgame-citadels/" target="_blank" rel="noopener">冒險安迪 · 榮耀之城</a></footer>
+  </div>
+</section>
+
+<!-- ============================ 剧本一览 ============================ -->
+<section id="screen-scenarios" class="screen">
+  <div class="panel wide-panel scenario-panel">
+    <div class="scenario-heading"><h2>剧本一览</h2><button class="btn ghost" type="button" data-goto="home">返回主页</button></div>
+    <label class="field"><span>选择剧本</span><select id="scenario-reference-choice">${SCENARIOS.map(s => '<option value="' + s.id + '">' + s.name + '</option>').join('')}</select></label>
+    <p class="dim small scenario-note">以下为剧本原始配置。开局时按人数适配：两人不使用 9 号角色，皇帝改为国王；三、四人皇后改为艺术家；经典组合在三人、八人局加入艺术家。</p>
+    <h3 class="section-title" id="scenario-role-heading">角色</h3>
+    <div class="char-grid scenario-grid" id="scenario-reference-roles"></div>
+    <h3 class="section-title" id="scenario-district-heading">独特建筑</h3>
+    <div class="char-grid scenario-grid" id="scenario-reference-districts"></div>
   </div>
 </section>
 
@@ -269,6 +287,21 @@
 :host([data-active]) { display:flex; flex-direction:column; }
 /* mode="mobile" 时隐藏 PC 专属入口：训练链接、服务器控制台、启动信息 */
 :host([mode="mobile"]) [data-desktop-only] { display:none; }
+#screen-scenarios { align-items:center; overflow-y:auto; padding:24px 12px; }
+.scenario-panel { min-width:0; flex-shrink:0; }
+.scenario-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
+.scenario-heading h2 { margin:0; flex:1; }
+.scenario-heading .btn { flex-shrink:0; }
+.scenario-note { margin:14px 0; line-height:1.7; }
+.scenario-grid { grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); }
+.scenario-grid .ref-card { min-width:0; padding:12px; background:var(--paper2); color:var(--ink); }
+.scenario-grid .rc-art { aspect-ratio:2/3; object-fit:contain; }
+@media(max-width:600px) {
+  #screen-scenarios { padding:12px 8px; }
+  .scenario-panel { width:100%; max-width:100%; padding:16px 12px; }
+  .scenario-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .scenario-grid .ref-card p { font-size:12px; }
+}
 
 /* 霓虹主题变量：原定义在 html[data-theme="neon"] 上，无法命中 Shadow 内部选择器，
    在宿主元素上镜像一份，供下面的霓虹规则取用。 */
@@ -956,7 +989,7 @@
 
       /* ============================== 屏幕切换 ============================== */
       function showScreen(name) {
-        const map = { home: 'screen-home', setup: 'screen-setup', lobby: 'screen-lobby' };
+        const map = { home: 'screen-home', setup: 'screen-setup', lobby: 'screen-lobby', scenarios: 'screen-scenarios' };
         $$('.screen').forEach(s => s.classList.remove('active'));
         const id = map[name];
         if (id) { const node = $('#' + id); if (node) node.classList.add('active'); }
@@ -1090,6 +1123,31 @@
       $('#btn-rules').onclick = () => openExtra('rules');
       $('#btn-all-roles').onclick = () => openExtra('all-roles');
       $('#btn-all-buildings').onclick = () => openExtra('all-buildings');
+      function renderScenarioReference() {
+        const scenario = SCENARIOS.find(s => s.id === $('#scenario-reference-choice').value);
+        if (!scenario) return;
+        const cards = window.CitCards;
+        const theme = window.CitadelThemeManager;
+        const roles = scenario.characters.map(id => cards.CHAR_MAP[id]);
+        const districts = cards.districtsForScenario(scenario.id).filter(d => d.color === 'purple');
+        const renderCard = (card, role) => {
+          const asset = theme && (role ? theme.roleAsset(card, 'thumb') : theme.districtAsset(card, 'thumb'));
+          return '<article class="ref-card" data-scenario-card="' + escapeHtml(role ? card.id : card.en) + '">' +
+            (asset ? '<img class="rc-art" src="' + escapeHtml(asset) + '" alt="' + escapeHtml(card.name) + '" loading="lazy" decoding="async">' : '') +
+            '<h4>' + (role ? '<span class="rc-num">' + card.num + '</span>' : '') + escapeHtml(card.name) + '</h4>' +
+            '<span class="rc-en">' + escapeHtml(card.en) + (role ? '' : ' · ' + card.cost + ' 金') + '</span>' +
+            '<p>' + escapeHtml(card.desc || '') + '</p></article>';
+        };
+        $('#scenario-role-heading').textContent = '角色（' + roles.length + ' 张）';
+        $('#scenario-district-heading').textContent = '独特建筑（' + districts.length + ' 张）';
+        $('#scenario-reference-roles').innerHTML = roles.map(c => renderCard(c, true)).join('');
+        $('#scenario-reference-districts').innerHTML = districts.map(c => renderCard(c, false)).join('');
+      }
+      $('#btn-scenarios').onclick = () => { renderScenarioReference(); showScreen('scenarios'); };
+      $('#scenario-reference-choice').onchange = renderScenarioReference;
+      if (TM && typeof TM.onChange === 'function') TM.onChange(() => {
+        if ($('#screen-scenarios').classList.contains('active')) renderScenarioReference();
+      });
       if ($('#btn-server-console')) $('#btn-server-console').onclick = () => openExtra('console');
       if ($('#btn-server-startup')) $('#btn-server-startup').onclick = () => openExtra('startup');
 
