@@ -99,20 +99,10 @@
           <option value="8">8 人</option>
         </select>
       </label>
-      <label class="field" hidden>
-        <span>电脑难度（兼容旧配置）</span>
-        <select id="cfg-level">
-          <option value="easy">简单</option>
-          <option value="normal" selected>普通</option>
-          <option value="hard">困难</option>
-        </select>
-      </label>
       <label class="field">
         <span>电脑类型</span>
         <select id="cfg-bot-type">
-          <option value="npc-easy">启发式电脑 · 简单</option>
-          <option value="npc-normal">启发式电脑 · 普通</option>
-          <option value="npc-hard" selected>启发式电脑 · 困难（MCTS）</option>
+          <option value="npc-hard" selected>启发式电脑（MCTS）</option>
           <option value="neural">策略神经网络（仓库自带权重）</option>
           <option value="agent">AI Agent 电脑（大模型决策，需要联网）</option>
         </select>
@@ -631,13 +621,10 @@
           }
         });
       }
-      const HEURISTIC_BOT_LEVELS = { 'npc-easy': 'easy', 'npc-normal': 'normal', 'npc-hard': 'hard' };
-      function normalizeBotSelection(type, fallbackLevel) {
-        const level = HEURISTIC_BOT_LEVELS[type];
-        if (level) return { botType: 'npc', botLevel: level };
+      function normalizeBotSelection(type) {
         return {
           botType: type === 'agent' || type === 'neural' ? type : 'npc',
-          botLevel: ['easy', 'normal', 'hard'].includes(fallbackLevel) ? fallbackLevel : 'hard'
+          botLevel: 'hard'
         };
       }
       async function startPythonSingle(cfg) {
@@ -834,7 +821,7 @@
         syncScenarioChoice('r', amHost);
         seats.forEach((s, i) => {
           const d = el('div', 'seat' + (s.taken ? ' taken' : '') + (s.id === App.myId ? ' me' : ''));
-          const heuristicLabel = s.botLevel === 'easy' ? '启发式电脑 · 简单' : s.botLevel === 'hard' ? '启发式电脑 · 困难' : '启发式电脑 · 普通';
+          const heuristicLabel = '启发式电脑';
           const botLabel = s.isBot ? (s.botType === 'agent' ? 'AI Agent' : s.botType === 'neural' ? '策略神经网络' : heuristicLabel) : (s.taken ? '真人玩家' : '可加入');
           d.innerHTML = '<div class="seat-no">座位 ' + (i + 1) + (i === 0 ? ' · 房主' : '') + '</div>' +
             '<div class="seat-name">' + (s.taken ? escapeHtml(s.name) : '空缺') + '</div>' +
@@ -848,8 +835,8 @@
             if (s.isBot) {
               const type = el('select');
               type.setAttribute('aria-label', s.name + '的电脑类型');
-              type.innerHTML = '<option value="npc-easy">启发式电脑 · 简单</option><option value="npc-normal">启发式电脑 · 普通</option><option value="npc-hard">启发式电脑 · 困难</option><option value="neural">策略神经网络（仓库权重）</option><option value="agent">AI Agent（模型）</option>';
-              type.value = s.botType === 'npc' ? 'npc-' + (s.botLevel || 'normal') : (s.botType || 'npc-normal');
+              type.innerHTML = '<option value="npc-hard">启发式电脑</option><option value="neural">策略神经网络（仓库权重）</option><option value="agent">AI Agent（模型）</option>';
+              type.value = s.botType === 'npc' ? 'npc-hard' : (s.botType || 'npc-hard');
               type.onchange = () => Net.send({ t: 'setSeat', index: i, kind: 'bot', botType: type.value });
               ops.appendChild(type);
               if (s.botType === 'neural') {
@@ -1057,7 +1044,7 @@
       syncNeuralOnlyFields();
 
       $('#btn-start-single').onclick = () => {
-        const botSelection = normalizeBotSelection($('#cfg-bot-type').value, $('#cfg-level').value);
+        const botSelection = normalizeBotSelection($('#cfg-bot-type').value);
         const cfg = {
           players: Number($('#cfg-players').value),
           level: botSelection.botLevel,
