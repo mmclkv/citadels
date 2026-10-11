@@ -28,7 +28,7 @@ from .game_engine_worker import GameEngineWorker
 from .model_contract import MODEL_CONTRACTS, config_contract, checkpoint_resume_plan
 from .training_config import sanitize_config
 from .historical_policy_pool import HistoricalPolicyPool, assign_seat_policies
-from .weakness_search import WeaknessSearch, discovery_due
+from .weakness_search import WeaknessSearch, discovery_due, evaluation_worker_count
 from .batch_composition import balanced_game_compositions, composition_summary
 from .opponent_replay import OpponentReplayBuffer
 
@@ -639,7 +639,7 @@ def _parallel_weakness_evaluation(tasks, stop_event):
     if not tasks or stop_event.is_set():
         return
     config = tasks[0][2]
-    workers = min(int(config.get("weaknessEvaluationWorkers", 2)), int(config.get("workers", 1)), len(tasks))
+    workers = evaluation_worker_count(config, len(tasks))
     context = multiprocessing.get_context("spawn")
     worker_stop = context.Event()
     pool = context.Pool(workers, initializer=_initialize_weakness_evaluator,

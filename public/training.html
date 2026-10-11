@@ -67,7 +67,6 @@
           <label><span>历史对手比例</span><input id="historical-opponent-probability" type="number" min="0" max="1" step="0.05" value="0.5"><small>其他模式按此概率抽取；随机混合模式逐局分配数量，0 = 停用历史对手</small></label>
           <label><span>寻找弱点的间隔</span><input id="weakness-search-every" type="number" min="0" value="2000"><small>每隔多少主训练对局训练针对性对手；0 = 关闭，需启用历史池</small></label>
           <label><span>每次对手训练局数</span><input id="weakness-training-games" type="number" min="1" value="64"><small>独立训练对手争第一，主模型保持冻结；会增加训练耗时</small></label>
-          <label><span>验证并行进程</span><input id="weakness-evaluation-workers" type="number" min="1" max="4" value="2"><small>默认 2，最多 4，且不超过采样进程数；保留完整搜索预算</small></label>
           <label><span>对手验证对数</span><input id="weakness-evaluation-pairs" type="number" min="1" value="32"><small>每对使用相同初始局面比较训练前后；通过验证才入池</small></label>
           <label><span>课程起始网络玩家数</span><input id="curriculum-start-players" type="number" min="1" max="8" value="1"></label>
           <label><span>课程目标网络玩家数</span><input id="curriculum-end-players" type="number" min="0" max="8" value="0"><small>0 = 随当前局人数达到全员</small></label>
@@ -128,6 +127,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=35"></script>
+  <script src="./training.js?v=36"></script>
 </body>
 </html>

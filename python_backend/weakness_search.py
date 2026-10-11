@@ -16,6 +16,11 @@ import numpy as np
 from .model_contract import config_contract
 
 
+def evaluation_worker_count(config: dict, games: int) -> int:
+    """Use the console's sampler count, bounded only by available validation games."""
+    return min(int(config.get("workers", 1)), games)
+
+
 def discovery_due(games: int, last_search: int, config: dict) -> bool:
     interval = int(config["weaknessSearchEvery"])
     return (interval > 0 and config["historicalPoolSize"] > 0 and
@@ -238,8 +243,7 @@ class WeaknessSearch:
                         cases[index] = {"gameNumber": index + 1, "seed": evaluation_seed,
                                         **{key: case[key] for key in
                                            ("playerCount", "learnerSeat", "targetSeat", "crownSeat")}}
-                workers = min(int(self.config.get("weaknessEvaluationWorkers", 2)),
-                              int(self.config.get("workers", 1)), len(tasks)) if self.evaluation_runner else 1
+                workers = evaluation_worker_count(self.config, len(tasks)) if self.evaluation_runner else 1
                 self.log(f"弱点验证开始：{expected} 对 / {len(tasks)} 局；并行进程 {workers}")
                 finished_games = 0
                 self.progress({"phase": "evaluating", "mainGames": main_games,

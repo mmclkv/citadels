@@ -83,7 +83,6 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "historicalOpponentProbability": finite_clamp("historicalOpponentProbability", 0, 1, 0.5),
         "weaknessSearchEvery": finite_integer("weaknessSearchEvery", 0, math.inf, 2000),
         "weaknessTrainingGames": finite_integer("weaknessTrainingGames", 1, math.inf, 64),
-        "weaknessEvaluationWorkers": finite_integer("weaknessEvaluationWorkers", 1, 4, 2),
         "weaknessEvaluationPairs": finite_integer("weaknessEvaluationPairs", 1, math.inf, 32),
         "workers": _clamp_or(raw.get("workers"), 1, math.inf, default_workers),
         "checkpointEvery": _clamp_or(raw.get("checkpointEvery"), 1, math.inf, 100),

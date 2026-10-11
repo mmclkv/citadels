@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from python_backend.training_config import sanitize_config
 from python_backend.training_runtime import _load_trainer, _training_data
 from python_backend.weakness_search import (WeaknessSearch, discovery_due, evaluate_pairs,
-                                           train_response_policy)
+                                           train_response_policy, evaluation_worker_count)
 
 
 def pair(baseline_target=True, candidate_target=False, baseline_own=False, candidate_own=True):
@@ -24,6 +24,12 @@ def pair(baseline_target=True, candidate_target=False, baseline_own=False, candi
 
 
 class WeaknessSearchTests(unittest.TestCase):
+    def test_validation_uses_console_workers_and_ignores_legacy_limit(self):
+        self.assertEqual(evaluation_worker_count({"workers": 32, "weaknessEvaluationWorkers": 2}, 64), 32)
+        self.assertEqual(evaluation_worker_count({"workers": 128}, 64), 64)
+        self.assertEqual(evaluation_worker_count({"workers": 1.0}, 64), 1)
+        self.assertIsInstance(evaluation_worker_count({"workers": 1.0}, 64), int)
+
     def test_trigger_obeys_interval_and_pool_enablement(self):
         config = sanitize_config({})
         self.assertFalse(discovery_due(1999, 0, config))
@@ -174,7 +180,7 @@ class WeaknessSearchTests(unittest.TestCase):
         from unittest.mock import patch
         from python_backend.training_runtime import _parallel_weakness_evaluation
         stop = threading.Event()
-        config = {"workers": 2, "weaknessEvaluationWorkers": 2}
+        config = {"workers": 2, "weaknessEvaluationWorkers": 1}
         tasks = [(index, "baseline", config) for index in range(6)]
         before = {child.pid for child in multiprocessing.active_children()}
         with patch("python_backend.training_runtime._evaluate_weakness_game", _fake_evaluation_game):
