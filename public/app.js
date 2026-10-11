@@ -3144,7 +3144,8 @@
           return { mini: !picking, clickable: !!act, pickable: !!act };
         }, (node, c) => {
           const act = districtActionFor(p, c);
-          if (act) bindCardAction(node, () => pickDistrict(p.id, c.uid, act), true);
+          if (ballroomThanksFor(c, p.id)) bindCardAction(node, () => openBallroom(c, p.id), false);
+          else if (act) bindCardAction(node, () => pickDistrict(p.id, c.uid, act), true);
           else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
         });
       }
@@ -3407,6 +3408,31 @@
   function availableMobileActions() {
     return (App.state && App.state.available && App.state.available.actions) || [];
   }
+  function ballroomThanksFor(card, playerId) {
+    const s = App.state;
+    if (!s || s.spectating || !card || !card.uid) return null;
+    const owner = s.players.find(p => p.hasCrown && p.id !== App.myId &&
+      (!playerId || p.id === playerId) && p.city.some(c => c.uid === card.uid &&
+        (c.purpleEffect || (c.purple && c.purple.effect)) === 'ballroom'));
+    return owner && availableMobileActions().find(a => !a.disabled &&
+      a.type === 'district_effect' && a.name === 'ballroom_thanks') || null;
+  }
+  function openBallroom(card, playerId) {
+    if (!ballroomThanksFor(card, playerId)) return;
+    $('#modal-title').textContent = card.name;
+    const body = $('#modal-body'); body.innerHTML = '';
+    const image = el('img'); image.src = districtCardAsset(card, 'full'); image.alt = card.name;
+    image.style.maxWidth = '100%'; image.style.maxHeight = '55vh';
+    body.appendChild(image);
+    const button = el('button', 'btn primary', '致谢');
+    onTap(button, () => {
+      const action = ballroomThanksFor(card, playerId);
+      closeModal();
+      if (action) send(action);
+    });
+    body.appendChild(button);
+    $('#modal').hidden = false;
+  }
   function mobilePlayerActionsFor(playerId) {
     return availableMobileActions().filter(a => MOBILE_PLAYER_ACTIONS.includes(a.type) && a.target === playerId);
   }
@@ -3504,7 +3530,8 @@
       previewActions.appendChild(mobileDetailButton('返回重选', mobileDetailBack, 'ghost'));
       const liveAction = mobileActionStillAvailable(preview.action);
       if (liveAction) previewActions.appendChild(mobileDetailButton(
-        preview.action.label ? '确认 · ' + preview.action.label : '确认选择',
+        preview.action.name === 'ballroom_thanks' ? '致谢' :
+          preview.action.label ? '确认 · ' + preview.action.label : '确认选择',
         () => {
           if (liveAction.type === 'wizard_card' && MobileDetail.playerId) MobileDetail.preview = null;
           else closeMobileDetail();
@@ -3562,7 +3589,7 @@
       wrapper.type = 'button';
       wrapper.appendChild(node);
       wrapper.appendChild(el('span', '', escapeHtml(card.name) + ' · ' + card.cost));
-      onTap(wrapper, () => mobilePreview(card, action, 'district'));
+      onTap(wrapper, () => mobilePreview(card, ballroomThanksFor(card, player.id) || action, 'district'));
       city.appendChild(wrapper);
     });
     body.appendChild(city);
@@ -4699,7 +4726,8 @@
       return;
     }
 
-    promptEl.innerHTML = escapeHtml(av.prompt || '请选择行动');
+    promptEl.innerHTML = escapeHtml(s.turn && s.turn.pending && s.turn.pending.kind === 'ballroom'
+      ? '请选择行动' : av.prompt || '请选择行动');
     const turnPending = s.turn && s.turn.pending;
     if (turnPending && turnPending.kind === 'prophet_give') {
       const recipient = s.players[turnPending.targetIdx];
@@ -4711,6 +4739,8 @@
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     const representedActions = new Set();
+    av.actions.filter(a => a.type === 'district_effect' && a.name === 'ballroom_thanks')
+      .forEach(a => representedActions.add(a));
     if (isMobileGameUI()) av.actions.filter(a => a.type === 'build').forEach(a => representedActions.add(a));
     const lighthouseActions = av.actions.filter(a => a.type === 'district_effect' &&
       (a.name === 'lighthouse_pick' || a.name === 'lighthouse_skip'));
@@ -4846,7 +4876,8 @@
       if (a.type === 'build') cls = 'main';
       if (a.type === 'take_gold' || a.type === 'take_cards' || a.type === 'income') cls = 'main';
       if (a.type === 'choose_district' || a.type === 'warlord_destroy') cls = 'danger';
-      actionsEl.appendChild(actionBtn(a, cls));
+      actionsEl.appendChild(actionBtn(a.type === 'district_effect' && a.name === 'ballroom_skip'
+        ? Object.assign({}, a, { label: '跳过本回合' }) : a, cls));
     });
 
     // 多选确认按钮（魔术师弃牌 / 艺术家美化）

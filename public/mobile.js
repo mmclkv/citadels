@@ -37,6 +37,13 @@
   const roleTag = (card, extra='') => `<button class="summary-role ${extra}" type="button" data-kind="role" data-key="${attr(card.id)}">${badge(card)}</button>`;
   const canBuild = card => !!card?.uid && legal().some(a=>a.type==='build'&&a.uid===card.uid);
   const canBuildAny = () => legal().some(a=>a.type==='build');
+  function ballroomThanksFor(card, playerId) {
+    const s=M.state;
+    if(!s||s.spectating||!card?.uid)return null;
+    const owner=s.players.find(p=>p.hasCrown&&p.id!==M.id&&(!playerId||p.id===playerId)&&
+      p.city.some(c=>c.uid===card.uid&&(c.purpleEffect||c.purple?.effect)==='ballroom'));
+    return owner&&legal().find(a=>a.type==='district_effect'&&a.name==='ballroom_thanks')||null;
+  }
   const mini = card => `<button class="city-mini ${M.selection?.uids.has(card.uid)?'selected':''} ${canBuild(card)?'buildable':''}${card.beautified?' beautified':''}${stageCls('district',card.uid)}${stageCls('hand',card.uid)}" type="button" data-kind="district" data-key="${attr(cardKey(card))}" style="--district-color:${C[card.color]||C.purple}" title="${attr(card.name)} · ${card.cost} 金币${card.beautified?' · 已美化 +1':''}"><span class="mini-cost">${esc(card.cost)}</span><span class="mini-name">${esc(String(card.name||'').slice(0,3))}</span>${card.museumCount?`<span class="mini-museum" title="博物馆下叠放 ${esc(card.museumCount)} 张牌">${esc(card.museumCount)}</span>`:''}</button>`;
   const thumb = (card, kind) => `<button class="small-card-btn ${M.selection?.uids.has(card.uid)?'selected':''} ${kind==='district'&&canBuild(card)?'buildable':''}${kind==='district'?stageCls('district',card.uid)+stageCls('hand',card.uid):''}" type="button" data-kind="${kind}" data-key="${attr(cardKey(card))}"><img src="${attr(kind==='role'?roleImg(card):districtImg(card))}" alt="${attr(card.name)}"><span class="small-card-label">${kind==='role'?esc(card.num)+' · ':''}${esc(card.name)}</span></button>`;
   const coin = n => `<span class="stat-with-icon"><i class="coin-icon"></i><span class="stat-value">${esc(n)}</span></span>`;
@@ -446,7 +453,7 @@
       }
       buttons.push(`<button class="btn ghost" type="button" data-armory-back>${M.armory.targetId!=null?'返回玩家选择':M.armory.buildingUid!=null?'返回军械库选择':'取消'}</button>`);
       $('actions').className=actionsClass(buttons.length);$('actions').innerHTML=buttons.join('');return;}
-    const generic=all.filter(a=>!['draft_pick','draft_discard','build','draw_keep','scholar_pick','wizard_card','prophet_give','choose_char','magistrate_signed','magistrate_char','blackmailer_signed','blackmailer_char'].includes(a.type));
+    const generic=all.filter(a=>!(a.type==='district_effect'&&a.name==='ballroom_thanks')&&!['draft_pick','draft_discard','build','draw_keep','scholar_pick','wizard_card','prophet_give','choose_char','magistrate_signed','magistrate_char','blackmailer_signed','blackmailer_char'].includes(a.type));
     const armoryGroups=new Map();for(const a of all.filter(a=>a.type==='district_effect'&&a.name==='armory')){if(!armoryGroups.has(a.uid))armoryGroups.set(a.uid,[]);armoryGroups.get(a.uid).push(a);}
     const groups=[...armoryGroups].map(([uid,actions])=>({uid,actions,name:myPlayer()?.city?.find(c=>c.uid===uid)?.name||'军械库'}));
     const grouped=[];const seen=new Set();for(const a of generic.filter(a=>!(a.type==='district_effect'&&a.name==='armory'))){const target=['choose_player','spy_target','wizard_target','emperor_crown','choose_district'].includes(a.type);
@@ -456,11 +463,11 @@
     const lighthouse=all.filter(a=>a.type==='district_effect'&&(a.name==='lighthouse_pick'||a.name==='lighthouse_skip'));
     M.actions=M.actions.filter(a=>!(a.type==='district_effect'&&(a.name==='lighthouse_pick'||a.name==='lighthouse_skip')));
     if(lighthouse.some(a=>a.name==='lighthouse_pick'))M.actions.unshift({_lighthouseStart:true,label:'发动灯塔效果 · 选择建筑牌'});
-    const prompt=s.available?.prompt||(s.phase==='draft'?'选角阶段':s.phase==='gameover'?'游戏结束':'等待其他玩家行动');
+    const prompt=s.turn?.pending?.kind==='ballroom'?'请选择行动':s.available?.prompt||(s.phase==='draft'?'选角阶段':s.phase==='gameover'?'游戏结束':'等待其他玩家行动');
     const current=s.phase==='draft'?s.draft?.currentPlayer:s.turn?.playerId;
     const waitingForMagistrate=s.reaction?.kind==='magistrate'&&current===M.id;
     $('selectedInfo').textContent=waitingForMagistrate?'请等待行政官响应':M.targetType?'在公开区域选择目标玩家':choice?choice.title:prompt;
-    const buttons=M.actions.map((a,i)=>{const label=a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
+    const buttons=M.actions.map((a,i)=>{const label=a.type==='district_effect'&&a.name==='ballroom_skip'?'跳过本回合':a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
       return `<button class="btn ${a.type==='end_turn'||a.type==='ability_skip'?'ghost':a.type==='ability'?'purple':'primary'}" type="button" data-action-index="${i}" title="${esc(label)}">${esc(label)}</button>`;});
     if(current===M.id&&!M.targetType&&!M.selection&&choice)buttons.unshift(`<button class="btn gold" type="button" id="chooseTarget">${esc(String(choice.title||'选择目标').replace(/^请/,''))}</button>`);
     if(!M.targetType&&!M.selection&&all.some(a=>a.type==='build'))buttons.unshift('<button class="btn gold" type="button" id="chooseBuild">建造建筑</button>');
@@ -500,6 +507,7 @@
     return url;
   }
   function openViewer(kind,card,confirm,context,stageOption){if(!card&&kind!=='back')return;
+    if(kind==='district')confirm=confirm?.name==='ballroom_thanks'?ballroomThanksFor(card):ballroomThanksFor(card)||confirm;
     const art=kind==='back'?window.CitadelMobileTheme.cardAsset('back'):kind==='role'?roleImg(card,'full'):districtImg(card,'full');
     M.viewer={kind,card,confirm,context,stageOption,art};
     $('viewerTitle').textContent=kind==='back'?'暗置角色牌':kind==='role'?`${card.num} · ${card.name} · 角色卡`:`${card.name} · 建筑卡`;
@@ -507,7 +515,7 @@
     $('viewerMeta').innerHTML=kind==='back'?'暗置弃置角色的身份不会公开。':kind==='role'?`编号 ${esc(card.num)} · ${esc(card.name)}`:`<span class="color-dot" style="--district-color:${C[card.color]||C.purple}"></span><span>${esc(CN[card.color]||'独特')} · 费用 ${esc(card.cost)} · ${esc(context||'点击查看卡牌')}</span>`;
     const pick=stageOption>=0, act=confirm||pick;
     $('viewerActions').className='viewer-actions '+(act?'two':'');
-    $('viewerActions').innerHTML='<button class="btn ghost" type="button" id="viewerBack">返回</button>'+(act?`<button class="btn ${confirm?.type==='draft_discard'?'danger':'gold'}" type="button" id="viewerConfirm">${esc(confirm?.label||'确认选择')}</button>`:'');
+    $('viewerActions').innerHTML='<button class="btn ghost" type="button" id="viewerBack">返回</button>'+(act?`<button class="btn ${confirm?.type==='draft_discard'?'danger':'gold'}" type="button" id="viewerConfirm">${esc(confirm?.name==='ballroom_thanks'?'致谢':confirm?.label||'确认选择')}</button>`:'');
     $('viewer').classList.add('show');
   }
   function closeViewer(){M.viewer=null;$('viewer').classList.remove('show');}
@@ -593,14 +601,14 @@
     if(e.target.id==='stageConfirm'){confirmStage();return;}
     const publicCity=e.target.closest('.player-row .city-mini');
     if(publicCity){const st=stageStep();if(st&&st.surface==='district'){handleCard('district',publicCity.dataset.key);return;}
-      const row=publicCity.closest('[data-player]');if(row)renderDetail(row.dataset.player);return;}
+      const row=publicCity.closest('[data-player]');if(row){const p=M.state.players.find(x=>x.id===row.dataset.player),c=p?.city.find(x=>String(x.uid)===publicCity.dataset.key);if(ballroomThanksFor(c,p?.id))openViewer('district',c,null,p.name);else renderDetail(row.dataset.player);}return;}
     const card=e.target.closest('[data-kind]');if(card){e.preventDefault();e.stopPropagation();handleCard(card.dataset.kind,card.dataset.key);return;}
     const detail=e.target.closest('[data-detail-card]');if(detail){const p=M.state.players.find(x=>x.id===M.sheetPlayer),c=p?.city.find(x=>String(x.uid)===detail.dataset.detailCard);if(c){const st=stageStep();if(st&&st.surface==='district'&&stageIndexOf(c.uid)>=0){handleCard('district',String(c.uid));return;}const a=legal().find(x=>x.type==='choose_district'&&x.target===p.id&&x.uid===c.uid);openViewer('district',c,a,p.name);}return;}
     const player=e.target.closest('[data-player]');if(player){const id=player.dataset.player;const st=stageStep();
       if(st&&st.surface==='player'){if(stageIndexOf(id)>=0)renderDetail(id);return;}
       if(M.targetType&&!legal().some(a=>a.type===M.targetType&&a.target===id))return;renderDetail(id);return;}
     const button=e.target.closest('[data-action-index]');if(button){handleGeneric(M.actions[Number(button.dataset.actionIndex)]);return;}
-    if(e.target.id==='viewerConfirm'){const v=M.viewer;if(v?.stageOption>=0){closeViewer();chooseStageOption(v.stageOption);}else if(v?.confirm)action(v.confirm);return;}
+    if(e.target.id==='viewerConfirm'){const v=M.viewer;if(v?.stageOption>=0){closeViewer();chooseStageOption(v.stageOption);}else if(v?.confirm){const a=v.confirm.name==='ballroom_thanks'?ballroomThanksFor(v.card):v.confirm;if(a)action(a);}return;}
     if(e.target.id==='viewerBack'||e.target.id==='viewerClose'){closeViewer();return;}
     if(e.target.id==='detailSpectate'&&M.state?.spectating){const playerId=M.sheetPlayer;closeViewer();closeSheet();send({t:'spectatePlayer',playerId});return;}
     if(e.target.id==='detailConfirm'){const a=legal().find(x=>x.type===M.targetType&&x.target===M.sheetPlayer);if(a)action(a);return;}
