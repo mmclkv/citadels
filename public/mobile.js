@@ -378,7 +378,7 @@
     const hints={magician:st.step===0?'选择一种能力':st.picks[0]?.value==='swap'?'选择交换手牌的玩家':'选择要弃掉的手牌，可留空',spy:st.step===0?'选择调查的玩家':'选择调查的建筑颜色',emperor:st.step===0?'选择接收皇冠的玩家':'选择从该玩家处取得的资源',diplomat:st.step===0?'先选择自己的一栋建筑':'再选择对方的一栋建筑',artist:'选择最多两栋建筑，可留空',magistrate:['选择真实逮捕目标','选择第一个伪装目标','选择第二个伪装目标'][st.step],blackmailer:['选择第一个威胁角色','选择第二个威胁角色','选择真实威胁目标'][st.step]};
     return hints[st.role]||'选择目标，确认前可以返回';}
   const stageMulti = st => (st.role==='magician'&&st.step===1&&st.picks[0]?.value==='redraw')||st.role==='artist';
-  function stageStep(){ if(!M.stage) return null; const options=stageOptions();
+  function stageStep(){ if(!M.stage) return null; const options=M.stage.ready?[]:stageOptions();
     return {options, surface:options[0]?.surface||'button', multi:stageMulti(M.stage)}; }
   const stageIndexOf = value => { const st=stageStep(); return st?st.options.findIndex(o=>String(o.value)===String(value)):-1; };
   const stagePicked = value => !!M.stage && M.stage.selected.has(String(value));
@@ -393,7 +393,7 @@
       if(blackmailerRoles(roles).length<2)return false;
     }
     M.stage={role:roleId,step:0,picks:[],selected:new Set(),ready:false};render();return true;}
-  function chooseStageOption(index){const st=M.stage;if(!st)return;const option=stageOptions()[index];if(!option)return;
+  function chooseStageOption(index){const st=M.stage;if(!st||st.ready)return;const option=stageOptions()[index];if(!option)return;
     const multi=stageMulti(st);
     if(multi){const v=String(option.value);st.selected.has(v)?st.selected.delete(v):st.selected.add(v);if(st.role==='artist'&&st.selected.size>2)st.selected.delete(v);}
     else{closeSheet();closeViewer();st.picks[st.step]=option;const last={magician:1,spy:1,emperor:1,diplomat:1,magistrate:2,blackmailer:2}[st.role]??0;if(st.step<last)st.step++;else st.ready=true;}
@@ -477,6 +477,9 @@
         $('actions').className=actionsClass(buttons.length);$('actions').innerHTML=buttons.join('');return;}
       M.districtPick=null;
     }
+    if(M.stage?.ready){M.actions=[];$('selectedInfo').textContent=stageTitle();
+      $('actions').className='actions stage-confirmation';
+      $('actions').innerHTML=`<div class="stage-selection" role="status"><span>已选择</span><strong>${M.stage.picks.map(o=>esc(o.label)).join(' → ')}</strong></div><button class="btn gold" type="button" id="stageConfirm">确认发动</button><button class="btn ghost" type="button" id="stageBack">返回上一步</button>`;return;}
     if(M.stage){const st=stageStep();const buttons=st.surface==='button'?st.options.map((o,i)=>`<button class="btn primary" type="button" data-stage-option="${i}" title="${esc(o.label)}">${esc(o.label)}</button>`):[];
       const multiPick=st.multi&&M.stage.selected.size>0;
       buttons.push(`<button class="btn ghost" type="button" id="stageBack">${multiPick?'返回重选':M.stage.step>0?'返回上一步':M.stage.ready?'返回重选':'返回'}</button>`);
