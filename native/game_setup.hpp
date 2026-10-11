@@ -149,9 +149,15 @@ inline NativeGameState create_native_game(const JsonValue& request) {
   if (!district_definitions.is_array()) throw std::runtime_error("catalog.districts 必须是数组");
   if (!scenario) {
     std::vector<std::string> purple_districts;
-    for (const auto& definition : district_definitions.as_array())
-      if (string_field(definition, "color") == "purple" && int_field(definition, "count") > 0)
-        purple_districts.push_back(string_field(definition, "en"));
+    for (const auto& definition : district_definitions.as_array()) {
+      if (string_field(definition, "color") != "purple" || int_field(definition, "count") <= 0) continue;
+      const auto* required_roles = definition.get("requiresAnyCharacter");
+      if (required_roles && std::none_of(required_roles->as_array().begin(), required_roles->as_array().end(),
+          [&](const JsonValue& role) {
+            return std::find(state.char_deck.begin(), state.char_deck.end(), role.as_string()) != state.char_deck.end();
+          })) continue;
+      purple_districts.push_back(string_field(definition, "en"));
+    }
     for (size_t i = purple_districts.size(); i > 1; --i) {
       const size_t selected = static_cast<size_t>(state.rng.next() * static_cast<double>(i));
       std::swap(purple_districts[i - 1], purple_districts[std::min(selected, i - 1)]);

@@ -172,6 +172,7 @@
   {
     "name": "堡垒",
     "en": "Keep",
+    "requiresAnyCharacter": ["warlord", "diplomat", "marshal"],
     "color": "purple",
     "cost": 3,
     "count": 2,
@@ -194,6 +195,7 @@
   {
     "name": "墓地",
     "en": "Graveyard",
+    "requiresAnyCharacter": ["warlord"],
     "color": "purple",
     "cost": 5,
     "count": 1,
@@ -284,6 +286,7 @@
   {
     "name": "长城",
     "en": "Great Wall",
+    "requiresAnyCharacter": ["warlord", "diplomat", "marshal"],
     "color": "purple",
     "cost": 6,
     "count": 1,
@@ -548,6 +551,7 @@
   {
     "name": "医院",
     "en": "Hospital",
+    "requiresAnyCharacter": ["assassin"],
     "color": "purple",
     "cost": 6,
     "count": 1,

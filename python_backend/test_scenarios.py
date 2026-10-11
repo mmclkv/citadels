@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import unittest
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest import mock
 
@@ -68,8 +69,8 @@ class NativeScenarioTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.worker.close()
 
-    def create(self, count, scenario='', mode='mixed', seed=19):
-        return self.worker.create_game({'catalog': cards._catalog, 'seed': seed,
+    def create(self, count, scenario='', mode='mixed', seed=19, catalog=None):
+        return self.worker.create_game({'catalog': catalog or cards._catalog, 'seed': seed,
             'endDistricts': 8, 'scenario': scenario, 'charSetMode': mode,
             'seats': [{'id': f'p{i}', 'name': f'Player {i}'} for i in range(count)]}, 'scenario-test')
 
@@ -134,6 +135,53 @@ class NativeScenarioTests(unittest.TestCase):
                     self.assertEqual(state['deck'], repeated['deck'])
                     self.assertEqual([p['hand'] for p in state['players']], [p['hand'] for p in repeated['players']])
         self.assertGreater(len(selections), 1)
+
+    def test_random_buildings_require_roles_in_the_game_roster(self):
+        requirements = {'Hospital': {'assassin'}, 'Graveyard': {'warlord'},
+                        'Keep': {'warlord', 'diplomat', 'marshal'},
+                        'Great Wall': {'warlord', 'diplomat', 'marshal'}}
+        for count in range(2, 9):
+            for seed in range(1, 25):
+                with self.subTest(count=count, seed=seed):
+                    state = self.create(count, seed=seed)
+                    deck = state['deck'] + [c for p in state['players'] for c in p['hand']]
+                    for card in deck:
+                        if card['en'] in requirements:
+                            self.assertTrue(requirements[card['en']] & set(state['charDeck']))
+                    self.assertEqual(len(deck), 68)
+
+    def test_role_dependencies_filter_candidates_before_sampling(self):
+        for military in (None, 'warlord', 'diplomat', 'marshal'):
+            with self.subTest(military=military):
+                catalog = deepcopy(cards._catalog)
+                catalog['characters'] = [c for c in catalog['characters']
+                    if (c['version'] == 'base' and c['num'] not in (1, 8))
+                    or c['id'] == 'witch' or c['id'] == military]
+                seen = set()
+                for seed in range(1, 25):
+                    state = self.create(4, seed=seed, catalog=catalog)
+                    deck = state['deck'] + [c for p in state['players'] for c in p['hand']]
+                    names = {c['en'] for c in deck if c['color'] == 'purple'}
+                    self.assertNotIn('Hospital', names)
+                    if military != 'warlord':
+                        self.assertNotIn('Graveyard', names)
+                    if military is None:
+                        self.assertTrue(names.isdisjoint({'Keep', 'Great Wall'}))
+                    self.assertEqual(len(names), 14)
+                    self.assertEqual(len(deck), 68)
+                    seen.update(names)
+                if military:
+                    self.assertTrue({'Keep', 'Great Wall'} <= seen)
+                if military == 'warlord':
+                    self.assertIn('Graveyard', seen)
+
+        # Assassin makes Hospital eligible, even before anyone drafts it.
+        seen = set()
+        for seed in range(1, 25):
+            state = self.create(4, mode='base', seed=seed)
+            seen.update(c['en'] for c in state['deck'])
+            seen.update(c['en'] for p in state['players'] for c in p['hand'])
+        self.assertIn('Hospital', seen)
 
 
 @unittest.skipUnless(os.environ.get('CITADELS_TEST_GAME_ENGINE'), 'Compiled game engine required')
