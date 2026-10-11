@@ -233,6 +233,7 @@ def sanitize(state: dict, player_id: str | None,
     result = {
         "roomId": state["roomId"], "phase": state["phase"], "round": state["round"],
         "config": state["config"], "you": player_id if viewer_index >= 0 else None,
+        "uniqueDistricts": state.get("uniqueDistricts"),
         "endDistricts": state.get("completionDistricts", state["config"]["endDistricts"]), "players": players,
         "deckCount": len(state["deck"]), "discardCount": len(state["discard"]),
         "callIdx": state.get("callIdx") or 0, "turnsCompleted": state.get("turnsCompleted") or 0,

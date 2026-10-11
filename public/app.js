@@ -5370,7 +5370,7 @@
     body.appendChild(lg);
 
     body.appendChild(el('div', 'section-title', all === true ? '全部建筑（按颜色，含特殊效果）' : '本局建筑（按颜色，含特殊效果）'));
-    const districts = Cards.districtsForScenario(s && s.config && s.config.scenario);
+    const districts = Cards.districtsForGame(s);
     ['yellow', 'blue', 'green', 'red', 'purple'].forEach(k => {
       const col = Cards.COLORS[k];
       body.appendChild(el('div', 'color-sub', col.name + '（' + col.en + '）'));

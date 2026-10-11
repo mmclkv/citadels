@@ -719,7 +719,7 @@
   function openRoles(all=false){const cards=(!all&&M.state?.charDeck?.length?M.state.charDeck:window.CitCards.CHARACTERS).slice().sort((a,b)=>a.num-b.num);
     openReference('角色一览','<div class="section-title">'+(all?'全部角色':'本局角色')+'（按编号）</div><div class="char-grid">'+cards.map(c=>`<button class="ref-card" type="button" data-ref-role="${attr(c.id)}"><img class="rc-art" src="${attr(roleImg(c))}" alt="${attr(c.name)}" loading="lazy" decoding="async"><h4><span class="rc-num">${esc(c.num)}</span>${esc(c.name)}<span class="rc-en">${esc(c.en||'')}</span></h4></button>`).join('')+'</div>',all);}
   function openBuildings(all=false){const data=window.CitCards,cols=['yellow','blue','green','red','purple'];
-    const districts=all?data.DISTRICTS:data.districtsForScenario(M.state?.config?.scenario);
+    const districts=all?data.DISTRICTS:data.districtsForGame(M.state);
     const legend=`<div class="section-title">建筑颜色与收入角色</div><div class="color-legend">${cols.map(k=>{const c=data.COLORS[k];
       return `<span><i class="dot" style="background:${attr(c.hex)}"></i>${esc(c.name)}（${esc(c.en)}）${c.incomeChar?' — 提供 '+esc(c.incomeChar)+' 号角色收入':' — 独特建筑'}</span>`;}).join('')}</div>`;
     const groups=cols.map(k=>{const c=data.COLORS[k];

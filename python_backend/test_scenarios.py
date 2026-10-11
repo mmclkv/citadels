@@ -195,7 +195,7 @@ class NativeServerScenarioTests(unittest.IsolatedAsyncioTestCase):
                 app = PythonServer(SimpleNamespace(worker=None, game_worker=worker, running=True))
             with mock.patch.object(app, '_schedule_bot'), \
                  mock.patch.object(app, '_broadcast_state', new=mock.AsyncMock()):
-                for scenario in cards.SCENARIOS:
+                for scenario in [*cards.SCENARIOS, {'id': ''}]:
                     with self.subTest(scenario=scenario['id']):
                         client = Client(None)
                         client.send = mock.AsyncMock()
@@ -206,8 +206,12 @@ class NativeServerScenarioTests(unittest.IsolatedAsyncioTestCase):
                         await app._handle_message(client, {'t': 'startGame'})
                         expected_config = dict(room['state']['config'])
                         expected_roles = ['artist' if c == 'queen' else c
-                                          for c in scenario['characters']]
+                                          for c in scenario['characters']] if scenario['id'] else room['state']['charDeck']
                         self.assertEqual(room['state']['charDeck'], expected_roles)
+                        deck = room['state']['deck'] + [c for p in room['state']['players'] for c in p['hand']]
+                        expected_unique = sorted({c['en'] for c in deck if c['color'] == 'purple'})
+                        self.assertEqual(len(expected_unique), 14)
+                        self.assertEqual(room['state']['uniqueDistricts'], expected_unique)
                         for _ in range(4):
                             actor = worker.current(room['id'])['playerId']
                             action = worker.legal_actions(game_id=room['id'], player_id=actor)['actions'][0]
@@ -216,10 +220,21 @@ class NativeServerScenarioTests(unittest.IsolatedAsyncioTestCase):
                             view = await app._state_for_client(room, client.id)
                             self.assertEqual(view['config']['scenario'], scenario['id'])
                             self.assertEqual([c['id'] for c in view['charDeck']], expected_roles)
+                            self.assertEqual(view['uniqueDistricts'], expected_unique)
+                        public_view = await app._state_for_client(room, None)
+                        self.assertEqual(public_view['uniqueDistricts'], expected_unique)
+                        if shutil.which('node'):
+                            result = subprocess.run([shutil.which('node'), '-e',
+                                "const c=require('./src/cards.js'); const s=JSON.parse(require('fs').readFileSync(0,'utf8'));"
+                                "process.stdout.write(JSON.stringify(c.districtsForGame(s).filter(d=>d.color==='purple').map(d=>d.en).sort()))"],
+                                cwd=ROOT, input=json.dumps(view), capture_output=True, text=True,
+                                encoding='utf-8', check=True)
+                            self.assertEqual(json.loads(result.stdout), expected_unique)
                         deck = room['state']['deck'] + [c for p in room['state']['players'] for c in p['hand']]
                         self.assertEqual(len(deck), 68)
-                        self.assertEqual({c['en'] for c in deck if c['color'] == 'purple'},
-                                         set(scenario['districts']))
+                        if scenario['id']:
+                            self.assertEqual({c['en'] for c in deck if c['color'] == 'purple'},
+                                             set(scenario['districts']))
         finally:
             worker.close()
 

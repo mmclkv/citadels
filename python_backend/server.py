@@ -594,7 +594,7 @@ class PythonServer:
             if room.get("state") is not current:
                 return {"ok": False, "error": "房间状态已变化，请刷新后重试"}
             retained = {key: current[key] for key in
-                        ("roomId", "config", "createdAt", "log", "notices", "noticeSeq", "witchResume")
+                        ("roomId", "config", "uniqueDistricts", "createdAt", "log", "notices", "noticeSeq", "witchResume")
                         if key in current}
             old_players = {player.get("id"): player for player in current.get("players", [])}
             for player in native_state.get("players", []):
@@ -2046,6 +2046,10 @@ class PythonServer:
                     player["heuristicMcts"] = seat.get("heuristicMcts")
                     player["mcts"] = seat.get("mcts")
                 native_state.update({"roomId": room["id"],
+                                     "uniqueDistricts": sorted({card["en"] for card in
+                                         native_state["deck"] + [card for player in native_state["players"]
+                                                                 for card in player["hand"]]
+                                         if card["color"] == "purple"}),
                                      "config": {**config, "playerCount": len(seats),
                                                  "initialCrownSeat": 0, "startingHand": 4,
                                                  "startingGold": 2},

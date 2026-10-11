@@ -1060,9 +1060,18 @@
     return DISTRICTS.filter(d => d.color !== 'purple' || scenario.districts.includes(d.en));
   }
 
+  function districtsForGame(state) {
+    if (!state || !Array.isArray(state.uniqueDistricts)) {
+      return districtsForScenario(state && state.config && state.config.scenario);
+    }
+    const selected = new Set(state.uniqueDistricts);
+    return DISTRICTS.filter(d => d.color !== 'purple' || selected.has(d.en));
+  }
+
   return {
     SCENARIOS: SCENARIOS,
     districtsForScenario: districtsForScenario,
+    districtsForGame: districtsForGame,
     COLORS: COLORS,
     COLOR_ORDER: COLOR_ORDER,
     DISTRICTS: DISTRICTS,
