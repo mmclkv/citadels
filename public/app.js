@@ -4696,6 +4696,32 @@
     }
     return true;
   }
+  // Native actions remain the source of truth for every selectable card.
+  function ownDistrictEffectGroups(actions, player) {
+    const specs = {
+      lab: { name: '实验室', field: 'discardUid', area: 'hand', hint: '选择一张手牌弃掉，换取 2 金' },
+      museum: { name: '博物馆', field: 'cardUid', area: 'hand', hint: '选择一张手牌放入博物馆，计分 +1' },
+      framework: { name: '脚手架', field: 'secondaryUid', area: 'hand', hint: '选择一张手牌免费建造（拆除脚手架）' },
+      necropolis: { name: '大墓园', field: 'uid', area: 'city', hint: '选择自己的一栋建筑拆除，免费建造大墓园' }
+    };
+    const groups = new Map();
+    for (const action of actions) {
+      if (action.disabled) continue;
+      const mode = action.type === 'district_effect' ? action.name : action.type;
+      const spec = specs[mode];
+      if (!spec) continue;
+      const buildingUid = mode === 'necropolis' ? action.secondaryUid : action.uid;
+      const key = mode + ':' + buildingUid;
+      if (!groups.has(key)) groups.set(key, { ...spec, key, buildingUid, actions: [] });
+      groups.get(key).actions.push(action);
+    }
+    return [...groups.values()].map(group => ({ ...group,
+      label: '发动' + group.name + '效果',
+      choices: group.actions.map(action => ({ action,
+        card: (player && player[group.area] || []).find(card => card.uid === action[group.field]) }))
+    }));
+  }
+
   function renderActions(s) {
     const av = s.available;
     const promptEl = $('#prompt');
@@ -4804,27 +4830,28 @@
       onTap(button, () => { App.sel = { kind: 'armory', buildingUid, actions }; render(); });
       actionsEl.appendChild(button);
     });
-    // Keep the native action schema unchanged: group its existing lab choices
-    // into a front-end-only activation step followed by card selection.
-    const labGroups = new Map();
-    av.actions.filter(a => a.type === 'lab').forEach(a => {
-      representedActions.add(a);
-      if (!labGroups.has(a.uid)) labGroups.set(a.uid, []);
-      labGroups.get(a.uid).push(a);
-    });
-    labGroups.forEach((actions, buildingUid) => {
-      const me = s.players.find(p => p.id === App.myId);
-      const building = me && (me.city || []).find(c => c.uid === buildingUid);
-      const label = building ? '发动实验室效果（' + building.name + '）' : '发动实验室效果';
-      const selecting = App.sel && App.sel.kind === 'labpick';
-      const button = el('button', 'act main', selecting && App.sel.buildingUid === buildingUid
-        ? '选择要弃置的手牌…' : label);
-      button.disabled = !!selecting;
-      if (!selecting) onTap(button, () => {
-        App.sel = { kind: 'labpick', buildingUid: buildingUid, actions: actions,
-          label: label + '：点击一张手牌弃掉，换取 2 金' };
-        render();
-      });
+    const effectGroups = ownDistrictEffectGroups(av.actions, s.players.find(p => p.id === App.myId));
+    effectGroups.forEach(group => group.actions.forEach(a => representedActions.add(a)));
+    if (App.sel && App.sel.kind === 'districtpick') {
+      const group = effectGroups.find(group => group.key === App.sel.key);
+      if (group) {
+        actionsEl.innerHTML = '';
+        promptEl.textContent = group.name + '：' + group.hint;
+        group.choices.forEach(({ action, card }) => {
+          const button = el('button', 'act main', card ? '选择『' + card.name + '』' : action.label);
+          onTap(button, () => { App.sel = null; send(action); });
+          actionsEl.appendChild(button);
+        });
+        const cancel = el('button', 'act', '取消发动');
+        onTap(cancel, () => { App.sel = null; render(); });
+        actionsEl.appendChild(cancel);
+        return;
+      }
+      App.sel = null;
+    }
+    effectGroups.forEach(group => {
+      const button = el('button', 'act main', group.label);
+      onTap(button, () => { App.sel = { kind: 'districtpick', key: group.key }; render(); });
       actionsEl.appendChild(button);
     });
     const playerActions = av.actions.filter(a =>
@@ -4885,7 +4912,8 @@
         // 忘记致谢时仍展示领取资源入口，尝试领取即触发舞厅的跳过效果。
         ['拿取金币', '抽取建筑牌'].forEach(label =>
           actionsEl.appendChild(actionBtn(Object.assign({}, a, { label }), 'main')));
-      } else actionsEl.appendChild(actionBtn(a, cls));
+      } else actionsEl.appendChild(actionBtn(a.type === 'district_effect' && a.name === 'thieves_begin'
+        ? Object.assign({}, a, { label: '发动盗贼巢穴效果' }) : a, cls));
     });
 
     // 多选确认按钮（魔术师弃牌 / 艺术家美化）

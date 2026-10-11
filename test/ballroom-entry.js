@@ -42,7 +42,7 @@ for (const mobile of [false, true]) {
   model.state.spectating = true;
   assert.equal(context.ballroomThanksFor(ballroom), null);
   model.state.spectating = false;
-  vm.runInContext(extract(source, mobile ? '  function renderFooter(' : '  function renderActions(',
+  vm.runInContext(extract(source, '  function ownDistrictEffectGroups(',
     mobile ? '  function renderLighthousePicker(' : '  function appendTargetActionButtons('), context);
   if (mobile) {
     context.renderFooter();

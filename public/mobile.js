@@ -7,7 +7,7 @@
   const CN = { yellow:'皇家', blue:'宗教', green:'商业', red:'军事', purple:'独特' };
   const SESSION = 'citadels.net.session';
   const M = { ws:null, state:null, id:null, room:null, name:'玩家',
-    reconnect:0, handOpen:false, roleOpen:true, targetType:null, selection:null, armory:null, lighthouse:null,
+    reconnect:0, handOpen:false, roleOpen:true, targetType:null, selection:null, armory:null, lighthouse:null, districtPick:null,
     sheetPlayer:null, viewer:null, actions:[], menu:false, leavePending:false,
     sidebar:false, sidebarTab:'log', chat:[], speed:localStorage.getItem('citadels.speed')||'normal',
     stage:null, sequence:null, noticeSeen:null, events:[], event:null, eventTimer:0, effectFallback:null, effectTimer:0,
@@ -51,7 +51,7 @@
   const hand = n => `<span class="hand-stat"><i class="hand-back"></i><span class="stat-value">×${esc(n)}</span></span>`;
   function message(text) { $('entryMessage').textContent = text || ''; }
   function send(payload) { if (M.ws && M.ws.readyState===1) M.ws.send(JSON.stringify(payload)); else message('正在重新连接服务器'); }
-  function action(a) { if (!a || M.state?.spectating) return; send({t:'action',action:a}); M.targetType=null; M.selection=null; M.armory=null; M.lighthouse=null; $('lighthousePicker').hidden=true; M.focus=null; M.confirm=null; closeViewer(); closeSheet(); }
+  function action(a) { if (!a || M.state?.spectating) return; send({t:'action',action:a}); M.targetType=null; M.selection=null; M.armory=null; M.lighthouse=null; M.districtPick=null; $('lighthousePicker').hidden=true; M.focus=null; M.confirm=null; closeViewer(); closeSheet(); }
   // 选目标类动作共用：点亮目标所在区域并把视口挪过去。
   const focusEl = area => area==='players'?$('players').closest('section'):area==='hand'?$('handSection'):area==='roles'?$('roleArea'):null;
   const surfaceFocus = surface => surface==='player'||surface==='district'?'players':surface==='hand'?'hand':surface==='role'?'roles':null;
@@ -90,7 +90,7 @@
   function render() {
     const s=M.state;if(!s)return;
     $('phone').classList.toggle('spectating',!!s.spectating);
-    if(s.spectating){M.stage=null;M.sequence=null;M.selection=null;M.targetType=null;M.confirm=null;M.focus=null;}
+    if(s.spectating){M.stage=null;M.sequence=null;M.selection=null;M.targetType=null;M.confirm=null;M.focus=null;M.districtPick=null;}
     if(s.phase==='lobby'){
       const el=$('lobby');
       if(el&&el.returnToLobby)el.returnToLobby(s);
@@ -424,11 +424,46 @@
     M.sequence={steps:sequenceSteps(st),index:0,redraw:st.role==='magician'&&st.picks[0]?.value==='redraw'?new Set(st.selected):null};M.stage=null;M.focus=null;render();$('selectedInfo').textContent='正在提交角色能力…';driveSequence();
   }
   const actionsClass = n => 'actions count-'+Math.min(6,n)+(n===1?' one':'');
+  // Native actions remain the source of truth for every selectable card.
+  function ownDistrictEffectGroups(actions, player) {
+    const specs = {
+      lab: { name: '实验室', field: 'discardUid', area: 'hand', hint: '选择一张手牌弃掉，换取 2 金' },
+      museum: { name: '博物馆', field: 'cardUid', area: 'hand', hint: '选择一张手牌放入博物馆，计分 +1' },
+      framework: { name: '脚手架', field: 'secondaryUid', area: 'hand', hint: '选择一张手牌免费建造（拆除脚手架）' },
+      necropolis: { name: '大墓园', field: 'uid', area: 'city', hint: '选择自己的一栋建筑拆除，免费建造大墓园' }
+    };
+    const groups = new Map();
+    for (const action of actions) {
+      if (action.disabled) continue;
+      const mode = action.type === 'district_effect' ? action.name : action.type;
+      const spec = specs[mode];
+      if (!spec) continue;
+      const buildingUid = mode === 'necropolis' ? action.secondaryUid : action.uid;
+      const key = mode + ':' + buildingUid;
+      if (!groups.has(key)) groups.set(key, { ...spec, key, buildingUid, actions: [] });
+      groups.get(key).actions.push(action);
+    }
+    return [...groups.values()].map(group => ({ ...group,
+      label: '发动' + group.name + '效果',
+      choices: group.actions.map(action => ({ action,
+        card: (player && player[group.area] || []).find(card => card.uid === action[group.field]) }))
+    }));
+  }
+
   function renderFooter(){const s=M.state,all=legal(),choice=choiceItems();
     $('spectatorInfo').hidden=!s.spectating;
     $('actions').hidden=!!s.spectating;
     if(s.spectating){M.actions=[];$('selectedInfo').textContent=spectatorStatus(s);
       $('spectatorInfo').textContent='仅查看 · '+(myPlayer()?.name||'玩家')+' 的视角';$('actions').replaceChildren();return;}
+    const effectGroups=ownDistrictEffectGroups(all,s.players.find(p=>p.id===M.id));
+    if(M.districtPick){const group=effectGroups.find(g=>g.key===M.districtPick);
+      if(group){M.actions=group.choices.map(({action,card})=>({...action,label:card?'选择『'+card.name+'』':action.label}));
+        $('selectedInfo').textContent=group.name+'：'+group.hint;
+        const buttons=M.actions.map((a,i)=>`<button class="btn primary" type="button" data-district-choice="${i}">${esc(a.label)}</button>`);
+        buttons.push('<button class="btn ghost" type="button" id="districtPickCancel">取消发动</button>');
+        $('actions').className=actionsClass(buttons.length);$('actions').innerHTML=buttons.join('');return;}
+      M.districtPick=null;
+    }
     if(M.stage){const st=stageStep();const buttons=st.surface==='button'?st.options.map((o,i)=>`<button class="btn primary" type="button" data-stage-option="${i}" title="${esc(o.label)}">${esc(o.label)}</button>`):[];
       const multiPick=st.multi&&M.stage.selected.size>0;
       buttons.push(`<button class="btn ghost" type="button" id="stageBack">${multiPick?'返回重选':M.stage.step>0?'返回上一步':M.stage.ready?'返回重选':'返回'}</button>`);
@@ -456,9 +491,12 @@
     const generic=all.filter(a=>!(a.type==='district_effect'&&a.name==='ballroom_thanks')&&!['draft_pick','draft_discard','build','draw_keep','scholar_pick','wizard_card','prophet_give','choose_char','magistrate_signed','magistrate_char','blackmailer_signed','blackmailer_char'].includes(a.type));
     const armoryGroups=new Map();for(const a of all.filter(a=>a.type==='district_effect'&&a.name==='armory')){if(!armoryGroups.has(a.uid))armoryGroups.set(a.uid,[]);armoryGroups.get(a.uid).push(a);}
     const groups=[...armoryGroups].map(([uid,actions])=>({uid,actions,name:myPlayer()?.city?.find(c=>c.uid===uid)?.name||'军械库'}));
-    const grouped=[];const seen=new Set();for(const a of generic.filter(a=>!(a.type==='district_effect'&&a.name==='armory'))){const target=['choose_player','spy_target','wizard_target','emperor_crown','choose_district'].includes(a.type);
+    const representedEffects=new Set(effectGroups.flatMap(g=>g.actions));
+    const grouped=[];const seen=new Set();for(const a of generic.filter(a=>!representedEffects.has(a)&&!(a.type==='district_effect'&&a.name==='armory'))){const target=['choose_player','spy_target','wizard_target','emperor_crown','choose_district'].includes(a.type);
       const key=target?a.type:((a.type==='lab'||a.type==='museum')?a.type:JSON.stringify(a));if(seen.has(key))continue;seen.add(key);grouped.push({...a,_targetGroup:target});}
     M.actions=grouped.filter(a=>!a._targetGroup&&!(M.selection&&a.type==='choose_cards'));
+    M.actions=M.actions.map(a=>a.type==='district_effect'&&a.name==='thieves_begin'?{...a,label:'发动盗贼巢穴效果'}:a);
+    M.actions.unshift(...effectGroups.map(g=>({_districtStart:g.key,label:g.label})));
     // 领取资源前忘记致谢，就让引擎执行舞厅的跳过效果。
     M.actions=M.actions.flatMap(a=>a.type==='district_effect'&&a.name==='ballroom_skip'
       ? ['拿取金币','抽取建筑牌'].map(label=>({...a,label})) : [a]);
@@ -555,7 +593,8 @@
     const owner=idx>=0&&stage.surface==='district'?stage.options[idx].target:null;
     openViewer(kind,card,confirm,owner?(M.state.players.find(x=>x.id===owner)?.name||''):null,idx);
   }
-  function handleGeneric(a){if(a._lighthouseStart){M.lighthouse={actions:legal().filter(x=>x.type==='district_effect'&&(x.name==='lighthouse_pick'||x.name==='lighthouse_skip')),cards:M.state.turn?.pending?.cards||[],page:0};render();return;}
+  function handleGeneric(a){if(a._districtStart){M.districtPick=a._districtStart;M.selection=null;M.targetType=null;render();return;}
+    if(a._lighthouseStart){M.lighthouse={actions:legal().filter(x=>x.type==='district_effect'&&(x.name==='lighthouse_pick'||x.name==='lighthouse_skip')),cards:M.state.turn?.pending?.cards||[],page:0};render();return;}
     if(a._armoryStart){const grouped=new Map();for(const x of legal().filter(x=>x.type==='district_effect'&&x.name==='armory')){if(!grouped.has(x.uid))grouped.set(x.uid,[]);grouped.get(x.uid).push(x);}
       M.armory={groups:[...grouped].map(([uid,actions])=>({uid,actions,name:myPlayer()?.city?.find(c=>c.uid===uid)?.name||'军械库'})),buildingUid:a.uid,targetId:null};render();return;}
     if(a.type==='ability'){if(startStage())return;
@@ -589,6 +628,10 @@
   document.addEventListener('pointerover',warmCardFromIntent,{passive:true});
   document.addEventListener('pointerdown',warmCardFromIntent,{passive:true});
   document.addEventListener('click',e=>{
+    if(e.target.id==='districtPickCancel'){M.districtPick=null;render();return;}
+    const districtChoice=e.target.closest('[data-district-choice]');if(districtChoice){
+      const group=ownDistrictEffectGroups(legal(),myPlayer()).find(g=>g.key===M.districtPick);
+      const choice=group?.choices[Number(districtChoice.dataset.districtChoice)];if(choice)action(choice.action);return;}
     if($('eventOverlay')&&!$('eventOverlay').hidden){if(e.target.id==='eventOk'||e.target.id==='eventOverlay')closeEvent();e.stopPropagation();return;}
     const fold=e.target.closest('[data-fold]');if(fold){if(fold.dataset.fold==='handSection')M.handOpen=!M.handOpen;else M.roleOpen=!M.roleOpen;render();return;}
     const lighthouseCard=e.target.closest('[data-lighthouse-uid]');if(lighthouseCard){const a=M.lighthouse?.actions.find(x=>x.name==='lighthouse_pick'&&String(x.uid)===lighthouseCard.dataset.lighthouseUid);if(a)action(a);return;}
