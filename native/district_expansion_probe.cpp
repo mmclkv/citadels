@@ -32,7 +32,7 @@ static void choose(NativeGameState& s, int actor, const std::string& mode, const
   const auto it=std::find_if(actions.begin(),actions.end(),[&](const auto& a) {return a.type==ActionType::DistrictEffect && a.name==mode && (uid.empty() || a.uid==uid);});
   check(it!=actions.end()); const auto a=*it;
   check(!cfr_action_key(s,actor,a).empty());
-  check(encode_network_action(a,&s,actor).size()==256);
+  check(encode_network_action(a,&s,actor).size()==448);
   check(rules.apply(s,actor,a));
 }
 static NativeGameState roundtrip(const NativeGameState& s) {
@@ -50,6 +50,55 @@ int main(int argc,char** argv) {
       if (c.purple_effect=="secretVault") { check(!s.start_build(c.uid)); check(s.score_bonus(0)==3); continue; }
       check(s.start_build(c.uid)); check(s.players[0].city.size()==1);
       check(roundtrip(s).players[0].city.front().effect==c.purple_effect);
+    }
+    {
+      // Bishop financing must use the Factory-discounted cost, just like
+      // ordinary build legality and the final payment.
+      const auto build_capitol = [](NativeGameState& s) {
+        const auto actions = rules.legal_actions(s, 0);
+        const auto it = std::find_if(actions.begin(), actions.end(), [](const auto& a) {
+          return a.type == ActionType::Build && a.uid == "d70";
+        });
+        check(it != actions.end());
+        const auto action = *it;
+        check(rules.apply(s, 0, action));
+      };
+      auto s = base(); s.players[0].role_id = "bishop";
+      city(s, 0, card("factory", "factory", 5));
+      s.players[0].gold = 4; s.players[0].hand = {card("d70", "capitol", 5)};
+      build_capitol(s); check(s.pending_kind.empty());
+      check(s.players[0].city.back().card.uid == "d70");
+      check(s.players[0].gold == 0); check(s.spent_on_build == 4);
+
+      s = base(); s.players[0].role_id = "bishop";
+      city(s, 0, card("factory", "factory", 5));
+      s.players[0].gold = 4; s.players[0].hand = {card("d70", "capitol", 5), card("repay")};
+      s.players[1].gold = s.players[2].gold = 0;
+      build_capitol(s); check(s.pending_kind.empty()); check(s.players[0].hand.size() == 1);
+
+      for (bool factory : {false, true}) {
+        s = base(); s.players[0].role_id = "bishop";
+        if (factory) city(s, 0, card("factory", "factory", 5));
+        s.players[0].gold = factory ? 3 : 4;
+        s.players[0].hand = {card("d70", "capitol", 5), card("repay")};
+        s.players[1].gold = 1; s.players[2].gold = 0;
+        build_capitol(s); check(s.pending_kind == "bishop_payer"); check(s.pending_amount == 1);
+        NativeSearchAction payer{ActionType::ChoosePlayer}; payer.target = "p1";
+        check(rules.apply(s, 0, payer)); check(s.pending_kind == "bishop_repay");
+        NativeSearchAction repay{ActionType::ChooseCards}; repay.selected_uids = {"repay"};
+        check(rules.apply(s, 0, repay)); check(s.pending_kind.empty());
+        check(s.players[0].city.back().card.uid == "d70"); check(s.players[0].gold == 0);
+        check(s.spent_on_build == (factory ? 4 : 5));
+        check(s.players[1].gold == 0); check(s.players[1].hand.back().uid == "repay");
+      }
+      s = base(); s.players[0].role_id = "bishop";
+      city(s, 0, card("factory", "factory", 5));
+      s.players[0].gold = 3; s.players[0].hand = {card("d70", "capitol", 5), card("repay")};
+      s.players[1].gold = s.players[2].gold = 0;
+      const auto actions = rules.legal_actions(s, 0);
+      check(std::none_of(actions.begin(), actions.end(), [](const auto& a) { return a.type == ActionType::Build && a.uid == "d70"; }));
+      NativeSearchAction unaffordable{ActionType::Build}; unaffordable.uid = "d70";
+      check(!rules.apply(s, 0, unaffordable)); check(s.pending_kind.empty());
     }
     {
       auto s=base(); s.players[0].hand={card("one","stables",2),card("two")}; s.builds=1;

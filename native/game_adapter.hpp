@@ -596,10 +596,11 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           action.color = card.color;
           actions.push_back(std::move(action));
         }
-        else if (p->role_id == "bishop" && card.cost > p->gold && p->hand.size() > 1) {
-          NativePlayer funded = *p; funded.gold = card.cost;
+        else if (p->role_id == "bishop" && state.building_cost(*p, card) > p->gold && p->hand.size() > 1) {
+          const int cost = state.building_cost(*p, card);
+          NativePlayer funded = *p; funded.gold = cost;
           if (!can_build(state, funded, card)) continue;
-          const int shortfall = card.cost - p->gold;
+          const int shortfall = cost - p->gold;
           if (static_cast<int>(p->hand.size()) - 1 < shortfall) continue;
           bool has_payer = false;
           for (size_t payer = 0; payer < state.players.size(); ++payer) {
@@ -757,7 +758,7 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
       const auto card = std::find_if(state.players[player].hand.begin(), state.players[player].hand.end(),
         [&](const DistrictCard& value) { return value.uid == state.pending_uid; });
       if (card == state.players[player].hand.end()) return false;
-      NativePlayer funded = state.players[player]; funded.gold = card->cost;
+      NativePlayer funded = state.players[player]; funded.gold = state.building_cost(funded, *card);
       if (!can_build(state, funded, *card)) return false;
       state.pending_target = payer;
       state.pending_kind = "bishop_repay";
@@ -949,10 +950,11 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
           const auto card = std::find_if(state.players[player].hand.begin(), state.players[player].hand.end(),
             [&](const DistrictCard& value) { return value.uid == action.uid; });
           if (card == state.players[player].hand.end()) return false;
-          if (card->cost > state.players[player].gold) {
-            const int amount = card->cost - state.players[player].gold;
+          const int cost = state.building_cost(state.players[player], *card);
+          if (cost > state.players[player].gold) {
+            const int amount = cost - state.players[player].gold;
             if (static_cast<int>(state.players[player].hand.size()) - 1 < amount) return false;
-            NativePlayer funded = state.players[player]; funded.gold = card->cost;
+            NativePlayer funded = state.players[player]; funded.gold = cost;
             if (!can_build(state, funded, *card)) return false;
             bool has_payer = false;
             for (size_t i = 0; i < state.players.size(); ++i)
