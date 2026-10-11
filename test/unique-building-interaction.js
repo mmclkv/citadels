@@ -30,7 +30,7 @@ for (const mobile of [false, true]) {
     legal: () => model.state.available.actions.filter(a => !a.disabled),
     myPlayer: () => model.state.players[0], choiceItems: () => null, renderAgentStatus: () => false,
     isMobileGameUI: () => false, districtSelectMode: () => false, escapeHtml: String, esc: String,
-    el: (tag, cls, label) => ({ label }), onTap: (node, click) => { node.click = click; },
+    el: (tag, cls, label) => ({ label, dataset: {} }), onTap: (node, click) => { node.click = click; },
     actionBtn: a => ({ label: a.label, action: a }), actionsClass: String,
     render: () => draw(), send: a => sent.push(a), action: a => { sent.push(a); model.districtPick = null; }
   });
@@ -40,6 +40,14 @@ for (const mobile of [false, true]) {
   const draw = () => mobile ? context.renderFooter() : context.renderActions(model.state);
   const groups = context.ownDistrictEffectGroups(actions, model.state.players[0]);
   assert.equal(groups.length, 4);
+  assert.equal(groups.find(g => g.key === 'lab:l1').label, '发动实验室效果');
+  if (!mobile) {
+    const actionBtnStub = context.actionBtn;
+    vm.runInContext(extract(source, '  function actionBtn(', '  /* ============================== 行动分发'), context);
+    const button = context.actionBtn({ type: 'lab', label: '使用实验室', disabled: true });
+    assert.equal(button.innerHTML, '发动实验室效果', 'legacy labels also use activation text');
+    context.actionBtn = actionBtnStub;
+  }
   for (const group of groups) {
     draw();
     assert.equal(sent.length, 0, 'rendering never submits an effect');

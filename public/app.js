@@ -4967,7 +4967,8 @@
   function actionBtn(a, cls) {
     const b = el('button', 'act ' + (cls || '') + (a.disabled ? ' disabled' : ''));
     b.dataset.actionType = a.type || '';
-    b.innerHTML = escapeHtml(a.type === 'museum' ? '使用博物馆（选择一张手牌）' : a.label || a.type);
+    b.innerHTML = escapeHtml(a.type === 'lab' ? '发动实验室效果'
+      : a.type === 'museum' ? '使用博物馆（选择一张手牌）' : a.label || a.type);
     b.disabled = !!a.disabled;
     if (!a.disabled) onTap(b, () => runAction(a));
     return b;

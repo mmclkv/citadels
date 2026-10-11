@@ -508,7 +508,7 @@
     const current=s.phase==='draft'?s.draft?.currentPlayer:s.turn?.playerId;
     const waitingForMagistrate=s.reaction?.kind==='magistrate'&&current===M.id;
     $('selectedInfo').textContent=waitingForMagistrate?'请等待行政官响应':M.targetType?'在公开区域选择目标玩家':choice?choice.title:prompt;
-    const buttons=M.actions.map((a,i)=>{const label=a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
+    const buttons=M.actions.map((a,i)=>{const label=a.type==='lab'?'发动实验室效果':a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
       return `<button class="btn ${a.type==='end_turn'||a.type==='ability_skip'?'ghost':a.type==='ability'?'purple':'primary'}" type="button" data-action-index="${i}" title="${esc(label)}">${esc(label)}</button>`;});
     if(current===M.id&&!M.targetType&&!M.selection&&choice)buttons.unshift(`<button class="btn gold" type="button" id="chooseTarget">${esc(String(choice.title||'选择目标').replace(/^请/,''))}</button>`);
     if(!M.targetType&&!M.selection&&all.some(a=>a.type==='build'))buttons.unshift('<button class="btn gold" type="button" id="chooseBuild">建造建筑</button>');
