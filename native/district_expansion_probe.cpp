@@ -164,7 +164,8 @@ int main(int argc,char** argv) {
       auto s=base(); city(s,0,card("ivory","ivoryTower",5)); city(s,0,card("ghost","anyColorScore",2));
       for (const auto& color : {"yellow","blue","green","red"}) city(s,0,card(color,{},1,color));
       check(s.score_bonus(0)==8);
-      s=base(); city(s,0,card("well","wishingWell",5)); city(s,0,card("other")); check(s.score_bonus(0)==1);
+      s=base(); city(s,0,card("well","wishingWell",5)); check(s.score_bonus(0)==1);
+      city(s,0,card("other")); check(s.score_bonus(0)==2);
       s=base(); city(s,0,card("cap","capitol",5)); for(int i=0;i<3;++i) city(s,0,card("g"+std::to_string(i),{},1,"green"));
       check(s.score_bonus(0)==3);
       s=base(); city(s,0,card("bas","basilica",4)); city(s,0,card("odd",{},3,"green")); check(s.score_bonus(0)==1);

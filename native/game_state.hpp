@@ -278,7 +278,7 @@ struct NativeGameState {
         if (d.effect == "mapRoom") add(d, static_cast<int>(p.hand.size()));
         if (d.effect == "ivoryTower" && purple == 1) add(d, 5);
         if (d.effect == "statue" && p.has_crown) add(d, 5);
-        if (d.effect == "wishingWell") add(d, std::max(0, purple - 1));
+        if (d.effect == "wishingWell") add(d, purple);
       }
       if (!record_detail && value > best) { best = value; best_counts = counts; }
     };

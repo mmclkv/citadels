@@ -58,8 +58,14 @@ int main() {
   s.first_finishers.clear(); s.end_districts = 4;
   assert((rewards(s, 34).back() == std::pair<std::string, int>{"完工奖励", 2}));
 
-  s = base(); city(s, card("许愿井", "wishingWell", 5)); city(s, card("其他"));
+  s = base(); city(s, card("许愿井", "wishingWell", 5));
   assert((rewards(s, 1) == Details{{"许愿井加成奖励", 1}}));
+  city(s, card("其他"));
+  assert((rewards(s, 2) == Details{{"许愿井加成奖励", 2}}));
+  city(s, card("普通建筑", {}, 1, "green"));
+  assert((rewards(s, 2) == Details{{"许愿井加成奖励", 2}}));
+  city(s, card("幽灵区", "anyColorScore", 2));
+  assert((rewards(s, 3) == Details{{"许愿井加成奖励", 3}}));
   s = base(); city(s, card("国会", "capitol", 5));
   for (int i = 0; i < 3; ++i) city(s, card("green" + std::to_string(i), {}, 1, "green"));
   assert((rewards(s, 3) == Details{{"国会加成奖励", 3}}));
