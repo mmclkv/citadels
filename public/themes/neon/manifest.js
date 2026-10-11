@@ -22,6 +22,7 @@
   ];
 
   function variants(folder, key) {
+    const magistrateRules = folder === 'roles' && key === 'magistrate';
     const updatedRules = folder === 'districts' &&
       ['ghost_town', 'laboratory', 'observatory', 'library', 'great_wall', 'quarry'].includes(key);
     // 墓地卡图曾把建造费用 5 错印成能力支付费用 1，多张角色卡已更新；
@@ -43,9 +44,9 @@
                 ? '?v=3'
                 : (versioned ? '?v=2' : ''))))));
     return {
-      thumb: base + folder + '/thumb/' + key + '.webp' + (updatedRules ? '?v=rules-20261010' : version),
+      thumb: base + folder + '/thumb/' + key + '.webp' + (magistrateRules ? '?v=rules-20261012' : updatedRules ? '?v=rules-20261010' : version),
       // Full-resolution artwork was recompressed; version the URL so browser/PWA caches refresh it.
-      full: base + folder + '/full/' + key + '.webp' + (updatedRules ? '?v=rules-20261010' : '?v=optimized-1')
+      full: base + folder + '/full/' + key + '.webp' + (magistrateRules ? '?v=rules-20261012' : updatedRules ? '?v=rules-20261010' : '?v=optimized-1')
     };
   }
 
