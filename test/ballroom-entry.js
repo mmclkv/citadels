@@ -46,9 +46,11 @@ for (const mobile of [false, true]) {
     mobile ? '  function renderLighthousePicker(' : '  function appendTargetActionButtons('), context);
   if (mobile) {
     context.renderFooter();
-    assert.equal(model.actions.length, 1);
-    assert.equal(model.actions[0].name, 'ballroom_skip');
+    assert.equal(model.actions.length, 2);
+    assert.deepEqual(Array.from(model.actions, a => a.label), ['拿取金币', '抽取建筑牌']);
+    assert.ok(model.actions.every(a => a.name === 'ballroom_skip'), 'both resource attempts forfeit the turn without thanks');
     assert.ok(!$('actions').innerHTML.includes('致谢'));
+    assert.ok(!$('actions').innerHTML.includes('跳过'));
     assert.ok(!$('selectedInfo').textContent.includes('舞厅'));
     vm.runInContext(extract(source, '  function openViewer(', '  function closeViewer('), context);
     context.openViewer('district', other);
@@ -60,9 +62,9 @@ for (const mobile of [false, true]) {
     assert.ok(!$('viewerActions').innerHTML.includes('viewerConfirm'), 'stale thanks disappears');
   } else {
     context.renderActions(model.state);
-    assert.equal($('#actions').children.length, 1);
-    assert.equal($('#actions').children[0].action.name, 'ballroom_skip');
-    assert.equal($('#actions').children[0].action.label, '跳过本回合');
+    assert.equal($('#actions').children.length, 2);
+    assert.deepEqual($('#actions').children.map(b => b.action.label), ['拿取金币', '抽取建筑牌']);
+    assert.ok($('#actions').children.every(b => b.action.name === 'ballroom_skip'), 'both resource attempts forfeit the turn without thanks');
     assert.equal($('#prompt').innerHTML, '请选择行动');
     context.openBallroom(ballroom, 'king');
     assert.equal($('#modal').hidden, false);
@@ -72,6 +74,18 @@ for (const mobile of [false, true]) {
     model.state.available.actions = [];
     button.click();
     assert.equal(sent.length, 1, 'stale dialog cannot submit thanks');
+  }
+  model.state.turn.pending = null;
+  model.state.available.actions = [
+    { type: 'take_gold', label: '拿取金币' }, { type: 'take_cards', label: '抽取建筑牌' }
+  ];
+  if (mobile) {
+    context.renderFooter();
+    assert.deepEqual(Array.from(model.actions, a => a.type), ['take_gold', 'take_cards']);
+  } else {
+    $('#actions').children = [];
+    context.renderActions(model.state);
+    assert.deepEqual($('#actions').children.map(b => b.action.type), ['take_gold', 'take_cards']);
   }
 }
 console.log('PASS: ballroom thanks appears only after opening the crown holder’s building');

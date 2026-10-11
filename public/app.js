@@ -4876,8 +4876,11 @@
       if (a.type === 'build') cls = 'main';
       if (a.type === 'take_gold' || a.type === 'take_cards' || a.type === 'income') cls = 'main';
       if (a.type === 'choose_district' || a.type === 'warlord_destroy') cls = 'danger';
-      actionsEl.appendChild(actionBtn(a.type === 'district_effect' && a.name === 'ballroom_skip'
-        ? Object.assign({}, a, { label: '跳过本回合' }) : a, cls));
+      if (a.type === 'district_effect' && a.name === 'ballroom_skip') {
+        // 忘记致谢时仍展示领取资源入口，尝试领取即触发舞厅的跳过效果。
+        ['拿取金币', '抽取建筑牌'].forEach(label =>
+          actionsEl.appendChild(actionBtn(Object.assign({}, a, { label }), 'main')));
+      } else actionsEl.appendChild(actionBtn(a, cls));
     });
 
     // 多选确认按钮（魔术师弃牌 / 艺术家美化）

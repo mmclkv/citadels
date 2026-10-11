@@ -459,6 +459,9 @@
     const grouped=[];const seen=new Set();for(const a of generic.filter(a=>!(a.type==='district_effect'&&a.name==='armory'))){const target=['choose_player','spy_target','wizard_target','emperor_crown','choose_district'].includes(a.type);
       const key=target?a.type:((a.type==='lab'||a.type==='museum')?a.type:JSON.stringify(a));if(seen.has(key))continue;seen.add(key);grouped.push({...a,_targetGroup:target});}
     M.actions=grouped.filter(a=>!a._targetGroup&&!(M.selection&&a.type==='choose_cards'));
+    // 领取资源前忘记致谢，就让引擎执行舞厅的跳过效果。
+    M.actions=M.actions.flatMap(a=>a.type==='district_effect'&&a.name==='ballroom_skip'
+      ? ['拿取金币','抽取建筑牌'].map(label=>({...a,label})) : [a]);
     M.actions.unshift(...groups.map(g=>({_armoryStart:true,uid:g.uid,label:'发动军械库效果（'+g.name+'）'})));
     const lighthouse=all.filter(a=>a.type==='district_effect'&&(a.name==='lighthouse_pick'||a.name==='lighthouse_skip'));
     M.actions=M.actions.filter(a=>!(a.type==='district_effect'&&(a.name==='lighthouse_pick'||a.name==='lighthouse_skip')));
@@ -467,7 +470,7 @@
     const current=s.phase==='draft'?s.draft?.currentPlayer:s.turn?.playerId;
     const waitingForMagistrate=s.reaction?.kind==='magistrate'&&current===M.id;
     $('selectedInfo').textContent=waitingForMagistrate?'请等待行政官响应':M.targetType?'在公开区域选择目标玩家':choice?choice.title:prompt;
-    const buttons=M.actions.map((a,i)=>{const label=a.type==='district_effect'&&a.name==='ballroom_skip'?'跳过本回合':a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
+    const buttons=M.actions.map((a,i)=>{const label=a.type==='museum'?'使用博物馆（选择一张手牌）':a._targetGroup?(a.type==='choose_district'?'选择目标建筑':'选择目标玩家'):a.label||a.type;
       return `<button class="btn ${a.type==='end_turn'||a.type==='ability_skip'?'ghost':a.type==='ability'?'purple':'primary'}" type="button" data-action-index="${i}" title="${esc(label)}">${esc(label)}</button>`;});
     if(current===M.id&&!M.targetType&&!M.selection&&choice)buttons.unshift(`<button class="btn gold" type="button" id="chooseTarget">${esc(String(choice.title||'选择目标').replace(/^请/,''))}</button>`);
     if(!M.targetType&&!M.selection&&all.some(a=>a.type==='build'))buttons.unshift('<button class="btn gold" type="button" id="chooseBuild">建造建筑</button>');
