@@ -1050,8 +1050,15 @@
   }
 ];
 
+  function districtsForScenario(scenarioId) {
+    const scenario = SCENARIOS.find(s => s.id === scenarioId);
+    if (!scenario) return DISTRICTS;
+    return DISTRICTS.filter(d => d.color !== 'purple' || scenario.districts.includes(d.en));
+  }
+
   return {
     SCENARIOS: SCENARIOS,
+    districtsForScenario: districtsForScenario,
     COLORS: COLORS,
     COLOR_ORDER: COLOR_ORDER,
     DISTRICTS: DISTRICTS,

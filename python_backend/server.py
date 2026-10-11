@@ -605,6 +605,9 @@ class PythonServer:
                     if key in old:
                         player[key] = old[key]
             merged = {**retained, **native_state}
+            # Native snapshots contain only rule configuration (endDistricts).
+            # Keep the complete room setup, including its selected scenario.
+            merged["config"] = {**native_state.get("config", {}), **current.get("config", {})}
             self._append_gain_notices(current, merged, action)
             self._append_crown_transfer_notice(current, merged, action)
             self._append_marshal_seize_notice(current, merged, action)

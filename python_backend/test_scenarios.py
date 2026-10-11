@@ -5,6 +5,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 from python_backend import cards
 from python_backend.rooms import RoomRegistry
@@ -30,6 +32,21 @@ class ScenarioTests(unittest.TestCase):
             "process.stdout.write(JSON.stringify(require('./src/cards.js').SCENARIOS))"],
             cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True)
         self.assertEqual(json.loads(result.stdout), cards.SCENARIOS)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node.js required')
+    def test_building_reference_matches_each_scenario(self):
+        result = subprocess.run([shutil.which('node'), '-e',
+            "const c=require('./src/cards.js'); process.stdout.write(JSON.stringify("
+            "['',...c.SCENARIOS.map(s=>s.id)].map(id=>c.districtsForScenario(id))))"],
+            cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True)
+        references = json.loads(result.stdout)
+        self.assertEqual(references[0], cards.DISTRICTS)
+        ordinary = [d for d in cards.DISTRICTS if d['color'] != 'purple']
+        for scenario, reference in zip(cards.SCENARIOS, references[1:]):
+            with self.subTest(scenario=scenario['id']):
+                self.assertEqual([d for d in reference if d['color'] != 'purple'], ordinary)
+                self.assertEqual({d['en'] for d in reference if d['color'] == 'purple'},
+                                 set(scenario['districts']))
 
     def test_room_preserves_optional_selection_and_rejects_unknown_values(self):
         registry = RoomRegistry()
@@ -97,6 +114,46 @@ class NativeScenarioTests(unittest.TestCase):
         self.assertEqual(len(state['deck']) + sum(len(p['hand']) for p in state['players']), 92)
         with self.assertRaisesRegex(RuntimeError, 'Unknown scenario'):
             self.create(4, 'unknown')
+
+
+@unittest.skipUnless(os.environ.get('CITADELS_TEST_GAME_ENGINE'), 'Compiled game engine required')
+class NativeServerScenarioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_player_setup_and_actions_preserve_scenario(self):
+        from python_backend.server import Client, PythonServer
+
+        worker = GameEngineWorker(os.environ['CITADELS_TEST_GAME_ENGINE'])
+        try:
+            with mock.patch.object(PythonServer, '_load_admin_credentials', return_value=('test', 'test')):
+                app = PythonServer(SimpleNamespace(worker=None, game_worker=worker, running=True))
+            with mock.patch.object(app, '_schedule_bot'), \
+                 mock.patch.object(app, '_broadcast_state', new=mock.AsyncMock()):
+                for scenario in cards.SCENARIOS:
+                    with self.subTest(scenario=scenario['id']):
+                        client = Client(None)
+                        client.send = mock.AsyncMock()
+                        await app._handle_message(client, {'t': 'createRoom', 'name': 'Solo',
+                            'config': {'playerCount': 4, 'bots': 3, 'charSetMode': 'base',
+                                       'scenario': scenario['id'], 'voice': False}})
+                        room = app.rooms.rooms[client.room_id]
+                        await app._handle_message(client, {'t': 'startGame'})
+                        expected_config = dict(room['state']['config'])
+                        expected_roles = ['artist' if c == 'queen' else c
+                                          for c in scenario['characters']]
+                        self.assertEqual(room['state']['charDeck'], expected_roles)
+                        for _ in range(4):
+                            actor = worker.current(room['id'])['playerId']
+                            action = worker.legal_actions(game_id=room['id'], player_id=actor)['actions'][0]
+                            self.assertTrue((await app._apply_game_action(room, actor, action))['ok'])
+                            self.assertEqual(room['state']['config'], expected_config)
+                            view = await app._state_for_client(room, client.id)
+                            self.assertEqual(view['config']['scenario'], scenario['id'])
+                            self.assertEqual([c['id'] for c in view['charDeck']], expected_roles)
+                        deck = room['state']['deck'] + [c for p in room['state']['players'] for c in p['hand']]
+                        self.assertEqual(len(deck), 68)
+                        self.assertEqual({c['en'] for c in deck if c['color'] == 'purple'},
+                                         set(scenario['districts']))
+        finally:
+            worker.close()
 
 
 if __name__ == '__main__':

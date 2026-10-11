@@ -5303,12 +5303,13 @@
     });
     body.appendChild(lg);
 
-    body.appendChild(el('div', 'section-title', '全部建筑（按颜色，含特殊效果）'));
+    body.appendChild(el('div', 'section-title', '本局建筑（按颜色，含特殊效果）'));
+    const districts = Cards.districtsForScenario(s && s.config && s.config.scenario);
     ['yellow', 'blue', 'green', 'red', 'purple'].forEach(k => {
       const col = Cards.COLORS[k];
       body.appendChild(el('div', 'color-sub', col.name + '（' + col.en + '）'));
       const grp = el('div', 'char-grid');
-      Cards.DISTRICTS.filter(d => d.color === k).sort((a, b) => a.cost - b.cost).forEach(d => {
+      districts.filter(d => d.color === k).sort((a, b) => a.cost - b.cost).forEach(d => {
         const e = el('div', 'ref-card c-' + k);
         const thumb = districtCardAsset(d, 'thumb');
         const full = districtCardAsset(d, 'full');
