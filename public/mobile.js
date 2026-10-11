@@ -7,7 +7,7 @@
   const CN = { yellow:'皇家', blue:'宗教', green:'商业', red:'军事', purple:'独特' };
   const SESSION = 'citadels.net.session';
   const M = { ws:null, state:null, id:null, room:null, name:'玩家',
-    reconnect:0, handOpen:false, roleOpen:true, targetType:null, selection:null, armory:null, lighthouse:null, districtPick:null,
+    reconnect:0, handOpen:false, roleOpen:true, targetType:null, selection:null, lighthouse:null, districtPick:null,
     sheetPlayer:null, viewer:null, actions:[], menu:false, leavePending:false,
     sidebar:false, sidebarTab:'log', chat:[], speed:localStorage.getItem('citadels.speed')||'normal',
     stage:null, sequence:null, noticeSeen:null, events:[], event:null, eventTimer:0, effectFallback:null, effectTimer:0,
@@ -51,7 +51,7 @@
   const hand = n => `<span class="hand-stat"><i class="hand-back"></i><span class="stat-value">×${esc(n)}</span></span>`;
   function message(text) { $('entryMessage').textContent = text || ''; }
   function send(payload) { if (M.ws && M.ws.readyState===1) M.ws.send(JSON.stringify(payload)); else message('正在重新连接服务器'); }
-  function action(a) { if (!a || M.state?.spectating) return; send({t:'action',action:a}); M.targetType=null; M.selection=null; M.armory=null; M.lighthouse=null; M.districtPick=null; $('lighthousePicker').hidden=true; M.focus=null; M.confirm=null; closeViewer(); closeSheet(); }
+  function action(a) { if (!a || M.state?.spectating) return; send({t:'action',action:a}); M.targetType=null; M.selection=null; M.lighthouse=null; M.districtPick=null; $('lighthousePicker').hidden=true; M.focus=null; M.confirm=null; closeViewer(); closeSheet(); }
   // 选目标类动作共用：点亮目标所在区域并把视口挪过去。
   const focusEl = area => area==='players'?$('players').closest('section'):area==='hand'?$('handSection'):area==='roles'?$('roleArea'):null;
   const surfaceFocus = surface => surface==='player'||surface==='district'?'players':surface==='hand'?'hand':surface==='role'?'roles':null;
@@ -354,6 +354,10 @@
     const cities=players=>players.flatMap(p=>(p.city||[]).map(c=>({value:c.uid,label:`${p.name} · ${c.name} · ${c.cost} 金`,surface:'district',target:p.id,uid:c.uid,card:c}))).filter(x=>!x.card.fortress);
     const mode=(value,label)=>({value,label,surface:'button'});
     switch(st.role){
+      case 'armory':return legal().filter(a=>a.type==='district_effect'&&a.name==='armory'&&a.uid===st.buildingUid)
+        .map(a=>{const player=s.players.find(p=>p.id===a.target),card=player?.city.find(c=>c.uid===a.secondaryUid);
+          return {value:a.secondaryUid,uid:a.secondaryUid,target:a.target,card,surface:'district',action:a,
+            label:`${player?.name||'玩家'} · ${card?.name||'建筑'}`};}).filter(o=>o.card);
       case 'magician':return step===0?[mode('swap','交换手牌'),mode('redraw','弃牌重抽')]:st.picks[0]?.value==='swap'?people:(myPlayer()?.hand||[]).map(c=>({value:c.uid,label:`${c.name} · ${c.cost} 金`,surface:'hand'}));
       case 'assassin':case 'thief':case 'witch':return roles.filter(x=>st.role==='thief'?x.value!==1:st.role==='witch'?x.value!==1:true);
       case 'spy':return step===0?people:COLORS.map(c=>mode(c,CN[c]));
@@ -368,8 +372,9 @@
       default:return [];
     }
   }
-  function stageTitle(){const names={magician:'魔术师能力',assassin:'刺杀目标',thief:'偷窃目标',witch:'施咒目标',spy:'间谍能力',wizard:'法师目标',emperor:'皇帝能力',navigator:'航海家奖励',warlord:'摧毁建筑',marshal:'抢夺建筑',diplomat:'交换建筑',artist:'美化建筑',magistrate:'逮捕令',blackmailer:'威胁标记'};return names[M.stage?.role]||'角色能力';}
+  function stageTitle(){const names={armory:'军械库摧毁建筑',magician:'魔术师能力',assassin:'刺杀目标',thief:'偷窃目标',witch:'施咒目标',spy:'间谍能力',wizard:'法师目标',emperor:'皇帝能力',navigator:'航海家奖励',warlord:'摧毁建筑',marshal:'抢夺建筑',diplomat:'交换建筑',artist:'美化建筑',magistrate:'逮捕令',blackmailer:'威胁标记'};return names[M.stage?.role]||'角色能力';}
   function stageHint(){const st=M.stage;if(!st)return '';if(st.ready)return '确认后才会向游戏引擎提交行动。';
+    if(st.role==='armory')return '点击高亮的建筑，牺牲军械库并摧毁目标';
     const hints={magician:st.step===0?'选择一种能力':st.picks[0]?.value==='swap'?'选择交换手牌的玩家':'选择要弃掉的手牌，可留空',spy:st.step===0?'选择调查的玩家':'选择调查的建筑颜色',emperor:st.step===0?'选择接收皇冠的玩家':'选择从该玩家处取得的资源',diplomat:st.step===0?'先选择自己的一栋建筑':'再选择对方的一栋建筑',artist:'选择最多两栋建筑，可留空',magistrate:['选择真实逮捕目标','选择第一个伪装目标','选择第二个伪装目标'][st.step],blackmailer:['选择第一个威胁角色','选择第二个威胁角色','选择真实威胁目标'][st.step]};
     return hints[st.role]||'选择目标，确认前可以返回';}
   const stageMulti = st => (st.role==='magician'&&st.step===1&&st.picks[0]?.value==='redraw')||st.role==='artist';
@@ -423,6 +428,11 @@
     seq.index++;send({t:'action',action:exact});return true;
   }
   function confirmStage(){const st=M.stage;if(!st)return;const multi=stageMulti(st);if(!st.ready&&!multi)return;
+    if(st.role==='armory'){
+      const pick=st.picks[0];const exact=legal().find(a=>a.type==='district_effect'&&a.name==='armory'&&a.uid===st.buildingUid&&a.target===pick?.target&&a.secondaryUid===pick?.uid);
+      if(!exact){st.ready=false;st.picks=[];message('当前目标已变化，请重新选择建筑');render();return;}
+      M.stage=null;action(exact);return;
+    }
     expectEffect(`${myPlayer()?.name||'我'} 发动了【${role(st.role).name||'角色'}】能力`);
     M.sequence={steps:sequenceSteps(st),index:0,redraw:st.role==='magician'&&st.picks[0]?.value==='redraw'?new Set(st.selected):null};M.stage=null;M.focus=null;render();$('selectedInfo').textContent='正在提交角色能力…';driveSequence();
   }
@@ -478,19 +488,6 @@
       $('actions').className=actionsClass(2);
       $('actions').innerHTML=`<button class="btn ghost" type="button" id="confirmBack">返回</button><button class="btn purple" type="button" id="confirmAction">确认发动</button>`;return;}
     if(M.lighthouse){M.actions=[];$('selectedInfo').textContent='灯塔：在选牌框中选择建筑牌';$('actions').replaceChildren();renderLighthousePicker();return;}
-    if(M.armory){M.actions=[];let buttons=[];
-      if(M.armory.buildingUid==null){$('selectedInfo').textContent='军械库：先选择要发动效果的建筑';
-        buttons=M.armory.groups.map(g=>`<button class="btn purple" type="button" data-armory-building="${attr(g.uid)}">发动军械库效果（${esc(g.name||'军械库')}）</button>`);
-      }else if(M.armory.targetId==null){const actions=M.armory.groups.find(g=>g.uid===M.armory.buildingUid)?.actions||[];
-        const ids=[...new Set(actions.map(a=>a.target))];$('selectedInfo').textContent='军械库：选择要发动效果的目标玩家';
-        buttons=ids.map(id=>`<button class="btn primary" type="button" data-armory-target="${attr(id)}">${esc(M.state.players.find(p=>p.id===id)?.name||'目标玩家')}</button>`);
-      }else{const player=M.state.players.find(p=>p.id===M.armory.targetId);const group=M.armory.groups.find(g=>g.uid===M.armory.buildingUid);
-        M.armory.options=(group?.actions||[]).filter(a=>a.target===M.armory.targetId);
-        $('selectedInfo').textContent=`军械库：选择摧毁 ${player?.name||'目标玩家'} 的一栋建筑`;
-        buttons=M.armory.options.map((a,i)=>{const card=player?.city?.find(c=>c.uid===a.secondaryUid);return `<button class="btn danger" type="button" data-armory-action="${i}">摧毁『${esc(card?.name||'目标建筑')}』</button>`;});
-      }
-      buttons.push(`<button class="btn ghost" type="button" data-armory-back>${M.armory.targetId!=null?'返回玩家选择':M.armory.buildingUid!=null?'返回军械库选择':'取消'}</button>`);
-      $('actions').className=actionsClass(buttons.length);$('actions').innerHTML=buttons.join('');return;}
     const generic=all.filter(a=>!(a.type==='district_effect'&&a.name==='ballroom_thanks')&&!['draft_pick','draft_discard','build','draw_keep','scholar_pick','wizard_card','prophet_give','choose_char','magistrate_signed','magistrate_char','blackmailer_signed','blackmailer_char'].includes(a.type));
     const armoryGroups=new Map();for(const a of all.filter(a=>a.type==='district_effect'&&a.name==='armory')){if(!armoryGroups.has(a.uid))armoryGroups.set(a.uid,[]);armoryGroups.get(a.uid).push(a);}
     const groups=[...armoryGroups].map(([uid,actions])=>({uid,actions,name:myPlayer()?.city?.find(c=>c.uid===uid)?.name||'军械库'}));
@@ -598,8 +595,7 @@
   }
   function handleGeneric(a){if(a._districtStart){M.districtPick=a._districtStart;M.selection=null;M.targetType=null;render();return;}
     if(a._lighthouseStart){M.lighthouse={actions:legal().filter(x=>x.type==='district_effect'&&(x.name==='lighthouse_pick'||x.name==='lighthouse_skip')),cards:M.state.turn?.pending?.cards||[],page:0};render();return;}
-    if(a._armoryStart){const grouped=new Map();for(const x of legal().filter(x=>x.type==='district_effect'&&x.name==='armory')){if(!grouped.has(x.uid))grouped.set(x.uid,[]);grouped.get(x.uid).push(x);}
-      M.armory={groups:[...grouped].map(([uid,actions])=>({uid,actions,name:myPlayer()?.city?.find(c=>c.uid===uid)?.name||'军械库'})),buildingUid:a.uid,targetId:null};render();return;}
+    if(a._armoryStart){M.stage={role:'armory',buildingUid:a.uid,step:0,picks:[],selected:new Set(),ready:false};render();return;}
     if(a.type==='ability'){if(startStage())return;
       const r=role(M.state?.turn?.charId);M.confirm={action:a,hint:`【${r.name||'角色'}】${r.desc||'发动角色能力'}`};render();return;}
     if(a._targetGroup){M.targetType=a.type;focusArea('players');return;}
@@ -641,10 +637,6 @@
     if(e.target.id==='lighthousePrev'||e.target.id==='lighthouseNext'){if(M.lighthouse){M.lighthouse.page+=e.target.id==='lighthousePrev'?-1:1;renderLighthousePicker();}return;}
     if(e.target.id==='lighthouseSkip'){const a=M.lighthouse?.actions.find(x=>x.name==='lighthouse_skip');if(a)action(a);return;}
     if(e.target.id==='lighthouseCancel'||e.target.id==='lighthouseClose'){M.lighthouse=null;$('lighthousePicker').hidden=true;render();return;}
-    const armoryBuilding=e.target.closest('[data-armory-building]');if(armoryBuilding){const group=M.armory?.groups?.find(g=>String(g.uid)===armoryBuilding.dataset.armoryBuilding);if(group){M.armory={groups:M.armory.groups,buildingUid:group.uid,targetId:null};render();}return;}
-    const armoryTarget=e.target.closest('[data-armory-target]');if(armoryTarget){if(M.armory)M.armory.targetId=armoryTarget.dataset.armoryTarget;render();return;}
-    const armoryAction=e.target.closest('[data-armory-action]');if(armoryAction){const a=M.armory?.options?.[Number(armoryAction.dataset.armoryAction)];if(a)action(a);return;}
-    if(e.target.closest('[data-armory-back]')){if(M.armory?.targetId!=null)M.armory.targetId=null;else if(M.armory?.buildingUid!=null)M.armory.buildingUid=null;else M.armory=null;render();return;}
     const stageOpt=e.target.closest('[data-stage-option]');if(stageOpt){chooseStageOption(Number(stageOpt.dataset.stageOption));return;}
     if(e.target.id==='stageBack'){backStage();return;}
     if(e.target.id==='stageConfirm'){confirmStage();return;}

@@ -3337,7 +3337,7 @@
     $('#mobile-public-count').textContent = s.players.length + ' 人局';
     const targeting = mobileHasTargetChoice(s);
     $('#mobile-public-status').textContent = targeting
-      ? (availableMobileActions().some(a => a.type === 'choose_district') ? '选择目标玩家和建筑' : '点击目标玩家')
+      ? (districtSelectMode() ? '选择目标玩家和建筑' : '点击目标玩家')
       : '顺时针排列';
     // 两列按顺时针围桌：左上 → 右上 → 右侧向下 → 左侧向上。
     const ordered = s.players.slice(0, 2);
@@ -3446,11 +3446,12 @@
     return availableMobileActions().filter(a => MOBILE_PLAYER_ACTIONS.includes(a.type) && a.target === playerId);
   }
   function mobileDistrictActionsFor(playerId) {
-    return availableMobileActions().filter(a => a.type === 'choose_district' && a.target === playerId);
+    const player = App.state.players.find(p => p.id === playerId);
+    return player ? player.city.map(card => districtActionFor(player, card)).filter(Boolean) : [];
   }
   function mobileHasTargetChoice(s) {
     return !!(s && s.turn && s.turn.playerId === App.myId &&
-      availableMobileActions().some(a => MOBILE_PLAYER_ACTIONS.includes(a.type) || a.type === 'choose_district'));
+      (districtSelectMode() || availableMobileActions().some(a => MOBILE_PLAYER_ACTIONS.includes(a.type))));
   }
   function closeMobileDetail() {
     MobileDetail.playerId = null;
@@ -3489,7 +3490,7 @@
         App.state.draft.pool.some(c => c.id === action.charId)) return action;
     return availableMobileActions().find(a => a.type === action.type &&
       a.uid === action.uid && a.target === action.target && a.num === action.num &&
-      a.name === action.name && a.charId === action.charId) || null;
+      a.name === action.name && a.charId === action.charId && a.secondaryUid === action.secondaryUid) || null;
   }
   function refreshMobileDetail(s) {
     const overlay = $('#mobile-detail');
@@ -3591,7 +3592,7 @@
     const city = el('div', 'mobile-detail-city');
     if (!player.city.length) city.appendChild(el('p', 'empty-hint', '尚无建筑'));
     player.city.forEach(card => {
-      const action = districtActions.find(a => a.uid === card.uid);
+      const action = districtActions.find(a => (a.type === 'district_effect' ? a.secondaryUid : a.uid) === card.uid);
       const node = cardNode(card, { clickable: false });
       node.__noZoom = true;
       const wrapper = el('button', 'mobile-detail-card' + (action ? ' targetable' : ''));
@@ -4789,8 +4790,7 @@
     } else if (lighthouseSkip) {
       actionsEl.appendChild(actionBtn(lighthouseSkip));
     }
-    // Armory actions already contain all legal player/building pairs. Keep them
-    // native, but expose them as a three-step frontend flow.
+    // Armory shares the role abilities' highlighted city-card selection.
     const armoryGroups = new Map();
     av.actions.filter(a => a.type === 'district_effect' && a.name === 'armory').forEach(a => {
       representedActions.add(a);
@@ -4798,40 +4798,21 @@
       armoryGroups.get(a.uid).push(a);
     });
     if (App.sel && App.sel.kind === 'armory') {
-      const actions = App.sel.actions || [];
-      const cancel = el('button', 'act', App.sel.targetId == null ? '取消发动' : '返回玩家选择');
-      onTap(cancel, () => {
-        if (App.sel.targetId != null) App.sel.targetId = null;
-        else App.sel = null;
-        render();
-      });
-      if (App.sel.targetId == null) {
-        promptEl.textContent = '军械库：选择要发动效果的目标玩家';
-        const targets = [...new Set(actions.map(a => a.target))];
-        targets.forEach(id => {
-          const player = s.players.find(p => p.id === id);
-          const button = el('button', 'act main', player ? player.name : '目标玩家');
-          onTap(button, () => { App.sel.targetId = id; render(); });
-          actionsEl.appendChild(button);
-        });
-      } else {
-        const player = s.players.find(p => p.id === App.sel.targetId);
-        promptEl.textContent = '军械库：选择摧毁 ' + (player ? player.name : '目标玩家') + ' 的一栋建筑';
-        actions.filter(a => a.target === App.sel.targetId).forEach(a => {
-          const district = player && (player.city || []).find(c => c.uid === a.secondaryUid);
-          const button = el('button', 'act danger', district ? '摧毁『' + district.name + '』' : '摧毁目标建筑');
-          onTap(button, () => { App.sel = null; send(a); });
-          actionsEl.appendChild(button);
-        });
+      if (armoryGroups.has(App.sel.buildingUid)) {
+        actionsEl.innerHTML = '';
+        promptEl.textContent = '军械库：点击高亮的建筑，牺牲军械库并摧毁目标';
+        const cancel = el('button', 'act', '取消发动');
+        onTap(cancel, () => { App.sel = null; render(); });
+        actionsEl.appendChild(cancel);
+        return;
       }
-      actionsEl.appendChild(cancel);
-      return;
+      App.sel = null;
     }
     armoryGroups.forEach((actions, buildingUid) => {
       const me = s.players.find(p => p.id === App.myId);
       const building = me && (me.city || []).find(c => c.uid === buildingUid);
       const button = el('button', 'act main', building ? '发动军械库效果（' + building.name + '）' : '发动军械库效果');
-      onTap(button, () => { App.sel = { kind: 'armory', buildingUid, actions }; render(); });
+      onTap(button, () => { App.sel = { kind: 'armory', buildingUid }; render(); });
       actionsEl.appendChild(button);
     });
     const effectGroups = ownDistrictEffectGroups(av.actions, s.players.find(p => p.id === App.myId));
@@ -4981,6 +4962,7 @@
   /* ============================== 行动分发 ============================== */
   function runAction(a) {
     if (App.buildingAnimPaused) return;
+    if (a.type === 'district_effect' && a.name === 'armory') App.sel = null;
     switch (a.type) {
       case 'lab':
         App.sel = { kind: 'labpick', buildingUid: a.uid,
@@ -5043,16 +5025,20 @@
   /** 当前是否处于「选择建筑」模式 */
   function districtSelectMode() {
     const s = App.state;
-    if (!s || !s.turn || !s.turn.pending) return false;
-    return s.turn.playerId === App.myId &&
-      ['warlord_destroy', 'marshal_seize', 'diplomat_mine', 'diplomat_theirs', 'artist'].indexOf(s.turn.pending.kind) >= 0;
+    if (!s || s.spectating || !s.turn || s.turn.playerId !== App.myId) return false;
+    return (s.available && s.available.actions || []).some(a => !a.disabled &&
+      (a.type === 'choose_district' || (App.sel && App.sel.kind === 'armory' &&
+        a.type === 'district_effect' && a.name === 'armory' && a.uid === App.sel.buildingUid)));
   }
   /** 返回这栋建筑对应的 choose_district 动作；没有则返回 null */
   function districtActionFor(player, card) {
     if (!districtSelectMode()) return null;
     const av = App.state.available;
     if (!av || !av.actions) return null;
-    return av.actions.find(a => a.type === 'choose_district' && a.target === player.id && a.uid === card.uid) || null;
+    return av.actions.find(a => !a.disabled && a.target === player.id &&
+      (a.type === 'choose_district' && a.uid === card.uid ||
+       App.sel && App.sel.kind === 'armory' && a.type === 'district_effect' && a.name === 'armory' &&
+       a.uid === App.sel.buildingUid && a.secondaryUid === card.uid)) || null;
   }
   function isSelectableDistrict(player, card) {
     return !!districtActionFor(player, card);
@@ -5064,8 +5050,8 @@
    * 按钮因为自带动作对象始终有效 —— 同一动作两条入口表现不一致。 */
   function pickDistrict(playerId, uid, boundAction) {
     if (boundAction) { runAction(boundAction); return; }
-    const av = App.state.available;
-    const a = (av && av.actions || []).find(x => x.type === 'choose_district' && x.target === playerId && x.uid === uid);
+    const player = App.state.players.find(p => p.id === playerId);
+    const a = player && districtActionFor(player, { uid });
     if (a) runAction(a);
     else render();     // 状态已变：重绘同步高亮，别留在「点了没反应」的状态
   }
