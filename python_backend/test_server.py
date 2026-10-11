@@ -681,6 +681,32 @@ async def _recv_json(reader: asyncio.StreamReader) -> dict:
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_finished_game_returns_to_same_room_for_guest_and_host(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        _, guest = self.app.rooms.join_room(room["id"], "Guest")
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        client = mock.Mock(id=guest["id"], room_id=room["id"])
+        original_seats = [dict(seat) for seat in room["seats"]]
+        original_config = dict(room["config"])
+        with self.assertRaisesRegex(ValueError, "对局尚未结束"):
+            await self.app._handle_message(client, {"t": "returnToRoom"})
+        self.assertIs(room["state"], state)
+        state["phase"] = "gameover"
+        with mock.patch.object(self.app, "_broadcast_state", new_callable=mock.AsyncMock) as broadcast:
+            await self.app._handle_message(client, {"t": "returnToRoom"})
+            broadcast.assert_awaited_once_with(room)
+        self.assertIsNone(room["state"])
+        self.assertIs(self.app.rooms.rooms[room["id"]], room)
+        self.assertEqual(room["seats"], original_seats)
+        self.assertEqual(room["config"], original_config)
+        self.assertEqual(client.room_id, room["id"])
+        lobby = await self.app._state_for_client(room, guest["id"])
+        self.assertEqual(lobby["phase"], "lobby")
+        self.assertEqual(lobby["roomId"], room["id"])
+        # The host's later click remains valid after the guest has returned the room.
+        client.id = room["seats"][0]["id"]
+        await self.app._handle_message(client, {"t": "returnToRoom"})
+
     async def test_scenario_updates_clear_and_reach_native_setup(self):
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "charSetMode": "dark"})
         client = Client(None)
@@ -940,7 +966,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         other = Viewer()
         await self.app._handle_message(other, {"t": "spectateRoom", "roomId": room["id"]})
         self.assertEqual(room["spectators"][other.id]["viewPlayerId"], state["players"][0]["id"])
-        for kind in ("action", "startGame", "restart", "setPace", "setAutoHost", "config", "chat"):
+        for kind in ("action", "startGame", "restart", "returnToRoom", "setPace", "setAutoHost", "config", "chat"):
             with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "观战模式"):
                 await self.app._handle_message(viewer, {"t": kind, "action": {"type": "end_turn"}})
         await self.app._handle_message(viewer, {"t": "botDebugSubscribe"})

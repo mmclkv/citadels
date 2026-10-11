@@ -2095,8 +2095,11 @@ class PythonServer:
             await self._broadcast_state(room)
             self._schedule_bot(room)
             return
-        if kind == "restart":
-            if room["seats"][0]["id"] != client.id:
+        if kind in ("restart", "returnToRoom"):
+            if kind == "returnToRoom":
+                if room["state"] and room["state"]["phase"] != "gameover":
+                    raise ValueError("对局尚未结束")
+            elif room["seats"][0]["id"] != client.id:
                 raise ValueError("仅房主可重开游戏")
             task = room.get("botTask")
             if task and not task.done():

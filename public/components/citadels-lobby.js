@@ -1006,9 +1006,12 @@
       }
       host.returnToHome = returnToHome;
 
-      // 联机房间重开（比如结算后「再来一局」）时由页面调用：收回 socket，
+      // 结算后「返回房间」时由页面调用：收回 socket，
       // 直接显示大厅房间，房主可以再开一局。
       host.returnToLobby = function (state) {
+        App.localServerGame = false;
+        Net.autoStart = false;
+        Net.startGameRequested = false;
         Net.handedOver = false;
         started = false;
         Net.attach();

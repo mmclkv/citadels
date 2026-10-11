@@ -693,7 +693,7 @@
   };
   $('menuNewGame').onclick=leaveToLobby;
   $('overExit').onclick=leaveToLobby;
-  $('overAgain').onclick=()=>{send({t:'restart'});$('overOverlay').hidden=true;$('selectedInfo').textContent='正在开始新对局…';};
+  $('overAgain').onclick=()=>{send({t:'returnToRoom'});};
   $('viewer').onclick=e=>{if(e.target.id==='viewer')closeViewer();};
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('eventOverlay')&&!$('eventOverlay').hidden){closeEvent();}else if($('viewer').classList.contains('show'))closeViewer();else if(M.stage){backStage();}else if(M.confirm){M.confirm=null;render();}else if(M.focus){M.focus=null;render();}else if(!$('referenceOverlay').hidden)closeReference();else if($('sheet').classList.contains('show'))closeSheet();else if(M.sidebar)hideSidebar();else closeMenu();}});
   setInterval(()=>{if(M.ws?.readyState===1)send({t:'heartbeat',ts:Date.now()});},5000);

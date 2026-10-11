@@ -784,13 +784,8 @@
           if (App.leavingNetGame) break;
           App.state = m.state;
           if (m.state.you) App.myId = m.state.you;
-          if (m.state.phase === 'lobby' && App.localServerGame) {
-            // 单机房间重开：清掉上一局残留的牌，再让服务器重新开局。
-            App.chatHistory = [];
-            clearGameBoardView();
-            this.send({ t: 'startGame' });
-          } else if (m.state.phase === 'lobby') {
-            // 联机房间重开：还回组件，由它显示大厅房间。
+          if (m.state.phase === 'lobby') {
+            // 结算后返回原房间，还回组件，等待房主手动开局。
             App.chatHistory = [];
             hidePageScreens();
             this.release();
@@ -5242,6 +5237,7 @@
   function showOver(s) {
     // 避免之前打开的计分详情浮层挡住结算页按钮，导致首击只关闭浮层。
     closeScore();
+    $('#btn-again').hidden = !!s.spectating;
     const rows = s.scores || [];
     let best = -1;
     rows.forEach(r => { if (r.total > best) best = r.total; });
@@ -5526,11 +5522,10 @@
       Net.send({ t: 'chat', text: text });
       closeChatComposer();
     };
-    // 再来一局：单机房间由服务器重新开局（handle 收到大厅态会补发 startGame）；
-    // 联机房间服务器回到大厅，handle 会把 socket 交还组件显示房间。
+    // 返回原房间，收到大厅态后把 socket 交还组件。
     $('#btn-again').onclick = () => {
       App.leavingNetGame = false;
-      Net.send({ t: 'restart' });
+      Net.send({ t: 'returnToRoom' });
     };
     window.addEventListener('resize', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
     window.addEventListener('orientationchange', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
