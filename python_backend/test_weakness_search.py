@@ -107,6 +107,83 @@ class WeaknessSearchTests(unittest.TestCase):
             for first, second in zip(calls[1::2], calls[2::2]):
                 self.assertEqual(first, second, "each paired case must have identical seats and seed")
 
+    def test_unordered_validation_and_exception_cleanup(self):
+        from unittest.mock import patch
+        torch, trainer = _load_trainer()
+        torch.set_num_threads(1)
+        config = sanitize_config({"weaknessTrainingGames": 1, "weaknessEvaluationPairs": 5})
+        model = trainer.create_model("entity-v6", "fast")
+        logs, states = [], []
+        def sample(*args):
+            return {"completed": True, "rows": [{}]}
+        def unordered(tasks, stop):
+            for index, name, case in reversed(tasks):
+                yield index, name, {"completed": True, "playerCount": case["weaknessRun"]["playerCount"],
+                                    "targetFirst": name == "baseline", "challengerFirst": name == "candidate"}, 1.25
+        def failure(tasks, stop):
+            yield from ()
+            raise RuntimeError("evaluation failed")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            search = WeaknessSearch(torch, trainer, torch.device("cpu"), config, root / "data",
+                                    root / "runtime", sample, _training_data, threading.Event(), logs.append,
+                                    states.append, evaluation_runner=unordered)
+            with patch("python_backend.weakness_search.train_response_policy", return_value=1):
+                report = search.run(model, 2000, [])
+                self.assertTrue(report["accepted"])
+                self.assertEqual([p["case"]["gameNumber"] for p in report["pairs"]], [1, 2, 3, 4, 5])
+                self.assertEqual(states[-2]["evaluationGames"], 10)
+                self.assertTrue(all("elapsedSeconds" in state for state in states))
+                self.assertEqual(sum("耗时" in log for log in logs), 11)
+                search.evaluation_runner = failure
+                with self.assertRaisesRegex(RuntimeError, "evaluation failed"):
+                    search.run(model, 2001, [])
+                self.assertEqual(states[-1]["phase"], "failed")
+                self.assertEqual(list((root / "runtime" / "weakness").iterdir()), [])
+                self.assertFalse(any(t.name == "weakness-progress" for t in threading.enumerate()))
+
+    def test_cancel_incomplete_unordered_pair(self):
+        from unittest.mock import patch
+        torch, trainer = _load_trainer()
+        torch.set_num_threads(1)
+        stop = threading.Event()
+        closed = []
+        def partial(tasks, event):
+            try:
+                index, name, config = tasks[0]
+                yield index, name, {"completed": True, "playerCount": 4,
+                                    "targetFirst": True, "challengerFirst": False}, 1
+                event.set()
+            finally:
+                closed.append(True)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            search = WeaknessSearch(torch, trainer, torch.device("cpu"),
+                                    sanitize_config({"weaknessTrainingGames": 1}), root / "data", root / "runtime",
+                                    lambda *args: {"completed": True, "rows": [{}]}, _training_data,
+                                    stop, lambda msg: None, evaluation_runner=partial)
+            with patch("python_backend.weakness_search.train_response_policy", return_value=1):
+                report = search.run(trainer.create_model("entity-v6", "fast"), 2000, [])
+            self.assertTrue(report["cancelled"])
+            self.assertFalse(report["accepted"])
+            self.assertEqual(report["completePairs"], 0)
+            self.assertEqual(closed, [True])
+
+    def test_parallel_pool_cancel_closes_children(self):
+        import multiprocessing
+        from unittest.mock import patch
+        from python_backend.training_runtime import _parallel_weakness_evaluation
+        stop = threading.Event()
+        config = {"workers": 2, "weaknessEvaluationWorkers": 2}
+        tasks = [(index, "baseline", config) for index in range(6)]
+        before = {child.pid for child in multiprocessing.active_children()}
+        with patch("python_backend.training_runtime._evaluate_weakness_game", _fake_evaluation_game):
+            results = _parallel_weakness_evaluation(tasks, stop)
+            self.assertIsNotNone(next(results)[2])
+            stop.set()
+            results.close()
+        self.assertEqual({child.pid for child in multiprocessing.active_children()}, before)
+
     def test_stop_never_admits_partial_candidate(self):
         torch, trainer = _load_trainer()
         torch.set_num_threads(1)
@@ -122,6 +199,17 @@ class WeaknessSearchTests(unittest.TestCase):
             self.assertTrue(result["cancelled"])
             self.assertFalse(result["accepted"])
             self.assertEqual(list((root / "data").glob("checkpoint-*.json.gz")), [])
+
+
+def _fake_evaluation_game(task):
+    import time
+    from python_backend import training_runtime as runtime
+    index, name, config = task
+    if index == 0:
+        return index, name, {"completed": True}, 0.01
+    while not runtime._SAMPLER_STOP.wait(0.01):
+        pass
+    return index, name, None, 0.0
 
 
 if __name__ == "__main__":

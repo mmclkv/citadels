@@ -89,7 +89,7 @@ class HistoricalSelfPlayTests(unittest.TestCase):
             config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
                       "charSet": "base", "profile": "fast", "device": "cpu",
                       "mctsSimulations": 1, "mctsParticles": 1, "mctsMaxDepth": 10,
-                      "workers": 1, "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
+                      "workers": 2, "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
                       "checkpointEvery": 1, "maxRounds": 30, "endDistricts": 7,
                       "weaknessSearchEvery": 1, "weaknessTrainingGames": 1,
                       "weaknessEvaluationPairs": 1, "seed": 8127}

@@ -612,6 +612,56 @@ def _sample_game_in_worker(task):
     return _sample_game(config, int(game_number), _SAMPLER_STOP)
 
 
+def _initialize_weakness_evaluator(config, stop_event):
+    from multiprocessing.util import Finalize
+    _initialize_sampler(config, stop_event)
+    # multiprocessing workers do not run ordinary atexit handlers.
+    Finalize(None, _close_sampler_worker, exitpriority=10)
+
+
+def _evaluate_weakness_game(task):
+    index, name, config = task
+    started = time.monotonic()
+    if _SAMPLER_STOP.is_set():
+        return index, name, None, 0.0
+    try:
+        result = _sample_game(config, index + 1, _SAMPLER_STOP)
+        if result is not None:
+            result = {key: result[key] for key in
+                      ("completed", "playerCount", "targetFirst", "challengerFirst")}
+        return index, name, result, time.monotonic() - started
+    except BaseException:
+        _close_sampler_worker()
+        raise
+
+
+def _parallel_weakness_evaluation(tasks, stop_event):
+    if not tasks or stop_event.is_set():
+        return
+    config = tasks[0][2]
+    workers = min(int(config.get("weaknessEvaluationWorkers", 2)), int(config.get("workers", 1)), len(tasks))
+    context = multiprocessing.get_context("spawn")
+    worker_stop = context.Event()
+    pool = context.Pool(workers, initializer=_initialize_weakness_evaluator,
+                        initargs=(config, worker_stop))
+    try:
+        results = pool.imap_unordered(_evaluate_weakness_game, tasks, chunksize=1)
+        remaining = len(tasks)
+        while remaining and not stop_event.is_set():
+            try:
+                result = results.next(timeout=0.5)
+            except multiprocessing.TimeoutError:
+                continue
+            remaining -= 1
+            yield result
+    finally:
+        # Cooperative stop lets native subprocesses finish their current request;
+        # queued games skip sampling and worker finalizers close both native pipes.
+        worker_stop.set()
+        pool.close()
+        pool.join()
+
+
 def _training_data(torch, rows: list[dict], contract=None) -> dict:
     contract = contract or MODEL_CONTRACTS["entity-v6"]
     action_size = contract["actionSize"]
@@ -913,7 +963,8 @@ class TrainingManager:
                     self._status["weaknessSearch"] = state
             weakness_search = WeaknessSearch(
                 torch, trainer, self._device, config, self.data_dir, Path(native_model_dir.name),
-                _sample_game, lambda torch, rows: _training_data(torch, rows, contract), self._stop, self._log, weakness_progress)
+                _sample_game, lambda torch, rows: _training_data(torch, rows, contract), self._stop, self._log, weakness_progress,
+                evaluation_runner=_parallel_weakness_evaluation)
             action_version = contract["action"]
             self._check_entity_forward_parity(
                 torch, architecture, config["profile"], self._device,

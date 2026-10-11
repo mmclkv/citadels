@@ -6,6 +6,8 @@ import gzip
 import json
 import math
 import os
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,13 +99,14 @@ def train_response_policy(torch, trainer, model, optimizer, device, rows, traini
 
 class WeaknessSearch:
     def __init__(self, torch, trainer, device, config, data_dir, runtime_dir,
-                 sample_game, training_data, stop_event, log, progress=lambda state: None):
+                 sample_game, training_data, stop_event, log, progress=lambda state: None, evaluation_runner=None):
         self.torch, self.trainer, self.device = torch, trainer, device
         self.config = config
         self.data_dir, self.directory = Path(data_dir), Path(runtime_dir) / "weakness"
         self.directory.mkdir(parents=True, exist_ok=True)
         self.sample_game, self.training_data = sample_game, training_data
         self.stop, self.log, self.progress = stop_event, log, progress
+        self.evaluation_runner = evaluation_runner
 
     def _case(self, index, seed, target, backgrounds, evaluation):
         config = {**self.config, "seed": seed, "selfPlayMode": "all-network"}
@@ -119,6 +122,54 @@ class WeaknessSearch:
         return config
 
     def run(self, incumbent, main_games, backgrounds):
+        started = time.monotonic()
+        done = threading.Event()
+        lock = threading.Lock()
+        callback = self.progress
+        state = {}
+        def publish(value):
+            with lock:
+                state.clear()
+                state.update(value)
+                callback({**state, "elapsedSeconds": time.monotonic() - started})
+        def heartbeat():
+            while not done.wait(30):
+                with lock:
+                    elapsed = time.monotonic() - started
+                    callback({**state, "elapsedSeconds": elapsed})
+                    self.log(f"寻找弱点仍在运行：{state.get('phase', 'starting')}；"
+                             f"进度 {state.get('games', 0)}/{state.get('total', 0)}；"
+                             f"累计 {elapsed / 60:.1f} 分钟")
+        self.progress = publish
+        thread = threading.Thread(target=heartbeat, name="weakness-progress", daemon=True)
+        thread.start()
+        try:
+            return self._run(incumbent, main_games, backgrounds)
+        except Exception as error:
+            publish({"phase": "failed", "mainGames": main_games, "error": str(error)})
+            raise
+        finally:
+            done.set()
+            thread.join()
+            self.progress = callback
+            directory = self.directory / f"cycle-{main_games}"
+            for name in ("target.bin", "baseline.bin", "candidate.bin"):
+                (directory / name).unlink(missing_ok=True)
+            if directory.exists():
+                directory.rmdir()
+
+    def _evaluation_results(self, tasks):
+        if self.evaluation_runner:
+            yield from self.evaluation_runner(tasks, self.stop)
+            return
+        for index, name, config in tasks:
+            if self.stop.is_set():
+                break
+            started = time.monotonic()
+            result = self.sample_game(config, index + 1, self.stop)
+            yield index, name, result, time.monotonic() - started
+
+    def _run(self, incumbent, main_games, backgrounds):
         seed = (int(self.config["seed"]) ^ (main_games * 0x85EBCA6B)) & 0xFFFFFFFF
         count = int(self.config["weaknessTrainingGames"])
         expected = int(self.config["weaknessEvaluationPairs"])
@@ -132,6 +183,7 @@ class WeaknessSearch:
                   "checkpoint": f"frozen-main-{main_games}", "actionEncodingVersion": contract["action"]}
         report = {"mainGames": main_games, "seed": seed, "accepted": False,
                   "trainingGames": 0, "trainingCompletedGames": 0, "updates": 0, "pairs": []}
+        cycle_started = time.monotonic()
         self.log(f"寻找弱点：冻结主模型第 {main_games} 局版本；训练 {count} 局，验证 {expected} 对")
         devices = [self.device.index if self.device.index is not None else self.torch.cuda.current_device()] if self.device.type == "cuda" else []
         with self.torch.random.fork_rng(devices=devices):
@@ -149,9 +201,15 @@ class WeaknessSearch:
                 for index in range(start, min(count, start + int(self.config["batchGames"]))):
                     config = self._case(index, seed, target, backgrounds, False)
                     config["nativeModelPath"] = str(candidate_path)
+                    self.progress({"phase": "training", "mainGames": main_games,
+                                   "games": report["trainingGames"], "total": count,
+                                   "currentGame": index + 1})
+                    started = time.monotonic()
                     result = self.sample_game(config, index + 1, self.stop)
                     if result is None:
                         break
+                    self.log(f"弱点训练 {index + 1}/{count} 局；耗时 {time.monotonic() - started:.1f} 秒；" +
+                             ("完成" if result["completed"] else "未完成"))
                     report["trainingGames"] += 1
                     if result["completed"]:
                         report["trainingCompletedGames"] += 1
@@ -159,6 +217,7 @@ class WeaknessSearch:
                     self.progress({"phase": "training", "mainGames": main_games,
                                    "games": report["trainingGames"], "total": count})
                 if rows and not self.stop.is_set():
+                    self.log(f"弱点训练更新：使用 {len(rows)} 条样本")
                     report["updates"] += train_response_policy(
                         self.torch, self.trainer, candidate, optimizer, self.device, rows,
                         self.training_data, int(self.config["trainingEpochs"]),
@@ -167,26 +226,48 @@ class WeaknessSearch:
             # Disjoint seed stream and no training updates during held-out evaluation.
             evaluation_seed = seed ^ 0xD1B54A35
             if report["updates"] and not self.stop.is_set():
+                tasks = []
+                pairs = {}
+                cases = {}
                 for index in range(expected):
-                    pair = {}
                     for name, path in (("baseline", baseline_path), ("candidate", candidate_path)):
                         config = self._case(index, evaluation_seed, target, backgrounds, True)
                         config["nativeModelPath"] = str(path)
-                        result = self.sample_game(config, index + 1, self.stop)
+                        tasks.append((index, name, config))
+                        case = config["weaknessRun"]
+                        cases[index] = {"gameNumber": index + 1, "seed": evaluation_seed,
+                                        **{key: case[key] for key in
+                                           ("playerCount", "learnerSeat", "targetSeat", "crownSeat")}}
+                workers = min(int(self.config.get("weaknessEvaluationWorkers", 2)),
+                              int(self.config.get("workers", 1)), len(tasks)) if self.evaluation_runner else 1
+                self.log(f"弱点验证开始：{expected} 对 / {len(tasks)} 局；并行进程 {workers}")
+                finished_games = 0
+                self.progress({"phase": "evaluating", "mainGames": main_games,
+                               "games": 0, "total": expected, "evaluationGames": 0,
+                               "evaluationTotalGames": len(tasks), "workers": workers})
+                results = self._evaluation_results(tasks)
+                try:
+                    for index, name, result, elapsed in results:
                         if result is None:
-                            break
+                            continue
+                        finished_games += 1
+                        pair = pairs.setdefault(index, {})
                         pair[name] = {key: result[key] for key in
                                       ("completed", "playerCount", "targetFirst", "challengerFirst")}
-                    if len(pair) != 2:
-                        break
-                    case = config["weaknessRun"]
-                    pair["case"] = {"gameNumber": index + 1, "seed": evaluation_seed,
-                                    **{key: case[key] for key in
-                                       ("playerCount", "learnerSeat", "targetSeat", "crownSeat")}}
-                    report["pairs"].append(pair)
-                    self.progress({"phase": "evaluating", "mainGames": main_games,
-                                   "games": len(report["pairs"]), "total": expected})
+                        self.log(f"弱点验证第 {index + 1}/{expected} 对 " +
+                                 ("训练前" if name == "baseline" else "训练后") +
+                                 f"；{result['playerCount']} 人局；耗时 {elapsed:.1f} 秒；" +
+                                 ("完成" if result["completed"] else "未完成"))
+                        report["pairs"] = [{**pairs[i], "case": cases[i]} for i in sorted(pairs)
+                                           if "baseline" in pairs[i] and "candidate" in pairs[i]]
+                        self.progress({"phase": "evaluating", "mainGames": main_games,
+                                       "games": len(report["pairs"]), "total": expected,
+                                       "evaluationGames": finished_games,
+                                       "evaluationTotalGames": len(tasks), "workers": workers})
+                finally:
+                    results.close()
             report.update(evaluate_pairs(report["pairs"], expected))
+            report["elapsedSeconds"] = time.monotonic() - cycle_started
             report["cancelled"] = self.stop.is_set()
             if report["cancelled"]:
                 report["accepted"] = False
@@ -216,7 +297,4 @@ class WeaknessSearch:
         self.progress({"phase": "cancelled" if report["cancelled"] else "completed", **report})
         self.log(f"弱点验证：{report['completePairs']}/{expected} 对；p={report['pValue']:.4f}；" +
                  ("通过，加入对手池" if report["accepted"] else "未通过，不入池"))
-        for path in (target_path, baseline_path, candidate_path):
-            path.unlink(missing_ok=True)
-        directory.rmdir()
         return report
