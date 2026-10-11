@@ -147,11 +147,23 @@ inline NativeGameState create_native_game(const JsonValue& request) {
 
   const auto& district_definitions = required_field(catalog, "districts");
   if (!district_definitions.is_array()) throw std::runtime_error("catalog.districts 必须是数组");
+  if (!scenario) {
+    std::vector<std::string> purple_districts;
+    for (const auto& definition : district_definitions.as_array())
+      if (string_field(definition, "color") == "purple" && int_field(definition, "count") > 0)
+        purple_districts.push_back(string_field(definition, "en"));
+    for (size_t i = purple_districts.size(); i > 1; --i) {
+      const size_t selected = static_cast<size_t>(state.rng.next() * static_cast<double>(i));
+      std::swap(purple_districts[i - 1], purple_districts[std::min(selected, i - 1)]);
+    }
+    for (size_t i = 0; i < std::min<size_t>(14, purple_districts.size()); ++i)
+      scenario_districts.insert(purple_districts[i]);
+  }
   std::vector<DistrictCard> deck;
   for (const auto& definition : district_definitions.as_array()) {
     const bool purple = string_field(definition, "color") == "purple";
-    if (scenario && purple && !scenario_districts.count(string_field(definition, "en"))) continue;
-    const int count = scenario && purple ? 1 : std::max(0, int_field(definition, "count"));
+    if (purple && !scenario_districts.count(string_field(definition, "en"))) continue;
+    const int count = purple ? 1 : std::max(0, int_field(definition, "count"));
     for (int i = 0; i < count; ++i) {
       DistrictCard card;
       card.uid = "d" + std::to_string(deck.size());

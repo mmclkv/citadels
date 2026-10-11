@@ -68,8 +68,8 @@ class NativeScenarioTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.worker.close()
 
-    def create(self, count, scenario='', mode='mixed'):
-        return self.worker.create_game({'catalog': cards._catalog, 'seed': 19,
+    def create(self, count, scenario='', mode='mixed', seed=19):
+        return self.worker.create_game({'catalog': cards._catalog, 'seed': seed,
             'endDistricts': 8, 'scenario': scenario, 'charSetMode': mode,
             'seats': [{'id': f'p{i}', 'name': f'Player {i}'} for i in range(count)]}, 'scenario-test')
 
@@ -104,16 +104,36 @@ class NativeScenarioTests(unittest.TestCase):
                     self.assertEqual(state['phase'], 'action')
                     self.assertTrue(all(len(p['chars']) == (2 if count <= 3 else 1) for p in state['players']))
 
-    def test_scenario_overrides_role_group_and_default_deck_is_unchanged(self):
+    def test_scenario_overrides_role_group_and_default_deck_has_68_cards(self):
         baseline = self.create(4, 'cunning', 'base')
         for mode in ('dark', 'mixed', 'ignored'):
             state = self.create(4, 'cunning', mode)
             self.assertEqual(state['charDeck'], baseline['charDeck'])
             self.assertEqual(state['deck'], baseline['deck'])
         state = self.create(4)
-        self.assertEqual(len(state['deck']) + sum(len(p['hand']) for p in state['players']), 92)
+        self.assertEqual(len(state['deck']) + sum(len(p['hand']) for p in state['players']), 68)
         with self.assertRaisesRegex(RuntimeError, 'Unknown scenario'):
             self.create(4, 'unknown')
+
+    def test_default_deck_samples_14_unique_purple_districts(self):
+        ordinary = {d['en']: d['count'] for d in cards.DISTRICTS if d['color'] != 'purple'}
+        selections = set()
+        for count in range(2, 9):
+            for seed in (1, 19, 42):
+                with self.subTest(count=count, seed=seed):
+                    state = self.create(count, seed=seed)
+                    deck = state['deck'] + [c for p in state['players'] for c in p['hand']]
+                    purple = [c for c in deck if c['color'] == 'purple']
+                    self.assertEqual(len(deck), 68)
+                    self.assertEqual(len(purple), 14)
+                    self.assertEqual(len({c['en'] for c in purple}), 14)
+                    self.assertEqual(len({c['uid'] for c in deck}), 68)
+                    self.assertEqual({name: sum(c['en'] == name for c in deck) for name in ordinary}, ordinary)
+                    selections.add(tuple(sorted(c['en'] for c in purple)))
+                    repeated = self.create(count, seed=seed)
+                    self.assertEqual(state['deck'], repeated['deck'])
+                    self.assertEqual([p['hand'] for p in state['players']], [p['hand'] for p in repeated['players']])
+        self.assertGreater(len(selections), 1)
 
 
 @unittest.skipUnless(os.environ.get('CITADELS_TEST_GAME_ENGINE'), 'Compiled game engine required')
