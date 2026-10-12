@@ -79,14 +79,16 @@ class HistoricalSelfPlayTests(unittest.TestCase):
         from python_backend.weakness_search import WeaknessSearch
         original = WeaknessSearch.run
         checked = []
+        native_reports = []
         def isolated_run(search, incumbent, games, backgrounds):
             before = {name: value.detach().clone() for name, value in incumbent.state_dict().items()}
             result = original(search, incumbent, games, backgrounds)
+            native_reports.append(result)
             checked.append(all(torch.equal(before[name], value) for name, value in incumbent.state_dict().items()))
             return result
         with tempfile.TemporaryDirectory() as directory:
             manager = TrainingManager(directory, self.native.worker, self.native.game_worker)
-            config = {"targetGames": 1, "minPlayers": 2, "maxPlayers": 2,
+            config = {"targetGames": 2, "minPlayers": 2, "maxPlayers": 2,
                       "charSet": "base", "profile": "fast", "device": "cpu",
                       "mctsSimulations": 1, "mctsParticles": 1, "mctsMaxDepth": 10,
                       "workers": 2, "batchGames": 1, "trainingEpochs": 1, "miniBatch": 32,
@@ -94,20 +96,37 @@ class HistoricalSelfPlayTests(unittest.TestCase):
                       "weaknessSearchEvery": 1, "weaknessTrainingGames": 1,
                       "weaknessEvaluationPairs": 1, "seed": 8127}
             config["maxRounds"] = 100
-            with patch.object(WeaknessSearch, "run", isolated_run):
+            import multiprocessing
+            from python_backend.training_runtime import _parallel_weakness_evaluation
+            validation_pools = []
+            def reused_evaluation(tasks, stop, pool=None):
+                self.assertIsNotNone(pool, "parallel validation must borrow the sampler pool")
+                validation_pools.append(pool)
+                pids = {worker.pid for worker in pool._pool}
+                for result in _parallel_weakness_evaluation(tasks, stop, pool=pool):
+                    self.assertTrue({child.pid for child in multiprocessing.active_children()} <= pids,
+                                    "validation must not start a second pool")
+                    yield result
+            with patch.object(WeaknessSearch, "run", isolated_run), patch(
+                    "python_backend.training_runtime._parallel_weakness_evaluation", reused_evaluation):
                 manager.start(config)
                 status = self.wait(manager)
+            self.assertEqual(len(validation_pools), 2)
+            self.assertIs(validation_pools[0], validation_pools[1], "reuse pool across training and validation cycles")
             report = status["weaknessSearch"]
-            self.assertEqual(checked, [True], "opponent learning must not update incumbent weights")
+            self.assertEqual(checked, [True, True], "opponent learning must not update incumbent weights")
             self.assertEqual(report["trainingCompletedGames"], 1)
             self.assertGreater(report["updates"], 0)
-            self.assertEqual(report["completePairs"], 1, report["pairs"])
+            self.assertEqual(native_reports[0]["completePairs"], 1, native_reports[0]["pairs"])
+            self.assertEqual(len(report["pairs"]), 1, "both evaluation jobs must return in the second cycle")
+            if not all(report["pairs"][0][name]["completed"] for name in ("baseline", "candidate")):
+                self.assertEqual(report["completePairs"], 0, "round-limited games cannot count as complete pairs")
             self.assertFalse(report["accepted"], "one pair cannot pass the significance gate")
-            self.assertEqual(status["completedGames"], 1, "discovery games are separate from main training")
-            self.assertEqual(len(list(Path(directory).glob("checkpoint-*.json.gz"))), 1)
+            self.assertEqual(status["completedGames"], 2, "discovery games are separate from main training")
+            self.assertEqual(len(list(Path(directory).glob("checkpoint-*.json.gz"))), 2)
             reports = list((Path(directory) / "weakness-search").glob("*.json"))
-            self.assertEqual(len(reports), 1)
-            self.assertEqual(json.loads(reports[0].read_text(encoding="utf-8"))["completePairs"], 1)
+            self.assertEqual(len(reports), 2)
+            self.assertEqual(max(json.loads(path.read_text(encoding="utf-8"))["completePairs"] for path in reports), 1)
 
     def test_random_batch_counts_reach_parallel_native_games(self):
         from python_backend.batch_composition import balanced_game_compositions, composition_summary

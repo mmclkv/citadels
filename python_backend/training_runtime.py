@@ -602,21 +602,19 @@ def _initialize_sampler(config: dict, stop_event) -> None:
     global _SAMPLER_CONFIG, _SAMPLER_STOP
     _SAMPLER_CONFIG = config
     _SAMPLER_STOP = stop_event
+    # Pool workers skip ordinary atexit; finalize native children on graceful exit.
+    from multiprocessing.util import Finalize
+    Finalize(None, _close_sampler_worker, exitpriority=10)
 
 
 def _sample_game_in_worker(task):
     if _SAMPLER_CONFIG is None or _SAMPLER_STOP is None:
         raise RuntimeError("自对弈进程尚未初始化")
+    if _SAMPLER_STOP.is_set():
+        return None
     game_number, composition = task if isinstance(task, tuple) else (task, None)
     config = {**_SAMPLER_CONFIG, "batchComposition": composition}
     return _sample_game(config, int(game_number), _SAMPLER_STOP)
-
-
-def _initialize_weakness_evaluator(config, stop_event):
-    from multiprocessing.util import Finalize
-    _initialize_sampler(config, stop_event)
-    # multiprocessing workers do not run ordinary atexit handlers.
-    Finalize(None, _close_sampler_worker, exitpriority=10)
 
 
 def _evaluate_weakness_game(task):
@@ -635,15 +633,18 @@ def _evaluate_weakness_game(task):
         raise
 
 
-def _parallel_weakness_evaluation(tasks, stop_event):
+def _parallel_weakness_evaluation(tasks, stop_event, pool=None):
     if not tasks or stop_event.is_set():
         return
     config = tasks[0][2]
     workers = evaluation_worker_count(config, len(tasks))
-    context = multiprocessing.get_context("spawn")
-    worker_stop = context.Event()
-    pool = context.Pool(workers, initializer=_initialize_weakness_evaluator,
-                        initargs=(config, worker_stop))
+    owns_pool = pool is None
+    worker_stop = None
+    if owns_pool:
+        context = multiprocessing.get_context("spawn")
+        worker_stop = context.Event()
+        pool = context.Pool(workers, initializer=_initialize_sampler,
+                            initargs=(config, worker_stop))
     try:
         results = pool.imap_unordered(_evaluate_weakness_game, tasks, chunksize=1)
         remaining = len(tasks)
@@ -657,9 +658,12 @@ def _parallel_weakness_evaluation(tasks, stop_event):
     finally:
         # Cooperative stop lets native subprocesses finish their current request;
         # queued games skip sampling and worker finalizers close both native pipes.
-        worker_stop.set()
-        pool.close()
-        pool.join()
+        if owns_pool:
+            worker_stop.set()
+            pool.close()
+            pool.join()
+        # A borrowed sampler pool belongs to TrainingManager. It remains available
+        # for the next sampling batch; cancellation/error cleanup is its owner's job.
 
 
 def _training_data(torch, rows: list[dict], contract=None) -> dict:
@@ -964,7 +968,8 @@ class TrainingManager:
             weakness_search = WeaknessSearch(
                 torch, trainer, self._device, config, self.data_dir, Path(native_model_dir.name),
                 _sample_game, lambda torch, rows: _training_data(torch, rows, contract), self._stop, self._log, weakness_progress,
-                evaluation_runner=_parallel_weakness_evaluation)
+                evaluation_runner=lambda tasks, stop: _parallel_weakness_evaluation(
+                    tasks, stop, pool=sampler_pool))
             action_version = contract["action"]
             self._check_entity_forward_parity(
                 torch, architecture, config["profile"], self._device,
@@ -1170,7 +1175,9 @@ class TrainingManager:
             self._stop.set()
             self._worker_stop.set()
             if sampler_pool:
-                sampler_pool.terminate()
+                # Workers observe _worker_stop between native requests. Graceful
+                # exit runs their finalizers instead of orphaning CUDA subprocesses.
+                sampler_pool.close()
                 sampler_pool.join()
             with self._lock:
                 self._status.update({"state": "error", "running": False, "stopping": False,

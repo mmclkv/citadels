@@ -175,6 +175,43 @@ class WeaknessSearchTests(unittest.TestCase):
             self.assertEqual(report["completePairs"], 0)
             self.assertEqual(closed, [True])
 
+    def test_queued_sampling_skips_native_work_after_stop(self):
+        from unittest.mock import patch
+        from python_backend import training_runtime as runtime
+        stop = threading.Event()
+        stop.set()
+        with patch.object(runtime, "_SAMPLER_CONFIG", {"workers": 32}), patch.object(
+                runtime, "_SAMPLER_STOP", stop), patch.object(runtime, "_sample_game") as sample:
+            self.assertIsNone(runtime._sample_game_in_worker((1, None)))
+            sample.assert_not_called()
+
+    def test_validation_borrows_sampler_pool_without_starting_or_closing_it(self):
+        from unittest.mock import Mock, patch
+        from python_backend.training_runtime import _parallel_weakness_evaluation, _evaluate_weakness_game
+        stop = threading.Event()
+        result = (0, "baseline", {"completed": True}, 1.0)
+        pool = Mock()
+        pool.imap_unordered.return_value.next.return_value = result
+        tasks = [(0, "baseline", {"workers": 32})]
+        with patch("python_backend.training_runtime.multiprocessing.get_context") as context:
+            self.assertEqual(list(_parallel_weakness_evaluation(tasks, stop, pool=pool)), [result])
+            context.assert_not_called()
+        pool.imap_unordered.assert_called_once_with(_evaluate_weakness_game, tasks, chunksize=1)
+        pool.close.assert_not_called()
+        pool.join.assert_not_called()
+        pool.terminate.assert_not_called()
+
+    def test_borrowed_pool_error_cleanup_remains_with_owner(self):
+        from unittest.mock import Mock
+        from python_backend.training_runtime import _parallel_weakness_evaluation
+        pool = Mock()
+        pool.imap_unordered.return_value.next.side_effect = RuntimeError("CUDA allocation failed")
+        with self.assertRaisesRegex(RuntimeError, "CUDA allocation failed"):
+            list(_parallel_weakness_evaluation([(0, "baseline", {"workers": 32})],
+                                              threading.Event(), pool=pool))
+        pool.close.assert_not_called()
+        pool.join.assert_not_called()
+
     def test_parallel_pool_cancel_closes_children(self):
         import multiprocessing
         from unittest.mock import patch
