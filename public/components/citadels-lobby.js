@@ -61,6 +61,11 @@
         <div class="mode-name">联机模式</div>
         <div class="mode-tip">创建房间或输入房号，与好友对战</div>
       </button>
+      <a class="mode-card" href="./replays.html" id="btn-replays">
+        <div class="mode-icon">▶</div>
+        <div class="mode-name">查看录像</div>
+        <div class="mode-tip">浏览已完成对局，播放或逐步复盘</div>
+      </a>
       <button class="mode-card" id="btn-rules">
         <div class="mode-icon">≡</div>
         <div class="mode-name">规则速查</div>

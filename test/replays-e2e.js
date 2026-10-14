@@ -1,0 +1,16 @@
+/* Browser integration: node test/replays-e2e.js (PLAYWRIGHT_PATH/PYTHON_PATH optional). */
+const assert=require('node:assert/strict'),path=require('node:path'),{spawn}=require('node:child_process');const{chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright-core');
+const root=path.resolve(__dirname,'..');require('node:fs').mkdirSync(path.join(root,'tmp'),{recursive:true});const code=`import asyncio,os,sys,tempfile
+from pathlib import Path
+sys.path.insert(0,os.getcwd())
+from python_backend.server import PythonServer
+from python_backend.replays import ReplayStore,Recorder\nfrom python_backend.test_replays import fixture
+async def main():
+ with tempfile.TemporaryDirectory() as folder:
+  os.environ['CITADELS_ADMIN_FILE']=str(Path(folder)/'admin.json')
+  app=PythonServer();app.replays=ReplayStore(Path(folder)/'replays')\n  room=fixture();record=Recorder(room,{});record.observe(room['state'])\n  room['state']['players'][0]['gold']+=2;record.observe(room['state'],'a',{'type':'gold'})\n  room['state']['phase']='gameover';room['state']['winner']=0;record.observe(room['state']);app.replays.save(record)
+  server=await asyncio.start_server(app.handle,'127.0.0.1',0)
+  print('PORT='+str(server.sockets[0].getsockname()[1]),flush=True)
+  async with server:await server.serve_forever()
+asyncio.run(main())`;
+(async()=>{const server=spawn(process.env.PYTHON_PATH||path.join(root,'.python/python.exe'),['-u','-c',code],{cwd:root,windowsHide:true});let browser;try{let output='';const port=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(output)),30000);server.stdout.on('data',d=>{output+=d;const m=output.match(/PORT=(\d+)/);if(m){clearTimeout(timer);resolve(Number(m[1]));}});server.stderr.on('data',d=>output+=d);server.on('error',reject);});browser=await chromium.launch({channel:'msedge',headless:true});for(const [name,viewport] of [['desktop',{width:1280,height:900}],['mobile',{width:390,height:844}]]){const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:'+port+'/'+(name==='desktop'?'index.html':'mobile.html'));await page.locator('c-citadels-lobby').locator('#btn-replays').click();await page.getByRole('button',{name:'播放',exact:true}).first().click();await page.waitForSelector('#board .seat');assert.equal(await page.locator('#board .seat').count(),2);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.getByRole('button',{name:'下一步',exact:true}).click();assert.match(await page.locator('#position').textContent(),/^1 \/ /);await page.getByRole('button',{name:'▶ 播放',exact:true}).click();await page.waitForTimeout(1200);await page.getByRole('button',{name:'⏸ 暂停',exact:true}).click();await page.getByRole('button',{name:'⏭ 结果',exact:true}).click();assert.match(await page.locator('#phase').textContent(),/对局结束/);await page.getByRole('button',{name:'⏮ 开局',exact:true}).click();assert.match(await page.locator('#position').textContent(),/^0 \/ /);await page.screenshot({path:path.join(root,'tmp/replay-'+name+'.png'),fullPage:true});assert.deepEqual(errors,[]);await page.close();console.log(name+' REPLAY_PLAYBACK_PASSED');}}finally{if(browser)await browser.close();server.kill();}})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -37,6 +37,7 @@ from .frp import FrpManager
 from .codex_gateway import CodexGateway, detect_codex
 from .native_worker_manager import NativeWorkerManager
 from .versioning import version_info, require_stable
+from .replays import Recorder, ReplayStore
 
 ROOT = Path(__file__).resolve().parents[1]
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -203,6 +204,7 @@ class PythonServer:
     def __init__(self, native_worker_manager: NativeWorkerManager | None = None) -> None:
         self.release = version_info()
         self.rooms = RoomRegistry()
+        self.replays = ReplayStore(os.environ.get("CITADELS_REPLAY_DIR") or ROOT / "replays")
         self.clients: set[Client] = set()
         self._room_cleanup_lock = asyncio.Lock()
         external_agent_requested = any(os.environ.get(key) for key in
@@ -565,6 +567,23 @@ class PythonServer:
                     card["canBuild"] = card.get("uid") in build_uids
         return view
 
+    async def _record_replay(self, room, actor=None, action=None, state=None):
+        state = state or room.get("state")
+        if not state:
+            room.pop("_replay", None)
+            return
+        try:
+            recorder = room.get("_replay")
+            if recorder is None or recorder.token != state.get("createdAt"):
+                recorder = room["_replay"] = Recorder({**room, "state": state}, self.release)
+            if recorder.saved:
+                return
+            recorder.observe(state, actor, action)
+            if state.get("phase") == "gameover":
+                await asyncio.to_thread(self.replays.save, recorder)
+        except Exception as exc:
+            self._log_startup("[replay] 录像保存失败：" + str(exc), "error")
+
     async def _create_room_game(self, room: dict, new_game: dict) -> dict:
         # Creation and release must be ordered even if the last participant
         # leaves while the native worker is creating the initial state.
@@ -637,6 +656,7 @@ class PythonServer:
                                   "type": "info", "round": merged.get("round", 0)})
             if len(state_log) > 400:
                 del state_log[:-400]
+            await self._record_replay(room, player_id, action, merged)
             current.clear()
             current.update(merged)
             return {"ok": True}
@@ -644,6 +664,7 @@ class PythonServer:
     async def _broadcast_state(self, room: dict) -> None:
         if room.get("closed"):
             return
+        await self._record_replay(room)
         for client in list(self.clients):
             if client.room_id == room["id"] and client.id:
                 try:
@@ -2470,6 +2491,26 @@ class PythonServer:
                 await _http_response(writer, 200, _json_bytes({"configured": status["configured"],
                                                                "message": status["message"]}),
                                      headers={"Access-Control-Allow-Origin": "*"})
+                return
+            if route == "/api/replays" and method == "GET":
+                query = parse_qs(urlsplit(target).query)
+                try:
+                    offset = max(0, int(query.get("offset", [0])[0]))
+                    limit = min(100, max(1, int(query.get("limit", [30])[0])))
+                except ValueError:
+                    await _http_response(writer, 400, _json_bytes({"error": "分页参数无效"}))
+                    return
+                result = await asyncio.to_thread(self.replays.listing, offset, limit)
+                await _http_response(writer, 200, _json_bytes(result), headers={"Cache-Control": "no-store"})
+                return
+            if route.startswith("/api/replays/") and method == "GET":
+                try:
+                    payload = await asyncio.to_thread(self.replays.read, route[len("/api/replays/"):])
+                    body = gzip.compress(_json_bytes(payload), compresslevel=6, mtime=0)
+                except (ValueError, OSError, KeyError, EOFError):
+                    await _http_response(writer, 404, _json_bytes({"error": "录像不存在或已损坏"}))
+                    return
+                await _http_response(writer, 200, body, headers={"Content-Encoding": "gzip"})
                 return
             if route == "/api/version" and method == "GET":
                 await _http_response(writer, 200, _json_bytes(self.release),

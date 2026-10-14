@@ -32,3 +32,6 @@ native/*.exp
 native/*.dll
 native/*.build.json
 *.dmp
+
+# 已完成对局的压缩录像
+replays/
