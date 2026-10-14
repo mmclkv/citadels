@@ -144,8 +144,8 @@ class NeuralPolicy:
         policy = np.asarray(result["policy"], dtype=np.float64)
         if policy.size != len(candidates) or not np.isfinite(policy).all() or policy.sum() <= 0:
             raise RuntimeError("C++ MCTS 返回了无效策略分布")
-        # Live play takes the strongest search action; self-play controls exploration separately.
-        selection = options.get("selection", "argmax")
+        # Live play samples the clean visit distribution without adding root noise.
+        selection = options.get("selection", "sample")
         selected = select_search_action(policy, rng, selection)
         mcts_stats = {"determinizations": result.get("particlesUsed", len(particles)),
                       "beliefDecay": decay, "visits": result.get("visits", 0),

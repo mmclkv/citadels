@@ -1,3 +1,6 @@
+import random
+from collections import Counter
+from unittest.mock import patch
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +10,7 @@ from python_backend.neural import NeuralPolicy
 
 
 class LiveSelectionTests(unittest.TestCase):
-    def test_live_default_chooses_largest_search_probability(self):
+    def test_live_default_samples_search_probability(self):
         actions = [{"type": "gold"}, {"type": "cards"}, {"type": "end_turn"}]
         state = {"phase": "turn"}
         distribution = [0.2, 0.6, 0.2]
@@ -27,13 +30,22 @@ class LiveSelectionTests(unittest.TestCase):
             model.touch()
             policy.model_path = str(model)
             for options in (None, {"simulations": 7, "maxDepth": 80, "particles": 1}):
-                for _ in range(20):
-                    diagnostics = {}
-                    self.assertEqual(policy.decide(state, "p1", {"actions": actions}, options,
-                                                   diagnostics=diagnostics), actions[1])
-                    self.assertEqual(diagnostics["mcts"]["selection"], "argmax")
-            distribution[:] = [0.4, 0.4, 0.2]
-            self.assertEqual(policy.decide(state, "p1", {"actions": actions}), actions[0])
+                rng = random.Random(42)
+                with patch("python_backend.neural.random.Random", return_value=rng):
+                    counts = Counter()
+                    for _ in range(1000):
+                        diagnostics = {}
+                        action = policy.decide(state, "p1", {"actions": actions}, options,
+                                               diagnostics=diagnostics)
+                        counts[actions.index(action)] += 1
+                        self.assertEqual(diagnostics["mcts"]["selection"], "sample")
+                for i, probability in enumerate(distribution):
+                    self.assertAlmostEqual(counts[i] / 1000, probability, delta=0.05)
+            distribution[:] = [0.0, 0.0, 1.0]
+            self.assertEqual(policy.decide(state, "p1", {"actions": actions}), actions[2])
+            distribution[:] = [0.2, 0.6, 0.2]
+            self.assertEqual(policy.decide(state, "p1", {"actions": actions},
+                                          {"selection": "argmax"}), actions[1])
 
     def test_neural_autohost_does_not_loop_thieves_den_cancellation(self):
         pay = {"type": "district_effect", "name": "thieves_pay", "uid": "den"}

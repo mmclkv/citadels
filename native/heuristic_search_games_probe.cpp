@@ -21,7 +21,7 @@ int main(int argc,char** argv){
     auto s=create_native_game(parse_json(q.str()));int steps=0;
     HeuristicSearchSession session;
     while(s.phase!=NativePhase::GameOver && steps<10000 && s.round<150){
-      const int actor=rules.next_player(s);const auto legal=rules.legal_actions(s,actor);
+      const int actor=rules.next_player(s);const auto legal=rules.ai_actions(s,actor);
       auto budget=config;if(matchup && actor!=g%players)budget.enabled=false;
       const auto choice=choose_native_npc(s,actor,legal,1700+g+steps,budget,&session);
       if(choice.fallback)throw std::runtime_error("unexpected search fallback: "+choice.fallback_reason+

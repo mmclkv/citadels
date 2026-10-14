@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cerrno>
 #include <cstdlib>
+#include <random>
 #include "npc_policy.hpp"
 #include "heuristic_opponents.hpp"
 #include "determinize.hpp"
@@ -205,6 +206,20 @@ struct HeuristicDecision {
   size_t retained_nodes=0;
 };
 
+// Use a separate seeded draw so rollout length cannot shift the action draw.
+inline int sample_heuristic_search_action(const std::vector<float>& policy,uint32_t seed) {
+  double total=0;
+  for(float weight:policy){
+    if(!std::isfinite(weight) || weight<0)throw std::runtime_error("Invalid heuristic search probability");
+    total+=weight;
+  }
+  if(policy.empty() || !std::isfinite(total) || total<=0)
+    throw std::runtime_error("Empty heuristic search probability mass");
+  std::mt19937 rng(seed^0xa511e9b3u);
+  std::discrete_distribution<int> sample(policy.begin(),policy.end());
+  return sample(rng);
+}
+
 inline bool heuristic_actions_equal(const NativeSearchAction& a,const NativeSearchAction& b) {
   return a.type==b.type && a.uid==b.uid && a.name==b.name && a.effect==b.effect &&
     a.target==b.target && a.selected_uids==b.selected_uids && a.secondary_uid==b.secondary_uid &&
@@ -297,7 +312,7 @@ inline HeuristicDecision choose_native_npc(const NativeGameState& state,int play
     const auto result=Mcts<NativeGameState,NativeSearchAction>(rules,evaluator,config).search(particles,player,{},
         session && options.reuse_tree?&session->tree:nullptr);
     if(result.policy.size()!=actions.size())throw std::runtime_error("Invalid heuristic search policy");
-    decision.selected=static_cast<int>(std::max_element(result.policy.begin(),result.policy.end())-result.policy.begin());
+    decision.selected=sample_heuristic_search_action(result.policy,seed);
     decision.visits=result.visits;decision.expansions=result.expansions;
     decision.particles=static_cast<int>(particles.size());decision.searched=true;
     decision.new_visits=result.new_visits;decision.reused_visits=result.reused_visits;

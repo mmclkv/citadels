@@ -196,6 +196,14 @@ void check_opponent_models(){
   require(CriticalOpponentResponse::choose(threat,1,0,rules.ai_actions(threat,1),deadline)==-1,"critical check ignored deadline");
 }
 int main(){
+  std::array<int,3> sampled_counts{};
+  for(uint32_t seed=0;seed<10000;++seed){
+    const int picked=sample_heuristic_search_action({0.2f,0.6f,0.2f},seed);
+    ++sampled_counts.at(picked);
+    require(picked==sample_heuristic_search_action({0.2f,0.6f,0.2f},seed),"same seed changed sampled action");
+    require(sample_heuristic_search_action({0,0,1},seed)==2,"sampled zero probability action");
+  }
+  for(int i=0;i<3;++i)require(std::abs(sampled_counts[i]/10000.0-(i==1?0.6:0.2))<0.025,"sample frequencies differ from visit distribution");
   check_opponent_models();
   check_warrant_privacy();
   check_win_objective();
