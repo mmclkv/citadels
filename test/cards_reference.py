@@ -34,7 +34,9 @@ def build_district_deck(rnd: Callable[[], float]) -> list[dict]:
 def pick_character_set(player_count: int, mode: str,
                        rnd: Callable[[], float]) -> list[dict]:
     if mode == "base":
-        pool = [character for character in CHARACTERS if character["version"] == "base"]
+        ids = ("assassin", "thief", "magician", "king", "abbot", "merchant",
+               "architect", "warlord")
+        pool = [CHAR_MAP[character_id] for character_id in ids]
     elif mode == "dark":
         ids = ("witch", "blackmailer", "wizard", "emperor", "abbot", "alchemist",
                "navigator", "diplomat", "tax_collector")

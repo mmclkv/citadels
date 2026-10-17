@@ -66,7 +66,7 @@ a{color:var(--gold-d, #a97c15)}
   border-radius:14px;cursor:pointer;box-shadow:var(--shadow);transition:.18s;text-align:center;color:var(--ink);
 }
 .mode-card:hover{transform:translateY(-3px);box-shadow:var(--shadow2);border-color:var(--gold)}
-.mode-card.training-link{text-decoration:none;color:var(--ink)}
+.mode-card[href]{text-decoration:none;color:var(--ink)}
 .mode-icon{font-size:30px;margin-bottom:6px}
 .mode-name{font-weight:700;font-size:16px;margin-bottom:4px}
 .mode-tip{font-size:12px;color:var(--dim)}
@@ -654,6 +654,10 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opp-role-row,.me-role-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:9px}
 .opp-body{display:flex;gap:9px;align-items:flex-start}
 .opp-city{display:flex;flex-wrap:wrap;gap:5px;flex:1 1 auto;min-height:60px}
+.opp-debug-hand,.debug-public-hand{display:none}
+.opp-debug-hand:not([hidden]),.debug-public-hand{display:flex;align-items:center;gap:3px;flex-wrap:wrap;font-size:10px;line-height:1.2;max-height:42px;overflow:auto}
+.opp-debug-hand b,.debug-public-hand b{color:var(--gold,#d7b467);white-space:nowrap}
+.opp-debug-hand span,.debug-public-hand span{padding:2px 4px;border:1px solid rgba(212,176,91,.25);border-radius:4px;background:rgba(0,0,0,.22);white-space:nowrap}
 .table-arena[data-players="4"] .opp-city{flex-wrap:nowrap;overflow:visible}
 .table-arena[data-players="4"] .opp-city>.card{flex:0 0 auto}
 .table-arena[data-players="4"] .me-area .city-row{flex-wrap:nowrap;overflow:visible}

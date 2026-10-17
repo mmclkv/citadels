@@ -25,8 +25,13 @@ inline std::vector<std::string> select_character_ids(const JsonValue& catalog,
   if (!definitions.is_array()) throw std::runtime_error("catalog.characters 必须是数组");
   std::vector<const JsonValue*> pool;
   if (mode == "base") {
-    for (const auto& item : definitions.as_array())
-      if (string_field(item, "version") == "base") pool.push_back(&item);
+    static const std::vector<std::string> base = {
+      "assassin", "thief", "magician", "king", "abbot", "merchant", "architect", "warlord"};
+    for (const auto& id : base) {
+      const auto it = std::find_if(definitions.as_array().begin(), definitions.as_array().end(),
+        [&](const JsonValue& item) { return string_field(item, "id") == id; });
+      if (it != definitions.as_array().end()) pool.push_back(&*it);
+    }
   } else if (mode == "dark") {
     static const std::vector<std::string> dark = {
       "witch", "blackmailer", "wizard", "emperor", "abbot", "alchemist",
@@ -151,6 +156,10 @@ inline NativeGameState create_native_game(const JsonValue& request) {
     std::vector<std::string> purple_districts;
     for (const auto& definition : district_definitions.as_array()) {
       if (string_field(definition, "color") != "purple" || int_field(definition, "count") <= 0) continue;
+      // The Bell Tower only lowers the finish threshold to seven. In seven-district
+      // games it has no effect, so keep it out of the randomly selected set.
+      const auto* purple = definition.get("purple");
+      if (state.end_districts == 7 && purple && string_field(*purple, "effect") == "bellTower") continue;
       const auto* required_roles = definition.get("requiresAnyCharacter");
       if (required_roles && std::none_of(required_roles->as_array().begin(), required_roles->as_array().end(),
           [&](const JsonValue& role) {
@@ -164,6 +173,15 @@ inline NativeGameState create_native_game(const JsonValue& request) {
     }
     for (size_t i = 0; i < std::min<size_t>(14, purple_districts.size()); ++i)
       scenario_districts.insert(purple_districts[i]);
+  }
+  // Explicit scenarios select their purple districts directly, so apply the same
+  // seven-district exclusion after scenario/random selection.
+  if (state.end_districts == 7) {
+    for (const auto& definition : district_definitions.as_array()) {
+      const auto* purple = definition.get("purple");
+      if (purple && string_field(*purple, "effect") == "bellTower")
+        scenario_districts.erase(string_field(definition, "en"));
+    }
   }
   std::vector<DistrictCard> deck;
   for (const auto& definition : district_definitions.as_array()) {

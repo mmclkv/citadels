@@ -29,11 +29,13 @@
     mobileDraftExpanded: true,
     logOpen: true,
     chatOpen: false,
+    chatChannel: 'public',
+    chatTargetId: '',
+    debugLogPlayerId: null,
     voiceOpen: false,
     activeSideTab: 'log',
     sidePanelCollapsed: true,
     lastCfg: null,
-    speed: 'normal',       // 电脑行动节奏：slow | normal | fast
     paused: false,         // 事件弹层展示期间暂停电脑行动
     buildingAnimPaused: false,
     noticeSeen: null,      // 已展示到第几条关键事件（seq）
@@ -58,55 +60,11 @@
       return data && data.token && data.roomId ? data : null;
     } catch (e) { return null; }
   }
-  /* --------------------------- 电脑行动节奏 ---------------------------
-   * 原先固定 330ms，真人根本来不及看清电脑做了什么。
-   * 现在按「这一步有多值得看」分级停顿：
-   *   draft  选角（信息量大，要看清谁拿了什么）
-   *   big    宣告刺杀/施咒、建造、摧毁抢夺（关键局势变化）
-   *   act    领资源、用能力、结束回合
-   *   min    其它内部推进步骤
-   * ------------------------------------------------------------------ */
-  const PACE = {
-    slow:   { draft: 1700, big: 2100, act: 1300, min: 700, label: '慢速' },
-    normal: { draft: 1050, big: 1300, act: 820,  min: 430, label: '标准' },
-    fast:   { draft: 420,  big: 480,  act: 330,  min: 190, label: '快速' }
-  };
-  const SPEED_ORDER = ['slow', 'normal', 'fast'];
-  // 主题界面使用纯文本标签，避免速度按钮被图标字体或系统表情影响布局。
-  PACE.slow.label = '慢速';
-  PACE.normal.label = '标准';
-  PACE.fast.label = '快速';
-
-  function loadSpeed() {
-    let v = null;
-    try { v = window.localStorage.getItem('citadels.speed'); } catch (e) { /* 隐私模式 */ }
-    App.speed = PACE[v] ? v : 'normal';
-  }
-  function saveSpeed() {
-    try { window.localStorage.setItem('citadels.speed', App.speed); } catch (e) { /* 忽略 */ }
-  }
-  function pace() { return PACE[App.speed] || PACE.normal; }
-
-  function syncSpeedBtn() {
-    const b = $('#btn-speed');
-    if (!b) return;
-    b.textContent = pace().label;
-    b.title = App.mode === 'net'
-      ? '点击切换服务器上电脑的行动速度'
-      : '点击切换电脑行动速度';
-  }
   function syncThemeBtn() {
     const b = $('#btn-theme');
     if (!b || !Theme.label) return;
     b.textContent = '主题 · ' + Theme.label();
     b.title = '当前：' + Theme.label() + '，点击切换';
-  }
-  function cycleSpeed() {
-    const i = SPEED_ORDER.indexOf(App.speed);
-    App.speed = SPEED_ORDER[(i + 1) % SPEED_ORDER.length];
-    saveSpeed(); syncSpeedBtn();
-    toast('电脑节奏：' + pace().label);
-    if (App.mode === 'net') Net.send({ t: 'setPace', pace: pace().act });
   }
 
   /* ============================== 工具 ============================== */
@@ -320,6 +278,13 @@
 
     const hold = opt.hold || 4200;
     const fill = $('#event-bar-fill');
+    clearTimeout(evTimer);
+    clearTimeout(evBarTimer);
+    if (fill) fill.hidden = !!opt.requiresAck;
+    if (opt.requiresAck) {
+      $('#event-ok').textContent = '知道了';
+      return;
+    }
     if (fill && fill.style) {
       fill.style.transition = 'none';
       fill.style.width = '100%';
@@ -797,16 +762,19 @@
           }
           break;
         case 'error': toast('✗ ' + m.error); break;
+        case 'ballroomSkipped':
+          queueEvent({ tone: 'danger', icon: '!', title: '回合已被跳过',
+            text: escapeHtml(m.message || '未向舞厅主人致谢，本回合已被跳过。'), requiresAck: true });
+          break;
         case 'chat': {
           // 自己与对手的发言都在各自圆角矩形头顶弹出气泡（含自己）
           if (m.playerId) showPlayerChatBubble(m);
           if (m.playerId && m.text) {
             if (!App.chatHistory) App.chatHistory = [];
-            App.chatHistory.push({ playerId: m.playerId, playerName: m.playerName, text: m.text, sentAt: m.sentAt });
+            App.chatHistory.push({ ...m });
             const paneChat = $('#pane-chat');
             if (paneChat && !paneChat.hidden) {
-              const box = $('#chat-log');
-              if (box) { box.appendChild(chatEntryNode(m)); box.scrollTop = box.scrollHeight; }
+              renderChatLog();
             }
           }
           break;
@@ -2339,11 +2307,13 @@
       if (old.el && old.el.parentNode) old.el.parentNode.removeChild(old.el);
     }
     const bubble = el('div', 'player-chat-bubble');
+    if (message.channel === 'private') bubble.classList.add('private');
     if (message.playerId === App.myId) bubble.classList.add('self');
     bubble.setAttribute('role', 'status');
     const speaker = el('span', 'chat-speaker');
     const textNode = el('span', 'chat-text');
-    speaker.textContent = message.playerName || '玩家';
+    speaker.textContent = (message.playerName || '玩家') +
+      (message.channel === 'private' ? ' → ' + (message.targetName || '玩家') + ' · 私聊' : '');
     textNode.textContent = String(message.text);
     bubble.appendChild(speaker);
     bubble.appendChild(textNode);
@@ -2369,6 +2339,9 @@
     const composer = $('#chat-composer');
     const input = $('#chat-input');
     if (!composer || !input) return;
+    syncChatRecipients();
+    $('#chat-recipient').value = App.chatChannel === 'private' ? App.chatTargetId : '';
+    if (App.chatChannel === 'private' && !App.chatTargetId) { toast('没有可私聊的玩家'); return; }
     composer.hidden = false;
     $('#screen-game').classList.add('chat-open');
     input.value = '';
@@ -2380,6 +2353,21 @@
     if (!button) return;
     button.hidden = !(App.mode === 'net' && App.state && !App.state.spectating && App.state.phase !== 'gameover');
     if (button.hidden) closeChatComposer();
+    syncChatRecipients();
+    const compose = $('#chat-pane-compose');
+    if (compose) compose.hidden = button.hidden;
+  }
+
+  function syncChatRecipients() {
+    const select = $('#chat-recipient');
+    if (!select) return;
+    const players = (App.state?.players || []).filter(player => player.id !== App.myId);
+    if (!players.some(player => player.id === App.chatTargetId)) App.chatTargetId = players[0]?.id || '';
+    const selected = select.value;
+    select.innerHTML = '<option value="">公屏（所有玩家）</option>' + players.map(player =>
+      '<option value="' + escapeHtml(player.id) + '">私聊 · ' + escapeHtml(player.name) + '</option>').join('');
+    select.value = players.some(player => player.id === selected) ? selected :
+      (App.chatChannel === 'private' ? App.chatTargetId : '');
   }
 
   /* 金币从被偷者飞向盗贼的动画 */
@@ -2794,10 +2782,15 @@
     const viewerId = viewerIdForState(s);
     if (viewerId != null) App.myId = viewerId;
     $('#spectator-control').update(s, payload => Net.send(payload));
-    $('#btn-speed').hidden = !!s.spectating;
     const hostingButton = $('#btn-hosting');
     hostingButton.hidden = !!s.spectating || s.phase === 'gameover' || typeof s.hostingEnabled !== 'boolean';
     hostingButton.textContent = s.hostingEnabled ? '关闭托管' : '开启托管';
+    const debugAutoButton = $('#btn-debug-auto');
+    if (debugAutoButton) {
+      debugAutoButton.hidden = !s.debugMode || s.phase === 'gameover';
+      debugAutoButton.textContent = s.debugAuto ? '关闭自动行动' : '开启自动行动';
+      debugAutoButton.setAttribute('aria-pressed', String(!!s.debugAuto));
+    }
     hostingButton.setAttribute('aria-pressed', String(!!s.hostingEnabled));
     $('#btn-again').hidden = !!s.spectating;
     // 记录滚动位置，渲染完恢复（避免每次行动后画面跳动）
@@ -2811,7 +2804,6 @@
       '<span class="crown-owner">' + (crownP ? escapeHtml(crownP.name) : '—') + '</span>';
     $('#tb-room').textContent = App.localServerGame ? '单人模式'
       : (s.roomName || '联机房间 ' + (s.roomId || ''));
-    syncSpeedBtn();
     syncThemeBtn();
     syncChatControl();
     voiceSync();
@@ -3084,6 +3076,8 @@
         const head = el('div', 'opp-head'); d.appendChild(head);
         const body = el('div', 'opp-body');
         body.appendChild(el('div', 'opp-city'));
+        const debugHand = el('div', 'opp-debug-hand');
+        body.appendChild(debugHand);
         d.appendChild(body);
       }
       keep[p.seat] = d;
@@ -3155,6 +3149,12 @@
           else { node.__cardAction = null; node.__noZoom = false; node.onclick = null; node.__tapFn = null; }
         });
       }
+      let debugHand = d.querySelector('.opp-debug-hand');
+      if (!debugHand) { debugHand = el('div', 'opp-debug-hand'); d.querySelector('.opp-body').appendChild(debugHand); }
+      debugHand.hidden = !s.debugMode;
+      if (s.debugMode) debugHand.innerHTML = '<b>公开手牌</b> ' + (p.hand || []).map(card =>
+        '<span title="' + escapeHtml(card.name) + ' · ' + Number(card.cost || 0) + ' 金">' +
+        escapeHtml(card.name) + '</span>').join('') || '<span>空</span>';
       d.querySelector('.opp-char-stats').innerHTML = handCountHTML(p.handCount);
       frag.appendChild(d);
     });
@@ -4445,9 +4445,32 @@
   }
 
   function renderLog(s) {
+    const tabs = $('#debug-log-views');
+    const canInspect = !!(s.debugMode && !s.spectating && s.debugLogs);
+    tabs.hidden = !canInspect;
+    let entries = s.log;
+    if (canInspect) {
+      if (!s.players.some(player => player.id === App.debugLogPlayerId)) {
+        App.debugLogPlayerId = s.you || s.players[0]?.id;
+      }
+      tabs.replaceChildren();
+      s.players.forEach(player => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.logPlayer = player.id;
+        button.textContent = (player.seat + 1) + ' · ' + player.name;
+        button.title = '查看 ' + player.name + ' 看到的战报';
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-controls', 'log');
+        button.setAttribute('aria-selected', String(player.id === App.debugLogPlayerId));
+        button.onclick = () => { App.debugLogPlayerId = player.id; renderLog(App.state || s); };
+        tabs.appendChild(button);
+      });
+      entries = s.debugLogs[App.debugLogPlayerId] || [];
+    }
     const box = $('#log');
     box.innerHTML = '';
-    s.log.forEach(l => {
+    entries.forEach(l => {
       box.appendChild(el('div', l.type || 'info', escapeHtml(l.text)));
     });
     box.scrollTop = box.scrollHeight;
@@ -4461,9 +4484,9 @@
     return p(d.getHours()) + ':' + p(d.getMinutes());
   }
   function chatEntryNode(m) {
-    const row = el('div', 'chat-entry' + (m.playerId === App.myId ? ' self' : ''));
+    const row = el('div', 'chat-entry' + (m.playerId === App.myId ? ' self' : '') + (m.channel === 'private' ? ' private' : ''));
     const name = el('span', 'name');
-    name.textContent = m.playerName || '玩家';
+    name.textContent = (m.playerName || '玩家') + (m.channel === 'private' ? ' → ' + (m.targetName || '玩家') : '');
     const text = el('span', 'text');
     text.textContent = String(m.text || '');
     const ts = el('span', 'ts');
@@ -4472,13 +4495,20 @@
     return row;
   }
   function renderChatLog() {
-    const box = $('#chat-log');
-    if (!box) return;
-    box.innerHTML = '';
-    const list = App.chatHistory || [];
-    if (!list.length) { box.appendChild(el('div', 'chat-empty', '还没有人发言')); return; }
-    list.forEach(m => box.appendChild(chatEntryNode(m)));
-    box.scrollTop = box.scrollHeight;
+    for (const channel of ['public', 'private']) {
+      const box = $(channel === 'private' ? '#private-chat-log' : '#chat-log');
+      if (!box) continue;
+      box.hidden = App.chatChannel !== channel;
+      box.replaceChildren();
+      if (channel === 'private' && App.state?.debugMode) box.appendChild(el('div', 'private-chat-note', '调试模式：显示所有玩家的私聊'));
+      const list = (App.chatHistory || []).filter(message => (message.channel || 'public') === channel);
+      if (!list.length) box.appendChild(el('div', 'chat-empty', channel === 'private' ? '暂无私聊消息' : '还没有人发言'));
+      list.forEach(message => box.appendChild(chatEntryNode(message)));
+      box.scrollTop = box.scrollHeight;
+      $(channel === 'private' ? '#chat-private-tab' : '#chat-public-tab')?.setAttribute('aria-selected', String(App.chatChannel === channel));
+    }
+    const compose = $('#chat-pane-compose');
+    if (compose) compose.textContent = App.chatChannel === 'private' ? '发私聊' : '公屏发言';
   }
   /* 统一控制侧栏：战报 / 聊天记录 各自的开关与「同时开启时的 Chrome 式标签页叠加」 */
   function updateSidePanel() {
@@ -4775,6 +4805,8 @@
     if (districtSelectMode()) promptEl.innerHTML += ' <b class="pick-tip">← 点击高亮的建筑 ▼</b>';
     if (App.sel && App.sel.kind === 'multi') promptEl.innerHTML += '（已选 ' + App.sel.items.length + '）';
     const representedActions = new Set();
+    // Thanking is intentionally discoverable in the ballroom card detail,
+    // rather than reminding the player in the main action bar.
     av.actions.filter(a => a.type === 'district_effect' && a.name === 'ballroom_thanks')
       .forEach(a => representedActions.add(a));
     if (isMobileGameUI()) av.actions.filter(a => a.type === 'build').forEach(a => representedActions.add(a));
@@ -4894,7 +4926,7 @@
       if (a.type === 'take_gold' || a.type === 'take_cards' || a.type === 'income') cls = 'main';
       if (a.type === 'choose_district' || a.type === 'warlord_destroy') cls = 'danger';
       if (a.type === 'district_effect' && a.name === 'ballroom_skip') {
-        // 忘记致谢时仍展示领取资源入口，尝试领取即触发舞厅的跳过效果。
+        // Attempting to collect resources before thanking forfeits the turn.
         ['拿取金币', '抽取建筑牌'].forEach(label =>
           actionsEl.appendChild(actionBtn(Object.assign({}, a, { label }), 'main')));
       } else actionsEl.appendChild(actionBtn(a.type === 'district_effect' && a.name === 'thieves_begin'
@@ -5143,6 +5175,13 @@
       clearInterval(serverConsoleTimer);
       serverConsoleTimer = null;
     }
+  }
+
+  function openDebugGameEditor() {
+    if (window.CitadelDebugEditor) window.CitadelDebugEditor.open(state => {
+      closeModal();
+      $('#lobby').startDebugGame(state);
+    });
   }
 
   /* ============================== 服务器控制台 ============================== */
@@ -5432,6 +5471,7 @@
     if (lobbyHost) lobbyHost.addEventListener('citadels-extra', e => {
       const kind = e.detail && e.detail.kind;
       if (kind === 'rules') openRules();
+      else if (kind === 'debug-game') openDebugGameEditor();
       else if (kind === 'all-roles') openCharacters(true);
       else if (kind === 'all-buildings') openBuildings(true);
       else if (kind === 'console') openServerConsole();
@@ -5503,21 +5543,19 @@
       App.botDebugEntries = [];
       renderBotDebug();
     };
-    // 选中菜单里的任一项后自动收起（「电脑节奏」要连点切换，保持展开）。
+    // 选中菜单里的任一项后自动收起。
     const topbarEl = $('#topbar');
     if (topbarEl && gameScreen) {
       topbarEl.addEventListener('click', e => {
         const btn = e.target && e.target.closest ? e.target.closest('button') : null;
-        if (!btn || btn.id === 'btn-speed') return;
+        if (!btn) return;
         setMenuOpen(false);
       });
     }
 
-    // 电脑节奏：对局内一键切换（设置页下拉已随首页/设置页移入共享组件）
-    loadSpeed();
-    $('#btn-speed').onclick = cycleSpeed;
     $('#btn-hosting').onclick = () => Net.send({t: 'setHosting', enabled: !App.state?.hostingEnabled});
-    syncSpeedBtn();
+    if ($('#btn-debug-auto')) $('#btn-debug-auto').onclick = () =>
+      Net.send({ t: 'setDebugAuto', enabled: !App.state?.debugAuto });
 
     // 对局内
     $('#btn-back-home').onclick = () => {
@@ -5566,6 +5604,19 @@
       updateSidePanel();
     };
     $('#btn-chat').onclick = openChatComposer;
+    $('#chat-pane-compose').onclick = openChatComposer;
+    ['public', 'private'].forEach(channel => {
+      $(channel === 'private' ? '#chat-private-tab' : '#chat-public-tab').onclick = () => {
+        App.chatChannel = channel;
+        closeChatComposer();
+        renderChatLog();
+      };
+    });
+    $('#chat-recipient').onchange = event => {
+      App.chatTargetId = event.target.value;
+      App.chatChannel = App.chatTargetId ? 'private' : 'public';
+      renderChatLog();
+    };
     $('#chat-close').onclick = closeChatComposer;
     // 语音按钮一键两用：没加入时加入，已加入时开麦/静音（退出语音在语音面板里）。
     $('#btn-voice').onclick = () => Voice.toggleMute();
@@ -5580,7 +5631,8 @@
       const input = $('#chat-input');
       const text = input ? input.value.trim() : '';
       if (!text) { closeChatComposer(); return; }
-      Net.send({ t: 'chat', text: text });
+      const targetId = $('#chat-recipient').value;
+      Net.send({ t: 'chat', text: text, ...(targetId ? { targetId } : {}) });
       closeChatComposer();
     };
     // 返回原房间，收到大厅态后把 socket 交还组件。
@@ -5625,6 +5677,13 @@
   const lobbyEl = $('#lobby');
   if (lobbyEl && customElements.get('c-citadels-lobby')) {
     lobbyEl.onGameStart = handle => {
+      if (Net.roomId !== handle.roomId) {
+        App.chatHistory = [];
+        App.chatChannel = 'public';
+        App.chatTargetId = '';
+        App.debugLogPlayerId = null;
+        clearPlayerChatBubbles();
+      }
       App.sidePanelCollapsed = true;
       App.mode = 'net';
       App.localServerGame = !!handle.localServerGame;
@@ -5650,7 +5709,7 @@
   window.__CitadelsApp = App;
   // PWA：支持从主屏幕/桌面以独立窗口启动；联机功能仍需网络连接服务器。
   if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js?v=16', { scope: './' }).then(registration => {
+    navigator.serviceWorker.register('./sw.js?v=18', { scope: './' }).then(registration => {
       // GitHub Pages 上的 PWA 可能长时间保持旧 worker，启动时主动检查一次新版本。
       registration.update().catch(() => {});
       registration.addEventListener('updatefound', () => {

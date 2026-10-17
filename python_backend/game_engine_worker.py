@@ -53,6 +53,10 @@ class GameEngineWorker:
         result = self._request("create", gameId=game_id, newGame=new_game)
         return result["state"]
 
+    def load_game(self, state: dict, game_id: str) -> dict:
+        """Load an editable native snapshot into the authoritative engine."""
+        return self._request("load", gameId=game_id, state=state)["state"]
+
     def snapshot(self, game_id: str) -> dict:
         return self._request("snapshot", gameId=game_id)["state"]
 

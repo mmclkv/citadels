@@ -4,6 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <title>富饶之城 · 移动端</title>
+<link rel="stylesheet" href="./debug-state-editor.css?v=1">
 <style>
 :root{
   --bg:#030811;--panel:#071421;--panel2:#0a1b2b;--line:#153b58;--line2:#235a7e;
@@ -84,7 +85,8 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 .actions.stage-confirmation{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center}.actions.stage-confirmation .btn{padding:0 10px;font-size:12px}.stage-selection{min-width:0;padding:4px 2px;font-size:11px;line-height:1.4;overflow-wrap:anywhere}.stage-selection span{display:block;color:#93adbf;font-size:10px}.stage-selection strong{color:var(--gold)}
 .actions[hidden],.spectator-info[hidden]{display:none}
 </style>
-<link rel="stylesheet" href="./mobile-live.css?v=34"/>
+<link rel="stylesheet" href="./mobile-live.css?v=35"/>
+<link rel="stylesheet" href="./chat.css?v=3">
 <link rel="stylesheet" href="./themes/classic/mobile.css?v=5"/>
 </head>
 <body>
@@ -163,15 +165,16 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
       <aside class="mobile-sidebar" id="mobileSidebar" aria-label="游戏侧边栏" hidden>
         <div class="mobile-sidebar-head"><strong>对局信息</strong><button class="sidebar-close" id="sidebarClose" type="button" aria-label="收起侧边栏">›</button></div>
         <div class="sidebar-tabs"><button type="button" data-sidebar-tab="log" class="active">战报</button><button type="button" data-sidebar-tab="chat">聊天记录</button><button type="button" data-sidebar-tab="voice" id="sidebarVoiceTab" hidden>语音</button></div>
+        <div class="chat-channel-tabs debug-log-views" id="debugLogViews" role="tablist" aria-label="查看玩家战报" hidden></div>
+        <div class="chat-channel-tabs" id="sidebarChatChannels" role="tablist" aria-label="聊天频道" hidden><button type="button" data-chat-channel="public" role="tab" aria-selected="true">公屏聊天</button><button type="button" data-chat-channel="private" role="tab" aria-selected="false">私聊</button></div>
         <div class="sidebar-content" id="sidebarContent"></div>
         <div id="voiceAudio" hidden></div>
-        <form class="sidebar-chat-form" id="sidebarChatForm" hidden><input id="sidebarChatInput" maxlength="500" placeholder="发言…" aria-label="聊天内容"><button type="submit">发送</button></form>
+        <form class="sidebar-chat-form" id="sidebarChatForm" hidden><select id="sidebarChatTarget" aria-label="私聊对象" hidden></select><input id="sidebarChatInput" maxlength="120" placeholder="发言…" aria-label="聊天内容"><button type="submit">发送</button></form>
       </aside>
       <section class="entry-overlay" id="entryOverlay"><div class="entry-card"><h1>富饶之城</h1><p id="entryMessage">正在进入对局…</p></div></section>
       <section class="menu-overlay" id="menuOverlay" hidden>
         <div class="menu-card"><div class="menu-heading">菜单 <button id="menuClose" class="close" type="button">×</button></div>
         <div id="roomInfo"></div><div class="menu-options">
-          <button class="btn ghost" id="menuSpeed" type="button">电脑速度 · 标准</button>
           <button class="btn ghost" id="menuRoles" type="button">角色一览</button>
           <button class="btn ghost" id="menuBuildings" type="button">建筑一览</button>
           <button class="btn ghost" id="menuRules" type="button">游戏规则</button>
@@ -179,6 +182,7 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
           <button class="btn ghost" id="menuChat" type="button">聊天记录 / 发言</button>
           <button class="btn ghost" id="menuVoice" type="button" hidden>语音</button>
           <button class="btn ghost" id="menuHosting" type="button" hidden aria-pressed="false" title="立即由启发式电脑接管，再次点击恢复手动操作">开启托管</button>
+          <button class="btn ghost" id="menuDebugAuto" type="button" hidden aria-pressed="false">开启自动行动</button>
           <button class="btn ghost" id="menuAutoHost" type="button" hidden>断线/离开后托管我 · 开启</button>
           <button class="btn ghost" id="menuTheme" type="button">切换主题</button>
           <button class="btn ghost" id="menuNewGame" type="button">离开对局并返回首页</button>
@@ -196,9 +200,10 @@ button{font:inherit} body{background:radial-gradient(circle at 50% -15%,#17335a 
 <script src="./themes/neon/manifest.js?v=14"></script>
 <script src="./themes/theme-manager.js?v=4"></script>
 <script src="./src/cards.js?v=8"></script>
+<script src="./debug-state-editor.js?v=3"></script>
 <script src="./mobile-theme.js?v=2"></script>
 <script src="./components/citadels-lobby.js?v=11"></script>
 <script src="./components/citadels-spectator.js?v=2"></script>
-<script src="./mobile.js?v=17"></script>
+<script src="./mobile.js?v=25"></script>
 </body>
 </html>

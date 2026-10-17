@@ -780,7 +780,9 @@
     setMode = setMode || 'base';
     let pool;
     if (setMode === 'base') {
-      pool = CHARACTERS.filter(c => c.version === 'base');           // 8 张（1-8）
+      const base = ['assassin', 'thief', 'magician', 'king', 'abbot',
+                    'merchant', 'architect', 'warlord'];
+      pool = base.map(id => CHAR_MAP[id]);                            // 8 张（1-8）
     } else if (setMode === 'dark') {
       // 基本版 + 黑暗城市扩充各号一个 + 皇后
       const want = { 1: 'witch', 2: 'blackmailer', 3: 'wizard', 4: 'emperor', 5: 'abbot',

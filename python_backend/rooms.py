@@ -120,7 +120,6 @@ class RoomRegistry:
                        "charSetMode": config.get("charSetMode") or "base",
                        "scenario": scenario,
                        "botLevel": seat_config["botLevel"], "botType": seat_config["botType"],
-                       "botPace": config.get("botPace") or 430,
                        "mctsSimulations": _int_at_least(config.get("mctsSimulations"), 5000, 0),
                        "mctsMaxDepth": _int_at_least(config.get("mctsMaxDepth"), 2000, 0),
                        "mctsParticles": _int_at_least(config.get("mctsParticles"), 4, 1),

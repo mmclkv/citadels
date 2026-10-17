@@ -1,0 +1,16 @@
+.chat-channel-tabs{display:flex;gap:6px;padding:8px;border-bottom:1px solid var(--line,#2b536d);flex:0 0 auto}
+.chat-channel-tabs[hidden],.chat-log[hidden]{display:none}
+.chat-channel-tabs button{flex:1;padding:7px 9px;border:1px solid var(--line,#2b536d);border-radius:7px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.chat-channel-tabs button[aria-selected=true]{background:#215d81;color:#fff;border-color:#4ea5d0}
+.chat-channel-tabs button[data-chat-channel=private][aria-selected=true],#chat-private-tab[aria-selected=true]{background:#68408b;border-color:#ad88d0}
+#chat-pane-compose{margin:8px;flex:0 0 auto}#chat-composer select{max-width:180px;min-width:100px;padding:7px;border:1px solid #8e83a0;border-radius:7px;background:#fff;color:#28223b;font:inherit}
+.sidebar-chat-form{flex-wrap:wrap}#sidebarChatTarget{flex:0 0 100%;width:100%;padding:8px;border:1px solid #8e66b4;border-radius:7px;background:#211b32;color:#ead9fa;font:inherit}
+#sidebarChatTarget[hidden]{display:none}.private-chat-note{padding:7px;color:#a78fba;font-size:11px}
+body .player-chat-bubble.private,body .player-chat-bubble.private.self{background:#efe0ff;border-color:#9557bf;color:#48205c}
+body .player-chat-bubble.private::after,body .player-chat-bubble.private.self::after{background:#efe0ff;border-color:#9557bf}
+body .player-chat-bubble.private .chat-speaker,body .player-chat-bubble.private.self .chat-speaker{color:#682e85}
+html body .row-bubble.tone-private-chat{position:relative;left:auto;right:auto;bottom:auto;margin-top:9px;padding:6px 10px 7px;border:1px solid #b083d1;border-radius:3px 11px 11px 11px;background:linear-gradient(180deg,#f1e1ffdd,#ddbcf4dd);color:#48205c;box-shadow:0 8px 20px #0006;max-height:120px;overflow:auto;scrollbar-width:none;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;font-weight:500;line-height:1.45;user-select:text;cursor:text}
+.row-bubble.tone-private-chat::-webkit-scrollbar{width:0;height:0}
+.chat-entry.private .name{color:#a26dcb}
+.debug-log-views{flex-wrap:wrap}.debug-log-views button{flex:0 0 auto;padding:5px 8px;font-size:12px}
+@media(max-width:680px){#chat-composer{flex-wrap:wrap}#chat-composer select{flex:0 0 100%;max-width:none;width:100%;font-size:16px}}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import gzip
 import json
 import os
@@ -18,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from python_backend.server import (Client, PythonServer, _encoding_compatible, _static_path,
+from python_backend.server import (BALLROOM_THANKS_TEXTS, Client, PythonServer, _encoding_compatible, _static_path,
                                    parse_server_args)  # noqa: E402
 from python_backend import cards  # noqa: E402
 from python_backend.views import _removed_view  # noqa: E402
@@ -442,7 +443,7 @@ class ServerArgumentTests(unittest.TestCase):
         }])
         self.assertIn("建造者乙", log)
         self.assertIn("钟楼", log)
-        self.assertIn("4枚建造金币已退还", log)
+        self.assertIn("建造金币已退还", log)
 
     def test_assassin_thief_and_witch_character_choices_emit_target_popups(self) -> None:
         cases = [
@@ -681,6 +682,245 @@ async def _recv_json(reader: asyncio.StreamReader) -> dict:
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_debug_battle_reports_are_filtered_per_player_and_controller_only(self):
+        room, clients, spectator, _ = self._chat_room_clients()
+        state = room["state"]
+        state["log"] = [
+            {"i": 0, "text": "公开战报", "type": "info", "round": 1},
+            {"i": 1, "text": "双方私有战报", "type": "info", "round": 1,
+             "visibleTo": [clients[0].id, clients[1].id]}]
+        self.assertNotIn("debugLogs", self.app._state_for(room, clients[0].id))
+        room["debugMode"] = True
+        state["draft"]["steps"][0]["player"] = 3
+        state["draft"]["currentPlayer"] = clients[3].id
+        view = self.app._state_for(room, clients[0].id)
+        self.assertEqual(view["you"], clients[3].id)
+        self.assertEqual(set(view["debugLogs"]), {client.id for client in clients})
+        for index, client in enumerate(clients):
+            entries = view["debugLogs"][client.id]
+            self.assertIn("公开战报", [entry["text"] for entry in entries])
+            self.assertEqual("双方私有战报" in [entry["text"] for entry in entries], index in (0, 1))
+            self.assertTrue(all("visibleTo" not in entry for entry in entries))
+        self.assertNotIn("debugLogs", self.app._state_for(room, clients[2].id))
+        self.assertNotIn("debugLogs", self.app._state_for(room, spectator.id))
+        self.assertEqual(state["draft"]["currentPlayer"], clients[3].id)
+
+    def _ballroom_chat_state(self, room, actor_index=0):
+        state = room["state"]
+        state["phase"] = "action"
+        state["draft"] = None
+        state["players"][actor_index]["chars"] = ["merchant"]
+        state["turn"] = {"playerIdx": actor_index, "charId": "merchant", "num": 6,
+                         "phase": "main", "takenResources": False, "incomeTaken": False,
+                         "abilityUsed": False, "builds": 0, "spentOnBuild": 0,
+                         "usedLab": False, "usedSmithy": False, "usedMuseum": False,
+                         "bonusDone": False, "pending": {"kind": "ballroom"}}
+        for index, player in enumerate(state["players"]):
+            player["hasCrown"] = index == 1
+        state["players"][1]["city"] = [{"uid": "ballroom-test", "name": "舞厅", "en": "Ballroom",
+                                         "color": "purple", "cost": 6, "purple": {"effect": "ballroom"}}]
+        after = copy.deepcopy(state)
+        after["turn"]["pending"] = None
+        return state, after
+
+    async def test_ballroom_thanks_sends_random_private_chat_only_after_success(self):
+        room, clients, spectator, outsider = self._chat_room_clients()
+        state, after = self._ballroom_chat_state(room)
+        action = {"type": "district_effect", "name": "ballroom_thanks"}
+        worker = self.app.native_worker_manager.game_worker
+        clients[0].last_chat = time.monotonic()  # Automatic thanks bypass the manual chat cooldown.
+        with mock.patch.object(worker, "apply", side_effect=RuntimeError("invalid action")):
+            self.assertFalse((await self.app._apply_game_action(room, clients[0].id, action))["ok"])
+        for client in self.app.clients:
+            client.send.assert_not_awaited()
+        with mock.patch.object(worker, "apply", return_value=after), mock.patch(
+                "python_backend.server.secrets.choice", return_value=BALLROOM_THANKS_TEXTS[2]) as choose:
+            self.assertTrue((await self.app._apply_game_action(room, clients[0].id, action))["ok"])
+            choose.assert_called_once_with(BALLROOM_THANKS_TEXTS)
+        payload = clients[0].send.call_args.args[0]
+        self.assertEqual(payload["channel"], "private")
+        self.assertEqual(payload["playerId"], clients[0].id)
+        self.assertEqual(payload["targetId"], clients[1].id)
+        self.assertEqual(payload["text"], BALLROOM_THANKS_TEXTS[2])
+        clients[1].send.assert_awaited_once_with(payload)
+        for other in clients[2:] + [spectator, outsider]:
+            other.send.assert_not_awaited()
+        report = next(entry for entry in room["state"]["log"] if "visibleTo" in entry)
+        self.assertEqual(set(report["visibleTo"]), {clients[0].id, clients[1].id})
+        for index, client in enumerate(clients):
+            view = self.app._state_for(room, client.id)
+            self.assertEqual(report["text"] in [entry["text"] for entry in view["log"]], index in (0, 1))
+        for followed in (clients[0].id, clients[1].id):
+            room["spectators"][spectator.id]["viewPlayerId"] = followed
+            view = self.app._state_for(room, spectator.id)
+            self.assertNotIn(report["text"], [entry["text"] for entry in view["log"]])
+        room["debugMode"] = True
+        for index in (0, 1, 2):
+            room["state"]["turn"]["playerIdx"] = index
+            view = self.app._state_for(room, clients[0].id)
+            self.assertEqual(report["text"] in [entry["text"] for entry in view["log"]], index in (0, 1))
+        room["debugMode"] = False
+        room["state"]["turn"]["playerIdx"] = 0
+        # An already acknowledged snapshot cannot generate a second thank-you.
+        with mock.patch.object(worker, "apply", return_value=copy.deepcopy(after)):
+            await self.app._apply_game_action(room, clients[0].id, action)
+        clients[0].send.assert_awaited_once()
+
+    async def test_ballroom_skip_report_is_private_to_actor_and_ballroom_owner(self):
+        room, clients, spectator, _ = self._chat_room_clients()
+        state, after = self._ballroom_chat_state(room)
+        state["log"].append({"i": 0, "text": "公开战报", "type": "info", "round": 1})
+        after["log"] = copy.deepcopy(state["log"])
+        after["turn"]["playerIdx"] = 1
+        worker = self.app.native_worker_manager.game_worker
+        with mock.patch.object(worker, "apply", return_value=after):
+            self.assertTrue((await self.app._apply_game_action(room, clients[0].id,
+                {"type": "district_effect", "name": "ballroom_skip"}))["ok"])
+        private_entry = next(entry for entry in room["state"]["log"] if "visibleTo" in entry)
+        self.assertEqual(set(private_entry["visibleTo"]), {clients[0].id, clients[1].id})
+        notification = clients[0].send.call_args.args[0]
+        self.assertEqual(notification["t"], "ballroomSkipped")
+        self.assertEqual(notification["playerId"], clients[0].id)
+        self.assertIn("没有获得金币或建筑牌", notification["message"])
+        for other in clients[1:] + [spectator]:
+            other.send.assert_not_awaited()
+        for index, client in enumerate(clients):
+            view = self.app._state_for(room, client.id)
+            visible = [entry["text"] for entry in view["log"]]
+            self.assertEqual(private_entry["text"] in visible, index in (0, 1))
+            self.assertIn("公开战报", visible)
+            self.assertTrue(all("visibleTo" not in entry for entry in view["log"]))
+        for followed in (clients[0].id, clients[1].id):
+            room["spectators"][spectator.id]["viewPlayerId"] = followed
+            view = self.app._state_for(room, spectator.id)
+            self.assertNotIn(private_entry["text"], [entry["text"] for entry in view["log"]])
+        room["debugMode"] = True
+        for actor_index in (0, 1, 2):
+            room["state"]["turn"]["playerIdx"] = actor_index
+            view = self.app._state_for(room, clients[0].id)
+            self.assertEqual(private_entry["text"] in [entry["text"] for entry in view["log"]], actor_index in (0, 1))
+
+    async def test_debug_ballroom_thanks_uses_actor_and_skip_sends_only_popup(self):
+        room, clients, spectator, outsider = self._chat_room_clients()
+        room["debugMode"] = True
+        state, after = self._ballroom_chat_state(room, actor_index=2)
+        worker = self.app.native_worker_manager.game_worker
+        with mock.patch.object(worker, "apply", return_value=after):
+            self.assertTrue((await self.app._apply_game_action(room, clients[2].id,
+                {"type": "district_effect", "name": "ballroom_thanks"}))["ok"])
+        payload = clients[0].send.call_args.args[0]
+        self.assertEqual(payload["playerId"], clients[2].id)
+        self.assertEqual(payload["targetId"], clients[1].id)
+        self.assertIn(payload["text"], BALLROOM_THANKS_TEXTS)
+        for other in clients[1:] + [spectator, outsider]:
+            other.send.assert_not_awaited()
+        for client in self.app.clients:
+            client.send.reset_mock()
+        state, after = self._ballroom_chat_state(room, actor_index=2)
+        with mock.patch.object(worker, "apply", return_value=after):
+            self.assertTrue((await self.app._apply_game_action(room, clients[2].id,
+                {"type": "district_effect", "name": "ballroom_skip"}))["ok"])
+        notification = clients[0].send.call_args.args[0]
+        self.assertEqual(notification["t"], "ballroomSkipped")
+        self.assertEqual(notification["playerId"], clients[2].id)
+        self.assertEqual(notification["playerName"], state["players"][2]["name"])
+        for client in clients[1:] + [spectator, outsider]:
+            client.send.assert_not_awaited()
+
+    def _chat_room_clients(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 4})
+        for index in range(3):
+            self.app.rooms.join_room(room["id"], "Guest " + str(index + 1))
+        _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        clients = [mock.Mock(id=seat["id"], room_id=room["id"], last_chat=0,
+                             send=mock.AsyncMock()) for seat in room["seats"]]
+        spectator = mock.Mock(id="watcher", room_id=room["id"], send=mock.AsyncMock())
+        outsider = mock.Mock(id="outsider", room_id="other-room", send=mock.AsyncMock())
+        room["spectators"] = {spectator.id: {"viewPlayerId": clients[0].id}}
+        self.app.clients = set(clients + [spectator, outsider])
+        return room, clients, spectator, outsider
+
+    async def test_private_chat_is_only_delivered_to_sender_and_target(self):
+        room, clients, spectator, outsider = self._chat_room_clients()
+        sender, target = clients[:2]
+        await self.app._handle_message(sender, {"t": "chat", "text": "secret", "targetId": target.id,
+                                              "playerId": clients[2].id})
+        payload = sender.send.call_args.args[0]
+        self.assertEqual(payload["channel"], "private")
+        self.assertEqual(payload["playerId"], sender.id)
+        self.assertEqual(payload["targetId"], target.id)
+        target.send.assert_awaited_once_with(payload)
+        for other in clients[2:] + [spectator, outsider]:
+            other.send.assert_not_awaited()
+        for other in self.app.clients:
+            other.send.reset_mock()
+        sender.last_chat = 0
+        await self.app._handle_message(sender, {"t": "chat", "text": "public"})
+        for other in clients + [spectator]:
+            self.assertEqual(other.send.call_args.args[0]["channel"], "public")
+            self.assertNotIn("targetId", other.send.call_args.args[0])
+        outsider.send.assert_not_awaited()
+
+    async def test_private_chat_rejects_invalid_target_and_spectator_sender(self):
+        _, clients, spectator, _ = self._chat_room_clients()
+        for target_id in (clients[0].id, "watcher", "unknown", "", [], 42):
+            with self.subTest(target=target_id), self.assertRaises(ValueError):
+                await self.app._handle_message(clients[0], {"t": "chat", "text": "secret", "targetId": target_id})
+        with self.assertRaises(ValueError):
+            await self.app._handle_message(spectator, {"t": "chat", "text": "secret", "targetId": clients[0].id})
+        for client in self.app.clients:
+            client.send.assert_not_awaited()
+
+    async def test_debug_chat_uses_actor_and_routes_private_only_to_controller(self):
+        room, clients, spectator, outsider = self._chat_room_clients()
+        room["debugMode"] = True
+        state = room["state"]
+        state["draft"]["steps"][0]["player"] = 2
+        state["draft"]["currentPlayer"] = clients[2].id
+        await self.app._handle_message(clients[0], {"t": "chat", "text": "debug secret", "targetId": clients[1].id})
+        payload = clients[0].send.call_args.args[0]
+        self.assertEqual(payload["playerId"], clients[2].id)
+        self.assertEqual(payload["playerName"], state["players"][2]["name"])
+        self.assertEqual(payload["targetId"], clients[1].id)
+        for other in clients[1:] + [spectator, outsider]:
+            other.send.assert_not_awaited()
+        with self.assertRaises(ValueError):
+            await self.app._handle_message(clients[1], {"t": "chat", "text": "impersonation"})
+        clients[0].last_chat = 0
+        await self.app._handle_message(clients[0], {"t": "chat", "text": "debug public"})
+        self.assertEqual(clients[1].send.call_args.args[0]["playerId"], clients[2].id)
+        self.assertEqual(clients[1].send.call_args.args[0]["channel"], "public")
+
+    async def test_debug_draft_pool_follows_actor_in_later_round(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 4, "bots": 3})
+        worker = self.app.native_worker_manager.game_worker
+        state = _start_reference_room(self.app.rooms, room["id"], worker)
+        host_id = room["seats"][0]["id"]
+        state["round"] = 2
+        room["debugMode"] = True
+        # The crown can start the next round at any seat, not just the host.
+        for index in (3, 1, 2, 0):
+            actor_id = state["players"][index]["id"]
+            state["draft"]["steps"][0]["player"] = index
+            state["draft"]["currentPlayer"] = actor_id
+            view = await self.app._state_for_client(room, host_id)
+            self.assertEqual(view["you"], actor_id)
+            self.assertEqual(view["draft"]["currentPlayer"], actor_id)
+            self.assertEqual([role["id"] for role in view["draft"]["pool"]], state["draft"]["pool"])
+            self.assertTrue(view["available"]["actions"])
+            self.assertTrue(all("hand" in player for player in view["players"]))
+        # Normal games and spectators retain their existing privacy rules.
+        state["draft"]["steps"][0]["player"] = 3
+        state["draft"]["currentPlayer"] = state["players"][3]["id"]
+        room["debugMode"] = False
+        view = await self.app._state_for_client(room, host_id)
+        self.assertEqual(view["draft"]["pool"], [])
+        room["debugMode"] = True
+        room["spectators"] = {"viewer": {"viewPlayerId": host_id}}
+        spectator = await self.app._state_for_client(room, "viewer")
+        self.assertEqual(spectator["draft"]["pool"], [])
+        self.assertEqual(spectator["available"]["actions"], [])
+
     async def test_finished_game_returns_to_same_room_for_guest_and_host(self):
         room = self.app.rooms.create_room("Host", {"playerCount": 2})
         _, guest = self.app.rooms.join_room(room["id"], "Guest")
@@ -966,7 +1206,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         other = Viewer()
         await self.app._handle_message(other, {"t": "spectateRoom", "roomId": room["id"]})
         self.assertEqual(room["spectators"][other.id]["viewPlayerId"], state["players"][0]["id"])
-        for kind in ("action", "startGame", "restart", "returnToRoom", "setPace", "setAutoHost", "config", "chat"):
+        for kind in ("action", "startGame", "restart", "returnToRoom", "setAutoHost", "config", "chat"):
             with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "观战模式"):
                 await self.app._handle_message(viewer, {"t": kind, "action": {"type": "end_turn"}})
         await self.app._handle_message(viewer, {"t": "botDebugSubscribe"})
@@ -1039,7 +1279,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         # The native protocol does not contain Python's retained battle log.
         for snapshot in (selected, taken):
             snapshot.pop("log", None)
-        room = {"id": "wizard-regression", "state": state, "config": {"botPace": 0}}
+        room = {"id": "wizard-regression", "state": state, "config": {}}
         actions = [{"type": "wizard_card", "uid": "d81"}, {"type": "wizard_take"}]
         worker = self.app.native_worker_manager.game_worker
         with mock.patch.object(worker, "apply", side_effect=[selected, taken]), \
@@ -1450,7 +1690,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         try:
             await _send_json(writer, {"t": "hello", "name": "Debug"})
             await _send_json(writer, {"t": "createRoom", "config": {
-                "playerCount": 2, "bots": 1, "botPace": 1, "autoHost": False}})
+                "playerCount": 2, "bots": 1, "autoHost": False}})
             room_id = None
             entries = []
             while room_id is None:
@@ -1502,7 +1742,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(room["botDebug"][-1]["action"], {"type": "choose_role"})
 
     async def test_bot_debug_records_neural_configuration_error(self):
-        room = self.app.rooms.create_room("Debug", {"playerCount": 2, "bots": 1, "botPace": 1})
+        room = self.app.rooms.create_room("Debug", {"playerCount": 2, "bots": 1})
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         host = state["players"][0]
         options = get_available_actions(state, host["id"])["actions"]
@@ -1521,7 +1761,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_python_npc_driver_takes_a_legal_draft_action(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
-                                                     "botPace": 1, "seed": 91})
+                                                     "seed": 91})
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         original_step = state["draft"]["stepIdx"]
         self.app._schedule_bot(room)
@@ -1544,7 +1784,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bots_confirm_round_results_without_waiting_for_human_seat_order(self) -> None:
         room = self.app.rooms.create_room("Host", {"playerCount": 3, "bots": 2,
-                                                     "botType": "agent", "botPace": 0,
+                                                     "botType": "agent",
                                                      "seed": 92})
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         state["phase"] = "action"
@@ -1586,10 +1826,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
         self.app.agent = StubAgent(fail=True)
         room = self.app.rooms.create_room("Host", {"playerCount": 2, "bots": 1,
-                                                     "botType": "agent", "botPace": 0})
-        # Room configuration normalizes zero to the default pace; this test
-        # exercises decisions and fallback rather than the UI pacing delay.
-        room["config"]["botPace"] = 0
+                                                     "botType": "agent"})
         state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
         self.app._schedule_bot(room)
         for _ in range(30):

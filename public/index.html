@@ -10,8 +10,10 @@
 <meta name="apple-mobile-web-app-title" content="富饶之城">
 <link rel="manifest" href="./manifest.json">
 <title>富饶之城 · 荣耀之城 Citadels</title>
-  <link rel="stylesheet" href="./style.css?v=78">
+  <link rel="stylesheet" href="./style.css?v=79">
+  <link rel="stylesheet" href="./debug-state-editor.css?v=1">
 <link rel="stylesheet" href="./themes/neon/theme.css?v=16">
+<link rel="stylesheet" href="./chat.css?v=3">
 </head>
 <body>
 
@@ -25,7 +27,7 @@
     <div class="tb-left">
       <button class="btn tiny ghost" id="btn-back-home">返回主菜单</button>
       <button class="btn tiny ghost" id="btn-hosting" type="button" hidden aria-pressed="false" title="立即由启发式电脑接管，再次点击恢复手动操作">开启托管</button>
-      <button class="btn tiny" id="btn-speed" title="点击切换电脑行动速度">标准</button>
+      <button class="btn tiny ghost" id="btn-debug-auto" type="button" hidden aria-pressed="false">开启自动行动</button>
       <span class="tb-title" id="tb-room">富饶之城</span>
     </div>
     <div class="tb-mid">
@@ -136,10 +138,17 @@
       </div>
       <div class="side-panel-body" id="side-panel-body">
         <div class="side-pane" id="pane-log">
+          <div class="chat-channel-tabs debug-log-views" id="debug-log-views" role="tablist" aria-label="查看玩家战报" hidden></div>
           <div class="log" id="log"></div>
         </div>
         <div class="side-pane" id="pane-chat" hidden>
+          <div class="chat-channel-tabs" role="tablist" aria-label="聊天频道">
+            <button id="chat-public-tab" type="button" role="tab" aria-selected="true">公屏聊天</button>
+            <button id="chat-private-tab" type="button" role="tab" aria-selected="false">私聊</button>
+          </div>
           <div class="chat-log" id="chat-log"></div>
+          <div class="chat-log" id="private-chat-log" hidden></div>
+          <button class="btn ghost tiny" id="chat-pane-compose" type="button">公屏发言</button>
         </div>
         <div class="side-pane" id="pane-voice" hidden>
           <div class="voice-pane" id="voice-pane"></div>
@@ -154,6 +163,7 @@
   </footer>
   </div>
   <form class="chat-composer" id="chat-composer" hidden autocomplete="off">
+    <select id="chat-recipient" aria-label="发言对象"><option value="">公屏（所有玩家）</option></select>
     <label class="sr-only" for="chat-input">输入发言内容</label>
     <input id="chat-input" type="text" maxlength="120" enterkeyhint="send" placeholder="输入要说的话…">
     <button class="btn primary" id="chat-send" type="submit">发送</button>
@@ -280,8 +290,9 @@
 <script src="./themes/neon/manifest.js?v=14"></script>
 <script src="./themes/theme-manager.js?v=4"></script>
 <script src="./src/cards.js?v=8"></script>
+<script src="./debug-state-editor.js?v=3"></script>
 <script src="./components/citadels-lobby.js?v=11"></script>
 <script src="./components/citadels-spectator.js?v=2"></script>
-<script src="./app.js?v=107"></script>
+<script src="./app.js?v=113"></script>
 </body>
 </html>

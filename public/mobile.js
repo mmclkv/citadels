@@ -9,7 +9,7 @@
   const M = { ws:null, state:null, id:null, room:null, name:'玩家',
     reconnect:0, handOpen:false, roleOpen:true, targetType:null, selection:null, lighthouse:null, districtPick:null,
     sheetPlayer:null, viewer:null, actions:[], menu:false, leavePending:false,
-    sidebar:false, sidebarTab:'log', chat:[], speed:localStorage.getItem('citadels.speed')||'normal',
+    sidebar:false, sidebarTab:'log', chat:[], chatChannel:'public', chatTargetId:'', debugLogPlayerId:null,
     stage:null, sequence:null, noticeSeen:null, events:[], event:null, eventTimer:0, effectFallback:null, effectTimer:0,
     focus:null, confirm:null, autoFocus:null, bubbles:[], bubbleTimer:0, fxMemo:null, logSeen:null };
   const V = {room:null,joining:false,muted:true,error:''};
@@ -64,6 +64,7 @@
   // public/components/citadels-lobby.js 负责。它自己开 socket，开局时通过
   // onGameStart 把 socket 交过来，之后这个页面只处理对局内的消息。
   function adoptGame(handle){
+    if(M.room!==handle.roomId){M.chat=[];M.chatChannel='public';M.chatTargetId='';M.debugLogPlayerId=null;M.bubbles=[];clearTimeout(M.bubbleTimer);}
     hideSidebar();
     const ws=handle.ws;
     M.ws=ws; M.id=handle.myId||M.id; M.room=handle.roomId||M.room; M.name=handle.name||M.name;
@@ -85,6 +86,7 @@
     if(msg.t==='state') { const previousView=M.state?.viewPlayerId;M.state=msg.state; if(msg.state.you)M.id=msg.state.you;
       if(msg.state.spectating){if(previousView!==msg.state.viewPlayerId)closeViewer();render();}else if(!driveSequence())render(); }
     else if(msg.t==='chat') { M.chat.push(msg); renderSidebar(); chatBubble(msg); }
+    else if(msg.t==='ballroomSkipped') { queueEvent({tone:'danger',icon:'!',title:'回合已被跳过',text:msg.message||'未向舞厅主人致谢，本回合已被跳过。',requiresAck:true}); }
     else if(msg.t==='error') { M.sequence=null;message(msg.error); $('selectedInfo').textContent=msg.error; render();$('selectedInfo').textContent=msg.error; }
   }
   function render() {
@@ -100,7 +102,6 @@
     if(!spectator){spectator=document.createElement('c-citadels-spectator');spectator.id='spectator-control';$('viewport').before(spectator);}
     spectator.update(s,send);
     $('overAgain').hidden=!!s.spectating;
-    $('menuSpeed').hidden=!!s.spectating;
     const scroll=$('viewport').scrollTop;
     const sheetScroll=$('sheet').scrollTop;
     $('entryOverlay').hidden=true;
@@ -116,6 +117,8 @@
     $('menuHosting').hidden=!canControlHosting;
     $('menuHosting').textContent=s.hostingEnabled?'关闭托管':'开启托管';
     $('menuHosting').setAttribute('aria-pressed',String(!!s.hostingEnabled));
+    const debugAuto=$('menuDebugAuto');
+    if(debugAuto){debugAuto.hidden=!s.debugMode||s.phase==='gameover';debugAuto.textContent=s.debugAuto?'关闭自动行动':'开启自动行动';debugAuto.setAttribute('aria-pressed',String(!!s.debugAuto));}
     $('menuAutoHost').hidden=!canControlHosting;
     const autoHostEnabled=s.autoHostEnabled??(s.config?.autoHost!==false);
     $('menuAutoHost').textContent='断线/离开后托管我 · '+(autoHostEnabled?'开启':'关闭');
@@ -170,6 +173,9 @@
     $('eventIcon').textContent=ev.icon||'✦';$('eventTitle').textContent=ev.title||'';
     $('eventText').innerHTML=`<b>${esc(ev.text||'')}</b>${ev.detail?`<span class="event-detail">${esc(ev.detail)}</span>`:''}`;
     const hold=ev.hold||4200,fill=$('eventBarFill');$('eventOverlay').hidden=false;
+    fill.hidden=!!ev.requiresAck;
+    $('eventOk').textContent=ev.requiresAck?'知道了':'知道了，继续';
+    if(ev.requiresAck)return;
     fill.style.transition='none';fill.style.width='100%';
     setTimeout(()=>{fill.style.transition='width '+hold+'ms linear';fill.style.width='0%';},40);
     M.eventTimer=setTimeout(closeEvent,hold);}
@@ -232,9 +238,9 @@
   function chatBubble(msg){
     if(!msg.text||!(M.state?.players||[]).some(p=>p.id===msg.playerId))return;
     // 同一玩家连续发言显示最新一条；完整聊天记录仍保留在侧栏。
-    M.bubbles=M.bubbles.filter(b=>!(b.id===msg.playerId&&b.tone==='chat'));
-    const text=String(msg.text);
-    M.bubbles.push({id:msg.playerId,text,tone:'chat',
+    M.bubbles=M.bubbles.filter(b=>!(b.id===msg.playerId&&['chat','private-chat'].includes(b.tone)));
+    const text=(msg.channel==='private'?'私聊 → '+(msg.targetName||'玩家')+'：':'')+String(msg.text);
+    M.bubbles.push({id:msg.playerId,text,tone:msg.channel==='private'?'private-chat':'chat',
       until:Date.now()+Math.min(15000,Math.max(8000,text.length*120)),fresh:true});
     renderPlayers();armBubbles();
   }
@@ -288,6 +294,7 @@
           :(s.phase==='draft'&&p.hasChosen&&p.draftComplete!==false)?'<span class="draft-chosen">已选择</span>':''}
         <div class="p-stats">${coin(p.gold)}${points(score(p).total)}${hand(p.handCount)}</div></div></div>
         <div class="city-compact">${(p.city||[]).map(mini).join('')}</div>
+        ${s.debugMode&&p.id!==M.id?`<div class="debug-public-hand"><b>公开手牌</b>${(p.hand||[]).map(card=>`<span title="${esc(card.name)} · ${esc(card.cost)} 金">${esc(card.name)}</span>`).join('')||'<span>空</span>'}</div>`:''}
         ${bub?`<div class="row-bubble tone-${attr(bub.tone)}${bub.fresh?' enter':''}${bub.fading?' fading':''}">${esc(bub.text)}</div>`:''}</article>`;
     }).join('');
     // 入场动画只在气泡出现的那一次渲染播放，避免每次状态刷新都重放造成闪动。
@@ -500,7 +507,7 @@
     M.actions=grouped.filter(a=>!a._targetGroup&&!(M.selection&&a.type==='choose_cards'));
     M.actions=M.actions.map(a=>a.type==='district_effect'&&a.name==='thieves_begin'?{...a,label:'发动盗贼巢穴效果'}:a);
     M.actions.unshift(...effectGroups.map(g=>({_districtStart:g.key,label:g.label})));
-    // 领取资源前忘记致谢，就让引擎执行舞厅的跳过效果。
+    // Keep thanks in the ballroom detail. Forgetting and taking resources skips.
     M.actions=M.actions.flatMap(a=>a.type==='district_effect'&&a.name==='ballroom_skip'
       ? ['拿取金币','抽取建筑牌'].map(label=>({...a,label})) : [a]);
     M.actions.unshift(...groups.map(g=>({_armoryStart:true,uid:g.uid,label:'发动军械库效果（'+g.name+'）'})));
@@ -648,7 +655,7 @@
       const row=publicCity.closest('[data-player]');if(row){const p=M.state.players.find(x=>x.id===row.dataset.player),c=p?.city.find(x=>String(x.uid)===publicCity.dataset.key);if(ballroomThanksFor(c,p?.id))openViewer('district',c,null,p.name);else renderDetail(row.dataset.player);}return;}
     const card=e.target.closest('[data-kind]');if(card){e.preventDefault();e.stopPropagation();handleCard(card.dataset.kind,card.dataset.key);return;}
     const detail=e.target.closest('[data-detail-card]');if(detail){const p=M.state.players.find(x=>x.id===M.sheetPlayer),c=p?.city.find(x=>String(x.uid)===detail.dataset.detailCard);if(c){const st=stageStep();if(st&&st.surface==='district'&&stageIndexOf(c.uid)>=0){handleCard('district',String(c.uid));return;}const a=legal().find(x=>x.type==='choose_district'&&x.target===p.id&&x.uid===c.uid);openViewer('district',c,a,p.name);}return;}
-    const player=e.target.closest('[data-player]');if(player){const id=player.dataset.player;const st=stageStep();
+    const player=e.target.closest('.player-row[data-player]');if(player){const id=player.dataset.player;const st=stageStep();
       if(st&&st.surface==='player'){if(stageIndexOf(id)>=0)renderDetail(id);return;}
       if(M.targetType&&!legal().some(a=>a.type===M.targetType&&a.target===id))return;renderDetail(id);return;}
     const button=e.target.closest('[data-action-index]');if(button){handleGeneric(M.actions[Number(button.dataset.actionIndex)]);return;}
@@ -667,9 +674,19 @@
   function showSidebar(tab=M.sidebarTab){M.sidebar=true;M.sidebarTab=tab;$('sidebarMask').hidden=false;$('mobileSidebar').hidden=false;$('sidebarToggle').setAttribute('aria-expanded','true');$('sidebarToggle').setAttribute('aria-label','收起侧边栏');$('sidebarToggle').textContent='›';renderSidebar();}
   function hideSidebar(){M.sidebar=false;$('sidebarMask').hidden=true;$('mobileSidebar').hidden=true;$('sidebarToggle').setAttribute('aria-expanded','false');$('sidebarToggle').setAttribute('aria-label','展开侧边栏');$('sidebarToggle').textContent='‹';}
   function renderSidebar(){if(!M.sidebar)return;document.querySelectorAll('[data-sidebar-tab]').forEach(b=>b.classList.toggle('active',b.dataset.sidebarTab===M.sidebarTab));
-    const log=M.state?.log||[];
+    $('sidebarChatChannels').hidden=M.sidebarTab!=='chat';
+    document.querySelectorAll('[data-chat-channel]').forEach(button=>button.setAttribute('aria-selected',String(button.dataset.chatChannel===M.chatChannel)));
+    const debugTabs=$('debugLogViews'),canInspect=!!(M.state?.debugMode&&!M.state?.spectating&&M.state?.debugLogs);
+    debugTabs.hidden=!canInspect||M.sidebarTab!=='log';
+    let log=M.state?.log||[];
+    if(canInspect){
+      if(!M.state.players.some(player=>player.id===M.debugLogPlayerId))M.debugLogPlayerId=M.id||M.state.players[0]?.id;
+      debugTabs.innerHTML=M.state.players.map(player=>`<button type="button" role="tab" aria-controls="sidebarContent" data-log-player="${attr(player.id)}" aria-selected="${player.id===M.debugLogPlayerId}" title="查看 ${attr(player.name)} 看到的战报">${esc(player.seat+1)} · ${esc(player.name)}</button>`).join('');
+      log=M.state.debugLogs[M.debugLogPlayerId]||[];
+    }
     // 结构与类名对齐 PC 端：战报 .log > div.<type>，聊天 .chat-log > .chat-entry > .name/.text/.ts
-    const rows=M.sidebarTab==='log'?[log.length?`<div class="log-list">${log.map(x=>`<div class="${attr(x.type||'info')}">${esc(x.text)}</div>`).join('')}</div>`:'']:M.chat.map(x=>`<div class="chat-entry${x.playerId===M.id?' self':''}"><span class="name">${esc(x.playerName||'玩家')}</span><span class="text">${esc(x.text)}</span><span class="ts">${x.sentAt?new Date(x.sentAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):''}</span></div>`);
+    const chatRows=channel=>M.chat.filter(message=>(message.channel||'public')===channel).map(x=>`<div class="chat-entry${x.playerId===M.id?' self':''}${channel==='private'?' private':''}"><span class="name">${esc(x.playerName||'玩家')}${channel==='private'?' → '+esc(x.targetName||'玩家'):''}</span><span class="text">${esc(x.text)}</span><span class="ts">${x.sentAt?new Date(x.sentAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):''}</span></div>`).join('');
+    const rows=M.sidebarTab==='log'?[log.length?`<div class="log-list">${log.map(x=>`<div class="${attr(x.type||'info')}">${esc(x.text)}</div>`).join('')}</div>`:'']:['public','private'].map(channel=>`<div class="chat-log" id="${channel==='private'?'sidebarPrivateChat':'sidebarPublicChat'}" ${M.chatChannel!==channel?'hidden':''}>${channel==='private'&&M.state?.debugMode?'<div class="private-chat-note">调试模式：显示所有玩家的私聊</div>':''}${chatRows(channel)||'<div class="sidebar-empty">'+(channel==='private'?'暂无私聊消息':'还没有人发言')+'</div>'}</div>`);
     if(M.sidebarTab==='voice'){
       const roster=V.room?[V.room.localParticipant,...V.room.remoteParticipants.values()]:[];
       $('sidebarContent').innerHTML=`<div class="sidebar-entry">${V.joining?'正在连接语音…':V.room?(V.muted?'已加入 · 静音中':'已加入 · 正在通话'):'未加入语音'}</div>${V.error?`<div class="sidebar-entry">${esc(V.error)}</div>`:''}${roster.map(p=>`<div class="sidebar-entry">${esc(p.name||'玩家')}${p===V.room.localParticipant?'（我）':''}</div>`).join('')}<button class="voice-action" id="voicePrimary" type="button" ${V.joining?'disabled':''}>${V.room?(V.muted?'开麦':'静音'):'加入语音'}</button>${V.room?'<button class="voice-action secondary" id="voiceLeave" type="button">退出语音</button>':''}`;
@@ -677,11 +694,19 @@
     }
     $('sidebarContent').innerHTML=rows.join('')||'<div class="sidebar-empty">'+(M.sidebarTab==='log'?'暂无战报':'还没有人发言')+'</div>';
     $('sidebarChatForm').hidden=!!M.state?.spectating||M.sidebarTab!=='chat'||M.state?.phase==='gameover';
+    const targets=(M.state?.players||[]).filter(player=>player.id!==M.id),select=$('sidebarChatTarget');
+    if(!targets.some(player=>player.id===M.chatTargetId))M.chatTargetId=targets[0]?.id||'';
+    select.innerHTML=targets.map(player=>`<option value="${attr(player.id)}">私聊 · ${esc(player.name)}</option>`).join('');
+    select.value=M.chatTargetId;select.hidden=M.chatChannel!=='private';
+    $('sidebarChatInput').placeholder=M.chatChannel==='private'?'输入私聊内容…':'公屏发言…';
     $('sidebarContent').scrollTop=$('sidebarContent').scrollHeight;
   }
   $('sidebarToggle').onclick=()=>M.sidebar?hideSidebar():showSidebar();$('sidebarClose').onclick=hideSidebar;$('sidebarMask').onclick=hideSidebar;
   document.querySelectorAll('[data-sidebar-tab]').forEach(b=>b.onclick=()=>showSidebar(b.dataset.sidebarTab));
-  $('sidebarChatForm').onsubmit=e=>{e.preventDefault();const input=$('sidebarChatInput'),value=input.value.trim();if(value){send({t:'chat',text:value});input.value='';}};
+  $('debugLogViews').onclick=event=>{const button=event.target.closest('[data-log-player]');if(button){M.debugLogPlayerId=button.dataset.logPlayer;renderSidebar();}};
+  document.querySelectorAll('[data-chat-channel]').forEach(button=>button.onclick=()=>{M.chatChannel=button.dataset.chatChannel;renderSidebar();});
+  $('sidebarChatTarget').onchange=event=>{M.chatTargetId=event.target.value;};
+  $('sidebarChatForm').onsubmit=e=>{e.preventDefault();const input=$('sidebarChatInput'),value=input.value.trim();if(M.chatChannel==='private'&&!M.chatTargetId){message('没有可私聊的玩家');return;}if(value){send({t:'chat',text:value,...(M.chatChannel==='private'?{targetId:M.chatTargetId}:{})});input.value='';}};
   function loadVoiceSdk(){if(window.LivekitClient)return Promise.resolve(window.LivekitClient);return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='./vendor/livekit-client.umd.min.js';script.onload=()=>window.LivekitClient?resolve(window.LivekitClient):reject(new Error('语音组件加载失败'));script.onerror=()=>reject(new Error('语音组件加载失败'));document.head.appendChild(script);});}
   async function joinVoice(){if(V.room||V.joining)return;V.joining=true;V.error='';renderSidebar();try{
       if(!navigator.mediaDevices?.getUserMedia)throw new Error('当前浏览器不允许使用麦克风');
@@ -698,10 +723,8 @@
   $('menuButton').onclick=()=>{M.menu=true;$('menuOverlay').hidden=false;const s=M.state;$('roomInfo').textContent=M.room?'房间号 '+M.room+' · '+(s?.roomName||'')+' · 第 '+(s?.round||1)+' 轮 · '+(s?.endDistricts||8)+' 栋结束':'尚未进入房间';};
   const closeMenu=()=>{M.menu=false;$('menuOverlay').hidden=true;};
   $('menuClose').onclick=closeMenu;$('menuCloseBottom').onclick=closeMenu;
-  const speeds={slow:['慢速',1300],normal:['标准',820],fast:['快速',330]};
-  function syncSpeed(){$('menuSpeed').textContent='电脑速度 · '+speeds[M.speed]?.[0];}syncSpeed();
-  $('menuSpeed').onclick=()=>{const order=['slow','normal','fast'];M.speed=order[(order.indexOf(M.speed)+1)%3];localStorage.setItem('citadels.speed',M.speed);send({t:'setPace',pace:speeds[M.speed][1]});syncSpeed();};
   $('menuHosting').onclick=()=>send({t:'setHosting',enabled:!M.state?.hostingEnabled});
+  $('menuDebugAuto').onclick=()=>send({t:'setDebugAuto',enabled:!M.state?.debugAuto});
   $('menuAutoHost').onclick=()=>send({t:'setAutoHost',enabled:!(M.state?.autoHostEnabled??(M.state?.config?.autoHost!==false))});
   const referenceParent=$('referenceOverlay').parentNode,viewerParent=$('viewer').parentNode;
   function openReference(title,html,all=false){closeMenu();M.referenceAll=all;
@@ -760,12 +783,17 @@
   $('viewer').onclick=e=>{if(e.target.id==='viewer')closeViewer();};
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('eventOverlay')&&!$('eventOverlay').hidden){closeEvent();}else if($('viewer').classList.contains('show'))closeViewer();else if(M.stage){backStage();}else if(M.confirm){M.confirm=null;render();}else if(M.focus){M.focus=null;render();}else if(!$('referenceOverlay').hidden)closeReference();else if($('sheet').classList.contains('show'))closeSheet();else if(M.sidebar)hideSidebar();else closeMenu();}});
   setInterval(()=>{if(M.ws?.readyState===1)send({t:'heartbeat',ts:Date.now()});},5000);
+  function openDebugGameMobile(){
+    if(window.CitadelDebugEditor)window.CitadelDebugEditor.open(state=>$('lobby').startDebugGame(state));
+    else message('调试模式界面尚未加载，请刷新页面');
+  }
   // 把对局入口接到共享组件上：组件收到非大厅状态时调用它，把 socket 交给本页面
   const lobbyEl=$('lobby');
   if(lobbyEl)lobbyEl.addEventListener('citadels-extra',e=>{
     if(e.detail?.kind==='all-roles')openRoles(true);
     else if(e.detail?.kind==='all-buildings')openBuildings(true);
     else if(e.detail?.kind==='rules')$('menuRules').onclick();
+    else if(e.detail?.kind==='debug-game')openDebugGameMobile();
   });
   if(lobbyEl&&customElements.get('c-citadels-lobby'))lobbyEl.onGameStart=adoptGame;
   else message('界面组件加载失败，请刷新页面');

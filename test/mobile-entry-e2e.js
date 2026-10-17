@@ -196,12 +196,10 @@ async function main() {
         assert.equal(await watcher.locator('#actions button').count(), 0);
         await watcher.locator('#menuButton').click();
         assert.equal(await watcher.locator('#menuAutoHost').isHidden(), true);
-        assert.equal(await watcher.locator('#menuSpeed').isHidden(), true);
         await watcher.locator('#menuClose').click();
       } else {
         await watcher.locator('#mobile-menu-toggle').click();
         assert.equal(await watcher.locator('#btn-chat').isHidden(), true);
-        assert.equal(await watcher.locator('#btn-speed').isHidden(), true);
       }
       assert.equal(await selector.evaluate(node => {
         const r=node.getBoundingClientRect();

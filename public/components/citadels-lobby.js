@@ -61,6 +61,11 @@
         <div class="mode-name">联机模式</div>
         <div class="mode-tip">创建房间或输入房号，与好友对战</div>
       </button>
+      <button class="mode-card" id="btn-debug-game" type="button">
+        <div class="mode-icon">⚙</div>
+        <div class="mode-name">调试模式</div>
+        <div class="mode-tip">编辑任意对局状态，公开手牌并手动推进</div>
+      </button>
       <a class="mode-card" href="./replays.html" id="btn-replays">
         <div class="mode-icon">▶</div>
         <div class="mode-name">查看录像</div>
@@ -162,14 +167,6 @@
         </label>
         <p class="dim small mcts-hint">搜索达到时间预算或模拟次数上限时结束。启发式电脑的参数留空时自动配置。</p>
       </div>
-      <label class="field">
-        <span>电脑节奏</span>
-        <select id="cfg-speed">
-          <option value="slow">慢速（看得最清楚）</option>
-          <option value="normal" selected>标准</option>
-          <option value="fast">快速（老手）</option>
-        </select>
-      </label>
       <label class="field">
         <span>结束条件</span>
         <select id="cfg-end">
@@ -542,7 +539,6 @@
         myId: null,
         myIdx: null,
         name: '玩家',
-        speed: 'normal',       // 电脑行动节奏：slow | normal | fast
         lastCfg: null,
         noticeSeen: null,
         paused: false,
@@ -575,27 +571,6 @@
       function clearNetSession() {
         try { window.localStorage.removeItem(NET_SESSION_KEY); } catch (e) { /* ignore */ }
       }
-
-      /* --------------------------- 电脑行动节奏 --------------------------- */
-      const PACE = {
-        slow:   { draft: 1700, big: 2100, act: 1300, min: 700, label: '慢速' },
-        normal: { draft: 1050, big: 1300, act: 820,  min: 430, label: '标准' },
-        fast:   { draft: 420,  big: 480,  act: 330,  min: 190, label: '快速' }
-      };
-      const SPEED_ORDER = ['slow', 'normal', 'fast'];
-      PACE.slow.label = '慢速';
-      PACE.normal.label = '标准';
-      PACE.fast.label = '快速';
-
-      function loadSpeed() {
-        let v = null;
-        try { v = window.localStorage.getItem('citadels.speed'); } catch (e) { /* 隐私模式 */ }
-        App.speed = PACE[v] ? v : 'normal';
-      }
-      function saveSpeed() {
-        try { window.localStorage.setItem('citadels.speed', App.speed); } catch (e) { /* 忽略 */ }
-      }
-      function pace() { return PACE[App.speed] || PACE.normal; }
 
       function gameServerBase() {
         const url = new URL(selectedGameServer || location.origin);
@@ -721,7 +696,7 @@
           Net.autoStart = true;
           Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
             playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
-            endDistricts: cfg.end, charSetMode: cfg.chars, scenario: cfg.scenario, botPace: pace().act, voice: false,
+            endDistricts: cfg.end, charSetMode: cfg.chars, scenario: cfg.scenario, voice: false,
             mcts: Object.assign({ timeBudgetMs: readSearchBudget() }, cfg.botType === 'neural' ? {
               simulations: Number($('#cfg-mcts-sims').value) || 5000,
               maxDepth: Number($('#cfg-mcts-depth').value) || 2000,
@@ -736,6 +711,7 @@
       const Net = {
         autoStart: false,
         startGameRequested: false,
+        debugState: null,
         ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
         reconnectTimer: null, reconnectDelay: 1000, heartbeatTimer: null,
         handedOver: false,   // 已把 socket 交给页面接管
@@ -840,7 +816,8 @@
         requestAutoStart() {
           if (this.startGameRequested) return;
           this.startGameRequested = true;
-          this.send({ t: 'startGame' });
+          this.send({ t: 'startGame', debugState: this.debugState || undefined });
+          this.debugState = null;
         },
       };
 
@@ -1058,7 +1035,7 @@
       // 直接显示大厅房间，房主可以再开一局。
       host.returnToLobby = function (state) {
         App.localServerGame = false;
-        Net.autoStart = false;
+        Net.autoStart = true;
         Net.startGameRequested = false;
         Net.handedOver = false;
         started = false;
@@ -1088,6 +1065,27 @@
           detail: { kind: kind }, bubbles: true, composed: true
         }));
       }
+
+      host.startDebugGame = function (state) {
+        const players = state && state.players;
+        if (!Array.isArray(players) || players.length < 2 || players.length > 8) {
+          toast('调试对局需要 2–8 名玩家'); return;
+        }
+        App.localServerGame = true;
+        App.mode = 'net'; App.leavingNetGame = false;
+        App.state = null; App.myId = null; App.noticeSeen = 0;
+        App.botDebugEntries = [];
+        clearGameBoardView();
+        Net.name = players[0].name || '调试玩家';
+        Net.debugState = state;
+        Net.startGameRequested = false;
+        Net.autoStart = true;
+        Net.connect(() => Net.send({ t: 'createRoom', name: Net.name, config: {
+          playerCount: players.length, bots: 0, botType: 'npc', botLevel: 'hard',
+          endDistricts: Number((state.config || {}).endDistricts) || 8,
+          charSetMode: 'base', autoHost: false, voice: false
+        }}), { resume: false });
+      };
 
       ['#cfg-server', '#net-server'].forEach(sel => {
         const input = $(sel);
@@ -1119,6 +1117,7 @@
       });
 
       $('#btn-single').onclick = () => showScreen('setup');
+      $('#btn-debug-game').onclick = () => openExtra('debug-game');
       $('#btn-online').onclick = () => {
         App.leavingNetGame = false;
         showScreen('lobby');
@@ -1156,16 +1155,6 @@
       if ($('#btn-server-console')) $('#btn-server-console').onclick = () => openExtra('console');
       if ($('#btn-server-startup')) $('#btn-server-startup').onclick = () => openExtra('startup');
 
-      // 电脑节奏：设置页下拉
-      loadSpeed();
-      if ($('#cfg-speed')) {
-        $('#cfg-speed').value = App.speed;
-        $('#cfg-speed').onchange = () => {
-          App.speed = PACE[$('#cfg-speed').value] ? $('#cfg-speed').value : 'normal';
-          saveSpeed();
-        };
-      }
-
       // 搜索预算默认显示，详细参数由高级选项按钮控制。
       const botTypeSel = $('#cfg-bot-type');
       if (botTypeSel) botTypeSel.onchange = syncSearchFields;
@@ -1186,9 +1175,6 @@
           scenario: $('#cfg-scenario').value,
           name: ($('#cfg-name').value || '我').trim()
         };
-        if ($('#cfg-speed') && PACE[$('#cfg-speed').value]) {
-          App.speed = $('#cfg-speed').value; saveSpeed();
-        }
         App.lastCfg = cfg; App.mode = 'net'; App.localServerGame = true; App.name = cfg.name;
         startPythonSingle(cfg);
       };
@@ -1206,7 +1192,6 @@
               charSetMode: $('#net-chars').value,
               scenario: $('#net-scenario').value,
               autoHost: $('#net-auto-host').value === 'on',
-              botPace: pace().act,
               voice: $('#net-voice').value === 'on'
             })
           });

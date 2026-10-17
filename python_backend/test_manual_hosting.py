@@ -86,12 +86,10 @@ class ManualHostingTests(unittest.IsolatedAsyncioTestCase):
                 apply.assert_not_called()
 
 
-    async def test_disabling_during_bot_delay_prevents_decision(self):
+    async def test_disabling_before_bot_task_runs_prevents_decision(self):
         room, client = await self.setup_room()
-        room['config']['botPace'] = 80
         await self.app._handle_message(client, {'t': 'setHosting', 'enabled': True})
         task = room['botTask']
-        await asyncio.sleep(0.01)
         await self.app._handle_message(client, {'t': 'setHosting', 'enabled': False})
         await task
         self.assertEqual(self.app.native_worker_manager.game_worker.npc_decisions, 0)
@@ -99,7 +97,6 @@ class ManualHostingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_disabling_while_deciding_discards_action(self):
         room, client = await self.setup_room()
-        room['config']['botPace'] = 1
         started, release = asyncio.Event(), asyncio.Event()
         original = self.app._bot_available_actions
         async def delayed(state, player_id):

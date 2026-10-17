@@ -1183,6 +1183,19 @@ struct NativeGameState {
     return ok;
   }
 
+  void prepare_turn_start() {
+    if (phase != NativePhase::Action || !has_turn || !active()) return;
+    const auto& role = active()->role_id;
+    if (role == "king" || role == "noble") move_crown(active_player);
+    if (turn_phase == "hospital" || resources_taken || !pending_kind.empty()) return;
+    for (size_t owner = 0; owner < players.size(); ++owner)
+      if (static_cast<int>(owner) != active_player && players[owner].has_crown &&
+          has_effect(static_cast<int>(owner), "ballroom")) {
+        pending_kind = "ballroom";
+        break;
+      }
+  }
+
   bool end_turn() {
     if (!active()) return false;
     if (turn_phase != "setup") {
@@ -1266,14 +1279,7 @@ struct NativeGameState {
         builds = 0; spent_on_build = 0; used_lab = false; used_smithy = false; used_museum = false;
         // The crown changes hands as soon as role 4 is called. Resolve it
         // before resources and any subsequent Blackmailer threat.
-        if (entry.number == 4 && (entry.char_id == "king" || entry.char_id == "noble")) {
-          move_crown(entry.player);
-        }
-        if (turn_phase == "hospital") return true;
-        for (size_t owner = 0; owner < players.size(); ++owner)
-          if (static_cast<int>(owner) != active_player && players[owner].has_crown && has_effect(static_cast<int>(owner), "ballroom")) {
-            pending_kind = "ballroom"; break;
-          }
+        prepare_turn_start();
         return true;
       }
       active_player = -1; has_turn = false; turn_phase.clear();

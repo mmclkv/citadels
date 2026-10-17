@@ -3,10 +3,11 @@ const CACHE_NAME = 'citadels-shell-v90';
 // 它只在第一次点「语音」时才动态加载，下面的运行时缓存会在那次请求后把它存下来。
 // 放进 APP_SHELL 会让每个单机玩家都白白下载一遍。
 const APP_SHELL = [
+  './', './index.html', './manifest.json', './style.css', './chat.css',
+  './debug-state-editor.js', './debug-state-editor.css',
   './replays.html', './replays.js?v=1', './replays.css?v=1',
-  './', './index.html', './manifest.json', './style.css',
   './themes/neon/theme.css', './themes/neon/manifest.js', './themes/theme-manager.js',
-  './src/cards.js', './app.js', './mobile.html', './mobile-live.css', './mobile.js',
+  './src/cards.js', './app.js', './components/citadels-lobby.js?v=11', './mobile.html', './mobile-live.css', './mobile.js',
   './mobile-theme.js', './themes/classic/mobile.css',
   './icons/citadels.svg'
 ];

@@ -114,6 +114,9 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
 .player-row.self{border-color:#3a86c2;background:linear-gradient(135deg,#12456f,#0d2f4f 55%,#0a2038);box-shadow:inset 0 0 26px #35b7ff38,0 0 12px #06263f}
 .player-row.self .pname{color:#fff}
 .player-row.self .city-mini{background:color-mix(in srgb,var(--district-color) 22%,#0d2c46)}
+.debug-public-hand{display:flex;align-items:center;gap:3px;flex-wrap:wrap;padding:3px 1px 1px;font-size:9px;line-height:1.15;max-height:35px;overflow:auto;color:#aac0d2}
+.debug-public-hand b{color:var(--gold);white-space:nowrap}
+.debug-public-hand span{padding:2px 3px;border:1px solid #d4b05b40;border-radius:4px;background:#0004;white-space:nowrap}
 /* 底部按钮：一行排开，不换行、不滚动，靠字号自适应 */
 .actions{display:flex;flex-wrap:nowrap;gap:5px;max-height:none;overflow:visible}
 .actions .btn{flex:1 1 0;min-width:0;padding:0 5px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

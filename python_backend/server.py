@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from . import cards
 from .rooms import (RoomRegistry, _bot_seat, _empty_seat, _seat_mcts,
                     _seat_heuristic_mcts, lobby_view, public_room)
-from .views import sanitize
+from .views import battle_log_for_viewer, sanitize
 from .agent import AgentClient, AgentError, config_from_env
 from .voice import VoiceService
 from .neural import NeuralPolicy
@@ -41,6 +41,14 @@ from .replays import Recorder, ReplayStore
 
 ROOT = Path(__file__).resolve().parents[1]
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+BALLROOM_THANKS_TEXTS = (
+    "感谢你的舞厅招待，愿你的城邦繁荣！",
+    "多谢盛情款待，向你的舞厅和王冠致意。",
+    "谢谢你邀请我赴宴，今晚的舞会令人难忘！",
+    "承蒙款待，谨向舞厅主人表达谢意。",
+    "感谢这场精彩的舞会，愿你今晚尽兴！",
+    "谢谢你的热情招待，向你致以诚挚的感谢。",
+)
 MAX_HEADER_BYTES = 16384
 MAX_FRAME_BYTES = 1_048_576
 MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
@@ -508,19 +516,29 @@ class PythonServer:
         if not native_live:
             raise RuntimeError("C++ 游戏引擎不可用，无法生成游戏视图")
         perspective_id = spectator["viewPlayerId"] if spectator else player_id
+        if room.get("debugMode") and not spectator and player_id:
+            # Sanitize from the actor's perspective before hiding private data.
+            # Replacing `you` afterwards cannot recover the actor's draft pool.
+            perspective_id = self._debug_actor(room["state"]) or player_id
         if spectator and not any(p["id"] == perspective_id for p in room["state"]["players"]):
             perspective_id = room["state"]["players"][0]["id"]
             spectator["viewPlayerId"] = perspective_id
         view = sanitize(room["state"], perspective_id,
-                        legal_actions=[])
+                        legal_actions=[], allow_private_logs=not bool(spectator))
         view.update({"spectating": bool(spectator),
                      "viewPlayerId": perspective_id if spectator else None})
         view.update({"roomId": room["id"], "roomName": room["name"],
                      "hostId": room["seats"][0]["id"], "agentStatus": room.get("agentStatus"),
                      "voiceReady": self.voice.configured and not spectator,
                      "voiceEnabled": room["config"].get("voice") is not False})
+        if room.get("debugMode"):
+            view["debugMode"] = True
+            view["debugAuto"] = bool(room.get("debugAuto"))
+            if not spectator and player_id == room["seats"][0]["id"]:
+                view["debugLogs"] = {player["id"]: battle_log_for_viewer(room["state"], player["id"])
+                                     for player in room["state"]["players"]}
         seat = next((seat for seat in room["seats"] if seat["id"] == player_id), None)
-        if seat and not seat.get("isBot"):
+        if seat and not seat.get("isBot") and not room.get("debugMode"):
             player = next((p for p in room["state"]["players"] if p["id"] == player_id), None)
             view["hostingEnabled"] = bool(player and player.get("isBot"))
             view["autoHostEnabled"] = seat.get("autoHost", room["config"].get("autoHost")) is not False
@@ -534,7 +552,8 @@ class PythonServer:
             seat = next((seat for seat in room["seats"] if seat["id"] == player["id"]), None)
             connected = any(client.id == player["id"] and client.room_id == room["id"]
                             for client in self.clients)
-            player["connected"] = connected or bool(seat and seat["isBot"])
+            player["connected"] = (room.get("debugMode") or connected or
+                                   bool(seat and seat["isBot"]))
             player["disconnected"] = bool(seat and seat.get("disconnected"))
             player["left"] = bool(seat and seat.get("left"))
         return view
@@ -556,7 +575,27 @@ class PythonServer:
             return view
         # Always query native here: some action/reaction states are deliberately
         # not implemented in the Python presentation shim anymore.
-        view["available"] = await self._bot_available_actions(room["state"], player_id)
+        action_player_id = (self._debug_actor(room["state"])
+                            if room.get("debugMode") else player_id)
+        view["available"] = await self._bot_available_actions(
+            room["state"], action_player_id or player_id)
+        if room.get("debugMode"):
+            view["you"] = action_player_id
+            full_hands = {player.get("id"): player.get("hand", [])
+                          for player in room["state"].get("players", [])}
+            for player in view.get("players", []):
+                player["hand"] = full_hands.get(player.get("id"), [])
+                player["handCount"] = len(player["hand"])
+                for card in player["hand"]:
+                    card["canBuild"] = any(action.get("type") == "build" and
+                                            action.get("uid") == card.get("uid")
+                                            for action in view["available"].get("actions", []))
+            actor = next((p for p in room["state"]["players"]
+                          if p.get("id") == action_player_id), None)
+            if actor:
+                view["available"]["prompt"] = "调试模式 · 由你操作：" + actor.get("name", "当前玩家")
+            if room.get("debugAuto"):
+                view["available"] = {"actions": [], "prompt": "调试模式 · 电脑自动行动中"}
         if view.get("hostingEnabled"):
             view["available"] = {"actions": [], "prompt": "启发式电脑托管中，可在菜单中关闭托管"}
         build_uids = {action.get("uid") for action in view["available"].get("actions", [])
@@ -613,6 +652,13 @@ class PythonServer:
             if hosting_version is not None and (not actor or not actor.get("isBot") or
                     actor.get("hostingVersion", 0) != hosting_version):
                 return {"ok": False, "error": "托管状态已变化"}
+            ballroom_target = None
+            if (action.get("type") == "district_effect" and action.get("name") in ("ballroom_thanks", "ballroom_skip") and
+                    ((current.get("turn") or {}).get("pending") or {}).get("kind") == "ballroom"):
+                ballroom_target = next((dict(player) for player in current["players"]
+                    if player["id"] != player_id and player.get("hasCrown") and any(
+                        (card.get("purpleEffect") or (card.get("purple") or {}).get("effect")) == "ballroom"
+                        for card in player.get("city", []))), None)
             try:
                 native_state = await asyncio.to_thread(
                     worker.apply, game_id=str(room["id"]), player_id=player_id, action=action)
@@ -647,9 +693,12 @@ class PythonServer:
             state_log = merged.setdefault("log", [])
             actor = old_players.get(player_id, {})
             action_text = self._game_action_log_text(current, action, merged)
-            state_log.append({"i": len(state_log),
-                              "text": f"{actor.get('name') or player_id}：{action_text}",
-                              "type": "info", "round": merged.get("round", 0)})
+            action_entry = {"i": len(state_log),
+                            "text": f"{actor.get('name') or player_id}：{action_text}",
+                            "type": "info", "round": merged.get("round", 0)}
+            if action.get("type") == "district_effect" and action.get("name") in ("ballroom_thanks", "ballroom_skip"):
+                action_entry["visibleTo"] = [player_id] + ([ballroom_target["id"]] if ballroom_target else [])
+            state_log.append(action_entry)
             for effect_player, effect_text in self._turn_effect_log_entries(current, merged):
                 state_log.append({"i": len(state_log),
                                   "text": f"{effect_player}：{effect_text}",
@@ -659,7 +708,43 @@ class PythonServer:
             await self._record_replay(room, player_id, action, merged)
             current.clear()
             current.update(merged)
+            if ballroom_target and actor and action.get("name") == "ballroom_thanks":
+                await self._broadcast_chat(room, actor, secrets.choice(BALLROOM_THANKS_TEXTS), ballroom_target)
+            if actor and action.get("type") == "district_effect" and action.get("name") == "ballroom_skip":
+                await self._notify_ballroom_skip(room, actor, ballroom_target)
             return {"ok": True}
+
+    async def _notify_ballroom_skip(self, room: dict, actor: dict, owner: dict | None) -> None:
+        owner_name = owner.get("name", "舞厅主人") if owner else "舞厅主人"
+        payload = {"t": "ballroomSkipped", "playerId": actor["id"], "playerName": actor["name"],
+                   "message": f"{actor['name']}没有向持有皇冠和舞厅的{owner_name}致谢，因此本回合已被跳过。"
+                              "本次没有获得金币或建筑牌，也无法继续本回合的行动。"
+                              "下次请先打开对方的舞厅卡牌，在详情中选择“致谢”。"}
+        recipient = room["seats"][0]["id"] if room.get("debugMode") else actor["id"]
+        for client in list(self.clients):
+            if (client.room_id == room["id"] and client.id == recipient and
+                    client.id not in room.get("spectators", {})):
+                try:
+                    await client.send(payload)
+                except (ConnectionError, OSError):
+                    pass
+
+    async def _broadcast_chat(self, room: dict, sender: dict, text: str,
+                              target: dict | None = None) -> None:
+        """Use one routing policy for player messages and automatic ballroom thanks."""
+        payload = {"t": "chat", "playerId": sender["id"], "playerName": sender["name"],
+                   "channel": "private" if target else "public", "text": text,
+                   "sentAt": int(time.time() * 1000)}
+        if target:
+            payload.update({"targetId": target["id"], "targetName": target["name"]})
+        recipients = ({room["seats"][0]["id"]} if room.get("debugMode")
+                      else {sender["id"], target["id"] if target else None})
+        for client in list(self.clients):
+            if client.room_id == room["id"] and (not target or client.id in recipients):
+                try:
+                    await client.send(payload)
+                except (ConnectionError, OSError):
+                    pass
 
     async def _broadcast_state(self, room: dict) -> None:
         if room.get("closed"):
@@ -725,6 +810,14 @@ class PythonServer:
                      else (turn or {}).get("playerIdx"))
             return state["players"][actor]["id"] if isinstance(actor, int) and 0 <= actor < len(state["players"]) else None
         return None
+
+    def _debug_actor(self, state: dict) -> str | None:
+        confirmation = state.get("roundConfirm")
+        if confirmation:
+            for index, confirmed in enumerate(confirmation.get("confirmed") or []):
+                if not confirmed and index < len(state.get("players") or []):
+                    return state["players"][index]["id"]
+        return self._bot_actor(state)
 
     @staticmethod
     def _auto_host_enabled(room: dict, seat: dict) -> bool:
@@ -1073,7 +1166,13 @@ class PythonServer:
             if builder_idx == magistrate_idx or builder_idx >= len(new_players):
                 continue
             new_builder_uids = {card.get("uid") for card in new_players[builder_idx].get("city") or []}
-            for card in old_player.get("city") or []:
+            # Native rules defer construction until the reaction resolves, so
+            # the announced building is still in the builder's hand.
+            candidates = list(old_player.get("city") or [])
+            build_uid = (reaction.get("build") or {}).get("uid")
+            candidates.extend(card for card in old_player.get("hand") or []
+                              if build_uid and card.get("uid") == build_uid)
+            for card in candidates:
                 uid = card.get("uid")
                 if (uid and uid not in old_magistrate_uids and uid not in new_builder_uids and
                         any(moved.get("uid") == uid for moved in new_magistrate_city)):
@@ -1084,7 +1183,7 @@ class PythonServer:
     def _append_magistrate_confiscate_notice(previous: dict, updated: dict,
                                              action: dict) -> None:
         """Emit the transfer animation event after a Magistrate accepts confiscation."""
-        if action.get("type") != "reaction" or action.get("name") != "use":
+        if action.get("type") != "reaction" or not PythonServer._reaction_used(action):
             return
         moved = PythonServer._magistrate_confiscated_card(previous, updated)
         if not moved:
@@ -1449,16 +1548,22 @@ class PythonServer:
         kind = action.get("type", "")
         turn = state.get("turn") or {}
         pending = turn.get("pending") or {}
-        if (kind == "reaction" and action.get("name") == "use" and updated is not None):
+        if (kind == "reaction" and PythonServer._reaction_used(action) and updated is not None):
             confiscated = PythonServer._magistrate_confiscated_card(state, updated)
             if confiscated:
                 builder_idx, magistrate_idx, card = confiscated
                 builder = PythonServer._player_label(state, builder_idx)
                 magistrate = PythonServer._player_label(state, magistrate_idx)
                 name = card.get("name") or "建筑"
-                cost = max(0, int(card.get("cost") or 0))
                 return (f"【行政官】执行逮捕令，从{builder}处没收刚建造的『{name}』，"
-                        f"免费建入{magistrate}的城市；建造者支付的{cost}枚建造金币已退还。")
+                        f"免费建入{magistrate}的城市；建造金币已退还。")
+        if kind == "blackmailer_bribe":
+            players = state.get("players") or []
+            payer_idx = turn.get("playerIdx")
+            payer = (players[payer_idx] if isinstance(payer_idx, int) and
+                     0 <= payer_idx < len(players) else {})
+            amount = max(0, int(payer.get("gold") or 0)) // 2
+            return f"【勒索者】支付了{amount}枚金币作为贿金，赎回威胁标记。"
         reaction = state.get("reaction") or {}
         if kind == "reaction" and reaction.get("kind") == "blackmailer":
             target_idx = (turn.get("playerIdx") if pending.get("kind") == "blackmailer_threat"
@@ -1733,7 +1838,6 @@ class PythonServer:
                         room["agentStatus"].get("playerId") == actor_now["id"] and
                         not state.get("roundConfirm")):
                     break
-                await asyncio.sleep(max(0, int(room["config"].get("botPace") or 0)) / 1000)
                 if not actor_now.get("isBot"):
                     continue
                 hosting_version = actor_now.get("hostingVersion", 0)
@@ -1991,8 +2095,6 @@ class PythonServer:
                     room["config"][key] = updates[key]
             if scenario is not None:
                 room["config"]["scenario"] = scenario
-            if updates.get("botPace"):
-                room["config"]["botPace"] = int(updates["botPace"])
             for key in ("mctsSimulations", "mctsMaxDepth", "mctsParticles"):
                 if key in updates and updates[key] is not None:
                     try:
@@ -2057,6 +2159,77 @@ class PythonServer:
         if kind == "startGame":
             if room["seats"][0]["id"] != client.id:
                 raise ValueError("仅房主可开始游戏")
+            debug_snapshot = message.get("debugState")
+            if debug_snapshot is not None:
+                if not isinstance(debug_snapshot, dict):
+                    raise ValueError("调试状态必须是 JSON 对象")
+                if room.get("state"):
+                    raise ValueError("房间已开局")
+                async with self._native_action_lock:
+                    if not self.native_worker_manager or not self.native_worker_manager.running:
+                        raise RuntimeError("C++ 游戏引擎不可用，无法载入调试状态")
+                    debug_players = debug_snapshot.get("players")
+                    if not isinstance(debug_players, list) or not debug_players:
+                        raise ValueError("调试状态必须包含玩家列表")
+                    if debug_snapshot.get("phase") not in ("draft", "action"):
+                        raise ValueError("调试模式目前支持选角阶段或行动阶段")
+                    if not 2 <= len(debug_players) <= 8:
+                        raise ValueError("调试对局人数必须为 2–8 人")
+                    if any(not isinstance(player, dict) for player in debug_players):
+                        raise ValueError("players 中每位玩家都必须是对象")
+                    player_ids = [player.get("id") for player in debug_players]
+                    if any(not isinstance(player_id, str) or not player_id for player_id in player_ids) or len(set(player_ids)) != len(player_ids):
+                        raise ValueError("每位玩家都需要唯一且非空的 id")
+                    if debug_snapshot["phase"] == "draft":
+                        draft = debug_snapshot.get("draft")
+                        steps = draft.get("steps") if isinstance(draft, dict) else None
+                        step_idx = draft.get("stepIdx") if isinstance(draft, dict) else None
+                        if (not isinstance(steps, list) or not isinstance(step_idx, int) or
+                                not 0 <= step_idx < len(steps) or
+                                not isinstance(steps[step_idx], dict) or
+                                not 0 <= int(steps[step_idx].get("player", -1)) < len(debug_players)):
+                            raise ValueError("选角阶段需要有效的 draft.steps 和当前步骤")
+                    else:
+                        turn = debug_snapshot.get("turn")
+                        if (not isinstance(turn, dict) or not isinstance(turn.get("playerIdx"), int) or
+                                not 0 <= turn["playerIdx"] < len(debug_players)):
+                            raise ValueError("行动阶段需要 turn.playerIdx 指向一位玩家")
+                    debug_players[0]["id"] = client.id
+                    native_state = await asyncio.to_thread(
+                        self.native_worker_manager.game_worker.load_game,
+                        debug_snapshot, str(room["id"]))
+                for index, player in enumerate(native_state["players"]):
+                    player["seat"] = index
+                    player["isBot"] = False
+                    player["connected"] = index == 0
+                    player.setdefault("botType", "npc")
+                    player.setdefault("botLevel", "hard")
+                end_districts = int((debug_snapshot.get("config") or {}).get("endDistricts", 8))
+                purple_names = debug_snapshot.get("uniqueDistricts")
+                if not isinstance(purple_names, list):
+                    purple_names = [card.get("en") for card in (native_state.get("deck") or []) +
+                                    (native_state.get("discard") or []) + [
+                        card for player in native_state["players"]
+                        for card in (player.get("hand") or []) + (player.get("city") or [])]
+                                    if card.get("color") == "purple" and card.get("en")]
+                native_state.update({"roomId": room["id"], "uniqueDistricts": sorted(set(purple_names)),
+                    "config": {"playerCount": len(native_state["players"]),
+                               "endDistricts": end_districts,
+                               "initialCrownSeat": next((i for i, p in enumerate(native_state["players"])
+                                                         if p.get("hasCrown")), 0),
+                               "startingHand": 0, "startingGold": 0, "debugMode": True},
+                    "createdAt": int(time.time() * 1000),
+                    "log": [{"i": 0, "text": "调试模式：从自定义状态开始。", "type": "sys",
+                             "round": native_state.get("round", 1)}],
+                    "notices": [], "noticeSeq": 0, "witchResume": None})
+                room["debugMode"] = True
+                room["debugAuto"] = False
+                room["config"]["playerCount"] = len(native_state["players"])
+                room["state"] = native_state
+                await self._broadcast_state(room)
+                return
+            room["debugMode"] = False
+            room["debugAuto"] = False
             uses_agent = (any(seat["taken"] and seat["isBot"] and seat.get("botType") == "agent"
                               for seat in room["seats"]) or
                           (len([seat for seat in room["seats"] if seat["taken"]]) <
@@ -2129,14 +2302,34 @@ class PythonServer:
         if kind == "action":
             if not room["state"]:
                 raise ValueError("尚未开局")
+            if room.get("debugMode") and room.get("debugAuto"):
+                raise ValueError("电脑自动行动期间不能手动提交行动")
             action = message.get("action") or {}
             if not isinstance(action, dict):
                 raise ValueError("行动必须是对象")
-            result = await self._apply_game_action(room, client.id, action)
+            acting_id = self._debug_actor(room["state"]) if room.get("debugMode") else client.id
+            result = await self._apply_game_action(room, acting_id or client.id, action)
             if not result["ok"]:
                 raise ValueError(result["error"])
             await self._broadcast_state(room)
             self._schedule_bot(room)
+            return
+        if kind == "setDebugAuto":
+            if not room.get("debugMode") or room["seats"][0]["id"] != client.id:
+                raise ValueError("仅调试对局的发起者可切换自动行动")
+            enabled = message.get("enabled") is True
+            room["debugAuto"] = enabled
+            for player in room["state"]["players"]:
+                player["isBot"] = enabled
+                player["botType"] = "npc"
+                player["botLevel"] = "hard"
+            task = room.get("botTask")
+            if not enabled and task and not task.done():
+                task.cancel()
+                room["botTask"] = None
+            await self._broadcast_state(room)
+            if enabled:
+                self._schedule_bot(room)
             return
         if kind in ("restart", "returnToRoom"):
             if kind == "returnToRoom":
@@ -2149,12 +2342,9 @@ class PythonServer:
                 task.cancel()
             room["botTask"] = None
             room["state"] = None
+            room["debugMode"] = False
+            room["debugAuto"] = False
             await self._broadcast_state(room)
-            return
-        if kind == "setPace":
-            pace = message.get("pace")
-            if isinstance(pace, (int, float)) and 60 <= pace <= 6000:
-                room["config"]["botPace"] = round(pace)
             return
         if kind == "setHosting":
             async with self._native_action_lock:
@@ -2197,6 +2387,20 @@ class PythonServer:
                          and not seat["isBot"] and not seat.get("left")), None)
             if not seat:
                 raise ValueError("没有可发言的真人座位")
+            if room.get("debugMode") and seat["id"] != room["seats"][0]["id"]:
+                raise ValueError("仅调试操作者可代玩家发言")
+            sender_id = self._debug_actor(room["state"]) if room.get("debugMode") else seat["id"]
+            sender = next((player for player in room["state"]["players"] if player["id"] == sender_id), None)
+            if not sender:
+                raise ValueError("当前没有可发言的玩家")
+            target_id = message.get("targetId")
+            target = None
+            if target_id is not None:
+                if not isinstance(target_id, str) or not target_id:
+                    raise ValueError("私聊对象无效")
+                target = next((player for player in room["state"]["players"] if player["id"] == target_id), None)
+                if not target or target_id == sender_id:
+                    raise ValueError("请选择另一位本局玩家作为私聊对象")
             now = time.monotonic()
             if getattr(client, "last_chat", 0) and now - client.last_chat < 0.6:
                 raise ValueError("发言太快了，请稍后再试")
@@ -2205,11 +2409,7 @@ class PythonServer:
             if not content:
                 return
             client.last_chat = now
-            payload = {"t": "chat", "playerId": seat["id"], "playerName": seat["name"],
-                       "text": content, "sentAt": int(time.time() * 1000)}
-            for other in list(self.clients):
-                if other.room_id == room["id"]:
-                    await other.send(payload)
+            await self._broadcast_chat(room, sender, content, target)
             return
         raise NotImplementedError("Python 服务端消息尚未迁移：" + str(kind))
 

@@ -133,6 +133,21 @@ int main() {
         std::cout << "}\n" << std::flush;
         continue;
       }
+      if (mode == "load") {
+        const auto* snapshot = request.get("state");
+        if (!snapshot) throw std::runtime_error("load 缺少 state");
+        auto state = load_native_state(*snapshot);
+        // Editor-created action states represent a fresh turn. Restored native
+        // snapshots omit this marker so acknowledged effects are not replayed.
+        if (bool_field(*snapshot, "initializeTurn")) state.prepare_turn_start();
+        games[game_id] = state;
+        heuristic_sessions.erase(game_id);
+        std::cout << "{\"v\":1,\"t\":\"game_result\",\"id\":";
+        write_json_string(std::cout, id);
+        std::cout << ",\"state\":"; write_native_state(std::cout, state);
+        std::cout << "}\n" << std::flush;
+        continue;
+      }
       auto found = games.find(game_id);
       if (game_id.empty() || found == games.end()) throw std::runtime_error("未知 gameId");
       auto& state = found->second;

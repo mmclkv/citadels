@@ -167,8 +167,14 @@ def _removed_view(state: dict) -> dict:
             "faceDownCount": face_down_count}
 
 
+def battle_log_for_viewer(state: dict, player_id: str | None, *, allow_private_logs: bool = True) -> list[dict]:
+    return [{key: value for key, value in entry.items() if key != "visibleTo"}
+            for entry in state["log"]
+            if "visibleTo" not in entry or (allow_private_logs and player_id in entry["visibleTo"])][-120:]
+
+
 def sanitize(state: dict, player_id: str | None,
-             legal_actions: list[dict] | None = None) -> dict:
+             legal_actions: list[dict] | None = None, *, allow_private_logs: bool = True) -> dict:
     viewer_index = next((index for index, player in enumerate(state["players"])
                          if player["id"] == player_id), -1)
     players = []
@@ -249,7 +255,8 @@ def sanitize(state: dict, player_id: str | None,
                     # Declaration order is private: the real warrant is chosen first.
                     "magistrate": {"nums": sorted(warrant.get("nums") or [], key=int),
                                    "playerIdx": warrant["playerIdx"]} if warrant else None},
-        "firstToFinish": state["firstToFinish"], "log": state["log"][-120:],
+        "firstToFinish": state["firstToFinish"],
+        "log": battle_log_for_viewer(state, player_id, allow_private_logs=allow_private_logs),
         "notices": [_notice_for_viewer(notice, viewer_index) for notice in state["notices"][-12:]],
         "scores": scores, "winner": state["winner"],
         "removed": _removed_view(state),
