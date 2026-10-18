@@ -11,6 +11,7 @@
 #include "magician_machine.hpp"
 #include "mcts_core.hpp"
 #include "state_features.hpp"
+#include "search_observation.hpp"
 
 namespace citadels::native {
 
@@ -999,6 +1000,36 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
   std::array<float, kValueSlots> terminal_value_vector(
       const NativeGameState& state, int player) const override {
     return native_win_terminal_reward_vector(state, player);
+  }
+
+  std::vector<InformationSetKey> observation_hashes(const NativeGameState& state) const override {
+    return native_search_observations(state);
+  }
+
+  InformationSetKey visible_action_hash(const NativeGameState& state, int actor, int viewer,
+      const NativeSearchAction& a) const override {
+    InformationSetKeyBuilder b;
+    if (actor != viewer) {
+      if (state.pending_kind == "bishop_payer" || state.pending_kind == "bishop_repay") return {};
+      switch (a.type) {
+        case ActionType::Ability: case ActionType::ChoosePlayer: case ActionType::WizardTarget:
+        case ActionType::SpyTarget: case ActionType::SpyColor: case ActionType::EmperorCrown:
+        case ActionType::Build: case ActionType::WizardBuild: case ActionType::TakeGold:
+        case ActionType::TakeCards: case ActionType::EndTurn: case ActionType::Income:
+          break;
+        default: return {};
+      }
+      // Public announcements only. Card identities/selected payment cards and
+      // private navigation/role commitments never enter another viewer's key.
+      b.i32(actor); b.i32(static_cast<int>(a.type)); b.string(a.target);
+      b.i32(a.num); b.string(a.mode); b.string(a.color);
+    } else {
+      b.i32(actor); b.i32(static_cast<int>(a.type)); b.string(a.uid); b.string(a.name);
+      b.string(a.effect); b.string(a.target); b.string(a.secondary_uid); b.string(a.mode);
+      b.string(a.color); b.i32(a.num); b.i32(a.gold); b.i32(a.cards); b.boolean(a.use);
+      b.boolean(a.has_num); for (const auto& uid : a.selected_uids) b.string(uid);
+    }
+    return b.finish();
   }
 
   InformationSetKey information_set_hash(const NativeGameState& state, int player) const override {

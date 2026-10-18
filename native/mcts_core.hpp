@@ -106,6 +106,68 @@ struct GameAdapter {
     builder.string(key);
     return builder.finish();
   }
+  // Observations are available to each viewer even when somebody else acts.
+  // Adapters can batch this projection to avoid rehashing public state N times.
+  virtual std::vector<InformationSetKey> observation_hashes(const State& state) const {
+    const size_t count = std::max<size_t>(2, state_player_count(state, 0));
+    std::vector<InformationSetKey> result;
+    for (size_t p = 0; p < count; ++p) result.push_back(information_set_hash(state, static_cast<int>(p)));
+    return result;
+  }
+  // Zero means the action itself supplies no additional visible evidence.
+  // Never expose another actor's private action arguments here.
+  virtual InformationSetKey visible_action_hash(const State&, int, int, const Action&) const { return {}; }
+};
+
+inline InformationSetKey extend_information_history(InformationSetKey history,
+    InformationSetKey event, int kind) {
+  InformationSetKeyBuilder b;
+  b.u64(history.lo); b.u64(history.hi); b.i32(kind); b.u64(event.lo); b.u64(event.hi);
+  return b.finish();
+}
+
+// A simulation has one physical state, but a separate perfect-recall history
+// for every player. An opponent's private observation never enters our key.
+template <typename State, typename Action>
+struct SearchInformationHistory {
+  std::vector<InformationSetKey> keys, observations;
+  SearchInformationHistory(const GameAdapter<State, Action>& game, const State& state) {
+    observations = game.observation_hashes(state); keys.resize(observations.size());
+    for (size_t p = 0; p < keys.size(); ++p) {
+      InformationSetKeyBuilder b; b.i32(static_cast<int>(p));
+      keys[p] = extend_information_history(b.finish(), observations[p], 0);
+    }
+  }
+  void action(const GameAdapter<State, Action>& game, const State& state,
+      int actor, const Action& action, size_t index) {
+    // Remember one's own choices even when they cause no immediate observation.
+    if (actor >= 0 && static_cast<size_t>(actor) < keys.size()) {
+      InformationSetKeyBuilder b; b.u64(index);
+      keys[actor] = extend_information_history(keys[actor], b.finish(), 1);
+    }
+    for (size_t p = 0; p < keys.size(); ++p) {
+      const auto event = game.visible_action_hash(state, actor, static_cast<int>(p), action);
+      if (!(event == InformationSetKey{})) keys[p] = extend_information_history(keys[p], event, 2);
+    }
+  }
+  void observe(const GameAdapter<State, Action>& game, const State& state) {
+    const auto next = game.observation_hashes(state);
+    if (next.size() != keys.size()) throw std::runtime_error("Player count changed during search");
+    for (size_t p = 0; p < keys.size(); ++p) if (!(next[p] == observations[p])) {
+      keys[p] = extend_information_history(keys[p], next[p], 3);
+      observations[p] = next[p];
+    }
+  }
+};
+
+struct InformationSetStatistics {
+  struct Edge {
+    int visits = 0, pending = 0;
+    std::array<float, kValueSlots> total{};
+  };
+  std::vector<Edge> edges;
+  std::array<float, kValueSlots> total{};
+  int visits = 0, pending = 0;
 };
 
 template <typename Node>
@@ -186,6 +248,9 @@ class Mcts {
     std::vector<std::vector<std::unique_ptr<Node>>> child_variants;
     std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
     InformationSetKey information_set_key;
+    InformationSetKey history_key;
+    std::shared_ptr<InformationSetStatistics> statistics;
+    size_t incoming_action = 0;
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
     float value = 0.0f;
@@ -257,16 +322,14 @@ class Mcts {
    * 信息集搜索（ISMCTS）：root_states 是同一个公开局面的若干份「隐藏信息猜测」，
    * 每条模拟随机抽一份往下走，但所有粒子共用同一棵树、同一批统计量。
    *
-   * 这与「每个世界各建一棵树再平均根访问分布」（PIMC）不同：PIMC 会因为
-   * strategy fusion 选出一个在任一世界里都不最优的动作，而且模拟预算被切成
-   * N 份，同一信息集的经验分散在 N 棵树上谁都攒不起统计量。
-   *
-   * 树能共用的前提：同一信息集内合法动作集恒定（由调用方校验），且叶节点评估
-   * 只看得到公开信息（特征里是 hand_count 而不是牌面）。
+   * 物理路径可以按不同玩家的私有观察分叉；决策统计独立按该行动者自己的
+   * 可见历史共享，避免私有分叉传给后续并未获得这些信息的玩家。
+   * 同一信息集内合法动作集恒定，叶节点评估只读取行动者有权知道的信息。
    */
   Result search(const std::vector<State>& root_states, int root_player,
                 const std::vector<float>& particle_weights = {},Tree* retained_tree = nullptr) {
     if (root_states.empty()) return {};
+    statistics_.clear();
     roots_ = &root_states;
     weights_ = &particle_weights;
     weight_total_ = 0.0f;
@@ -281,7 +344,7 @@ class Mcts {
     if(root_key==InformationSetKey{} || !tree.matches(root_key,root_player))tree.clear();
     if(!tree.root_)tree.root_=std::make_unique<Node>();
     Node& root=*tree.root_;
-    const int inherited=root.visits;
+    const int inherited=root.statistics ? root.statistics->visits : 0;
     const auto deadline = config_.deadline != std::chrono::steady_clock::time_point{}
       ? config_.deadline : std::chrono::steady_clock::now() +
         std::chrono::milliseconds(std::max(0,config_.time_budget_ms));
@@ -291,6 +354,10 @@ class Mcts {
     root.information_set_key=root_key;
     root.actions = game_.ai_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
+    SearchInformationHistory<State, Action> initial_history(game_, seed_state);
+    if (root.history_key == InformationSetKey{}) root.history_key = extend_information_history(initial_history.keys.at(root_player),
+        game_.information_set_hash(seed_state, root_player), 4);
+    bind_statistics(root, root.history_key);
     expand(root, seed_state);
     if(!inherited)add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
 
@@ -298,6 +365,8 @@ class Mcts {
       if (expired()) break;
       // 每条模拟重新抽一个粒子：世界只在本次模拟内有效，不是被钉死在树上
       State state = root_states[pick_particle()];
+      SearchInformationHistory<State, Action> history(game_, state);
+      history.keys.at(root_player) = root.history_key;
       std::vector<Node*> path{&root};
       std::vector<size_t> edges;
       std::unordered_set<InformationSetKey, InformationSetKeyHasher> seen;
@@ -325,6 +394,7 @@ class Mcts {
             std::all_of(node->cycle_pruned.begin(), node->cycle_pruned.end(), [](bool b) { return b; })) {
           cycle_cut = true; break;
         }
+        if (index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
         if (index >= node->actions.size() ||
             !game_.apply(state, node->player, node->actions[index])) {
           backup(path, node->value_vector);
@@ -339,17 +409,22 @@ class Mcts {
           prune_no_progress_path(path, edges, index);
           cycle_cut = true; break;
         }
-        const InformationSetKey key = game_.information_set_hash(state, player);
+        history.observe(game_, state);
+        const auto observed_key = game_.information_set_hash(state, player);
+        const InformationSetKey key = extend_information_history(history.keys.at(player), observed_key, 4);
+        history.keys.at(player) = key;
         Node* child = find_child(*node, index, key);
         if (!child) {
           auto fresh = std::make_unique<Node>();
           child = fresh.get();
           node->child_variants[index].push_back(std::move(fresh));
           child->player = player;
-          child->information_set_key = key;
+          child->information_set_key = observed_key;
+          child->incoming_action = index;
           child->actions = game_.ai_actions(state, player);
           node->child_by_key[index].emplace(key, child);
         }
+        bind_statistics(*child, key);
         node = child;
         edges.push_back(index);
         path.push_back(node);
@@ -370,23 +445,21 @@ class Mcts {
     }
 
     Result result;
-    result.new_visits=root.visits-inherited;
+    result.new_visits=root.statistics->visits-inherited;
     result.reused_visits=inherited;
     if(retained_tree)result.retained_nodes=tree.nodes();
     result.policy.resize(root.actions.size(), 0.0f);
-    for (size_t i = 0; i < root.child_variants.size(); ++i) {
-      for (const auto& child : root.child_variants[i]) {
-        result.policy[i] += static_cast<float>(child->visits);
-        result.visits += child->visits;
-      }
+    for (size_t i = 0; i < root.statistics->edges.size(); ++i) {
+      result.policy[i] = static_cast<float>(root.statistics->edges[i].visits);
+      result.visits += root.statistics->edges[i].visits;
     }
     if (result.visits == 0) {
       result.policy = root.priors;
     } else {
       for (float& value : result.policy) value /= static_cast<float>(result.visits);
     }
-    if (root.visits) {
-      for (size_t i = 0; i < kValueSlots; ++i) result.value_vector[i] = root.total[i] / root.visits;
+    if (root.statistics->visits) {
+      for (size_t i = 0; i < kValueSlots; ++i) result.value_vector[i] = root.statistics->total[i] / root.statistics->visits;
     } else result.value_vector = root.value_vector;
     result.value = result.value_vector[0];
     result.expansions = expansions_;
@@ -412,20 +485,32 @@ class Mcts {
     ++expansions_;
   }
 
+  void bind_statistics(Node& node, InformationSetKey key) {
+    auto& slot = statistics_[key];
+    if (!slot) slot = node.statistics && node.history_key == key
+        ? node.statistics : std::make_shared<InformationSetStatistics>();
+    node.statistics = slot; node.history_key = key;
+    if (slot->edges.empty()) slot->edges.resize(node.actions.size());
+    if (slot->edges.size() != node.actions.size())
+      throw std::runtime_error("One information history has inconsistent legal actions");
+  }
+  float rotated_value(const std::array<float, kValueSlots>& value,
+      int perspective, int player, size_t relative) const {
+    if (!player_count_) return relative ? 0.f : value[0] * (player == perspective ? 1.f : -1.f);
+    if (relative >= player_count_) return 0.f;
+    return value[relative_slot(perspective, (player + static_cast<int>(relative)) % static_cast<int>(player_count_))];
+  }
   size_t select(const Node& node) {
     size_t best = node.actions.size();
     float best_score = -std::numeric_limits<float>::infinity();
-    const float parent = static_cast<float>(std::max(1, node.visits));
-    const float fpu = node.visits ? node.total[0] / node.visits : node.value_vector[0];
+    const float parent = static_cast<float>(std::max(1, node.statistics->visits));
+    const auto& shared = *node.statistics;
+    const float fpu = shared.visits ? shared.total[0] / shared.visits : node.value_vector[0];
     for (size_t i = 0; i < node.actions.size(); ++i) {
       if (node.cycle_pruned[i]) continue;
-      const auto& variants = node.child_variants[i];
-      float visits = 0.0f, total = 0.0f;
-      for (const auto& child : variants) {
-        visits += static_cast<float>(child->visits);
-        const size_t slot = player_count_ ? relative_slot(child->player, node.player) : 0;
-        total += child->visits ? child->total[slot] : 0.0f;
-      }
+      const auto& edge = shared.edges[i];
+      const float visits = static_cast<float>(edge.visits);
+      const float total = edge.total[0];
       const float q = visits > 0.0f ? total / visits : fpu;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       const float u = config_.c_puct * p * std::sqrt(parent) / (1.0f + visits);
@@ -454,6 +539,15 @@ class Mcts {
         }
       }
       ++node->visits;
+      auto& shared = *node->statistics;
+      ++shared.visits;
+      for (size_t r = 0; r < kValueSlots; ++r) shared.total[r] += rotated_value(value, leaf_player, node->player, r);
+    }
+    for (size_t i = 0; i + 1 < path.size(); ++i) {
+      Node* node = path[i];
+      auto& edge = node->statistics->edges.at(path[i+1]->incoming_action);
+      ++edge.visits;
+      for (size_t r = 0; r < kValueSlots; ++r) edge.total[r] += rotated_value(value, leaf_player, node->player, r);
     }
   }
 
@@ -489,6 +583,7 @@ class Mcts {
   std::mt19937 rng_;
   const std::vector<State>* roots_ = nullptr;
   const std::vector<float>* weights_ = nullptr;
+  std::unordered_map<InformationSetKey, std::shared_ptr<InformationSetStatistics>, InformationSetKeyHasher> statistics_;
   float weight_total_ = 0.0f;
   int expansions_ = 0;
   size_t player_count_ = 0;
@@ -526,6 +621,7 @@ class BatchedMcts {
         std::chrono::milliseconds(std::max(0, config_.time_budget_ms));
     const auto expired = [&] { return config_.time_budget_ms > 0 &&
         std::chrono::steady_clock::now() >= deadline; };
+    statistics_.clear();
     roots_ = &root_states;
     weights_ = &particle_weights;
     weight_total_ = 0.0f;
@@ -539,6 +635,10 @@ class BatchedMcts {
     root.player = root_player;
     root.actions = game_.ai_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
+    SearchInformationHistory<State, Action> initial_history(game_, seed_state);
+    if (root.history_key == InformationSetKey{}) root.history_key = extend_information_history(initial_history.keys.at(root_player),
+        game_.information_set_hash(seed_state, root_player), 4);
+    bind_statistics(root, root.history_key);
     expand(root, seed_state);
     add_root_noise(root.priors, rng_, config_.dirichlet_alpha, config_.dirichlet_epsilon);
     int completed = 0;
@@ -557,6 +657,8 @@ class BatchedMcts {
         if (expired()) break;
         // 每条模拟重新抽一个粒子：世界只在本次模拟内有效
         State state = root_states[pick_particle()];
+      SearchInformationHistory<State, Action> history(game_, state);
+      history.keys.at(root_player) = root.history_key;
         Node* node = &root;
         std::vector<Node*> path{&root};
         std::vector<size_t> edges;
@@ -597,6 +699,7 @@ class BatchedMcts {
               std::all_of(node->cycle_pruned.begin(), node->cycle_pruned.end(), [](bool b) { return b; })) {
             cycle_cut = true; break;
           }
+          if (index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
           if (index >= node->actions.size() ||
               !game_.apply(state, node->player, node->actions[index])) {
             terminal.push_back(true); terminal_values.push_back(node->value_vector);
@@ -610,17 +713,22 @@ class BatchedMcts {
             prune_no_progress_path(path, edges, index);
             cycle_cut = true; break;
           }
-          const InformationSetKey key = game_.information_set_hash(state, player);
+          history.observe(game_, state);
+          const auto observed_key = game_.information_set_hash(state, player);
+          const InformationSetKey key = extend_information_history(history.keys.at(player), observed_key, 4);
+          history.keys.at(player) = key;
           Node* child = find_child(*node, index, key);
           if (!child) {
             auto fresh = std::make_unique<Node>();
             child = fresh.get();
             node->child_variants[index].push_back(std::move(fresh));
             child->player = player;
-            child->information_set_key = key;
+            child->information_set_key = observed_key;
+            child->incoming_action = index;
             child->actions = search_actions(state, player);
             node->child_by_key[index].emplace(key, child);
           }
+          bind_statistics(*child, key);
           node = child;
           edges.push_back(index);
           path.push_back(node);
@@ -649,11 +757,11 @@ class BatchedMcts {
         // Completed results need no GPU evaluation: expose them immediately
         // to subsequent selections, even within this batch.
         if (terminal.back()) backup(paths.back(), terminal_values.back());
-        else for (Node* visited : paths.back()) ++visited->pending_visits;
+        else reserve(paths.back(), 1);
       }
       for (size_t i = 0; i < paths.size(); ++i)
         if (!terminal[i])
-          for (Node* visited : paths[i]) --visited->pending_visits;
+          reserve(paths[i], -1);
       const std::vector<Evaluation> evaluations = states.empty()
           ? std::vector<Evaluation>{} : evaluator_.evaluate_batch(states, players, actions);
       if (evaluations.size() != states.size())
@@ -683,6 +791,9 @@ class BatchedMcts {
     std::vector<std::unordered_map<InformationSetKey, Node*, InformationSetKeyHasher>> child_by_key;
     std::vector<bool> cycle_pruned;
     InformationSetKey information_set_key;
+    InformationSetKey history_key;
+    std::shared_ptr<InformationSetStatistics> statistics;
+    size_t incoming_action = 0;
     std::array<float, kValueSlots> total{};
     std::array<float, kValueSlots> value_vector{};
     float value = 0;
@@ -707,6 +818,21 @@ class BatchedMcts {
     node.cycle_pruned.resize(node.actions.size(), false);
     node.expanded = true;
   }
+  void bind_statistics(Node& node, InformationSetKey key) {
+    auto& slot = statistics_[key];
+    if (!slot) slot = node.statistics && node.history_key == key
+        ? node.statistics : std::make_shared<InformationSetStatistics>();
+    node.statistics = slot; node.history_key = key;
+    if (slot->edges.empty()) slot->edges.resize(node.actions.size());
+    if (slot->edges.size() != node.actions.size())
+      throw std::runtime_error("One information history has inconsistent legal actions");
+  }
+  float rotated_value(const std::array<float, kValueSlots>& value,
+      int perspective, int player, size_t relative) const {
+    if (!player_count_) return relative ? 0.f : value[0] * (player == perspective ? 1.f : -1.f);
+    if (relative >= player_count_) return 0.f;
+    return value[relative_slot(perspective, (player + static_cast<int>(relative)) % static_cast<int>(player_count_))];
+  }
   size_t select(const Node& node) {
     // Fixed direct-policy opponents are chance nodes, not optimizing agents.
     // Resample on every traversal; caching a single sampled action would make
@@ -725,20 +851,17 @@ class BatchedMcts {
       return std::discrete_distribution<size_t>(weights.begin(), weights.end())(rng_);
     }
     size_t best = node.actions.size(); float score_best = -std::numeric_limits<float>::infinity();
-    const float parent = static_cast<float>(std::max(1, node.visits + node.pending_visits));
+    const float parent = static_cast<float>(std::max(1, node.statistics->visits + node.statistics->pending));
     // Slot zero always belongs to this node's actor, not the root actor.
     // Reservations are not evidence and must not enter this mean.
-    const float fpu = node.visits ? node.total[0] / node.visits : node.value_vector[0];
+    const auto& shared = *node.statistics;
+    const float fpu = shared.visits ? shared.total[0] / shared.visits : node.value_vector[0];
     for (size_t i = 0; i < node.actions.size(); ++i) {
       if (node.cycle_pruned[i]) continue;
-      const auto& variants = node.child_variants[i];
-      float visits = 0.0f, pending = 0.0f, total = 0.0f;
-      for (const auto& child : variants) {
-        visits += static_cast<float>(child->visits);
-        pending += static_cast<float>(child->pending_visits);
-        const size_t slot = player_count_ ? relative_slot(child->player, node.player) : 0;
-        total += child->visits ? child->total[slot] : 0.0f;
-      }
+      const auto& edge = shared.edges[i];
+      const float visits = static_cast<float>(edge.visits);
+      const float total = edge.total[0];
+      const float pending = static_cast<float>(edge.pending);
       const float q = visits > 0.0f ? total / visits : fpu;
       const float p = i < node.priors.size() ? node.priors[i] : 0.0f;
       // Reservations spread work through U only. W/N remains the observed
@@ -763,7 +886,21 @@ class BatchedMcts {
         node->total[rel] += value[relative_slot(leaf_player, target)];
       }
       ++node->visits;
+      auto& shared = *node->statistics;
+      ++shared.visits;
+      for (size_t r = 0; r < kValueSlots; ++r) shared.total[r] += rotated_value(value, leaf_player, node->player, r);
     }
+    for (size_t i = 0; i + 1 < path.size(); ++i) {
+      Node* node = path[i];
+      auto& edge = node->statistics->edges.at(path[i+1]->incoming_action);
+      ++edge.visits;
+      for (size_t r = 0; r < kValueSlots; ++r) edge.total[r] += rotated_value(value, leaf_player, node->player, r);
+    }
+  }
+  void reserve(const std::vector<Node*>& path, int delta) {
+    for (Node* node : path) { node->pending_visits += delta; node->statistics->pending += delta; }
+    for (size_t i = 0; i+1 < path.size(); ++i)
+      path[i]->statistics->edges.at(path[i+1]->incoming_action).pending += delta;
   }
   std::vector<Action> search_actions(const State& state, int player) const {
     auto actions = game_.ai_actions(state, player);
@@ -776,14 +913,13 @@ class BatchedMcts {
   }
   Result result(const Node& root) const {
     Result output; output.policy.resize(root.actions.size(), 0.0f);
-    for (size_t i = 0; i < root.child_variants.size(); ++i)
-      for (const auto& child : root.child_variants[i]) {
-        output.policy[i] += static_cast<float>(child->visits);
-        output.visits += child->visits;
-      }
+    for (size_t i = 0; i < root.statistics->edges.size(); ++i) {
+      output.policy[i] = static_cast<float>(root.statistics->edges[i].visits);
+      output.visits += root.statistics->edges[i].visits;
+    }
     if (output.visits) for (float& value : output.policy) value /= output.visits;
     else output.policy = root.priors;
-    if (root.visits) for (size_t i = 0; i < kValueSlots; ++i) output.value_vector[i] = root.total[i] / root.visits;
+    if (root.statistics->visits) for (size_t i = 0; i < kValueSlots; ++i) output.value_vector[i] = root.statistics->total[i] / root.statistics->visits;
     else output.value_vector = root.value_vector;
     output.value = output.value_vector[0];
     output.expansions = expansions_;
@@ -816,6 +952,7 @@ class BatchedMcts {
   std::mt19937 rng_{config_.seed};
   const std::vector<State>* roots_ = nullptr;
   const std::vector<float>* weights_ = nullptr;
+  std::unordered_map<InformationSetKey, std::shared_ptr<InformationSetStatistics>, InformationSetKeyHasher> statistics_;
   float weight_total_ = 0.0f;
   size_t player_count_ = 0;
   int root_player_ = 0;

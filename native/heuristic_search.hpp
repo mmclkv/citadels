@@ -27,6 +27,11 @@ class NativeHeuristicAdapter final : public GameAdapter<NativeGameState,NativeSe
   bool apply(NativeGameState& s,int p,const NativeSearchAction& a) const override {return rules_.apply(s,p,a);}
   int next_player(const NativeGameState& s) const override {return rules_.next_player(s);}
   bool terminal(const NativeGameState& s) const override {return rules_.terminal(s);}
+  std::vector<InformationSetKey> observation_hashes(const NativeGameState& s) const override {
+    return rules_.observation_hashes(s);
+  }
+  InformationSetKey visible_action_hash(const NativeGameState& s,int actor,int viewer,
+      const NativeSearchAction& a) const override {return rules_.visible_action_hash(s,actor,viewer,a);}
   float terminal_value(const NativeGameState& s,int p) const override {return heuristic_terminal_reward_vector(s,p)[0];}
   std::array<float,kValueSlots> terminal_value_vector(const NativeGameState& s,int p) const override {return heuristic_terminal_reward_vector(s,p);}
   InformationSetKey information_set_hash(const NativeGameState& s,int player) const override {
