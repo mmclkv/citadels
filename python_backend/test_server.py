@@ -1638,7 +1638,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(room["config"]["mctsMaxDepth"], 4000)
         self.assertEqual(room["config"]["mctsParticles"], 32)
         self.assertEqual(room["seats"][1]["mcts"],
-                         {"simulations": 25000, "maxDepth": 4000, "particles": 32, "timeBudgetMs": 10000})
+                         {"advancedEnabled": True, "simulations": 25000, "maxDepth": 4000, "particles": 32, "timeBudgetMs": 10000})
         negative = rooms.create_room("Negative", {"playerCount": 2, "mctsMaxDepth": -2,
                                                     "mctsParticles": 0})
         self.assertEqual(negative["config"]["mctsMaxDepth"], 0)

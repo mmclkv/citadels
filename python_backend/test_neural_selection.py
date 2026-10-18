@@ -10,6 +10,40 @@ from python_backend.neural import NeuralPolicy
 
 
 class LiveSelectionTests(unittest.TestCase):
+    def test_collapsed_options_follow_budget_and_ignore_stale_manual_limits(self):
+        from python_backend.rooms import RoomRegistry, _seat_mcts, _seat_heuristic_mcts
+        from unittest.mock import Mock
+        policy = NeuralPolicy.__new__(NeuralPolicy)
+        policy.worker = SimpleNamespace(
+            determinize=lambda **kwargs: {"particles": [{}], "weights": [1.]},
+            search=Mock(return_value={"policy": [1., 0.], "visits": 6000}))
+        policy.model_path = __file__
+        policy.profile = "fast"; policy.architecture = "entity-v6"
+        policy.device_name = "cpu"; policy.action_version = 11
+        defaults = RoomRegistry().create_room("Host", {"bots": 1})["seats"][1]["mcts"]
+        self.assertFalse(defaults["advancedEnabled"])
+        for budget, depth in ((100, 64), (1000, 70), (10000, 700), (60000, 2000)):
+            options = _seat_mcts({"advancedEnabled": False, "timeBudgetMs": budget,
+                                  "simulations": 2, "maxDepth": 1, "particles": 1})
+            diagnostics = {}
+            policy.decide({}, "p1", {"actions": [{"type": "take_gold"}, {"type": "take_cards"}]}, options,
+                          diagnostics=diagnostics)
+            request = policy.worker.search.call_args.kwargs
+            self.assertEqual(request["simulations"], 2_147_483_647)
+            self.assertEqual(request["max_depth"], depth)
+            self.assertEqual(request["time_budget_ms"], budget)
+            self.assertTrue(diagnostics["mcts"]["automatic"])
+        options = _seat_mcts({"advancedEnabled": True, "timeBudgetMs": 10000,
+                              "simulations": 20, "maxDepth": 10, "particles": 2})
+        policy.decide({}, "p1", {"actions": [{"type": "take_gold"}, {"type": "take_cards"}]}, options)
+        request = policy.worker.search.call_args.kwargs
+        self.assertEqual((request["simulations"], request["max_depth"]), (20, 10))
+        policy.worker.search.reset_mock()
+        policy.decide({}, "p1", {"actions": [{"type": "end_turn"}]}, defaults)
+        policy.worker.search.assert_not_called()
+        self.assertNotIn("advanced", _seat_heuristic_mcts({"advancedEnabled": False,
+                          "advanced": {"simulations": 1, "maxDepth": 1}}))
+
     def test_live_default_samples_search_probability(self):
         actions = [{"type": "gold"}, {"type": "cards"}, {"type": "end_turn"}]
         state = {"phase": "turn"}
@@ -61,7 +95,7 @@ class LiveSelectionTests(unittest.TestCase):
             path = Path(directory) / "model.bin"; path.touch(); policy.model_path = str(path)
             available = {"actions": [cancel, pay]}
             self.assertEqual(policy.decide({}, "human", available), pay)
-            self.assertEqual(seen, [pay])
+            self.assertEqual(seen, [])  # A forced payment needs no search.
             self.assertEqual(available["actions"], [cancel, pay])
 
 

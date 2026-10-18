@@ -632,6 +632,7 @@
       }
       function readHeuristicAdvanced() {
         const advanced = {};
+        if (!singleAdvancedOpen) return advanced;
         [['#cfg-mcts-sims', 'simulations'], ['#cfg-mcts-depth', 'maxDepth'], ['#cfg-mcts-particles', 'particles']].forEach(([id, key]) => {
           if ($(id).value.trim() !== '') advanced[key] = Math.max(1, Math.floor(Number($(id).value) || 1));
         });
@@ -697,12 +698,12 @@
           Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
             playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
             endDistricts: cfg.end, charSetMode: cfg.chars, scenario: cfg.scenario, voice: false,
-            mcts: Object.assign({ timeBudgetMs: readSearchBudget() }, cfg.botType === 'neural' ? {
+            mcts: Object.assign({ timeBudgetMs: readSearchBudget(), advancedEnabled: singleAdvancedOpen }, cfg.botType === 'neural' ? {
               simulations: Number($('#cfg-mcts-sims').value) || 5000,
               maxDepth: Number($('#cfg-mcts-depth').value) || 2000,
               particles: Number($('#cfg-mcts-particles').value) || 4
             } : {}),
-            heuristicMcts: { timeBudgetMs: readSearchBudget(), advanced: readHeuristicAdvanced() }
+            heuristicMcts: { timeBudgetMs: readSearchBudget(), advancedEnabled: singleAdvancedOpen, advanced: readHeuristicAdvanced() }
           }, readMctsConfig('#cfg-mcts-sims', '#cfg-mcts-depth', '#cfg-mcts-particles')) });
         });
       }
@@ -920,15 +921,25 @@
                 advanced.id = 'seat-advanced-' + i;
                 toggle.setAttribute('aria-controls', advanced.id);
                 const syncAdvanced = () => {
-                  const open = seatAdvancedOpen.has(advancedKey);
+                  const open = cfg.advancedEnabled === true || seatAdvancedOpen.has(advancedKey);
                   advanced.hidden = !open;
                   toggle.setAttribute('aria-expanded', String(open));
                   toggle.textContent = open ? '收起高级选项' : '高级选项';
                 };
                 toggle.onclick = () => {
-                  if (seatAdvancedOpen.has(advancedKey)) seatAdvancedOpen.delete(advancedKey);
-                  else seatAdvancedOpen.add(advancedKey);
-                  syncAdvanced();
+                  const open = advanced.hidden;
+                  advanced.hidden = !open;
+                  toggle.setAttribute('aria-expanded', String(open));
+                  toggle.textContent = open ? '收起高级选项' : '高级选项';
+                  if (open) seatAdvancedOpen.add(advancedKey);
+                  else seatAdvancedOpen.delete(advancedKey);
+                  const values = {};
+                  ['simulations', 'maxDepth', 'particles'].forEach((key, index) => {
+                    const raw = advanced.querySelectorAll('input')[index].value.trim();
+                    if (raw) values[key] = Number(raw);
+                  });
+                  sendSearchConfig(neural ? Object.assign({}, values, { advancedEnabled: open }) :
+                    { advancedEnabled: open, advanced: open ? values : {} });
                 };
                 syncAdvanced();
                 box.appendChild(toggle);
@@ -947,17 +958,17 @@
                   input.value = current[key] == null ? (neural ? String(roomValue == null ? fallback : roomValue) : '') : String(current[key]);
                   input.onchange = () => {
                     if (!input.checkValidity()) { input.reportValidity(); return; }
-                    if (neural) sendSearchConfig({ [key]: input.value || fallback });
+                    if (neural) sendSearchConfig({ advancedEnabled: true, [key]: input.value || fallback });
                     else {
                       const values = Object.assign({}, cfg.advanced);
                       if (input.value.trim() === '') delete values[key];
                       else values[key] = input.value;
-                      sendSearchConfig({ advanced: values });
+                      sendSearchConfig({ advancedEnabled: true, advanced: values });
                     }
                   };
                   field.appendChild(input); advanced.appendChild(field);
                 });
-                advanced.appendChild(el('span', 'hint seat-mcts-title', '达到时间预算或模拟次数上限时结束搜索。启发式参数留空时自动配置。'));
+                advanced.appendChild(el('span', 'hint seat-mcts-title', '展开时使用手动参数；收起后按时间预算自动搜索并调整深度。'));
                 box.appendChild(advanced); ops.appendChild(box);
               }
             }

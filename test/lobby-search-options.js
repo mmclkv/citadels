@@ -81,7 +81,12 @@ async function main() {
       assert.equal(await seat.locator('.search-budget input').inputValue(),'250');
       assert.equal(await seat.locator('.mcts-advanced input').first().inputValue(),'120');
       await seat.getByRole('button',{name:'收起高级选项',exact:true}).click();
-      assert.equal(await seat.locator('.mcts-advanced input').first().isVisible(),false);
+      await seat.locator('.mcts-advanced input').first().waitFor({state:'hidden'});
+      await page.waitForFunction(async()=>{
+        const {rooms}=await (await fetch('/api/rooms')).json();
+        const cfg=rooms.at(-1).seats[1].heuristicMcts;
+        return cfg.advancedEnabled===false && !cfg.advanced;
+      });
       await seat.locator('select').selectOption('neural');
       await seat.locator('.search-budget input').waitFor({state:'visible'});
       assert.equal(await seat.locator('.mcts-advanced input').first().isVisible(),false);
@@ -91,6 +96,17 @@ async function main() {
       await page.waitForTimeout(300);
       assert.equal(await seat.locator('.mcts-advanced input').nth(1).inputValue(),'30');
       assert.equal(await seat.locator('.mcts-advanced input').first().isVisible(),true);
+      await page.waitForFunction(async()=>{
+        const {rooms}=await (await fetch('/api/rooms')).json();
+        const cfg=rooms.at(-1).seats[1].mcts;
+        return cfg.advancedEnabled===true && cfg.maxDepth===30;
+      });
+      await seat.getByRole('button',{name:'收起高级选项',exact:true}).click();
+      await seat.locator('.mcts-advanced input').first().waitFor({state:'hidden'});
+      await page.waitForFunction(async()=>{
+        const {rooms}=await (await fetch('/api/rooms')).json();
+        return rooms.at(-1).seats[1].mcts.advancedEnabled===false;
+      });
       assert.deepEqual(errors,[]);
       await context.close();
     }

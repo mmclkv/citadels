@@ -21,7 +21,12 @@ def _int_at_least(value, default: int, low: int) -> int:
 def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
     value = value or {}
     fallback = fallback or {}
-    return {"simulations": _int_at_least(value.get("simulations", fallback.get("mctsSimulations")), 5000, 0),
+    advanced = value.get("advancedEnabled",
+        any(key in value for key in ("simulations", "maxDepth", "particles")) or
+        fallback.get("mctsAdvancedEnabled", any(key in fallback for key in
+            ("mctsSimulations", "mctsMaxDepth", "mctsParticles")))) is True
+    return {"advancedEnabled": advanced,
+            "simulations": _int_at_least(value.get("simulations", fallback.get("mctsSimulations")), 5000, 0),
             "maxDepth": _int_at_least(value.get("maxDepth", fallback.get("mctsMaxDepth")), 2000, 0),
             "particles": _int_at_least(value.get("particles", fallback.get("mctsParticles")), 4, 1),
             "timeBudgetMs": _int_at_least(value.get("timeBudgetMs"), 10000, 1)}
@@ -30,8 +35,10 @@ def _seat_mcts(value: dict | None, fallback: dict | None = None) -> dict:
 def _seat_heuristic_mcts(value: dict | None = None) -> dict:
     value = value or {}
     result = {"timeBudgetMs": _int_at_least(value.get("timeBudgetMs"), 10000, 1)}
+    if "advancedEnabled" in value:
+        result["advancedEnabled"] = value["advancedEnabled"] is True
     advanced = value.get("advanced")
-    if isinstance(advanced, dict):
+    if value.get("advancedEnabled") is not False and isinstance(advanced, dict):
         result["advanced"] = {key: min(2_147_483_647, _int_at_least(advanced[key], 1, 1))
                               for key in ("simulations", "maxDepth", "particles")
                               if key in advanced}
@@ -124,6 +131,7 @@ class RoomRegistry:
                        "mctsMaxDepth": _int_at_least(config.get("mctsMaxDepth"), 2000, 0),
                        "mctsParticles": _int_at_least(config.get("mctsParticles"), 4, 1),
                        "mctsBelief": config.get("mctsBelief") is not False,
+                       "mctsAdvancedEnabled": normalized["mcts"]["advancedEnabled"],
                        "voice": config.get("voice") is not False,
                        "autoHost": config.get("autoHost") is not False},
             "state": None, "createdAt": int(time.time() * 1000),

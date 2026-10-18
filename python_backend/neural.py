@@ -37,7 +37,8 @@ class NeuralPolicy:
         self._model_dir = None
         self.error = ""
         self._last_mcts = {"determinizations": 0, "beliefDecay": 0.5,
-                           "defaultSimulations": 5000, "defaultMaxDepth": 2000,
+                           "automatic": True, "timeBudgetMs": 10000,
+                           "defaultSimulations": 2_147_483_647, "defaultMaxDepth": 700,
                            "visits": 0, "expansions": 0}
         self._load()
 
@@ -118,9 +119,21 @@ class NeuralPolicy:
         if not candidates:
             raise RuntimeError("当前局面没有可评估的合法行动")
         options = mcts or {}
-        simulations = max(1, int(options.get("simulations", 5000)))
-        max_depth = max(1, int(options.get("maxDepth", 2000)))
-        particle_count = max(1, int(options.get("particles", 4)))
+        automatic = options.get("advancedEnabled", any(
+            key in options for key in ("simulations", "maxDepth", "particles"))) is False
+        time_budget_ms = max(1 if automatic else 0, int(options.get("timeBudgetMs", 10000 if automatic else 0)))
+        # Do not estimate throughput: the native deadline ends automatic search.
+        simulations = 2_147_483_647 if automatic else max(1, int(options.get("simulations", 5000)))
+        max_depth = min(2000, max(64, time_budget_ms * 7 // 100)) if automatic else max(1, int(options.get("maxDepth", 2000)))
+        particle_count = 4 if automatic else max(1, int(options.get("particles", 4)))
+        if len(candidates) == 1:
+            stats = {"automatic": automatic, "timeBudgetMs": time_budget_ms,
+                     "simulations": simulations, "maxDepth": max_depth,
+                     "determinizations": 0, "visits": 0, "expansions": 0, "forced": True}
+            self._last_mcts = stats
+            if diagnostics is not None:
+                diagnostics.update({"method": "forced-action", "mcts": dict(stats)})
+            return candidates[0]
         belief = options.get("belief", True) is not False
         decay = 0.5 if belief else 1.0
         rng = random.Random()
@@ -140,7 +153,7 @@ class NeuralPolicy:
             dirichlet_alpha=0.3, dirichlet_epsilon=0.0,
             seed=rng.randrange(0, 2**32), batch_size=int(options.get("batchSize", 32)),
             action_encoding_version=self.action_version,
-            time_budget_ms=max(0, int(options.get("timeBudgetMs", 0))))
+            time_budget_ms=time_budget_ms)
         policy = np.asarray(result["policy"], dtype=np.float64)
         if policy.size != len(candidates) or not np.isfinite(policy).all() or policy.sum() <= 0:
             raise RuntimeError("C++ MCTS 返回了无效策略分布")
@@ -150,7 +163,8 @@ class NeuralPolicy:
         mcts_stats = {"determinizations": result.get("particlesUsed", len(particles)),
                       "beliefDecay": decay, "visits": result.get("visits", 0),
                       "expansions": result.get("expansions", 0),
-                      "simulations": simulations, "maxDepth": max_depth, "selection": selection}
+                      "simulations": simulations, "maxDepth": max_depth, "selection": selection,
+                      "timeBudgetMs": time_budget_ms, "automatic": automatic}
         self._last_mcts = mcts_stats
         if diagnostics is not None:
             diagnostics.update({"method": "native-mcts", "profile": self.profile,
