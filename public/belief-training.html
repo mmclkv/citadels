@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>信念网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=13"><link rel="stylesheet" href="./belief-training.css?v=1">
+  <link rel="stylesheet" href="./training.css?v=13"><link rel="stylesheet" href="./belief-training.css?v=2">
 </head>
 <body>
   <header class="train-header"><div><p class="eyebrow">CITADELS BELIEF LAB</p><h1>信念网络训练</h1></div>
@@ -45,6 +45,8 @@
     </section>
     <section class="panel controls"><h2>训练进度</h2><progress id="progress" max="1" value="0"></progress>
       <div class="belief-metrics" id="metrics"></div><p class="belief-note">NLL 越低越好；只在相同验证集上比较。预测指标改善不等于夺冠率提高，仍需同时间预算实战评测。</p>
+      <div id="belief-charts" class="belief-charts" aria-label="信念网络训练指标曲线"></div>
+      <p class="belief-note">横轴为累计对局数，每个点对应一次训练更新。悬停、点击或用键盘聚焦数据点可查看数值；没有验证结果的更新会留空。</p>
       <h3>更新记录</h3><div class="belief-table"><table><thead><tr><th>累计局数</th><th>训练损失</th><th>验证联合 NLL</th><th>角色 NLL</th><th>手牌 NLL</th></tr></thead><tbody id="history"></tbody></table></div>
     </section>
     <section class="panel controls"><h2>实战启用</h2><p id="inference">未启用信念网络，继续使用原有规则信念。</p>
@@ -53,5 +55,6 @@
     </section>
     <section class="panel controls"><h2>训练日志</h2><pre id="logs" aria-live="polite">暂无训练记录。</pre></section>
   </main>
-  <script src="./belief-training.js?v=1"></script>
+  <script src="./belief-charts.js?v=1"></script>
+  <script src="./belief-training.js?v=2"></script>
 </body></html>

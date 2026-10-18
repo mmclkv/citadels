@@ -31,6 +31,7 @@ async function refresh() {
     const values=[`本次 ${state.completedGames}/${state.targetGames} 局`,`累计 ${state.totalGames} 局`,`采集 ${state.samples} 样本`,
       `参数 ${state.parameterCount || '—'}`,`训练 loss ${format(state.metrics?.loss)}`,`验证 NLL ${format(state.metrics?.validationJointNll)}`];
     $('metrics').replaceChildren(...values.map(text=>{const node=document.createElement('span');node.textContent=text;return node;}));
+    window.BeliefCharts.render($('belief-charts'),state.history || [],state.runId || '');
     $('history').replaceChildren(...(state.history || []).slice(-30).reverse().map(point=>{
       const row=document.createElement('tr');
       for (const value of [point.games,format(point.loss),format(point.validationJointNll),format(point.validationRoleNll),format(point.validationHandNll)]) {
