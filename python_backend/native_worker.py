@@ -71,7 +71,7 @@ class NativeMctsWorker:
                opponent_policies: list[dict] | None = None, time_budget_ms: int = 0,
                progressive_particles: bool = False, root_belief: bool = True,
                root_log_weights: list[float] | None = None, root_prior_mixture: float = 0.,
-               root_candidate_scorer=None) -> dict:
+               root_candidate_scorer=None, share_information_history: bool = True) -> dict:
         with self._lock:
             if self.process.poll() is not None:
                 raise RuntimeError(f"C++ MCTS worker 已退出（exit={self.process.returncode}）")
@@ -93,6 +93,7 @@ class NativeMctsWorker:
                 "dirichletEpsilon": float(dirichlet_epsilon),
                 "seed": int(seed), "batchSize": int(batch_size),
                 "opponentPolicies": opponent_policies or [],
+                "shareInformationHistory": bool(share_information_history),
                 "progressiveParticles": bool(progressive_particles), "rootBelief": bool(root_belief),
                 "rootPriorMixture": float(root_prior_mixture),
                 "scoreRootCandidates": root_candidate_scorer is not None,
@@ -146,6 +147,8 @@ class NativeMctsWorker:
                 raise RuntimeError("C++ MCTS worker 错误：" + detail)
             if result.get("t") != "search_result":
                 raise RuntimeError("C++ MCTS worker 响应类型不支持")
+            if not share_information_history and result.get("shareInformationHistory") is not False:
+                raise RuntimeError("C++ worker 不支持独立关闭信息历史共享；请重新编译")
             if progressive_particles and result.get("progressiveParticles") is not True:
                 raise RuntimeError("C++ worker 不支持逐步补充隐藏世界；请重新编译")
             self._validate_search_encoding(result, action_encoding_version)

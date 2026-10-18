@@ -194,7 +194,8 @@ class NeuralPolicy:
             action_encoding_version=self.action_version,
             time_budget_ms=remaining_ms, progressive_particles=progressive,
             root_belief=belief, root_log_weights=log_weights,
-            root_prior_mixture=mixture, root_candidate_scorer=scorer)
+            root_prior_mixture=mixture, root_candidate_scorer=scorer,
+            share_information_history=options.get("shareInformationHistory", True) is not False)
         policy = np.asarray(result["policy"], dtype=np.float64)
         if policy.size != len(candidates) or not np.isfinite(policy).all() or policy.sum() <= 0:
             raise RuntimeError("C++ MCTS 返回了无效策略分布")
@@ -206,7 +207,8 @@ class NeuralPolicy:
                       "expansions": result.get("expansions", 0),
                       "simulations": simulations, "maxDepth": max_depth, "selection": selection,
                       "timeBudgetMs": time_budget_ms, "automatic": automatic}
-        mcts_stats.update({"progressiveParticles": progressive,
+        mcts_stats.update({"shareInformationHistory": options.get("shareInformationHistory", True) is not False,
+            "progressiveParticles": progressive,
             "particleProposals": result.get("particleProposals", len(particles)),
             "particleDuplicates": result.get("particleDuplicates", 0),
             "particleRefreshes": result.get("particleRefreshes", 0),

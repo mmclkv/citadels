@@ -133,7 +133,8 @@ inline InformationSetKey extend_information_history(InformationSetKey history,
 template <typename State, typename Action>
 struct SearchInformationHistory {
   std::vector<InformationSetKey> keys, observations;
-  SearchInformationHistory(const GameAdapter<State, Action>& game, const State& state) {
+  SearchInformationHistory(const GameAdapter<State, Action>& game, const State& state, bool enabled = true) {
+    if (!enabled) { keys.resize(std::max<size_t>(2, state_player_count(state, 0))); return; }
     observations = game.observation_hashes(state); keys.resize(observations.size());
     for (size_t p = 0; p < keys.size(); ++p) {
       InformationSetKeyBuilder b; b.i32(static_cast<int>(p));
@@ -296,6 +297,7 @@ class Mcts {
     uint32_t seed = 1;
     // Zero preserves fixed-budget training. Timed searches also check inside
     // paths; an individual evaluation/application is not forcibly interrupted.
+    bool share_information_history = true;
     int time_budget_ms = 0;
     std::chrono::steady_clock::time_point deadline{};
   };
@@ -357,7 +359,7 @@ class Mcts {
     root.information_set_key=root_key;
     root.actions = game_.ai_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
-    SearchInformationHistory<State, Action> initial_history(game_, seed_state);
+    SearchInformationHistory<State, Action> initial_history(game_, seed_state, config_.share_information_history);
     if (root.history_key == InformationSetKey{}) root.history_key = extend_information_history(initial_history.keys.at(root_player),
         game_.information_set_hash(seed_state, root_player), 4);
     bind_statistics(root, root.history_key);
@@ -370,7 +372,7 @@ class Mcts {
       if (progressive) progressive->refresh(static_cast<size_t>(i), expired);
       if (expired()) break;
       State state = progressive ? progressive->draw(rng_) : root_states[pick_particle()];
-      SearchInformationHistory<State, Action> history(game_, state);
+      SearchInformationHistory<State, Action> history(game_, state, config_.share_information_history);
       history.keys.at(root_player) = root.history_key;
       std::vector<Node*> path{&root};
       std::vector<size_t> edges;
@@ -399,7 +401,7 @@ class Mcts {
             std::all_of(node->cycle_pruned.begin(), node->cycle_pruned.end(), [](bool b) { return b; })) {
           cycle_cut = true; break;
         }
-        if (index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
+        if (config_.share_information_history && index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
         if (index >= node->actions.size() ||
             !game_.apply(state, node->player, node->actions[index])) {
           backup(path, node->value_vector);
@@ -414,9 +416,10 @@ class Mcts {
           prune_no_progress_path(path, edges, index);
           cycle_cut = true; break;
         }
-        history.observe(game_, state);
+        if (config_.share_information_history) history.observe(game_, state);
         const auto observed_key = game_.information_set_hash(state, player);
-        const InformationSetKey key = extend_information_history(history.keys.at(player), observed_key, 4);
+        const InformationSetKey key = config_.share_information_history
+            ? extend_information_history(history.keys.at(player), observed_key, 4) : observed_key;
         history.keys.at(player) = key;
         Node* child = find_child(*node, index, key);
         if (!child) {
@@ -491,6 +494,12 @@ class Mcts {
   }
 
   void bind_statistics(Node& node, InformationSetKey key) {
+    if (!config_.share_information_history) {
+      if (!node.statistics) node.statistics = std::make_shared<InformationSetStatistics>();
+      node.history_key = key;
+      if (node.statistics->edges.empty()) node.statistics->edges.resize(node.actions.size());
+      return;
+    }
     auto& slot = statistics_[key];
     if (!slot) slot = node.statistics && node.history_key == key
         ? node.statistics : std::make_shared<InformationSetStatistics>();
@@ -642,7 +651,7 @@ class BatchedMcts {
     root.player = root_player;
     root.actions = game_.ai_actions(seed_state, root_player);
     if (root.actions.empty()) return {};
-    SearchInformationHistory<State, Action> initial_history(game_, seed_state);
+    SearchInformationHistory<State, Action> initial_history(game_, seed_state, config_.share_information_history);
     if (root.history_key == InformationSetKey{}) root.history_key = extend_information_history(initial_history.keys.at(root_player),
         game_.information_set_hash(seed_state, root_player), 4);
     bind_statistics(root, root.history_key);
@@ -666,7 +675,7 @@ class BatchedMcts {
         if (progressive) progressive->refresh(static_cast<size_t>(completed + i), expired);
         if (expired()) break;
         State state = progressive ? progressive->draw(rng_) : root_states[pick_particle()];
-      SearchInformationHistory<State, Action> history(game_, state);
+      SearchInformationHistory<State, Action> history(game_, state, config_.share_information_history);
       history.keys.at(root_player) = root.history_key;
         Node* node = &root;
         std::vector<Node*> path{&root};
@@ -708,7 +717,7 @@ class BatchedMcts {
               std::all_of(node->cycle_pruned.begin(), node->cycle_pruned.end(), [](bool b) { return b; })) {
             cycle_cut = true; break;
           }
-          if (index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
+          if (config_.share_information_history && index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
           if (index >= node->actions.size() ||
               !game_.apply(state, node->player, node->actions[index])) {
             terminal.push_back(true); terminal_values.push_back(node->value_vector);
@@ -722,9 +731,10 @@ class BatchedMcts {
             prune_no_progress_path(path, edges, index);
             cycle_cut = true; break;
           }
-          history.observe(game_, state);
+          if (config_.share_information_history) history.observe(game_, state);
           const auto observed_key = game_.information_set_hash(state, player);
-          const InformationSetKey key = extend_information_history(history.keys.at(player), observed_key, 4);
+          const InformationSetKey key = config_.share_information_history
+            ? extend_information_history(history.keys.at(player), observed_key, 4) : observed_key;
           history.keys.at(player) = key;
           Node* child = find_child(*node, index, key);
           if (!child) {
@@ -828,6 +838,12 @@ class BatchedMcts {
     node.expanded = true;
   }
   void bind_statistics(Node& node, InformationSetKey key) {
+    if (!config_.share_information_history) {
+      if (!node.statistics) node.statistics = std::make_shared<InformationSetStatistics>();
+      node.history_key = key;
+      if (node.statistics->edges.empty()) node.statistics->edges.resize(node.actions.size());
+      return;
+    }
     auto& slot = statistics_[key];
     if (!slot) slot = node.statistics && node.history_key == key
         ? node.statistics : std::make_shared<InformationSetStatistics>();

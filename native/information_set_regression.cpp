@@ -61,6 +61,9 @@ static void test_search(bool batched, int batch) {
   const auto blind = search();
   require(std::abs(blind.value-.5f) < .025f, "Private opponent branch leaked into future own decision");
   require(blind.visits == config.simulations, "Information sharing lost or duplicated completed visits");
+  config.share_information_history = false;
+  require(search().value > .97f, "History-off ablation must reproduce private-branch strategy fusion");
+  config.share_information_history = true;
   const auto weighted = search({4,1});
   require(std::abs(weighted.value-.8f) < .025f, "Shared decision did not optimize the weighted distribution");
   for (auto& world : worlds) world.safe = true;
