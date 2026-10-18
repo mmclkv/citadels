@@ -117,13 +117,18 @@ def run_case(case):
     stats = dict(decisions=0, searches=0, visits=0, expansions=0, seconds=0.,
         proposals=0, worlds=0, duplicates=0, refreshes=0, samplingMs=0.,
         essSum=0., essCount=0, budgetOverruns=0, learnedScored=0,
-        nativePrivatePhase=0)
+        nativePrivatePhase=0, progressWriteFailures=0)
     row = dict(case, complete=False)
     gid = case['id']
     def progress():
-        atomic_json(status, dict(id=gid, key=case['key'], players=case['players'],
-            round=state.get('round'), steps=steps, decisions=stats['decisions'],
-            elapsed=round(time.perf_counter()-start, 1)))
+        try:
+            atomic_json(status, dict(id=gid, key=case['key'], players=case['players'],
+                round=state.get('round'), steps=steps, decisions=stats['decisions'],
+                elapsed=round(time.perf_counter()-start, 1)))
+        except PermissionError:
+            # Windows readers can temporarily deny atomic replace/delete.
+            # Progress is advisory; a monitoring file must not decide a game.
+            stats['progressWriteFailures'] += 1
     try:
         state = engine.create_game(dict(seed=case['seed'], initialCrownSeat=case['crown'],
             charSetMode='random', endDistricts=8, startingHand=4, startingGold=2,
@@ -214,7 +219,10 @@ def run_case(case):
             engine.close_game(gid)
         except Exception:
             pass
-        status.unlink(missing_ok=True)
+        try:
+            status.unlink(missing_ok=True)
+        except PermissionError:
+            pass
     return row
 
 

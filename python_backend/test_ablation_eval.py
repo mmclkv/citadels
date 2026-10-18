@@ -1,9 +1,30 @@
 import unittest
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 from collections import Counter, defaultdict
 from python_backend.ablation_eval import schedule, summarize
 
 
 class AblationTests(unittest.TestCase):
+    def test_monitoring_file_lock_cannot_abort_a_game(self):
+        from python_backend import ablation_eval as arena
+        state=dict(scores=[dict(total=x) for x in (10,3,2,1)],round=1)
+        engine=SimpleNamespace(create_game=lambda *a,**kw:state,
+            current=lambda *a:dict(gameOver=True),snapshot=lambda *a:state,
+            close_game=lambda *a:None)
+        policy=SimpleNamespace(belief_policy=SimpleNamespace(histories={},error='',last=None))
+        case=dict(id='file-lock',key='b0h0d0',belief=False,history=False,dynamic=False,
+            players=4,seat=0,seed=1,crown=0)
+        with tempfile.TemporaryDirectory() as folder:
+            context=(dict(output=folder,budgetMs=5000),engine,None,policy,policy)
+            with patch.object(arena,'CONTEXT',context), patch.object(arena,'atomic_json',side_effect=PermissionError('file locked')):
+                row=arena.run_case(case)
+        self.assertTrue(row['complete'],row)
+        self.assertTrue(row['first'])
+        self.assertEqual(row['stats']['progressWriteFailures'],1)
+
     def test_balanced_paired_factorial_schedule(self):
         rows=schedule()
         self.assertEqual(rows,schedule())
