@@ -32,6 +32,7 @@ from .agent import AgentClient, AgentError, config_from_env
 from .voice import VoiceService
 from .neural import NeuralPolicy
 from .training_runtime import TrainingManager
+from .belief_training import BeliefTrainingManager
 from .model_contract import MODEL_CONTRACTS, ENCODING_CONTRACTS, checkpoint_resume_plan
 from .frp import FrpManager
 from .codex_gateway import CodexGateway, detect_codex
@@ -237,6 +238,9 @@ class PythonServer:
         self.training = TrainingManager(self.training_data_dir,
             native_worker=native_worker_manager.worker if native_worker_manager else None,
             game_worker=native_worker_manager.game_worker if native_worker_manager else None)
+        self.belief_training = BeliefTrainingManager(self.training_data_dir,
+            getattr(getattr(native_worker_manager, 'game_worker', None), 'executable', None),
+            getattr(getattr(native_worker_manager, 'worker', None), 'executable', None))
         self.frp = FrpManager(int(os.environ.get("PORT") or 8787), ROOT, self._log_startup)
         self.voice = VoiceService()
         self.voice_token_hits: dict[str, tuple[int, float]] = {}
@@ -706,6 +710,8 @@ class PythonServer:
             if len(state_log) > 400:
                 del state_log[:-400]
             await self._record_replay(room, player_id, action, merged)
+            if hasattr(self.neural, 'observe_belief'):
+                self.neural.observe_belief(merged)
             current.clear()
             current.update(merged)
             if ballroom_target and actor and action.get("name") == "ballroom_thanks":
@@ -747,6 +753,8 @@ class PythonServer:
                     pass
 
     async def _broadcast_state(self, room: dict) -> None:
+        if room.get('state') and hasattr(self.neural, 'observe_belief'):
+            self.neural.observe_belief(room['state'])
         if room.get("closed"):
             return
         await self._record_replay(room)
@@ -2648,6 +2656,48 @@ class PythonServer:
                 except (ValueError, OSError) as exc:
                     await _http_response(writer, 400, _json_bytes({"error": str(exc)}))
                 return
+            if route == '/api/belief/status' and method == 'GET':
+                status = self.belief_training.status()
+                status['checkpoints'] = await asyncio.to_thread(self.belief_training.checkpoints)
+                status['inference'] = self.neural.belief_policy.status()
+                await _http_response(writer, 200, _json_bytes(status))
+                return
+            if route in ('/api/belief/start', '/api/belief/stop', '/api/belief/activate', '/api/belief/disable'):
+                if method != 'POST':
+                    await _http_response(writer, 405, _json_bytes({'error': '请使用 POST'}))
+                    return
+                peer = writer.get_extra_info('peername')
+                try:
+                    local = _is_loopback_ip(ipaddress.ip_address(peer[0])) if peer else False
+                except ValueError:
+                    local = False
+                if not local:
+                    await _http_response(writer, 403, _json_bytes({'error': '信念训练和启用只能从服务器本机操作'}))
+                    return
+                try:
+                    length = int(headers.get('content-length', '0'))
+                    if not 0 <= length <= 64*1024:
+                        raise ValueError('信念配置长度无效')
+                    body = json.loads((await reader.readexactly(length)).decode('utf-8')) if length else {}
+                    if not isinstance(body, dict):
+                        raise ValueError('信念配置必须是 JSON 对象')
+                    if route.endswith('/start'):
+                        if self.training.status()['running']:
+                            raise ValueError('请先停止策略训练，避免争抢计算资源')
+                        result = self.belief_training.start(body)
+                    elif route.endswith('/stop'):
+                        result = self.belief_training.stop()
+                    elif route.endswith('/activate'):
+                        path = self.belief_training.checkpoint_path(body.get('checkpoint'))
+                        await asyncio.to_thread(self.neural.belief_policy.load, path)
+                        result = self.neural.belief_policy.status()
+                    else:
+                        self.neural.belief_policy.disable()
+                        result = self.neural.belief_policy.status()
+                    await _http_response(writer, 200, _json_bytes(result))
+                except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    await _http_response(writer, 400, _json_bytes({'error': str(exc)}))
+                return
             if route in ("/api/training/start", "/api/training/stop"):
                 if method != "POST":
                     await _http_response(writer, 405, _json_bytes({"error": "请使用 POST"}))
@@ -2670,6 +2720,8 @@ class PythonServer:
                     body = json.loads((await reader.readexactly(length)).decode("utf-8"))
                     if not isinstance(body, dict):
                         raise ValueError("训练配置必须是 JSON 对象")
+                    if self.belief_training.status()['running']:
+                        raise ValueError('请先停止信念训练，避免争抢计算资源')
                     result = self.training.start(body)
                     await _http_response(writer, 200, _json_bytes(result))
                 except (ValueError, UnicodeError, json.JSONDecodeError) as exc:

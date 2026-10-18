@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>信念网络训练 · 富饶之城</title>
+  <link rel="stylesheet" href="./training.css?v=13"><link rel="stylesheet" href="./belief-training.css?v=1">
+</head>
+<body>
+  <header class="train-header"><div><p class="eyebrow">CITADELS BELIEF LAB</p><h1>信念网络训练</h1></div>
+    <div class="header-actions"><span id="status-badge" class="status idle">空闲</span><a href="./training.html">策略网络训练</a><a href="./">返回游戏</a></div>
+  </header>
+  <main>
+    <section class="panel controls"><div class="section-title"><div><h2>自对弈数据与训练配置</h2>
+      <p>根据可见局面和历史观察，学习其他玩家的隐藏角色与手牌。无需人类录像；策略权重保持冻结。</p></div></div>
+      <form id="belief-form">
+        <label><span>本次采集对局数</span><input name="targetGames" type="number" min="1" max="10000000" value="1000" required></label>
+        <label><span>最少玩家</span><input name="minPlayers" type="number" min="2" max="8" value="4" required></label>
+        <label><span>最多玩家</span><input name="maxPlayers" type="number" min="2" max="8" value="8" required></label>
+        <label><span>角色组</span><select name="charSet"><option value="random">随机混合</option><option value="base">基本版</option><option value="dark">黑暗城市</option><option value="mixed">加强版混合</option></select></label>
+        <label><span>结束建筑数</span><select name="endDistricts"><option value="8">8 栋</option><option value="7">7 栋</option></select></label>
+        <label><span>数据生成对手</span><select name="opponents"><option value="mixed">每局随机混合</option><option value="heuristic">仅启发式</option><option value="network">仅策略网络</option></select><small>网络席位使用冻结默认/历史权重直接推理，不重复运行 MCTS；生成器使用 CPU。</small></label>
+        <label><span>采样进程数</span><input name="workers" type="number" min="1" max="8" value="1" required><small>每个采样器独占 C++ 游戏进程。</small></label>
+        <label><span>每局保留样本</span><input name="samplesPerGame" type="number" min="3" max="256" value="24" required><small>按前期、中期、尾盘分层，完成对局后才入库。</small></label>
+        <label><span>每隔几步观察一次</span><input name="sampleEvery" type="number" min="1" max="100" value="4" required></label>
+        <label><span>单局步数上限</span><input name="maxSteps" type="number" min="100" max="60000" value="5000" required></label>
+        <label><span>随机探索概率</span><input name="exploration" type="number" min="0" max="0.5" step="0.01" value="0.05" required></label>
+        <label><span>每几局保留一局验证</span><input name="validationEvery" type="number" min="2" max="20" value="5" required><small>整局留出；验证样本不参与梯度更新。</small></label>
+        <label><span>网络维度</span><select name="dimension"><option value="64">64 · 轻量</option><option value="128" selected>128 · 标准</option><option value="192">192 · 增强</option></select></label>
+        <label><span>历史事件窗口</span><input name="historyLength" type="number" min="8" max="512" value="128" required><small>训练与实战使用相同的可见事件窗口。</small></label>
+        <label><span>训练设备</span><select name="device"><option value="cpu">CPU</option><option value="cuda">GPU / CUDA</option></select></label>
+        <label><span>学习率</span><input name="learningRate" type="number" min="0.000001" max="0.01" step="0.000001" value="0.0003" required></label>
+        <label><span>每几局更新一次</span><input name="batchGames" type="number" min="1" max="256" value="16" required></label>
+        <label><span>每次更新样本数</span><input name="updateSamples" type="number" min="1" max="8192" value="128" required></label>
+        <label><span>梯度小批量</span><input name="miniBatch" type="number" min="1" max="64" value="4" required></label>
+        <label><span>每次更新轮数</span><input name="epochs" type="number" min="1" max="20" value="1" required></label>
+        <label><span>回放对局容量</span><input name="replayGames" type="number" min="4" max="2048" value="64" required><small>一半近期对局、一半长期储备，压缩落盘；更大容量增加内存占用。</small></label>
+        <label><span>每几局保存权重</span><input name="checkpointEvery" type="number" min="1" max="1000000" value="100" required></label>
+        <label><span>实战候选隐藏世界数</span><input name="candidateCount" type="number" min="4" max="128" value="16" required><small>合法世界经网络概率与先验校正后重采样；会增加推理耗时。</small></label>
+        <label><span>保留原采样比例</span><input name="priorMixture" type="number" min="0.05" max="1" step="0.05" value="0.2" required></label>
+        <label><span>随机种子</span><input name="seed" type="number" min="0" max="2147483647" value="20261018" required></label>
+        <label><span>续训信念权重</span><select name="resumeCheckpoint" id="resume"><option value="">从头训练</option></select><small>恢复网络与 Adam 状态；规模和历史窗口需一致。</small></label>
+      </form>
+      <div class="belief-actions"><button id="start" type="button">开始采集并训练</button><button id="stop" type="button" disabled>停止并保存已完成更新</button><span id="message" role="status" aria-live="polite"></span></div>
+      <p class="belief-note">训练启动/停止与权重启用沿用本机访问限制。策略训练与信念训练不能同时运行。保存不会自动替换实战模型。</p>
+    </section>
+    <section class="panel controls"><h2>训练进度</h2><progress id="progress" max="1" value="0"></progress>
+      <div class="belief-metrics" id="metrics"></div><p class="belief-note">NLL 越低越好；只在相同验证集上比较。预测指标改善不等于夺冠率提高，仍需同时间预算实战评测。</p>
+      <h3>更新记录</h3><div class="belief-table"><table><thead><tr><th>累计局数</th><th>训练损失</th><th>验证联合 NLL</th><th>角色 NLL</th><th>手牌 NLL</th></tr></thead><tbody id="history"></tbody></table></div>
+    </section>
+    <section class="panel controls"><h2>实战启用</h2><p id="inference">未启用信念网络，继续使用原有规则信念。</p>
+      <div class="belief-actions"><select id="checkpoint"><option value="">选择已保存的信念权重</option></select><button id="activate" type="button">启用选中权重</button><button id="disable" type="button">恢复原有采样</button></div>
+      <p class="belief-note">仅影响本服务器的策略网络玩家。特殊私人选牌/响应阶段保留原采样；任何模型或数值错误都会回退。重启后可用 CITADELS_BELIEF_CHECKPOINT 指定权重。</p>
+    </section>
+    <section class="panel controls"><h2>训练日志</h2><pre id="logs" aria-live="polite">暂无训练记录。</pre></section>
+  </main>
+  <script src="./belief-training.js?v=1"></script>
+</body></html>

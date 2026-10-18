@@ -15,6 +15,7 @@ import numpy as np
 
 from .model_contract import MODEL_CONTRACTS, validate_checkpoint_contract
 from .policy_selection import select_search_action
+from .belief import BeliefPolicy
 
 class NeuralPolicy:
     def __init__(self, checkpoint: str | None = None, profile: str | None = None,
@@ -33,6 +34,7 @@ class NeuralPolicy:
         self.state_version = MODEL_CONTRACTS["entity-v6"]["state"]
         self.action_version = MODEL_CONTRACTS["entity-v6"]["action"]
         self.worker = worker
+        self.belief_policy = BeliefPolicy()
         self.model_path = ""
         self._model_dir = None
         self.error = ""
@@ -97,12 +99,19 @@ class NeuralPolicy:
                 "device": self.device_name,
                 "game": 0, "message": "策略网络已就绪" if self.worker and self.model_path else self.error,
                 "tta": {"variants": 0, "maxInferenceMs": 0, "lastInference": None},
-                "mcts": dict(self._last_mcts)}
+                "mcts": dict(self._last_mcts),
+                "beliefNetwork": self.belief_policy.status() if hasattr(self, 'belief_policy') else {"configured": False}}
+
+    def observe_belief(self, state):
+        if hasattr(self, 'belief_policy'):
+            self.belief_policy.update(state)
 
     def _root_particles(self, state: dict, player_id: str, count: int,
                         seed: int, belief: bool) -> dict:
         if not self.worker or not hasattr(self.worker, "determinize"):
             raise RuntimeError("策略网络要求 C++ worker 提供隐藏信息确定化接口")
+        if hasattr(self, 'belief_policy'):
+            return self.belief_policy.sample(self.worker, state, player_id, count, seed, belief)
         return self.worker.determinize(state=state, player_id=player_id, count=count,
                                        seed=seed, belief=belief)
 
