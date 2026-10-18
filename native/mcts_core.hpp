@@ -18,6 +18,8 @@
 #include <utility>
 #include <vector>
 
+#include "root_particles.hpp"
+
 namespace citadels::native {
 
 constexpr size_t kValueSlots = 8;
@@ -327,7 +329,8 @@ class Mcts {
    * 同一信息集内合法动作集恒定，叶节点评估只读取行动者有权知道的信息。
    */
   Result search(const std::vector<State>& root_states, int root_player,
-                const std::vector<float>& particle_weights = {},Tree* retained_tree = nullptr) {
+                const std::vector<float>& particle_weights = {},Tree* retained_tree = nullptr,
+                ProgressiveRootParticles<State>* progressive = nullptr) {
     if (root_states.empty()) return {};
     statistics_.clear();
     roots_ = &root_states;
@@ -364,7 +367,9 @@ class Mcts {
     for (int i = 0; i < config_.simulations; ++i) {
       if (expired()) break;
       // 每条模拟重新抽一个粒子：世界只在本次模拟内有效，不是被钉死在树上
-      State state = root_states[pick_particle()];
+      if (progressive) progressive->refresh(static_cast<size_t>(i), expired);
+      if (expired()) break;
+      State state = progressive ? progressive->draw(rng_) : root_states[pick_particle()];
       SearchInformationHistory<State, Action> history(game_, state);
       history.keys.at(root_player) = root.history_key;
       std::vector<Node*> path{&root};
@@ -614,10 +619,12 @@ class BatchedMcts {
    * 每条模拟抽一份。分批评估只在「收集叶节点」这一层做，不影响粒子语义。
    */
   Result search(const std::vector<State>& root_states, int root_player, int batch_size,
-                const std::vector<float>& particle_weights = {}) {
+                const std::vector<float>& particle_weights = {},
+                ProgressiveRootParticles<State>* progressive = nullptr) {
     if (batch_size < 1) batch_size = 1;
     if (root_states.empty()) return {};
-    const auto deadline = std::chrono::steady_clock::now() +
+    const auto deadline = config_.deadline != std::chrono::steady_clock::time_point{}
+      ? config_.deadline : std::chrono::steady_clock::now() +
         std::chrono::milliseconds(std::max(0, config_.time_budget_ms));
     const auto expired = [&] { return config_.time_budget_ms > 0 &&
         std::chrono::steady_clock::now() >= deadline; };
@@ -656,7 +663,9 @@ class BatchedMcts {
       for (int i = 0; i < count; ++i) {
         if (expired()) break;
         // 每条模拟重新抽一个粒子：世界只在本次模拟内有效
-        State state = root_states[pick_particle()];
+        if (progressive) progressive->refresh(static_cast<size_t>(completed + i), expired);
+        if (expired()) break;
+        State state = progressive ? progressive->draw(rng_) : root_states[pick_particle()];
       SearchInformationHistory<State, Action> history(game_, state);
       history.keys.at(root_player) = root.history_key;
         Node* node = &root;

@@ -508,6 +508,8 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                 batch_size=config.get("mctsBatchSize", 32),
                 action_encoding_version=actor_policy["actionEncodingVersion"],
                 include_training_features=collect, policy_only=policy_only,
+                progressive_particles=not policy_only and config.get("mctsProgressiveParticles", True),
+                root_belief=config.get("mctsBelief", True),
                 # Weakness screening uses searched opponents, so do not model
                 # those seats as direct-policy actors. Ordinary training freezes
                 # each non-learner's exact model for the entire game.

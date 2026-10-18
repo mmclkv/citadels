@@ -68,7 +68,10 @@ class NativeMctsWorker:
                batch_size: int = 32, action_encoding_version: int = 11,
                include_training_features: bool = False, policy_only: bool = False,
                include_root_diagnostics: bool = False,
-               opponent_policies: list[dict] | None = None, time_budget_ms: int = 0) -> dict:
+               opponent_policies: list[dict] | None = None, time_budget_ms: int = 0,
+               progressive_particles: bool = False, root_belief: bool = True,
+               root_log_weights: list[float] | None = None, root_prior_mixture: float = 0.,
+               root_candidate_scorer=None) -> dict:
         with self._lock:
             if self.process.poll() is not None:
                 raise RuntimeError(f"C++ MCTS worker 已退出（exit={self.process.returncode}）")
@@ -90,7 +93,12 @@ class NativeMctsWorker:
                 "dirichletEpsilon": float(dirichlet_epsilon),
                 "seed": int(seed), "batchSize": int(batch_size),
                 "opponentPolicies": opponent_policies or [],
+                "progressiveParticles": bool(progressive_particles), "rootBelief": bool(root_belief),
+                "rootPriorMixture": float(root_prior_mixture),
+                "scoreRootCandidates": root_candidate_scorer is not None,
             }
+            if root_log_weights is not None:
+                request["rootLogWeights"] = root_log_weights
             assert self.process.stdin is not None and self.process.stdout is not None
             try:
                 self.process.stdin.write(json.dumps(request, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -104,15 +112,33 @@ class NativeMctsWorker:
                 raise RuntimeError(
                     "C++ MCTS worker 在接收搜索请求前退出 "
                     f"（exit={self.process.poll()}；stderr={stderr}）") from error
-            line = self.process.stdout.readline()
-            if not line:
-                raise RuntimeError("C++ MCTS worker 未返回结果")
-            try:
-                result = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise RuntimeError("C++ MCTS worker 返回了无效 JSON") from error
-            if result.get("id") != request_id:
-                raise RuntimeError("C++ MCTS worker 响应 ID 不匹配")
+            while True:
+                line = self.process.stdout.readline()
+                if not line:
+                    raise RuntimeError("C++ MCTS worker 未返回结果")
+                try:
+                    result = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise RuntimeError("C++ MCTS worker 返回了无效 JSON") from error
+                if result.get("id") != request_id:
+                    raise RuntimeError("C++ MCTS worker 响应 ID 不匹配")
+                if result.get("t") != "root_candidates":
+                    break
+                reply = {"id": request_id}
+                try:
+                    if not progressive_particles or root_candidate_scorer is None:
+                        raise RuntimeError("Unexpected root candidate scoring request")
+                    worlds = result["particles"]
+                    scores = [float(value) for value in root_candidate_scorer(worlds)]
+                    if len(scores) != len(worlds):
+                        raise ValueError("Root candidate score length mismatch")
+                    reply["logWeights"] = scores
+                    encoded = json.dumps(reply, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+                except Exception as error:
+                    # Always answer so the persistent IPC remains synchronised.
+                    encoded = json.dumps({"id": request_id, "error": str(error)}, ensure_ascii=False, separators=(",", ":"))
+                self.process.stdin.write(encoded + "\n")
+                self.process.stdin.flush()
             if result.get("t") == "error":
                 detail = str(result.get("error", "未知错误"))
                 if "未知网络架构" in detail:
@@ -120,6 +146,8 @@ class NativeMctsWorker:
                 raise RuntimeError("C++ MCTS worker 错误：" + detail)
             if result.get("t") != "search_result":
                 raise RuntimeError("C++ MCTS worker 响应类型不支持")
+            if progressive_particles and result.get("progressiveParticles") is not True:
+                raise RuntimeError("C++ worker 不支持逐步补充隐藏世界；请重新编译")
             self._validate_search_encoding(result, action_encoding_version)
             if opponent_policies and result.get("opponentPolicyMode") != "seat-policy-sampling-v1":
                 raise RuntimeError("C++ worker 不支持按席位策略预测对手；请重新编译，不能沿用旧搜索目标")

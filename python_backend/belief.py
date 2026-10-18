@@ -1,6 +1,7 @@
 """Optional learned importance resampling of legal native hidden worlds."""
 from __future__ import annotations
 import os
+import math
 import random
 import threading
 import time
@@ -64,6 +65,7 @@ class BeliefPolicy:
             # sampler until its proposal likelihood is explicitly supported.
             if not enabled or self.model is None or pending or state.get('reaction'):
                 return worker.determinize(state=state, player_id=viewer_id, count=count, seed=seed, belief=enabled)
+
             start = time.perf_counter()
             try:
                 import torch
@@ -93,3 +95,36 @@ class BeliefPolicy:
             except Exception as exc:
                 self.error = str(exc)
                 return worker.determinize(state=state, player_id=viewer_id, count=count, seed=seed, belief=enabled)
+
+    def candidate_scorer(self, state, viewer_id, enabled=True):
+        """Freeze one model and one real observation for an entire search.
+
+        Return unnormalised log importance weights on a common scale. Pool-wide
+        normalisation and the prior mixture happen in C++, including duplicates;
+        normalising each incoming batch would change its probability mass.
+        """
+        with self._lock:
+            pending = ((state.get('turn') or {}).get('pending') or {}).get('kind')
+            if not enabled or self.model is None or pending or state.get('reaction'):
+                return None
+            self.update(state)
+            key = (state.get('roomId', ''), state.get('createdAt', 0))
+            observation = observe(state, viewer_id)
+            history = self.histories[key].for_player(viewer_id).copy()
+            model = self.model
+            mixture = float(self.metadata.get('priorMixture', .2))
+            if not math.isfinite(mixture) or not 0 <= mixture <= 1:
+                raise ValueError('信念网络 priorMixture 无效')
+
+        def score(worlds):
+            import torch
+            targets = [labels(world, viewer_id, observation) for world in worlds]
+            with torch.inference_mode():
+                logp = model.score_candidates(observation, history, targets).cpu().numpy().astype(float)
+            logq = np.array([prior_hand_log_probability(world, viewer_id, observation) for world in worlds])
+            weights = logp - logq
+            if not np.isfinite(weights).all():
+                raise ValueError('信念网络返回无效概率')
+            return weights.tolist()
+
+        return score, mixture

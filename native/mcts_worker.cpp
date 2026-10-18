@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <new>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -240,6 +241,7 @@ int main() {
         throw std::runtime_error("当前 mcts_worker 未编译 LibTorch 后端，不能执行前向一致性检查");
 #endif
       }
+      const auto request_started = std::chrono::steady_clock::now();
       const bool determinize_mode = string_field(request, "mode") == "determinize";
       const auto* state_value = request.get("state");
       if (!state_value || state_value->is_null())
@@ -366,6 +368,7 @@ int main() {
       config.simulations = std::max(1, int_field(request, "simulations", 50));
       config.max_depth = std::max(1, int_field(request, "maxDepth", 200));
       config.time_budget_ms = std::max(0, int_field(request, "timeBudgetMs", 0));
+      if (config.time_budget_ms > 0) config.deadline = request_started + std::chrono::milliseconds(config.time_budget_ms);
       config.c_puct = static_cast<float>(number_field(request, "cPuct", 1.0));
       config.dirichlet_alpha = static_cast<float>(number_field(request, "dirichletAlpha", 0.3));
       config.dirichlet_epsilon = static_cast<float>(number_field(request, "dirichletEpsilon", 0.0));
@@ -424,6 +427,10 @@ int main() {
       if (opponent_policies && !opponent_policies->as_array().empty())
         throw std::runtime_error("opponentPolicies requires a LibTorch build");
 #endif
+      ProgressiveRootParticles<NativeGameState> progressive;
+      const bool progressive_enabled = bool_field(request, "progressiveParticles") && !bool_field(request, "policyOnly");
+      auto* root_source = progressive_enabled ? &progressive : nullptr;
+      std::string sampling_error;
       auto run_search = [&](const std::vector<NativeGameState>& states, int perspective,
                             int batch, const std::vector<float>& weights) {
 #ifdef CITADELS_LIBTORCH
@@ -456,17 +463,17 @@ int main() {
         if (direct_neural) {
           return BatchedMcts<NativeGameState, NativeSearchAction>(game, *seat_evaluator, config, npc_choice,
             [&](int player) { return seat_evaluator->has_policy(player); })
-            .search(states, perspective, batch, weights);
+            .search(states, perspective, batch, weights, root_source);
         }
 #endif
         if (shared_neural)
           return BatchedMcts<NativeGameState, NativeSearchAction>(game, *shared_neural, config, npc_choice)
-            .search(states, perspective, batch, weights);
+            .search(states, perspective, batch, weights, root_source);
         if (neural)
           return BatchedMcts<NativeGameState, NativeSearchAction>(game, *neural, config, npc_choice)
-            .search(states, perspective, batch, weights);
+            .search(states, perspective, batch, weights, root_source);
         return Mcts<NativeGameState, NativeSearchAction>(game, evaluator, config)
-          .search(states, perspective, weights);
+          .search(states, perspective, weights, nullptr, root_source);
       };
       const auto native_actions = game.ai_actions(state, root);
       context += " · 原生动作=" + std::to_string(native_actions.size());
@@ -495,15 +502,73 @@ int main() {
       };
       std::vector<NativeGameState> pool;
       std::vector<float> pool_weights;
+      std::vector<size_t> pool_indices;
       size_t particles_used = 0;
       if (actions_match) {
         pool.push_back(std::move(state));
-        pool_weights.push_back(weight_at(0));
+        pool_weights.push_back(weight_at(0)); pool_indices.push_back(0);
         for (size_t i = 0; i < particles.size(); ++i) {
           const auto particle_actions = game.ai_actions(particles[i], root);
           if (!actions_aligned(particle_actions, supplied)) continue;
           pool.push_back(std::move(particles[i]));
-          pool_weights.push_back(weight_at(i + 1));
+          pool_weights.push_back(weight_at(i + 1)); pool_indices.push_back(i+1);
+        }
+        if (progressive_enabled) {
+          // The seed world is frozen. Never generate from a simulated future.
+          const NativeGameState sampling_source = pool.front();
+          progressive.prior_mixture = number_field(request, "rootPriorMixture", 0);
+          progressive.sampling_fraction = config.time_budget_ms > 0 ? .2 : 1.;
+          progressive.identity = [](const NativeGameState& world) {
+            auto copy=world; copy.rng=JsRng(1);
+            std::ostringstream out; write_native_state(out,copy); return out.str();
+          };
+          // Future random events are sampled afresh, rather than making a
+          // lucky future RNG stream part of a frequently selected root world.
+          progressive.randomize_chance = [](NativeGameState& world,std::mt19937& rng) { world.rng=JsRng(rng()); };
+          const auto* logs=request.get("rootLogWeights");
+          if (logs && (!logs->is_array() || logs->as_array().size()!=1+particles.size()))
+            throw std::runtime_error("rootLogWeights length mismatch");
+          std::vector<ProgressiveRootParticles<NativeGameState>::Sample> initial;
+          // Initial worlds were already aligned above; use their original indices.
+          for (size_t j=0;j<pool.size();++j) {
+            const size_t i=pool_indices[j];
+            const double weight=weight_at(i);
+            if (logs) initial.push_back({pool[j],logs->as_array()[i].as_number()});
+            else initial.push_back({pool[j],weight>0 ? std::log(weight) : -INFINITY});
+          }
+          progressive.add(std::move(initial));
+          const bool learned=bool_field(request,"scoreRootCandidates");
+          const bool weak_belief=bool_field(request,"rootBelief",true);
+          auto sample_rng=std::make_shared<std::mt19937>(config.seed ^ 0xC0A3E17u);
+          progressive.generate=[&,sampling_source,sample_rng,learned,weak_belief](size_t count) {
+            std::vector<NativeGameState> candidates;
+            for (size_t i=0;i<count;++i) {
+              if(config.time_budget_ms>0 && std::chrono::steady_clock::now()>=config.deadline)break;
+              auto world=determinize_native_state(sampling_source,root,(*sample_rng)(),true);
+              if(actions_aligned(game.ai_actions(world,root),supplied)) candidates.push_back(std::move(world));
+            }
+            auto weights=native_belief_weights(candidates,root,weak_belief);
+            std::vector<double> log_weights;
+            for(float w:weights)log_weights.push_back(std::log(std::max(1e-30f,w)));
+            if(learned && !candidates.empty()) {
+              std::cout<<"{\"t\":\"root_candidates\",\"id\":\""<<escape(id)<<"\",\"particles\":[";
+              for(size_t i=0;i<candidates.size();++i){if(i)std::cout<<',';write_native_state(std::cout,candidates[i]);}
+              std::cout<<"]}\n"<<std::flush;
+              std::string response;
+              if(!std::getline(std::cin,response))throw std::runtime_error("Root candidate scorer disconnected");
+              const auto scored=JsonParser(response).parse();
+              if(string_field(scored,"id")!=id)throw std::runtime_error("Root candidate response ID mismatch");
+              if(!string_field(scored,"error").empty()) {sampling_error=string_field(scored,"error");return std::vector<ProgressiveRootParticles<NativeGameState>::Sample>{};}
+              const auto* values=scored.get("logWeights");
+              if(!values || !values->is_array() || values->as_array().size()!=candidates.size())
+                throw std::runtime_error("Root candidate score length mismatch");
+              log_weights.clear();
+              for(const auto& v:values->as_array())log_weights.push_back(v.as_number());
+            }
+            std::vector<ProgressiveRootParticles<NativeGameState>::Sample> added;
+            for(size_t i=0;i<candidates.size();++i)added.push_back({std::move(candidates[i]),log_weights[i]});
+            return added;
+          };
         }
         particles_used = pool.size();
         bool belief_used = false;
@@ -525,7 +590,8 @@ int main() {
         policy = result.policy; visits = result.visits; expansions = result.expansions;
         root_value = result.value;
         root_value_vector = result.value_vector;
-        belief_applied = belief_used && particles_used > 1;
+        if (progressive_enabled) particles_used=progressive.states.size();
+        belief_applied = (belief_used || bool_field(request,"scoreRootCandidates")) && particles_used > 1;
       }
       if (policy.size() != supplied.size()) policy.assign(supplied.size(), 1.0f / supplied.size());
       std::optional<Evaluation> root_diagnostic;
@@ -554,6 +620,14 @@ int main() {
                 << ",\"policyOnly\":" << (bool_field(request, "policyOnly") ? "true" : "false")
                 << ",\"fallback\":" << (actions_match ? "false" : "true")
                 << ",\"particlesUsed\":" << particles_used
+                << ",\"progressiveParticles\":" << (progressive_enabled ? "true" : "false")
+                << ",\"particleProposals\":" << progressive.proposals
+                << ",\"particleDuplicates\":" << progressive.duplicates
+                << ",\"particleRefreshes\":" << progressive.refreshes
+                << ",\"particleSamplingMs\":" << progressive.sampling_ms
+                << ",\"particleEss\":" << progressive.effective_samples()
+                << ",\"particleLimit\":" << progressive.limit
+                << ",\"particleSamplingError\":\"" << escape(sampling_error) << "\""
                 << ",\"belief\":" << (belief_applied ? "true" : "false")
                 << ",\"nativeActionCount\":" << native_actions.size()
                 << ",\"mismatchIndex\":" << mismatch_index

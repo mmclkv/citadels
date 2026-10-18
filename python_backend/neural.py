@@ -9,6 +9,7 @@ import math
 import os
 import random
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -146,12 +147,41 @@ class NeuralPolicy:
         belief = options.get("belief", True) is not False
         decay = 0.5 if belief else 1.0
         rng = random.Random()
-        sampled = self._root_particles(state, player_id, particle_count,
-                                       rng.randrange(0, 2**32), belief)
+        started = time.perf_counter()
+        progressive = options.get("progressiveParticles", True) is not False
+        scorer = None
+        mixture = 0.
+        log_weights = None
+        if progressive and hasattr(self, "belief_policy"):
+            try:
+                frozen = self.belief_policy.candidate_scorer(state, player_id, belief)
+                if frozen is not None:
+                    scorer, mixture = frozen
+            except Exception as error:
+                self.belief_policy.error = str(error)
+        sample_seed = rng.randrange(0, 2**32)
+        if scorer is not None:
+            sampled = self.worker.determinize(state=state, player_id=player_id,
+                count=particle_count, seed=sample_seed, belief=False)
+            try:
+                log_weights = scorer(sampled["particles"])
+            except Exception as error:
+                self.belief_policy.error = str(error)
+                scorer = None; mixture = 0.
+                sampled = self.worker.determinize(state=state, player_id=player_id,
+                    count=particle_count, seed=sample_seed, belief=belief)
+        else:
+            # Progressive learned sampling uses the scorer above; unsupported
+            # private phases keep the same native proposal for every batch.
+            sampled = (self.worker.determinize(state=state, player_id=player_id,
+                count=particle_count, seed=sample_seed, belief=belief) if progressive else
+                self._root_particles(state, player_id, particle_count, sample_seed, belief))
         particles = sampled["particles"]
         if not particles:
             raise RuntimeError("无法为当前局面生成合法的隐藏信息确定化样本")
         weights = sampled["weights"]
+        initial_sampling_ms = (time.perf_counter()-started)*1000
+        remaining_ms = max(1, math.ceil(time_budget_ms-initial_sampling_ms)) if time_budget_ms else 0
         result = self.worker.search(
             state=particles[0], particles=particles[1:], root_player_id=player_id,
             legal_actions=candidates, particle_weights=weights,
@@ -162,7 +192,9 @@ class NeuralPolicy:
             dirichlet_alpha=0.3, dirichlet_epsilon=0.0,
             seed=rng.randrange(0, 2**32), batch_size=int(options.get("batchSize", 32)),
             action_encoding_version=self.action_version,
-            time_budget_ms=time_budget_ms)
+            time_budget_ms=remaining_ms, progressive_particles=progressive,
+            root_belief=belief, root_log_weights=log_weights,
+            root_prior_mixture=mixture, root_candidate_scorer=scorer)
         policy = np.asarray(result["policy"], dtype=np.float64)
         if policy.size != len(candidates) or not np.isfinite(policy).all() or policy.sum() <= 0:
             raise RuntimeError("C++ MCTS 返回了无效策略分布")
@@ -174,6 +206,15 @@ class NeuralPolicy:
                       "expansions": result.get("expansions", 0),
                       "simulations": simulations, "maxDepth": max_depth, "selection": selection,
                       "timeBudgetMs": time_budget_ms, "automatic": automatic}
+        mcts_stats.update({"progressiveParticles": progressive,
+            "particleProposals": result.get("particleProposals", len(particles)),
+            "particleDuplicates": result.get("particleDuplicates", 0),
+            "particleRefreshes": result.get("particleRefreshes", 0),
+            "particleEss": result.get("particleEss"),
+            "particleLimit": result.get("particleLimit"),
+            "particleSamplingMs": initial_sampling_ms + result.get("particleSamplingMs", 0),
+            "particleSamplingError": result.get("particleSamplingError", ""),
+            "totalMs": (time.perf_counter()-started)*1000})
         self._last_mcts = mcts_stats
         if diagnostics is not None:
             diagnostics.update({"method": "native-mcts", "profile": self.profile,
