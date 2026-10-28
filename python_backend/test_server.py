@@ -120,7 +120,8 @@ class ServerArgumentTests(unittest.TestCase):
         })
 
     def test_checkpoint_encoding_compatibility_matches_entity_v6_contract(self) -> None:
-        self.assertTrue(_encoding_compatible(15, 11))
+        self.assertTrue(_encoding_compatible(16, 12))
+        self.assertFalse(_encoding_compatible(15, 11))
         self.assertFalse(_encoding_compatible(14, 9))
         self.assertFalse(_encoding_compatible(14, 10))
         self.assertFalse(_encoding_compatible(12, 9))
