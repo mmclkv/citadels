@@ -164,6 +164,13 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
         << ",\"quarryCount\":" << observation.quarry_count << ",\"builtNames\":";
     write_json_strings(out, observation.built_names); out << '}';
   }
+  out << "],\"privateKnowledge\":[";
+  for (size_t i = 0; i < state.known_hand_cards.size(); ++i) {
+    if (i) out << ',';
+    const auto& known = state.known_hand_cards[i];
+    out << "{\"viewer\":" << known.viewer << ",\"owner\":" << known.owner << ",\"uid\":";
+    write_json_string(out, known.uid); out << '}';
+  }
   out << "],\"draft\":";
   if (state.phase != NativePhase::Draft) out << "null";
   else {

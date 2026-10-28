@@ -633,6 +633,13 @@ class NativeGameAdapter final : public GameAdapter<NativeGameState, NativeSearch
 
   bool apply(NativeGameState& state, int player,
              const NativeSearchAction& action) const override {
+    const bool applied = apply_inner(state, player, action);
+    if (applied) state.prune_known_hand_cards();
+    return applied;
+  }
+
+  bool apply_inner(NativeGameState& state, int player,
+             const NativeSearchAction& action) const {
     if (action.type == ActionType::DistrictEffect) return apply_district(state, player, action);
     if (action.type == ActionType::ConfirmRound)
       return state.confirm_round(player);

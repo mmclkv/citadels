@@ -149,6 +149,11 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
       state.observations.push_back(std::move(observation));
     }
   }
+  const auto* private_knowledge = snapshot.get("privateKnowledge");
+  if (private_knowledge && private_knowledge->is_array())
+    for (const auto& value : private_knowledge->as_array())
+      if (value.is_object()) state.known_hand_cards.push_back({
+        int_field(value, "viewer", -1), int_field(value, "owner", -1), string_field(value, "uid")});
   const auto* char_deck = snapshot.get("charDeck");
   if (char_deck && char_deck->is_array()) for (const auto& id : char_deck->as_array())
     if (id.is_string()) state.char_deck.push_back(id.as_string());

@@ -27,6 +27,14 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
 
   std::vector<DistrictCard*> hidden_cards;
   std::vector<size_t> building_payment_slots;
+  std::vector<std::string> known_uids;
+  for (const auto& known : result.known_hand_cards)
+    if (known.viewer == viewer && known.owner >= 0 &&
+        known.owner < static_cast<int>(result.players.size())) {
+      const auto& hand = result.players[known.owner].hand;
+      if (std::any_of(hand.begin(), hand.end(), [&](const DistrictCard& card) { return card.uid == known.uid; }))
+        known_uids.push_back(known.uid);
+    }
   if (result.active_player >= 0 && result.active_player != viewer && result.building_mode == "thievesDen") {
     const auto& hand = result.players[result.active_player].hand;
     for (size_t slot = 0; slot < hand.size(); ++slot)
@@ -42,6 +50,9 @@ inline NativeGameState determinize_native_state(const NativeGameState& source,
     // those identities pinned in every particle; wizard_take resolves by UID.
     if (viewer_has_seen_wizard_hand && static_cast<int>(player) == result.pending_target) continue;
     for (auto& card : result.players[player].hand) {
+      // Cards previously returned to this player by the Prophet remain known
+      // until they leave that hand.
+      if (std::find(known_uids.begin(), known_uids.end(), card.uid) != known_uids.end()) continue;
       // An announced construction waiting for a Magistrate reaction is public,
       // even though the engine temporarily keeps its card in the builder's hand.
       // Re-sampling that UID makes both confiscate/decline impossible to resolve.

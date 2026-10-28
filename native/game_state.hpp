@@ -76,10 +76,19 @@ struct NativeObservation {
   std::vector<std::string> built_names;
 };
 
+struct NativeKnownHandCard {
+  int viewer = -1;
+  int owner = -1;
+  std::string uid;
+};
+
 struct NativeGameState {
   NativePhase phase = NativePhase::Unknown;
   std::vector<NativePlayer> players;
   std::vector<NativeObservation> observations;
+  // Exact cards a viewer has seen in another player's hand (currently Prophet
+  // returns). Kept private to search/determinization and never sent in player views.
+  std::vector<NativeKnownHandCard> known_hand_cards;
   DeckMachine deck;
   JsRng rng;
   int active_player = -1;
@@ -590,6 +599,7 @@ struct NativeGameState {
     auto it = std::find_if(p->hand.begin(), p->hand.end(),
       [&](const DistrictCard& card) { return card.uid == uid; });
     if (it == p->hand.end()) return false;
+    known_hand_cards.push_back({active_player, pending_target, it->uid});
     players[pending_target].hand.push_back(std::move(*it));
     p->hand.erase(it);
     pending_queue.erase(pending_queue.begin());
@@ -599,6 +609,18 @@ struct NativeGameState {
       pending_target = pending_queue.front();
     }
     return true;
+  }
+
+  void prune_known_hand_cards() {
+    known_hand_cards.erase(std::remove_if(known_hand_cards.begin(), known_hand_cards.end(),
+      [&](const NativeKnownHandCard& known) {
+        if (known.viewer < 0 || known.viewer >= static_cast<int>(players.size()) ||
+            known.owner < 0 || known.owner >= static_cast<int>(players.size()) ||
+            known.viewer == known.owner) return true;
+        const auto& hand = players[known.owner].hand;
+        return std::none_of(hand.begin(), hand.end(),
+          [&](const DistrictCard& card) { return card.uid == known.uid; });
+      }), known_hand_cards.end());
   }
   const NativePlayer* active() const {
     if (active_player < 0 || active_player >= static_cast<int>(players.size())) return nullptr;
