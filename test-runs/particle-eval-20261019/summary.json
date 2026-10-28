@@ -1,0 +1,228 @@
+{
+  "gamesPerVariant": 104,
+  "summaries": {
+    "flat4": {
+      "games": 104,
+      "firsts": 13,
+      "firstRate": 0.125,
+      "winShares": 12.0,
+      "winShareRate": 0.11538461538461539,
+      "meanReward": -0.10943222115384615,
+      "meanRank": 4.173076923076923,
+      "meanSeconds": 2.468202743269313,
+      "byPlayers": {
+        "5": {
+          "games": 20,
+          "firsts": 4,
+          "firstRate": 0.2,
+          "winShareRate": 0.2,
+          "meanRank": 3.2
+        },
+        "6": {
+          "games": 24,
+          "firsts": 3,
+          "firstRate": 0.125,
+          "winShareRate": 0.10416666666666667,
+          "meanRank": 3.9166666666666665
+        },
+        "7": {
+          "games": 28,
+          "firsts": 4,
+          "firstRate": 0.14285714285714285,
+          "winShareRate": 0.125,
+          "meanRank": 3.75
+        },
+        "8": {
+          "games": 32,
+          "firsts": 2,
+          "firstRate": 0.0625,
+          "winShareRate": 0.0625,
+          "meanRank": 5.34375
+        }
+      },
+      "meanProposalWorldsPerGame": 212.26923076923077
+    },
+    "flat32": {
+      "games": 104,
+      "firsts": 18,
+      "firstRate": 0.17307692307692307,
+      "winShares": 16.833333333333332,
+      "winShareRate": 0.16185897435897437,
+      "meanReward": -0.012545798076923076,
+      "meanRank": 3.8653846153846154,
+      "meanSeconds": 3.3009339355770724,
+      "byPlayers": {
+        "5": {
+          "games": 20,
+          "firsts": 3,
+          "firstRate": 0.15,
+          "winShareRate": 0.15,
+          "meanRank": 3.1
+        },
+        "6": {
+          "games": 24,
+          "firsts": 5,
+          "firstRate": 0.20833333333333334,
+          "winShareRate": 0.20833333333333334,
+          "meanRank": 3.9583333333333335
+        },
+        "7": {
+          "games": 28,
+          "firsts": 5,
+          "firstRate": 0.17857142857142858,
+          "winShareRate": 0.15476190476190477,
+          "meanRank": 3.2857142857142856
+        },
+        "8": {
+          "games": 32,
+          "firsts": 5,
+          "firstRate": 0.15625,
+          "winShareRate": 0.140625,
+          "meanRank": 4.78125
+        }
+      },
+      "meanProposalWorldsPerGame": 1787.076923076923
+    },
+    "role32": {
+      "games": 104,
+      "firsts": 14,
+      "firstRate": 0.1346153846153846,
+      "winShares": 13.5,
+      "winShareRate": 0.12980769230769232,
+      "meanReward": -0.015796701923076924,
+      "meanRank": 3.8365384615384617,
+      "meanSeconds": 5.026241166345733,
+      "byPlayers": {
+        "5": {
+          "games": 20,
+          "firsts": 3,
+          "firstRate": 0.15,
+          "winShareRate": 0.15,
+          "meanRank": 3.45
+        },
+        "6": {
+          "games": 24,
+          "firsts": 3,
+          "firstRate": 0.125,
+          "winShareRate": 0.10416666666666667,
+          "meanRank": 3.9166666666666665
+        },
+        "7": {
+          "games": 28,
+          "firsts": 4,
+          "firstRate": 0.14285714285714285,
+          "winShareRate": 0.14285714285714285,
+          "meanRank": 3.142857142857143
+        },
+        "8": {
+          "games": 32,
+          "firsts": 4,
+          "firstRate": 0.125,
+          "winShareRate": 0.125,
+          "meanRank": 4.625
+        }
+      },
+      "meanProposalWorldsPerGame": 7022.7692307692305
+    }
+  },
+  "pairedClusterBootstrap": [
+    {
+      "left": "flat4",
+      "right": "flat32",
+      "first": {
+        "delta": -0.04069940476190476,
+        "ci95": [
+          -0.1484375,
+          0.05520833333333333
+        ]
+      },
+      "winShare": {
+        "delta": -0.04051339285714285,
+        "ci95": [
+          -0.14992559523809523,
+          0.05472470238095238
+        ]
+      },
+      "reward": {
+        "delta": -0.08720235900297618,
+        "ci95": [
+          -0.28497020572916665,
+          0.11502977008928572
+        ]
+      },
+      "rank": {
+        "delta": 0.2712797619047619,
+        "ci95": [
+          -0.23586309523809523,
+          0.7591517857142857
+        ]
+      }
+    },
+    {
+      "left": "flat32",
+      "right": "role32",
+      "first": {
+        "delta": 0.03757440476190476,
+        "ci95": [
+          -0.054538690476190484,
+          0.12626488095238095
+        ]
+      },
+      "winShare": {
+        "delta": 0.032924107142857144,
+        "ci95": [
+          -0.06476934523809524,
+          0.1277529761904762
+        ]
+      },
+      "reward": {
+        "delta": 0.016517845610119056,
+        "ci95": [
+          -0.10297621465773808,
+          0.1468749761904762
+        ]
+      },
+      "rank": {
+        "delta": -0.00230654761904763,
+        "ci95": [
+          -0.31540178571428573,
+          0.3072172619047619
+        ]
+      }
+    },
+    {
+      "left": "flat4",
+      "right": "role32",
+      "first": {
+        "delta": -0.0031249999999999993,
+        "ci95": [
+          -0.06629464285714286,
+          0.057961309523809526
+        ]
+      },
+      "winShare": {
+        "delta": -0.007589285714285713,
+        "ci95": [
+          -0.0665922619047619,
+          0.05089285714285714
+        ]
+      },
+      "reward": {
+        "delta": -0.07068451339285714,
+        "ci95": [
+          -0.2208333050595238,
+          0.08035712946428572
+        ]
+      },
+      "rank": {
+        "delta": 0.2689732142857143,
+        "ci95": [
+          -0.0904017857142857,
+          0.6282738095238095
+        ]
+      }
+    }
+  ],
+  "clusters": 16,
+  "clusterDesign": "four cycle clusters per player count; bootstrap stratified by 5/6/7/8 players"
+}

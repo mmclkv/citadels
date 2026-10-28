@@ -1,0 +1,84 @@
+{
+  "plannedGamesPerVariant": 12,
+  "completedByVariant": {
+    "flat4": 12,
+    "flat32": 12,
+    "role32": 12
+  },
+  "summaries": [
+    {
+      "variant": "flat4",
+      "games": 12,
+      "firsts": 2,
+      "firstRate": 0.16666666666666666,
+      "winShares": 2.0,
+      "winShareRate": 0.16666666666666666,
+      "meanReward": 0.16150783333333332,
+      "meanRank": 3.4166666666666665,
+      "meanSeconds": 76.65813850833244,
+      "meanProposalWorldsPerGame": 224.66666666666666,
+      "meanRoleHypothesesPerGame": 179.91666666666666
+    },
+    {
+      "variant": "flat32",
+      "games": 12,
+      "firsts": 2,
+      "firstRate": 0.16666666666666666,
+      "winShares": 2.0,
+      "winShareRate": 0.16666666666666666,
+      "meanReward": 0.2833333333333333,
+      "meanRank": 2.9166666666666665,
+      "meanSeconds": 535.4501286583303,
+      "meanProposalWorldsPerGame": 1528,
+      "meanRoleHypothesesPerGame": 858.5
+    },
+    {
+      "variant": "role32",
+      "games": 12,
+      "firsts": 5,
+      "firstRate": 0.4166666666666667,
+      "winShares": 4.5,
+      "winShareRate": 0.375,
+      "meanReward": 0.34126983333333333,
+      "meanRank": 2.8333333333333335,
+      "meanSeconds": 536.1365310583338,
+      "meanProposalWorldsPerGame": 6474.666666666667,
+      "meanRoleHypothesesPerGame": 887.4166666666666
+    }
+  ],
+  "pairedComparisons": [
+    {
+      "left": "flat4",
+      "right": "flat32",
+      "cases": 12,
+      "completedPairs": 12,
+      "missingOrFailedPairs": 0,
+      "meanRankRewardDelta": -0.12182549999999998,
+      "completeSeedBlocks": 0,
+      "approxSeedBlock95CI": null,
+      "promotionEligible": false
+    },
+    {
+      "left": "flat32",
+      "right": "role32",
+      "cases": 12,
+      "completedPairs": 12,
+      "missingOrFailedPairs": 0,
+      "meanRankRewardDelta": -0.05793650000000001,
+      "completeSeedBlocks": 0,
+      "approxSeedBlock95CI": null,
+      "promotionEligible": false
+    },
+    {
+      "left": "flat4",
+      "right": "role32",
+      "cases": 12,
+      "completedPairs": 12,
+      "missingOrFailedPairs": 0,
+      "meanRankRewardDelta": -0.179762,
+      "completeSeedBlocks": 0,
+      "approxSeedBlock95CI": null,
+      "promotionEligible": false
+    }
+  ]
+}

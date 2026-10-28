@@ -1,0 +1,143 @@
+{
+  "players": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "cycles": 4,
+  "seed": 2026101903,
+  "simulations": 1000,
+  "particles": 4,
+  "depth": 2000,
+  "batch": 32,
+  "c_puct": 1.0,
+  "device": "cpu",
+  "max_steps": 3000,
+  "max_rounds": 100,
+  "repeat_limit": 20,
+  "char_set": "random",
+  "opponent_search_ms": 0,
+  "diagnostics": false,
+  "simulationSelection": "sample",
+  "beliefNetwork": false,
+  "roleProposalCount": 128,
+  "scaleSimulationsByParticles": true,
+  "cycleOnly": 3,
+  "seatParity": 1,
+  "simulationsPerVariant": {
+    "flat4": 1000,
+    "flat32": 8000,
+    "role32": 8000
+  },
+  "opponents": "fixed hard static NPC policy",
+  "weight": "C:\\Users\\Jiaming Qiu\\citadels\\models\\policy-default.json.gz",
+  "weightSha256": "e4a8235e9cd27a0cae8ced407efde3dfb551780be7652e07c8e287018ee6354a",
+  "engine": "C:\\Users\\Jiaming Qiu\\citadels\\native\\game_engine-c7652847a6b9.exe",
+  "engineSha256": "631f0c2aa73c12b4015518fc548e2d5f3dbc2b264c7dd3c220deb797c1374a91",
+  "worker": "C:\\Users\\Jiaming Qiu\\citadels\\native\\mcts_worker_libtorch-a9b69c139fbd.exe",
+  "workerSha256": "3cce2a5a605fd42e6bc374f008a0e73cbe15f2bcfe92b02512457f9ef357564b",
+  "cases": [
+    {
+      "case": "n5-c3-s1",
+      "players": 5,
+      "cycle": 3,
+      "seat": 1,
+      "seed": 2642726492,
+      "crown": 3
+    },
+    {
+      "case": "n5-c3-s3",
+      "players": 5,
+      "cycle": 3,
+      "seat": 3,
+      "seed": 2642726492,
+      "crown": 3
+    },
+    {
+      "case": "n6-c3-s1",
+      "players": 6,
+      "cycle": 3,
+      "seat": 1,
+      "seed": 597198025,
+      "crown": 3
+    },
+    {
+      "case": "n6-c3-s3",
+      "players": 6,
+      "cycle": 3,
+      "seat": 3,
+      "seed": 597198025,
+      "crown": 3
+    },
+    {
+      "case": "n6-c3-s5",
+      "players": 6,
+      "cycle": 3,
+      "seat": 5,
+      "seed": 597198025,
+      "crown": 3
+    },
+    {
+      "case": "n7-c3-s1",
+      "players": 7,
+      "cycle": 3,
+      "seat": 1,
+      "seed": 2842473126,
+      "crown": 3
+    },
+    {
+      "case": "n7-c3-s3",
+      "players": 7,
+      "cycle": 3,
+      "seat": 3,
+      "seed": 2842473126,
+      "crown": 3
+    },
+    {
+      "case": "n7-c3-s5",
+      "players": 7,
+      "cycle": 3,
+      "seat": 5,
+      "seed": 2842473126,
+      "crown": 3
+    },
+    {
+      "case": "n8-c3-s1",
+      "players": 8,
+      "cycle": 3,
+      "seat": 1,
+      "seed": 792750355,
+      "crown": 3
+    },
+    {
+      "case": "n8-c3-s3",
+      "players": 8,
+      "cycle": 3,
+      "seat": 3,
+      "seed": 792750355,
+      "crown": 3
+    },
+    {
+      "case": "n8-c3-s5",
+      "players": 8,
+      "cycle": 3,
+      "seat": 5,
+      "seed": 792750355,
+      "crown": 3
+    },
+    {
+      "case": "n8-c3-s7",
+      "players": 8,
+      "cycle": 3,
+      "seat": 7,
+      "seed": 792750355,
+      "crown": 3
+    }
+  ],
+  "variants": [
+    "flat4",
+    "flat32",
+    "role32"
+  ]
+}

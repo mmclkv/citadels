@@ -1,0 +1,264 @@
+{
+  "settings": {
+    "simulations": 1000,
+    "maxDepth": 2000,
+    "beliefNetwork": false,
+    "plannedCases": 104,
+    "cycles": 4,
+    "seed": 2026101903
+  },
+  "overall": [
+    {
+      "variant": "flat4",
+      "games": 104,
+      "firsts": 21,
+      "firstRate": 0.20192307692307693,
+      "winShares": 19.5,
+      "winShareRate": 0.1875,
+      "meanReward": 0.10961538461538461,
+      "meanRank": 3.4903846153846154,
+      "meanSeconds": 38.52241790961601,
+      "meanProposalWorldsPerGame": 218.1153846153846,
+      "meanRoleHypothesesPerGame": 166.69230769230768
+    },
+    {
+      "variant": "flat32",
+      "games": 104,
+      "firsts": 16,
+      "firstRate": 0.15384615384615385,
+      "winShares": 14.0,
+      "winShareRate": 0.1346153846153846,
+      "meanReward": -0.12916665384615383,
+      "meanRank": 4.240384615384615,
+      "meanSeconds": 20.308053326922582,
+      "meanProposalWorldsPerGame": 1740.6153846153845,
+      "meanRoleHypothesesPerGame": 848
+    },
+    {
+      "variant": "role32",
+      "games": 104,
+      "firsts": 17,
+      "firstRate": 0.16346153846153846,
+      "winShares": 15.25,
+      "winShareRate": 0.1466346153846154,
+      "meanReward": 0.009157528846153846,
+      "meanRank": 3.7884615384615383,
+      "meanSeconds": 23.19209963076859,
+      "meanProposalWorldsPerGame": 7070.7692307692305,
+      "meanRoleHypothesesPerGame": 973.8846153846154
+    }
+  ],
+  "byPlayers": {
+    "5": {
+      "flat4": {
+        "games": 20,
+        "firsts": 3,
+        "firstRate": 0.15,
+        "meanWinShare": 0.125,
+        "meanRank": 3,
+        "meanRounds": 11.75,
+        "meanSeconds": 39.75756852000195
+      },
+      "flat32": {
+        "games": 20,
+        "firsts": 4,
+        "firstRate": 0.2,
+        "meanWinShare": 0.175,
+        "meanRank": 3.35,
+        "meanRounds": 12.1,
+        "meanSeconds": 21.22243785499959
+      },
+      "role32": {
+        "games": 20,
+        "firsts": 6,
+        "firstRate": 0.3,
+        "meanWinShare": 0.2625,
+        "meanRank": 3.1,
+        "meanRounds": 12,
+        "meanSeconds": 26.942092319998483
+      }
+    },
+    "6": {
+      "flat4": {
+        "games": 24,
+        "firsts": 5,
+        "firstRate": 0.20833333333333334,
+        "meanWinShare": 0.20833333333333334,
+        "meanRank": 3.6666666666666665,
+        "meanRounds": 10.833333333333334,
+        "meanSeconds": 35.0882885125017
+      },
+      "flat32": {
+        "games": 24,
+        "firsts": 5,
+        "firstRate": 0.20833333333333334,
+        "meanWinShare": 0.1875,
+        "meanRank": 3.6666666666666665,
+        "meanRounds": 11,
+        "meanSeconds": 20.07364889999917
+      },
+      "role32": {
+        "games": 24,
+        "firsts": 2,
+        "firstRate": 0.08333333333333333,
+        "meanWinShare": 0.08333333333333333,
+        "meanRank": 3.9166666666666665,
+        "meanRounds": 11.166666666666666,
+        "meanSeconds": 21.307164141666362
+      }
+    },
+    "7": {
+      "flat4": {
+        "games": 28,
+        "firsts": 5,
+        "firstRate": 0.17857142857142858,
+        "meanWinShare": 0.16071428571428573,
+        "meanRank": 3.0357142857142856,
+        "meanRounds": 11.285714285714286,
+        "meanSeconds": 34.93170343214193
+      },
+      "flat32": {
+        "games": 28,
+        "firsts": 6,
+        "firstRate": 0.21428571428571427,
+        "meanWinShare": 0.17857142857142858,
+        "meanRank": 3.8214285714285716,
+        "meanRounds": 11.142857142857142,
+        "meanSeconds": 18.61691741071315
+      },
+      "role32": {
+        "games": 28,
+        "firsts": 4,
+        "firstRate": 0.14285714285714285,
+        "meanWinShare": 0.125,
+        "meanRank": 3.392857142857143,
+        "meanRounds": 10.392857142857142,
+        "meanSeconds": 20.855658975000033
+      }
+    },
+    "8": {
+      "flat4": {
+        "games": 32,
+        "firsts": 8,
+        "firstRate": 0.25,
+        "meanWinShare": 0.234375,
+        "meanRank": 4.0625,
+        "meanRounds": 10.5,
+        "meanSeconds": 43.46792099375034
+      },
+      "flat32": {
+        "games": 32,
+        "firsts": 1,
+        "firstRate": 0.03125,
+        "meanWinShare": 0.03125,
+        "meanRank": 5.59375,
+        "meanRounds": 10.78125,
+        "meanSeconds": 21.392110243750267
+      },
+      "role32": {
+        "games": 32,
+        "firsts": 5,
+        "firstRate": 0.15625,
+        "meanWinShare": 0.140625,
+        "meanRank": 4.46875,
+        "meanRounds": 10.9375,
+        "meanSeconds": 24.30644139062406
+      }
+    }
+  },
+  "pairedBlockBootstrap": [
+    {
+      "left": "flat4",
+      "right": "flat32",
+      "differences": {
+        "first": 0.0333,
+        "winShare": 0.039,
+        "rank": -0.6667
+      },
+      "ci95": {
+        "first": [
+          -0.0282,
+          0.0947
+        ],
+        "winShare": [
+          -0.0083,
+          0.0841
+        ],
+        "rank": [
+          -1.0402,
+          -0.2917
+        ]
+      }
+    },
+    {
+      "left": "flat32",
+      "right": "role32",
+      "differences": {
+        "first": -0.0071,
+        "winShare": -0.0098,
+        "rank": 0.3884
+      },
+      "ci95": {
+        "first": [
+          -0.0989,
+          0.099
+        ],
+        "winShare": [
+          -0.0866,
+          0.0814
+        ],
+        "rank": [
+          -0.1374,
+          0.85
+        ]
+      }
+    },
+    {
+      "left": "flat4",
+      "right": "role32",
+      "differences": {
+        "first": 0.0261,
+        "winShare": 0.0292,
+        "rank": -0.2783
+      },
+      "ci95": {
+        "first": [
+          -0.0625,
+          0.1199
+        ],
+        "winShare": [
+          -0.0563,
+          0.1205
+        ],
+        "rank": [
+          -0.7641,
+          0.2007
+        ]
+      }
+    }
+  ],
+  "failures": [],
+  "equalWeightByPlayerCount": {
+    "flat4": {
+      "firstRate": 0.19672619047619047,
+      "meanWinShare": 0.18210565476190477,
+      "meanRank": 3.441220238095238,
+      "meanRounds": 11.092261904761905,
+      "meanSeconds": 38.31137036459898
+    },
+    "flat32": {
+      "firstRate": 0.1634672619047619,
+      "meanWinShare": 0.14308035714285713,
+      "meanRank": 4.10796130952381,
+      "meanRounds": 11.256026785714285,
+      "meanSeconds": 20.326278602365544
+    },
+    "role32": {
+      "firstRate": 0.17061011904761905,
+      "meanWinShare": 0.15286458333333333,
+      "meanRank": 3.7195684523809525,
+      "meanRounds": 11.124255952380953,
+      "meanSeconds": 23.352839206822235
+    }
+  }
+}
