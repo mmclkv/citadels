@@ -1,0 +1,280 @@
+{
+  "ranking": {
+    "direct": {
+      "games": 180,
+      "firsts": 11,
+      "winShare": 9.0,
+      "meanRank": 4.572222152777778,
+      "pairwise": {
+        "mcts500": 0.37777777777777777,
+        "mcts2000": 0.36944444444444446
+      }
+    },
+    "mcts500": {
+      "games": 180,
+      "firsts": 34,
+      "winShare": 31.5,
+      "meanRank": 3.738888838888889,
+      "pairwise": {
+        "direct": 0.6222222222222222,
+        "mcts2000": 0.5222222222222223
+      }
+    },
+    "mcts2000": {
+      "games": 180,
+      "firsts": 26,
+      "winShare": 22.833333333333332,
+      "meanRank": 3.8777777583333335,
+      "pairwise": {
+        "direct": 0.6305555555555555,
+        "mcts500": 0.4777777777777778
+      }
+    }
+  },
+  "paired": {
+    "mcts500-direct": {
+      "openingBlocks": 60,
+      "metrics": {
+        "winShareDifference": {
+          "estimate": 0.125,
+          "95ClusterBootstrap": [
+            0.06388888888888887,
+            0.18888888888888886
+          ]
+        },
+        "firstRateDifference": {
+          "estimate": 0.12777777777777777,
+          "95ClusterBootstrap": [
+            0.06111111111111111,
+            0.19444444444444445
+          ]
+        },
+        "pairwiseScore": {
+          "estimate": 0.6222222222222221,
+          "95ClusterBootstrap": [
+            0.5583333333333332,
+            0.6833333333333332
+          ]
+        },
+        "meanRankDifference": {
+          "estimate": -0.8333333138888889,
+          "95ClusterBootstrap": [
+            -1.1833333772916665,
+            -0.4833333610416667
+          ]
+        }
+      },
+      "winShareDifference": 0.125,
+      "95ClusterBootstrap": [
+        0.06388888888888887,
+        0.18888888888888886
+      ]
+    },
+    "mcts2000-direct": {
+      "openingBlocks": 60,
+      "metrics": {
+        "winShareDifference": {
+          "estimate": 0.07685185185185187,
+          "95ClusterBootstrap": [
+            0.021296296296296296,
+            0.13796296296296295
+          ]
+        },
+        "firstRateDifference": {
+          "estimate": 0.08333333333333333,
+          "95ClusterBootstrap": [
+            0.02222222222222222,
+            0.14999999999999997
+          ]
+        },
+        "pairwiseScore": {
+          "estimate": 0.6305555555555556,
+          "95ClusterBootstrap": [
+            0.563888888888889,
+            0.6944444444444445
+          ]
+        },
+        "meanRankDifference": {
+          "estimate": -0.6944443944444445,
+          "95ClusterBootstrap": [
+            -1.044444348402778,
+            -0.3555554804166667
+          ]
+        }
+      },
+      "winShareDifference": 0.07685185185185187,
+      "95ClusterBootstrap": [
+        0.021296296296296296,
+        0.13796296296296295
+      ]
+    },
+    "mcts2000-mcts500": {
+      "openingBlocks": 60,
+      "metrics": {
+        "winShareDifference": {
+          "estimate": -0.04814814814814815,
+          "95ClusterBootstrap": [
+            -0.12777777777777777,
+            0.0324074074074074
+          ]
+        },
+        "firstRateDifference": {
+          "estimate": -0.044444444444444446,
+          "95ClusterBootstrap": [
+            -0.12222222222222223,
+            0.03888888888888888
+          ]
+        },
+        "pairwiseScore": {
+          "estimate": 0.47777777777777775,
+          "95ClusterBootstrap": [
+            0.4083333333333333,
+            0.5472222222222222
+          ]
+        },
+        "meanRankDifference": {
+          "estimate": 0.1388889194444445,
+          "95ClusterBootstrap": [
+            -0.26666659451388885,
+            0.5388888390972223
+          ]
+        }
+      },
+      "winShareDifference": -0.04814814814814815,
+      "95ClusterBootstrap": [
+        -0.12777777777777777,
+        0.0324074074074074
+      ]
+    }
+  },
+  "completeOpeningBlocks": 60,
+  "byPlayers": {
+    "4": {
+      "direct": {
+        "games": 60,
+        "firsts": 4,
+        "winShare": 3.0,
+        "meanRank": 3.03333325,
+        "pairwise": {
+          "mcts500": 0.4083333333333333,
+          "mcts2000": 0.325
+        }
+      },
+      "mcts500": {
+        "games": 60,
+        "firsts": 17,
+        "winShare": 15.5,
+        "meanRank": 2.616666625,
+        "pairwise": {
+          "direct": 0.5916666666666667,
+          "mcts2000": 0.44166666666666665
+        }
+      },
+      "mcts2000": {
+        "games": 60,
+        "firsts": 16,
+        "winShare": 15.0,
+        "meanRank": 2.4,
+        "pairwise": {
+          "direct": 0.675,
+          "mcts500": 0.5583333333333333
+        }
+      }
+    },
+    "6": {
+      "direct": {
+        "games": 60,
+        "firsts": 3,
+        "winShare": 2.5,
+        "meanRank": 4.6,
+        "pairwise": {
+          "mcts500": 0.38333333333333336,
+          "mcts2000": 0.4083333333333333
+        }
+      },
+      "mcts500": {
+        "games": 60,
+        "firsts": 7,
+        "winShare": 6.5,
+        "meanRank": 3.7,
+        "pairwise": {
+          "direct": 0.6166666666666667,
+          "mcts2000": 0.5833333333333334
+        }
+      },
+      "mcts2000": {
+        "games": 60,
+        "firsts": 3,
+        "winShare": 2.0,
+        "meanRank": 4.15,
+        "pairwise": {
+          "direct": 0.5916666666666667,
+          "mcts500": 0.4166666666666667
+        }
+      }
+    },
+    "8": {
+      "direct": {
+        "games": 60,
+        "firsts": 4,
+        "winShare": 3.5,
+        "meanRank": 6.083333208333333,
+        "pairwise": {
+          "mcts500": 0.3416666666666667,
+          "mcts2000": 0.375
+        }
+      },
+      "mcts500": {
+        "games": 60,
+        "firsts": 10,
+        "winShare": 9.5,
+        "meanRank": 4.899999891666667,
+        "pairwise": {
+          "direct": 0.6583333333333333,
+          "mcts2000": 0.5416666666666666
+        }
+      },
+      "mcts2000": {
+        "games": 60,
+        "firsts": 7,
+        "winShare": 5.833333333333333,
+        "meanRank": 5.083333275,
+        "pairwise": {
+          "direct": 0.625,
+          "mcts500": 0.4583333333333333
+        }
+      }
+    }
+  },
+  "instrumentation": {
+    "direct": {
+      "searches": 9176,
+      "totalVisits": 0,
+      "meanSearchSeconds": 0.0032931560593224417,
+      "meanTotalSeconds": 0.0033906931124686253,
+      "meanExpansions": 0.0,
+      "meanParticlesUsed": 1.0,
+      "meanChangedBest": 0.0
+    },
+    "mcts500": {
+      "searches": 9409,
+      "totalVisits": 4704500,
+      "meanSearchSeconds": 0.771849186949263,
+      "meanTotalSeconds": 0.814815814645535,
+      "meanExpansions": 1780.2210649378255,
+      "meanParticlesUsed": 65.4982463598682,
+      "meanChangedBest": 0.24508449356998618
+    },
+    "mcts2000": {
+      "searches": 9579,
+      "totalVisits": 19158000,
+      "meanSearchSeconds": 3.1953091136863505,
+      "meanTotalSeconds": 3.2390741204721345,
+      "meanExpansions": 6973.015346069527,
+      "meanParticlesUsed": 253.469464453492,
+      "meanChangedBest": 0.29846539304729097
+    }
+  },
+  "successfulGames": 180,
+  "failedGames": 0
+}

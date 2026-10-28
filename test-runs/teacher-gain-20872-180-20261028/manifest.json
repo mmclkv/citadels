@@ -1,0 +1,39 @@
+{
+  "sourceCheckpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-020872-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+  "sourceSha256": "262aae36ca4f5e99224973c4006f40d3fa0d7438152b149691b551c1c98b825b",
+  "config": {
+    "engine": "D:\\Users\\Jiaming Qiu\\citadels\\native\\game_engine-14f5b7d5e5c5.exe",
+    "worker": "D:\\Users\\Jiaming Qiu\\citadels\\native\\mcts_worker_libtorch-747048223b69.exe",
+    "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\teacher-gain-20872-180-20261028\\model.bin",
+    "belief": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\belief\\checkpoints\\belief-00009500-20261019143224-1e3cad.npz",
+    "profile": "fast"
+  },
+  "budgets": [
+    0,
+    500,
+    2000
+  ],
+  "particles": 8,
+  "depth": 700,
+  "batch": 32,
+  "selection": "sample",
+  "rootNoise": 0,
+  "learnedBelief": true,
+  "progressiveParticles": true,
+  "state": 16,
+  "action": 12,
+  "migration": "v15/v11 -> v16/v12, zero new inputs; no additional training",
+  "protocolVersion": 2,
+  "blocks": 60,
+  "plannedGames": 180,
+  "fastForwardSingleActions": true,
+  "workers": 16,
+  "orchestration": "independent Python samplers",
+  "opponent": "static hard, explicitly disabled MCTS",
+  "sha256": {
+    "engine": "9065a20110f6b145b47046566b3439e86fd12aff9c18ad22cdbbf6e39c057b8c",
+    "worker": "8f9745705208ea20176730c75e3e09bae1e63aac6a4ecd0acabd0494bd79a32a",
+    "flat": "948bc9bcb633d10d744e489383e16845e37ab4dde7b53c1abbc519ed384eaed4",
+    "belief": "5da1d46fcd7c657d47ef0a63e3233d014f218b6fa3cab56c1cb144da2bebb196"
+  }
+}
