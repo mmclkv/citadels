@@ -2288,6 +2288,15 @@
     App.chatBubbles.clear();
   }
 
+  let playerChatBubblePositionFrame = 0;
+  function schedulePlayerChatBubblePosition() {
+    if (playerChatBubblePositionFrame) return;
+    playerChatBubblePositionFrame = requestAnimationFrame(() => {
+      playerChatBubblePositionFrame = 0;
+      positionPlayerChatBubbles();
+    });
+  }
+
   function positionPlayerChatBubbles() {
     if (!App.state || !App.state.players) return;
     App.chatBubbles.forEach((item, playerId) => {
@@ -2300,7 +2309,7 @@
       const height = bubble.offsetHeight || 54;
       const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.left + (r.width - width) / 2));
       bubble.style.left = Math.round(left) + 'px';
-      bubble.style.top = Math.round(Math.max(8, r.top - height - 9)) + 'px';
+      bubble.style.top = Math.round(r.top - height - 9) + 'px';
     });
   }
 
@@ -2329,7 +2338,7 @@
       App.chatBubbles.delete(message.playerId);
     }, 6500);
     App.chatBubbles.set(message.playerId, item);
-    requestAnimationFrame(positionPlayerChatBubbles);
+    schedulePlayerChatBubblePosition();
   }
 
   function closeChatComposer() {
@@ -5746,6 +5755,7 @@
     };
     window.addEventListener('resize', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
     window.addEventListener('orientationchange', () => { scheduleMobileFitScale(); positionPlayerChatBubbles(); });
+    window.addEventListener('scroll', schedulePlayerChatBubblePosition, { capture: true, passive: true });
     document.addEventListener('keydown', e => {
       const composer = $('#chat-composer');
       const target = e.target;
