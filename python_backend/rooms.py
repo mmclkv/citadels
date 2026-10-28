@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 import string
 import time
-from .cards import normalize_scenario
+from .cards import normalize_custom_role_selections, normalize_scenario
 
 ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -109,6 +109,9 @@ class RoomRegistry:
     def create_room(self, host_name: str, config: dict | None = None) -> dict:
         config = config or {}
         scenario = normalize_scenario(config.get("scenario"))
+        char_set_mode = config.get("charSetMode") or "base"
+        if char_set_mode not in ("base", "dark", "mixed", "random", "custom"):
+            raise ValueError("未知的角色组")
         total = max(2, min(8, int(config.get("playerCount") or 4)))
         bots = max(0, min(total - 1, int(config.get("bots") or 0)))
         room_id = "".join(secrets.choice(ROOM_ALPHABET) for _ in range(4))
@@ -123,8 +126,11 @@ class RoomRegistry:
         seats.extend(_empty_seat() for _ in range(total - len(seats)))
         room = {
             "id": room_id, "name": (host_name or "房主") + " 的房间", "seats": seats,
-            "config": {"playerCount": total, "endDistricts": config.get("endDistricts") or 8,
-                       "charSetMode": config.get("charSetMode") or "base",
+            "config": {"playerCount": total,
+                       "endDistricts": config.get("endDistricts") or 8,
+                       "charSetMode": char_set_mode,
+                       "customRoleSelections": normalize_custom_role_selections(
+                           config.get("customRoleSelections")) if char_set_mode == "custom" else {},
                        "scenario": scenario,
                        "botLevel": seat_config["botLevel"], "botType": seat_config["botType"],
                        "mctsSimulations": _int_at_least(config.get("mctsSimulations"), 5000, 0),

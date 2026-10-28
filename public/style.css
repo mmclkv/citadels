@@ -97,6 +97,15 @@ a{color:var(--gold-d, #a97c15)}
 .mcts-advanced[hidden],.search-only[hidden]{display:none!important}
 .mcts-hint{grid-column:1/-1;margin:-6px 0 10px}
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.role-custom-picker[hidden]{display:none}
+.role-custom-picker{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2,rgba(0,0,0,.08))}
+.role-picker-title{grid-column:1/-1;font-size:12px;color:var(--ink2)}
+.role-number-group{min-width:0;margin:0;padding:7px;border:1px solid var(--line);border-radius:8px}
+.role-number-group legend{font-size:12px;font-weight:700}
+.role-select-all{float:right;margin-top:-21px}
+.role-choice-list{display:flex;flex-direction:column;gap:3px;clear:both}
+.role-choice-list label{display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer}
+.role-choice-list input{width:auto;margin:0;padding:0;accent-color:var(--gold)}
 .field>span{font-size:12px;color:var(--ink2);font-weight:600}
 .field.inline{flex-direction:row;align-items:center;gap:6px;margin:0}
 .field.inline>span{white-space:nowrap}
@@ -993,6 +1002,7 @@ html[data-theme="neon"] .mobile-hand-back{border-color:#9a58c4;
   #screen-setup .field>span,#screen-setup .dim{overflow-wrap:anywhere}
   .setup-grid{grid-template-columns:1fr;gap:0}
   .lobby-cols{grid-template-columns:1fr;gap:13px}
+  .role-custom-picker{grid-template-columns:repeat(2,minmax(0,1fr))}
 
   /* -------- 顶栏 -------- */
   .topbar{padding:6px 9px;gap:6px;flex-wrap:wrap}

@@ -182,8 +182,10 @@
           <option value="base" selected>基本版（8 角色）</option>
           <option value="dark">黑暗城市扩充（9 角色）</option>
           <option value="mixed">加强版混合（每号随机）</option>
+          <option value="custom">自选角色</option>
         </select>
       </label>
+      <div class="role-custom-picker" id="cfg-role-picker" hidden></div>
       <label class="field">
         <span>剧本</span><select id="cfg-scenario">${SCENARIO_OPTIONS}</select>
       </label>
@@ -231,8 +233,9 @@
             <select id="net-end"><option value="8" selected>建成 8 栋</option><option value="7">建成 7 栋（加快）</option></select>
           </label>
           <label class="field"><span>角色组</span>
-            <select id="net-chars"><option value="base" selected>基本版</option><option value="dark">黑暗城市扩充</option><option value="mixed">加强版混合</option></select>
+            <select id="net-chars"><option value="base" selected>基本版</option><option value="dark">黑暗城市扩充</option><option value="mixed">加强版混合</option><option value="custom">自选角色</option></select>
           </label>
+          <div class="role-custom-picker" id="net-role-picker" hidden></div>
           <label class="field voice-capable" hidden><span>房间语音</span>
             <select id="net-voice"><option value="on" selected>开启</option><option value="off">关闭</option></select>
           </label>
@@ -263,12 +266,13 @@
           <label class="field inline"><span>结束</span>
             <select id="r-end"><option value="8" selected>8 栋</option><option value="7">7 栋</option></select></label>
           <label class="field inline"><span>角色</span>
-            <select id="r-chars"><option value="base" selected>基本版</option><option value="dark">黑暗扩充</option><option value="mixed">混合</option></select></label>
+            <select id="r-chars"><option value="base" selected>基本版</option><option value="dark">黑暗扩充</option><option value="mixed">混合</option><option value="custom">自选角色</option></select></label>
           <label class="field inline voice-capable" hidden><span>语音</span>
             <select id="r-voice"><option value="on" selected>开</option><option value="off">关</option></select></label>
           <label class="field inline"><span>剧本</span><select id="r-scenario">${SCENARIO_OPTIONS}</select></label>
         </div>
       </div>
+      <div class="role-custom-picker" id="r-role-picker" hidden></div>
       <div class="seat-grid" id="seat-grid"></div>
       <p class="dim small" id="r-scenario-hint">选择剧本后，角色组设置不生效。</p>
       <p class="dim small">把房间号告诉朋友即可加入；房主可以在每个座位卡片内设置电脑类型和策略网络参数。</p>
@@ -472,6 +476,57 @@
       /* ============================ Shadow 作用域工具 ============================ */
       const $ = s => root.querySelector(s);
       const $$ = s => Array.from(root.querySelectorAll(s));
+      const roleGroups = {};
+      (window.CitCards && window.CitCards.CHARACTERS || []).forEach(role => {
+        (roleGroups[role.num] = roleGroups[role.num] || []).push(role);
+      });
+      const customRoleSelections = {};
+      Object.keys(roleGroups).forEach(number => customRoleSelections[number] = roleGroups[number].map(role => role.id));
+      function renderRolePickers() {
+        ['cfg', 'net', 'r'].forEach(prefix => {
+          const box = $('#' + prefix + '-role-picker');
+          if (!box) return;
+          box.innerHTML = '<div class="role-picker-title">每个编号至少选一个角色；选中多个时开局随机抽取</div>' +
+            Object.keys(roleGroups).sort((a, b) => Number(a) - Number(b)).map(number =>
+              '<fieldset class="role-number-group"><legend>' + number + ' 号</legend><button type="button" class="btn tiny role-select-all" data-role-number="' + number + '">全选</button><div class="role-choice-list">' +
+              roleGroups[number].map(role => '<label><input type="checkbox" data-role-number="' + number + '" data-role-id="' + role.id + '" checked><span>' + escapeHtml(role.name) + '</span></label>').join('') +
+              '</div></fieldset>').join('');
+          box.addEventListener('change', event => {
+            const input = event.target.closest('input[data-role-id]');
+            if (!input) return;
+            const number = input.dataset.roleNumber;
+            const chosen = Array.from(box.querySelectorAll('input[data-role-id]'))
+              .filter(node => node.dataset.roleNumber === number && node.checked);
+            if (!chosen.length) { input.checked = true; toast('每个编号至少保留一个角色'); return; }
+            customRoleSelections[number] = chosen.map(node => node.dataset.roleId);
+            syncRolePickers();
+            if (prefix === 'r' && App.lobbyState) sendRoomConfig();
+          });
+          box.addEventListener('click', event => {
+            const button = event.target.closest('.role-select-all');
+            if (!button) return;
+            const number = button.dataset.roleNumber;
+            customRoleSelections[number] = roleGroups[number].map(role => role.id);
+            syncRolePickers();
+            if (prefix === 'r' && App.lobbyState) sendRoomConfig();
+          });
+        });
+        syncRolePickers();
+      }
+      function syncRolePickers() {
+        ['cfg', 'net', 'r'].forEach(prefix => {
+          const box = $('#' + prefix + '-role-picker');
+          if (!box) return;
+          box.querySelectorAll('input[data-role-id]').forEach(input => {
+            input.checked = (customRoleSelections[input.dataset.roleNumber] || []).includes(input.dataset.roleId);
+            input.disabled = prefix === 'r' && !(App.lobbyState && App.lobbyState.seats && App.lobbyState.seats[0] && App.lobbyState.seats[0].id === App.myId);
+          });
+        });
+      }
+      function sendRoomConfig() {
+        Net.send({ t: 'config', config: { playerCount: Number($('#r-players').value), endDistricts: Number($('#r-end').value),
+          charSetMode: $('#r-chars').value, customRoleSelections, scenario: $('#r-scenario').value, voice: $('#r-voice').value === 'on' } });
+      }
       async function loadHomeVersion() {
         const label = $('#home-version');
         const controller = new AbortController();
@@ -740,6 +795,7 @@
           Net.send({ t: 'createRoom', name: cfg.name, config: Object.assign({
             playerCount: cfg.players, bots: cfg.players - 1, botType: cfg.botType, botLevel: cfg.level,
             endDistricts: cfg.end, charSetMode: cfg.chars, scenario: cfg.scenario, voice: false,
+            customRoleSelections,
             mcts: Object.assign({ timeBudgetMs: readSearchBudget(), advancedEnabled: singleAdvancedOpen }, cfg.botType === 'neural' ? {
               simulations: Number($('#cfg-mcts-sims').value) || 5000,
               maxDepth: Number($('#cfg-mcts-depth').value) || 2000,
@@ -916,11 +972,17 @@
         const selected = $('#' + prefix + '-scenario');
         const chars = $('#' + prefix + '-chars');
         const hint = $('#' + prefix + '-scenario-hint');
+        const picker = $('#' + prefix + '-role-picker');
         if (!selected || !chars) return;
         const scenario = SCENARIOS.find(s => s.id === selected.value);
         selected.disabled = !canEdit;
         chars.disabled = !!scenario || !canEdit;
+        if (picker) {
+          picker.hidden = !!scenario || chars.value !== 'custom';
+          picker.querySelectorAll('input, button').forEach(control => { control.disabled = !!scenario || !canEdit; });
+        }
         if (hint) hint.textContent = scenario ? scenario.name + '：使用固定角色和 14 张独特建筑，角色组设置不生效。两人皇帝改为国王；少于五人皇后改为艺术家；三人、八人经典组合加入艺术家。'
+          : chars.value === 'custom' ? '未使用剧本：按编号选择角色；同一编号选中多个时开局随机抽取一个。'
           : '未使用剧本：按角色组选择角色，所有建筑加入牌堆。';
       }
       function renderLobbyRoom(st) {
@@ -935,6 +997,10 @@
           $('#r-chars').value = st.config.charSetMode || 'base';
           $('#r-scenario').value = st.config.scenario || '';
           $('#r-voice').value = st.config.voice === false ? 'off' : 'on';
+          if (st.config.customRoleSelections) {
+            Object.keys(roleGroups).forEach(number => customRoleSelections[number] = st.config.customRoleSelections[number] || roleGroups[number].map(role => role.id));
+            syncRolePickers();
+          }
         }
         voiceSync();
         const grid = $('#seat-grid');
@@ -1271,6 +1337,7 @@
           end: Number($('#cfg-end').value),
           chars: $('#cfg-chars').value,
           scenario: $('#cfg-scenario').value,
+          customRoleSelections,
           name: ($('#cfg-name').value || '我').trim()
         };
         App.lastCfg = cfg; App.mode = 'net'; App.localServerGame = true; App.name = cfg.name;
@@ -1288,6 +1355,7 @@
               playerCount: Number($('#net-players').value),
               endDistricts: Number($('#net-end').value),
               charSetMode: $('#net-chars').value,
+              customRoleSelections,
               scenario: $('#net-scenario').value,
               autoHost: $('#net-auto-host').value === 'on',
               voice: $('#net-voice').value === 'on'
@@ -1342,9 +1410,14 @@
       $('#btn-net-shuffle').onclick = () => Net.send({ t: 'shuffleSeats' });
       ['cfg', 'net'].forEach(prefix => {
         $('#' + prefix + '-scenario').onchange = () => syncScenarioChoice(prefix);
+        $('#' + prefix + '-chars').onchange = () => syncScenarioChoice(prefix);
         syncScenarioChoice(prefix);
       });
+      renderRolePickers();
+      $('#r-chars').onchange = () => { syncScenarioChoice('r', !!(App.lobbyState && App.lobbyState.seats[0] && App.lobbyState.seats[0].id === App.myId)); sendRoomConfig(); };
+      $('#r-scenario').onchange = () => { syncScenarioChoice('r', !!(App.lobbyState && App.lobbyState.seats[0] && App.lobbyState.seats[0].id === App.myId)); sendRoomConfig(); };
       ['r-players', 'r-end', 'r-chars', 'r-voice', 'r-scenario'].forEach(id => {
+        if (id === 'r-chars' || id === 'r-scenario') return;
         const node = $('#' + id);
         if (!node) return;
         node.onchange = () => {
@@ -1353,6 +1426,7 @@
               playerCount: Number($('#r-players').value),
               endDistricts: Number($('#r-end').value),
               charSetMode: $('#r-chars').value,
+              customRoleSelections,
               scenario: $('#r-scenario').value,
               voice: $('#r-voice').value === 'on'
             }

@@ -20,6 +20,7 @@ inline bool character_allowed(const JsonValue& character, int players) {
 inline std::vector<std::string> select_character_ids(const JsonValue& catalog,
                                                      int players,
                                                      const std::string& mode,
+                                                     const JsonValue* custom_selections,
                                                      JsRng& rng) {
   const auto& definitions = required_field(catalog, "characters");
   if (!definitions.is_array()) throw std::runtime_error("catalog.characters 必须是数组");
@@ -40,6 +41,29 @@ inline std::vector<std::string> select_character_ids(const JsonValue& catalog,
       const auto it = std::find_if(definitions.as_array().begin(), definitions.as_array().end(),
         [&](const JsonValue& item) { return string_field(item, "id") == id; });
       if (it != definitions.as_array().end()) pool.push_back(&*it);
+    }
+  } else if (mode == "custom") {
+    if (!custom_selections || !custom_selections->is_object())
+      throw std::runtime_error("自选角色配置缺失");
+    for (int number = 1; number <= 9; ++number) {
+      const auto* choices = custom_selections->get(std::to_string(number));
+      if (!choices || !choices->is_array() || choices->as_array().empty())
+        throw std::runtime_error("自选角色每个编号至少需要一个角色");
+      std::vector<const JsonValue*> candidates;
+      std::unordered_set<std::string> seen_ids;
+      for (const auto& choice : choices->as_array()) {
+        if (!choice.is_string()) throw std::runtime_error("自选角色编号列表无效");
+        const auto& id = choice.as_string();
+        if (!seen_ids.insert(id).second) continue;
+        const auto it = std::find_if(definitions.as_array().begin(), definitions.as_array().end(),
+          [&](const JsonValue& item) { return string_field(item, "id") == id && int_field(item, "num") == number; });
+        if (it == definitions.as_array().end()) throw std::runtime_error("自选角色包含未知角色");
+        if (character_allowed(*it, players)) candidates.push_back(&*it);
+      }
+      if (!candidates.empty()) {
+        const size_t choice = static_cast<size_t>(rng.next() * candidates.size());
+        pool.push_back(candidates[std::min(choice, candidates.size() - 1)]);
+      }
     }
   } else {
     std::map<int, std::vector<const JsonValue*>> by_number;
@@ -67,7 +91,9 @@ inline std::vector<std::string> select_character_ids(const JsonValue& catalog,
     unique.resize(std::min<size_t>(8, unique.size()));
     selected = std::move(unique);
   }
-  if (selected.size() < static_cast<size_t>(players + 1)) {
+  if (mode == "custom" && selected.size() < static_cast<size_t>(players + 1))
+    throw std::runtime_error("当前人数与角色禁用规则下，自选角色不足以开局");
+  if (mode != "custom" && selected.size() < static_cast<size_t>(players + 1)) {
     std::unordered_set<int> used;
     for (const auto* item : selected) used.insert(int_field(*item, "num"));
     std::vector<const JsonValue*> extras;
@@ -147,7 +173,7 @@ inline NativeGameState create_native_game(const JsonValue& request) {
       scenario_districts.insert(value.as_string());
   } else {
     state.char_deck = select_character_ids(catalog, player_count,
-        string_field(request, "charSetMode", "base"), state.rng);
+        string_field(request, "charSetMode", "base"), request.get("customRoleSelections"), state.rng);
   }
 
   const auto& district_definitions = required_field(catalog, "districts");

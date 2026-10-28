@@ -775,7 +775,7 @@
    *   mixed 模式要从每个编号里抽一张，必须走这一条才能让同一 seed 复现同一套角色；
    *   不传时退回 Math.random（仅 UI/展示场景可用，训练绝不能走这条路）。
    */
-  function pickCharacterSet(playerCount, setMode, seedRandom) {
+  function pickCharacterSet(playerCount, setMode, seedRandom, customRoleSelections) {
     const rnd = seedRandom || Math.random;
     setMode = setMode || 'base';
     let pool;
@@ -788,6 +788,13 @@
       const want = { 1: 'witch', 2: 'blackmailer', 3: 'wizard', 4: 'emperor', 5: 'abbot',
                      6: 'alchemist', 7: 'navigator', 8: 'diplomat', 9: 'tax_collector' };
       pool = Object.keys(want).map(k => CHAR_MAP[want[k]]);
+    } else if (setMode === 'custom') {
+      const selections = customRoleSelections || {};
+      pool = Object.keys(selections).sort((a, b) => Number(a) - Number(b)).map(number => {
+        const allowed = (selections[number] || []).map(id => CHAR_MAP[id]).filter(c => c && c.num === Number(number) &&
+          !(c.twoPlayerBan && playerCount <= 2) && !(c.smallBan && playerCount < c.smallBan));
+        return allowed.length ? allowed[Math.floor(rnd() * allowed.length)] : null;
+      }).filter(Boolean);
     } else {
       // mixed（加强版混合）：从每个编号中随机挑一个，编号 9 只在大局使用
       const byNum = {};
@@ -819,7 +826,7 @@
     }
 
     // 角色牌数必须 ≥ 玩家数 + 1（每轮还要暗置 1 张）
-    if (chars.length < playerCount + 1) {
+    if (setMode !== 'custom' && chars.length < playerCount + 1) {
       const usedNums = {};
       chars.forEach(c => { usedNums[c.num] = true; });
       const extra = CHARACTERS.filter(c =>

@@ -2125,13 +2125,22 @@ class PythonServer:
             if not isinstance(updates, dict):
                 raise ValueError("房间配置必须是对象")
             scenario = cards.normalize_scenario(updates.get("scenario")) if "scenario" in updates else None
+            if "charSetMode" in updates:
+                if updates["charSetMode"] not in ("base", "dark", "mixed", "random", "custom"):
+                    raise ValueError("未知的角色组")
+                room["config"]["charSetMode"] = updates["charSetMode"]
+            if "customRoleSelections" in updates:
+                room["config"]["customRoleSelections"] = cards.normalize_custom_role_selections(
+                    updates["customRoleSelections"])
+            elif updates.get("charSetMode") == "custom" and not room["config"].get("customRoleSelections"):
+                room["config"]["customRoleSelections"] = cards.normalize_custom_role_selections(None)
             if updates.get("botType") == "neural":
                 status = self.neural.status()
                 if not status["configured"]:
                     raise ValueError(status["message"])
             if updates.get("botType") == "agent" and not self._agent_status()["configured"]:
                 raise ValueError(self._agent_status()["message"])
-            for key in ("endDistricts", "charSetMode", "botType", "botLevel"):
+            for key in ("endDistricts", "botType", "botLevel"):
                 if updates.get(key):
                     room["config"][key] = updates[key]
             if scenario is not None:
@@ -2288,6 +2297,7 @@ class PythonServer:
                 native_state = await self._create_room_game(room,
                     {"seed": secrets.randbits(32), "endDistricts": config["endDistricts"],
                      "charSetMode": config["charSetMode"], "initialCrownSeat": 0,
+                     "customRoleSelections": config.get("customRoleSelections") or {},
                      "scenario": config.get("scenario", ""),
                      "startingHand": 4, "startingGold": 2,
                      "seats": [{key: seat.get(key) for key in
