@@ -29,6 +29,10 @@ def play(task):
         state=engine.create_game({'seed':case['seed'],'charSetMode':'random','initialCrownSeat':case['crown'],
             'endDistricts':8,'startingGold':2,'startingHand':4,'catalog':cards._catalog,
             'seats':[{'id':f'p{i}','isBot':True,'botType':'neural' if f'p{i}' in actor_labels else 'npc','botLevel':'hard'} for i in range(case['players'])]},game_id)
+        opening={'players':[{k:p.get(k) for k in ('id','hand','gold','city')} for p in state['players']],
+                 'deck':state.get('deck'),'charDeck':state.get('charDeck'),
+                 'draft':state.get('draft'),'crown':case['crown']}
+        row['openingDealHash']=hashlib.sha256(json.dumps(opening,sort_keys=True).encode()).hexdigest()
         def observed(s):return {**s,'roomId':game_id,'createdAt':case['seed']}
         belief.update(observed(state)) if belief is not None else None
         while True:
@@ -60,6 +64,7 @@ def play(task):
             else:
                 seed=(case['seed']+decisions[label]*0x9E3779B1)&0xffffffff
                 direct=label=='direct';simulations={'direct':1,'mcts500':500,'mcts2000':2000}[label]
+                start=time.monotonic()
                 frozen=None if direct or belief is None else belief.candidate_scorer(belief_state,actor,enabled=True)
                 scorer,mix=frozen if frozen is not None else (None,0.)
                 if direct:sample={'particles':[state],'weights':[1.]};logs=None
@@ -72,6 +77,7 @@ def play(task):
                 direct_seat=case['seats']['direct']
                 opponents=[] if direct else [{'playerId':f'p{direct_seat}','modelPath':config['flat'],
                     'modelVersion':1,'actionEncodingVersion':12,'profile':config['profile']}]
+                search_start=time.monotonic()
                 result=worker.search(state=sample['particles'][0],particles=sample['particles'][1:],root_player_id=actor,
                     legal_actions=actions,particle_weights=sample['weights'],model_path=config['flat'],model_version=1,
                     profile=config['profile'],architecture='entity-v6',device='cpu',simulations=simulations,max_depth=700,
@@ -79,9 +85,14 @@ def play(task):
                     action_encoding_version=12,policy_only=direct,progressive_particles=not direct,
                     root_belief=scorer is None,root_log_weights=logs,root_prior_mixture=mix,
                     root_candidate_scorer=scorer,share_information_history=True,opponent_policies=opponents,
-                    include_root_diagnostics=not direct)
+                    include_root_diagnostics=not direct,fast_forward_single_actions=True)
+                finish=time.monotonic()
+                if result.get('fastForwardSingleActions') is not True:raise RuntimeError('Single-action fast-forward unsupported')
+                if result.get('stateEncodingVersion')!=16:raise RuntimeError('Wrong state encoding')
                 if result.get('fallback') or result.get('particleSamplingError'):raise RuntimeError('Search mismatch or sampling failure')
                 if not direct and result.get('visits')!=simulations:raise RuntimeError('Search budget not reached')
+                stats[label]['searchSeconds']+=finish-search_start
+                stats[label]['totalSeconds']+=finish-start
                 stats[label]['visits']+=result.get('visits',0);stats[label]['expansions']+=result.get('expansions',0)
                 stats[label]['particlesUsed']+=result.get('particlesUsed',0)
                 if not direct:stats[label]['changedBest']+=max(range(len(actions)),key=lambda i:result['policy'][i])!=max(range(len(actions)),key=lambda i:result['networkPolicy'][i])
@@ -97,23 +108,49 @@ def play(task):
 
 def summarize(games):
     import numpy as np
+    games=list({(g['block'],g['rotation']):g for g in games}.values())
     good=[g for g in games if g['completed']]
-    result={label:{'games':len(good),'firsts':sum(g['results'][label]['first'] for g in good),
-                  'winShare':sum(g['results'][label]['winShare'] for g in good),
-                  'meanRank':statistics.mean(g['results'][label]['rank'] for g in good) if good else None,
-                  'pairwise':{other:statistics.mean(g['results'][label]['comparisons'][other] for g in good) if good else None for other in LABELS if other!=label}}
-            for label in LABELS}
-    # Resample complete opening blocks, preserving the three seat rotations.
+    def ranking(rows):
+        return {label:{'games':len(rows),'firsts':sum(g['results'][label]['first'] for g in rows),
+            'winShare':sum(g['results'][label]['winShare'] for g in rows),
+            'meanRank':statistics.mean(g['results'][label]['rank'] for g in rows) if rows else None,
+            'pairwise':{other:statistics.mean(g['results'][label]['comparisons'][other] for g in rows) if rows else None
+                        for other in LABELS if other!=label}} for label in LABELS}
+    # Only whole three-rotation opening blocks enter paired inference.
     blocks={b:[g for g in good if g['block']==b] for b in sorted({g['block'] for g in good})}
-    blocks={b:gs for b,gs in blocks.items() if len(gs)==3}
-    cis={}
+    blocks={b:gs for b,gs in blocks.items() if len(gs)==3 and {g['rotation'] for g in gs}=={0,1,2}}
+    for gs in blocks.values():
+        hashes={g.get('openingDealHash') for g in gs}
+        if len(hashes)!=1:raise ValueError('Seat rotations do not share the same opening deal')
+    paired={}
     if len(blocks)>=2:
         rng=np.random.default_rng(20261028)
+        indices=rng.integers(len(blocks),size=(10000,len(blocks)))
         for a,b in [('mcts500','direct'),('mcts2000','direct'),('mcts2000','mcts500')]:
-            delta=np.asarray([statistics.mean(g['results'][a]['winShare']-g['results'][b]['winShare'] for g in gs) for gs in blocks.values()])
-            boot=delta[rng.integers(len(delta),size=(10000,len(delta)))].mean(1)
-            cis[a+'-'+b]={'winShareDifference':float(delta.mean()),'95ClusterBootstrap':np.quantile(boot,[.025,.975]).tolist(),'openingBlocks':len(delta)}
-    return {'ranking':result,'paired':cis,'successfulGames':len(good),'failedGames':len(games)-len(good)}
+            metrics={}
+            for name,measure in {
+                'winShareDifference':lambda g:g['results'][a]['winShare']-g['results'][b]['winShare'],
+                'firstRateDifference':lambda g:int(g['results'][a]['first'])-int(g['results'][b]['first']),
+                'pairwiseScore':lambda g:g['results'][a]['comparisons'][b],
+                'meanRankDifference':lambda g:g['results'][a]['rank']-g['results'][b]['rank'],
+            }.items():
+                delta=np.asarray([statistics.mean(measure(g) for g in gs) for gs in blocks.values()])
+                metrics[name]={'estimate':float(delta.mean()),
+                    '95ClusterBootstrap':np.quantile(delta[indices].mean(1),[.025,.975]).tolist()}
+            paired[a+'-'+b]={'openingBlocks':len(blocks),'metrics':metrics,
+                'winShareDifference':metrics['winShareDifference']['estimate'],
+                '95ClusterBootstrap':metrics['winShareDifference']['95ClusterBootstrap']}
+    instrumentation={}
+    for label in LABELS:
+        n=sum(g.get('decisions',{}).get(label,0) for g in good)
+        totals=Counter()
+        for g in good:totals.update(g.get('instrumentation',{}).get(label,{}))
+        instrumentation[label]={'searches':n,'totalVisits':totals['visits'],
+            **{'mean'+k[0].upper()+k[1:]:totals[k]/n if n else None
+               for k in ('searchSeconds','totalSeconds','expansions','particlesUsed','changedBest')}}
+    return {'ranking':ranking(good),'paired':paired,'completeOpeningBlocks':len(blocks),
+        'byPlayers':{str(n):ranking([g for g in good if g['players']==n]) for n in (4,6,8)},
+        'instrumentation':instrumentation,'successfulGames':len(good),'failedGames':len(games)-len(good)}
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',required=True);parser.add_argument('--blocks',type=int,default=20);parser.add_argument('--resume',action='store_true');parser.add_argument('--checkpoint');parser.add_argument('--workers',type=int,default=8);parser.add_argument('--threads',action='store_true',help='Share Python runtime to reduce memory use');parser.add_argument('--no-belief',action='store_true');args=parser.parse_args()
@@ -130,7 +167,8 @@ def main():
         previous=json.loads((out/'manifest.json').read_text(encoding='utf8'))
         if previous['sourceSha256']!=hashlib.sha256(source.read_bytes()).hexdigest():
             raise ValueError('Cannot resume with a different checkpoint')
-    checkpoint=json.load(gzip.open(source,'rt',encoding='utf8'))
+    source_bytes=source.read_bytes()
+    checkpoint=json.loads(gzip.decompress(source_bytes))
     contract=validate_checkpoint_contract(checkpoint,'entity-v6');profile=checkpoint['model']['profile']
     np.asarray(checkpoint['model']['flat'],dtype='<f4').tofile(out/'source.bin')
     old=create_model('entity-v6',profile,contract['state']);old.load_flat(str(out/'source.bin'))
@@ -144,10 +182,11 @@ def main():
             if not args.no_belief and training.get('beliefNetworkEnabled') and training.get('beliefCheckpoint') else None)
     config={'engine':engine,'worker':worker,'flat':str((out/'model.bin').resolve()),
             'belief':str(belief) if belief is not None else None,'profile':profile}
-    manifest={'sourceCheckpoint':str(source),'sourceSha256':hashlib.sha256(source.read_bytes()).hexdigest(),
+    manifest={'sourceCheckpoint':str(source),'sourceSha256':hashlib.sha256(source_bytes).hexdigest(),
               'config':config,'budgets':[0,500,2000],'particles':8,'depth':700,'batch':32,'selection':'sample',
               'rootNoise':0,'learnedBelief':config['belief'] is not None,'progressiveParticles':True,'state':16,'action':12,
               'migration':f"v{contract['state']}/v{contract['action']} -> v16/v12, zero new inputs; no additional training",
+              'protocolVersion':2,'blocks':args.blocks,'plannedGames':args.blocks*3,'fastForwardSingleActions':True,
               'workers':args.workers,'orchestration':'shared Python' if args.threads else 'independent Python samplers',
               'opponent':'static hard, explicitly disabled MCTS',
               'sha256':{k:hashlib.sha256(Path(config[k]).read_bytes()).hexdigest() for k in ('engine','worker','flat','belief') if config[k] is not None}}
