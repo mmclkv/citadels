@@ -21,6 +21,7 @@ class KnownEncodingTests(unittest.TestCase):
                 ns[:1504]=s[:1504];ns[1504:1534]=s[1504:1534];ns[1558:1814]=s[1534:1790]
             else: ns[:2054]=s
             ns[0]=16;ns[2054:]=.2
+            for seat in range(8):ns[32+184*seat+18]=.5
             with torch.inference_mode():
                 po,vo=old(torch.tensor(s)[None],torch.tensor(a)[None])
                 pn,vn=new(torch.tensor(ns)[None],torch.tensor(na)[None])

@@ -77,6 +77,10 @@ def migrate_model_weights(source, target, source_action_version, target_action_v
             target.self_embed.weight[:, :source.self_embed.in_features].copy_(source.self_embed.weight)
             target.action_embed.weight.zero_()
             target.action_embed.weight[:, :source.action_size].copy_(source.action_embed.weight)
+        if source.encoding_version < 16 and target.encoding_version >= 16:
+            # Legacy slot 18 was always zero; v16 exposes public NPC difficulty.
+            target.player_embed.weight[:, 18].zero_()
+            target.self_embed.weight[:, 18].zero_()
         if source_action_version == 9 and target_action_version != 9:
             # v9 did not train any suffix feature, including district effects.
             target.action_embed.weight[:, 182:].zero_()

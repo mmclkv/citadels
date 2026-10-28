@@ -272,7 +272,8 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       : (p.is_bot ? 1.0f : 0.0f);
     // 与 JS 编码保持一致：绝对座位号会让固定座位训练产生位置捷径，
     // 这里保留槽位但不再写入绝对 seat。
-    features[base + 18] = 0.0f;
+    features[base + 18] = encoding_version >= 16 && p.is_bot && p.bot_type == "npc"
+        ? (p.bot_level == "hard" ? 1.0f : p.bot_level == "easy" ? 1.0f/3.0f : 2.0f/3.0f) : 0.0f;
     const bool pending_exposes_count = state.pending_kind == "draw_keep" ||
         state.pending_kind == "scholar_pick" || state.pending_kind == "wizard_card";
     features[base + 19] = absolute == active && pending_exposes_count
