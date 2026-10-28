@@ -113,6 +113,8 @@ class RoomRegistry:
         if char_set_mode not in ("base", "dark", "mixed", "random", "custom"):
             raise ValueError("未知的角色组")
         total = max(2, min(8, int(config.get("playerCount") or 4)))
+        if config.get("teamMode") and total not in (4, 6, 8):
+            raise ValueError("团队战仅支持 4、6、8 人")
         bots = max(0, min(total - 1, int(config.get("bots") or 0)))
         room_id = "".join(secrets.choice(ROOM_ALPHABET) for _ in range(4))
         while room_id in self.rooms:
@@ -126,8 +128,8 @@ class RoomRegistry:
         seats.extend(_empty_seat() for _ in range(total - len(seats)))
         room = {
             "id": room_id, "name": (host_name or "房主") + " 的房间", "seats": seats,
-            "config": {"playerCount": total,
-                       "endDistricts": config.get("endDistricts") or 8,
+            "config": {"playerCount": total, "teamMode": bool(config.get("teamMode")) and total in (4, 6, 8),
+                       "endDistricts": 8 if config.get("teamMode") else config.get("endDistricts") or 8,
                        "charSetMode": char_set_mode,
                        "customRoleSelections": normalize_custom_role_selections(
                            config.get("customRoleSelections")) if char_set_mode == "custom" else {},

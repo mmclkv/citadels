@@ -111,6 +111,7 @@
     const phase=s.phase==='draft'?'选角阶段':s.phase==='gameover'?'游戏结束':'行动阶段';
     $('phase').innerHTML=`第 ${esc(s.round)} 轮 · ${phase}<small>${s.players.length} 人局 · ${s.spectating?esc(spectatorStatus(s)):current===M.id?'轮到你':'公开局面按顺时针排列'}</small>`;
     $('playerCount').textContent=s.players.length+' 人局';
+    renderTeamIdentity();
     const voiceAvailable=s.voiceReady!==false&&s.voiceEnabled!==false&&s.config?.voice!==false;
     $('menuVoice').hidden=!voiceAvailable;$('sidebarVoiceTab').hidden=!voiceAvailable;
     const canControlHosting=!s.spectating&&s.phase!=='lobby'&&s.phase!=='gameover'&&typeof s.hostingEnabled==='boolean';
@@ -127,9 +128,9 @@
     if(!s.spectating&&s.turn?.pending?.kind==='bishop_repay'&&!M.selection){M.selection={type:'choose_cards',uids:new Set()};M.handOpen=true;M.focus='hand';}
     if(M.selection?.type==='choose_cards'&&s.turn?.pending?.kind!=='bishop_repay')M.selection=null;
     const stage=stageStep();
-    if(stage&&M.stage){if(stage.surface==='hand')M.handOpen=true;if(stage.surface==='role')M.roleOpen=true;
-      $('publicSub').textContent=stage.surface==='player'||stage.surface==='district'?stageTitle():'顺时针排列';}
-    else $('publicSub').textContent=M.targetType?'点击目标玩家':'顺时针排列';
+    if(stage&&M.stage){if(stage.surface==='hand')M.handOpen=true;if(stage.surface==='role')M.roleOpen=true;}
+    $('publicSub').classList.toggle('team-z-order',!!s.config?.teamMode);
+    $('publicSub').textContent=s.config?.teamMode?'按 Z 字型行动':stage&&M.stage&&(stage.surface==='player'||stage.surface==='district')?stageTitle():M.targetType?'点击目标玩家':'顺时针排列';
     const wantFocus=s.spectating||current!==M.id||M.confirm?null:M.stage?surfaceFocus(stageStep()?.surface):choiceItems()?'roles':M.targetType?'players':M.selection?'hand':canBuildAny()?'hand':null;
     const focusMoved=wantFocus!==M.autoFocus;M.autoFocus=wantFocus;
     if(focusMoved&&wantFocus){M.focus=wantFocus;if(wantFocus==='hand')M.handOpen=true;if(wantFocus==='roles')M.roleOpen=true;}
@@ -271,25 +272,47 @@
     const fresh=list.filter(n=>n.seq>M.noticeSeen);M.noticeSeen=last;
     fresh.forEach(n=>{try{noticeEvent(n,s);}catch(_){}});}
   // 结算页：结构与字段沿用 PC 端 showOver（app.js:5060）+ #screen-over。
-  function renderOver(s){const box=$('overOverlay'),rows=(s.scores||[]).slice().sort((a,b)=>b.total-a.total);
-    $('overTitle').textContent=s.winner!=null&&s.players[s.winner]?`${s.players[s.winner].name} 获胜！`:'游戏结束（平局）';
+  function renderOver(s){const box=$('overOverlay'),rows=(s.scores||[]).slice().sort((a,b)=>b.total-a.total),teamMode=!!s.config?.teamMode;
+    const winner=s.winner!=null?s.players[s.winner]:null,teamWinner=s.teamWinner??(teamMode&&winner?teamIndex(winner):null);
+    $('overTitle').textContent=teamMode?(teamWinner!=null?`队伍 ${teamWinner+1} 获胜 · ${winner?.name||'个人最高分玩家'}`:'个人最高分并列，团队未分胜负'):
+      winner?`${winner.name} 获胜！`:'游戏结束（平局）';
     $('scoreTable').innerHTML='<tr><th>玩家</th><th>城区</th><th>建筑分</th><th>奖励</th><th>总分</th></tr>'+
-      rows.map(r=>{const me=(s.players[r.playerIdx]||{}).id===M.id,
+      rows.map(r=>{const me=(s.players[r.playerIdx]||{}).id===M.id,won=teamMode?teamWinner!=null&&r.playerIdx%2===teamWinner:s.winner===r.playerIdx,
           bonus=(r.detail||[]).filter(d=>d.label!=='建筑总分');
-        return `<tr class="${s.winner===r.playerIdx?'win':''}"><td>${esc(r.name)}${me?(s.spectating?' · 观战视角':' · 你'):''}</td><td>${esc(r.cityCount)}</td><td>${esc(r.base)}</td><td>+${esc(r.bonus)}</td><td class="total">${esc(r.total)}</td></tr>`+
+        return `<tr class="${won?'win':''}"><td>${teamMode?'队'+(r.playerIdx%2+1)+' · ':''}${esc(r.name)}${me?(s.spectating?' · 观战视角':' · 你'):''}</td><td>${esc(r.cityCount)}</td><td>${esc(r.base)}</td><td>+${esc(r.bonus)}</td><td class="total">${esc(r.total)}</td></tr>`+
           `<tr class="detail-row"><td colspan="5">${bonus.map(d=>`${esc(d.label)} +${esc(d.value)}`).join('，')||'无奖励分'}</td></tr>`;}).join('');
     box.hidden=false;}
+  function teamIndex(p){if(p&&(p.team===0||p.team===1))return p.team;return Math.max(0,M.state.players.indexOf(p))%2;}
+  function renderTeamIdentity(){const box=$('teamIdentityMobile'),s=M.state;if(!box)return;
+    const enabled=!!s.config?.teamMode;box.hidden=!enabled;box.innerHTML='';if(!enabled)return;
+    const own=s.spectating?-1:teamIndex(myPlayer());
+    const groups=[0,1].map(team=>{const ours=own===team,neutral=own<0;
+      const title=neutral?'队伍 '+(team+1):ours?'🛡 我方':'⚔ 对方';
+      const names=s.players.filter(p=>teamIndex(p)===team).map(p=>esc(p.name)).join('、');
+      return `<span class="team-identity-group ${neutral?'team-'+(team+1):ours?'ally':'enemy'}"><b>${title}</b><span>${names}</span></span>`;
+    }).join('');
+    box.innerHTML='<span class="team-identity-title">阵营</span>'+groups;
+  }
   function orderedPlayers(players){if(players.length<=2)return players;const out=[players[0],players[1]];for(let lo=2,hi=players.length-1;lo<=hi;lo++,hi--){out.push(players[hi]);if(lo!==hi)out.push(players[lo]);}return out;}
+  function teamZOrder(players){const teams=[0,1].map(team=>players.filter(p=>teamIndex(p)===team).sort((a,b)=>a.seat-b.seat));
+    const slots=new Map(),ordered=[],rows=Math.max(teams[0].length,teams[1].length);
+    for(let row=0;row<rows;row++)for(const team of(row%2?[1,0]:[0,1])){const p=teams[team][row];if(p){slots.set(p.id,{row:row+1,column:team+1});ordered.push(p);}}
+    return {ordered,slots};}
   function renderPlayers(){const s=M.state;const active=s.phase==='draft'?s.draft?.currentPlayer:s.turn?.playerId;
+    const teamMode=!!s.config?.teamMode,ownTeam=teamMode&&!s.spectating&&myPlayer()?teamIndex(myPlayer()):-1;
     const st=stageStep();const stagePlayers=st&&st.surface==='player'?new Set(st.options.map(o=>String(o.value))):null;
     const candidates=legal().filter(a=>a.type===M.targetType);const targetIds=new Set(candidates.map(a=>a.target));
+    const arrangement=teamMode?teamZOrder(s.players):{ordered:orderedPlayers(s.players),slots:null};
     $('players').classList.toggle('targeting',!!M.targetType||!!stagePlayers);
-    $('players').innerHTML=orderedPlayers(s.players).map(p=>{
-      const ch=p.takenOverCharId?role(p.takenOverCharId):p.revealedCharId&&(s.phase!=='draft'||p.id===M.id&&p.hasChosen&&p.draftComplete!==false)?role(p.revealedCharId):null;
+    $('players').innerHTML=arrangement.ordered.map(p=>{
+      const ch=p.takenOverCharId?role(p.takenOverCharId):p.revealedCharId&&(s.phase!=='draft'||p.revealedToTeam||p.id===M.id&&p.hasChosen&&p.draftComplete!==false)?role(p.revealedCharId):null;
       const isTarget=stagePlayers?stagePlayers.has(String(p.id)):targetIds.has(p.id);
+      const pTeam=teamMode?teamIndex(p):-1,teammate=teamMode&&ownTeam>=0&&pTeam===ownTeam;
+      const teamClass=teamMode?(ownTeam<0?'team-'+(pTeam+1):teammate?'team-ally':'team-enemy'):'';
+      const slot=arrangement.slots?.get(p.id);
       const bub=bubbleFor(p.id);
-      return `<article class="player-row ${p.id===M.id?'self ':''}${p.id===active?'active-turn ':''}${p.threat?'threat ':''}${M.targetType||stagePlayers?(isTarget?'target-selectable':'target-ineligible'):''}" data-player="${attr(p.id)}">
-        <div class="player-meta"><div class="player-headline"><div class="pname">${esc(p.name)}</div>${p.id===M.id?`<span class="you-chip">${s.spectating?'视角':'你'}</span>`:''}${p.hasCrown?'<i class="crown-icon">♛</i>':''}
+      return `<article class="player-row ${p.id===M.id?'self ':''}${teamClass} ${p.id===active?'active-turn ':''}${p.threat?'threat ':''}${M.targetType||stagePlayers?(isTarget?'target-selectable':'target-ineligible'):''}" data-player="${attr(p.id)}"${slot?` style="grid-column:${slot.column};grid-row:${slot.row}"`:''}>
+        <div class="player-meta"><div class="player-headline">${teamMode?`<span class="mobile-team-badge ${ownTeam<0?'team-'+(pTeam+1):teammate?'ally':'enemy'}">${ownTeam<0?'队伍 '+(pTeam+1):teammate?'🛡 我方':'⚔ 对方'}</span>`:''}<div class="pname">${esc(p.name)}</div>${p.id===M.id?`<span class="you-chip">${s.spectating?'视角':'你'}</span>`:''}${p.hasCrown?'<i class="crown-icon">♛</i>':''}
         ${ch?`<span class="public-role-inline"><button class="public-role-btn" type="button" data-kind="role" data-key="${attr(ch.id)}"><span class="role-no">${esc(ch.num)}</span><span>${esc(ch.name)}${p.takenOverCharId?' · 被接管':''}</span></button></span>`
           :(s.phase==='draft'&&p.hasChosen&&p.draftComplete!==false)?'<span class="draft-chosen">已选择</span>':''}
         <div class="p-stats">${coin(p.gold)}${points(score(p).total)}${hand(p.handCount)}</div></div></div>

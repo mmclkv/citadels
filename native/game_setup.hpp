@@ -128,6 +128,9 @@ inline NativeGameState create_native_game(const JsonValue& request) {
     throw std::runtime_error("Game seed must be a uint32");
   state.rng = JsRng(static_cast<uint32_t>(seed));
   state.end_districts = int_field(request, "endDistricts", 8);
+  state.team_mode = bool_field(request, "teamMode");
+  if (state.team_mode && player_count != 4 && player_count != 6 && player_count != 8)
+    throw std::runtime_error("团队战仅支持 4、6、8 人");
   state.round = 0;
   state.first_to_finish = -1;
 

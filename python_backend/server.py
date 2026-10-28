@@ -2142,7 +2142,15 @@ class PythonServer:
                 raise ValueError(self._agent_status()["message"])
             for key in ("endDistricts", "botType", "botLevel"):
                 if updates.get(key):
-                    room["config"][key] = updates[key]
+                    room["config"][key] = 8 if key == "endDistricts" and room["config"].get("teamMode") else updates[key]
+            if "teamMode" in updates:
+                enabled = updates["teamMode"] is True
+                requested_count = int(updates.get("playerCount") or room["config"].get("playerCount") or 4)
+                if enabled and requested_count not in (4, 6, 8):
+                    raise ValueError("团队战仅支持 4、6、8 人")
+                room["config"]["teamMode"] = enabled
+                if enabled:
+                    room["config"]["endDistricts"] = 8
             if scenario is not None:
                 room["config"]["scenario"] = scenario
             for key in ("mctsSimulations", "mctsMaxDepth", "mctsParticles"):
@@ -2295,7 +2303,7 @@ class PythonServer:
                 start_room, seats = self.rooms.prepare_start_room(room["id"])
                 config = start_room["config"]
                 native_state = await self._create_room_game(room,
-                    {"seed": secrets.randbits(32), "endDistricts": config["endDistricts"],
+                    {"seed": secrets.randbits(32), "endDistricts": config["endDistricts"], "teamMode": config.get("teamMode", False),
                      "charSetMode": config["charSetMode"], "initialCrownSeat": 0,
                      "customRoleSelections": config.get("customRoleSelections") or {},
                      "scenario": config.get("scenario", ""),

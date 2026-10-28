@@ -148,6 +148,26 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}
 #referenceBody .ref-card .rc-art{max-height:210px;object-fit:contain}
 /* 动作/效果气泡：整块圆角，左下角收成小尖当指向（一体成型，不再拼接三角形） */
 .player-row{position:relative}
+.team-identity-mobile{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:5px;padding:6px 7px;border-bottom:1px solid #153b58;background:linear-gradient(90deg,#08251f,#0a1c28);font-size:10px}
+.team-identity-mobile[hidden]{display:none!important}
+.team-identity-title{grid-column:1/-1;color:#a9c0d0;font-size:9px;font-weight:850;letter-spacing:.04em}
+.team-identity-group{display:flex;flex-direction:column;gap:3px;min-width:0;padding:5px 7px;border:1px solid;border-radius:8px;line-height:1.2}
+.team-identity-group>b{font-size:10px;font-weight:950;white-space:nowrap}
+.team-identity-group>span{overflow:hidden;color:#eef7ff;font-size:9px;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
+.team-identity-group.ally{color:#a8f4d7;border-color:#29866e;background:#0b332b}
+.team-identity-group.enemy{color:#ffc3bd;border-color:#a64a43;background:#351a20}
+.team-identity-group.team-1{color:#bcefff;border-color:#3b84a1;background:#112d3b}
+.team-identity-group.team-2{color:#f1ccff;border-color:#9465a6;background:#2a1b35}
+.section-title .sub.team-z-order{color:#43e4ff;font-size:10px;font-weight:950;white-space:nowrap}
+.player-row.team-ally{border-color:#23856e;border-left:4px solid #3dba91;background:linear-gradient(145deg,#0c2a25,#07131f 78%);box-shadow:inset 0 0 16px #3dba9116}
+.player-row.team-enemy{border-color:#a64a43;border-left:4px solid #df655a;background:linear-gradient(145deg,#301a20,#07131f 78%);box-shadow:inset 0 0 16px #df655a16}
+.player-row.team-1{border-color:#3b84a1;border-left:4px solid #4db4d9}
+.player-row.team-2{border-color:#9465a6;border-left:4px solid #c77be0}
+.mobile-team-badge{flex:0 0 auto;display:inline-flex;align-items:center;min-height:16px;padding:2px 4px;border:1px solid;border-radius:5px;font-size:8px;font-weight:950;line-height:1;white-space:nowrap}
+.mobile-team-badge.ally{color:#b8ffe1;border-color:#3dba91;background:#0d3d32}
+.mobile-team-badge.enemy{color:#ffd0d1;border-color:#df655a;background:#4a2026}
+.mobile-team-badge.team-1{color:#d7f7ff;border-color:#4db4d9;background:#123b4b}
+.mobile-team-badge.team-2{color:#ffe1fa;border-color:#c77be0;background:#3b2449}
 .row-bubble{position:absolute;left:5px;right:5px;bottom:5px;z-index:5;padding:5px 9px 6px;
   border:1px solid rgba(90,165,220,.55);border-radius:11px 11px 11px 3px;
   background:linear-gradient(180deg,rgba(20,63,99,.6),rgba(8,38,64,.6));

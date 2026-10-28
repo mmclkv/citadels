@@ -22,6 +22,13 @@ def _public_character_numbers(state: dict, player_index: int, viewer_index: int)
     result = []
     turn = state.get("turn")
     setup = bool(turn and turn.get("phase") == "setup")
+    team_mode = bool((state.get("config") or {}).get("teamMode"))
+    viewer_team = viewer_index % 2 if team_mode and viewer_index >= 0 else -1
+    team_role_known = (viewer_team >= 0 and player_index % 2 == viewer_team and
+                       (state["phase"] != "draft" or len(player["chars"]) >=
+                        (2 if len(state["players"]) <= 3 else 1)))
+    if team_role_known:
+        result.extend(CHAR_MAP[character_id]["num"] for character_id in player["chars"])
     if state["phase"] == "action" and turn and not setup and turn["playerIdx"] == player_index:
         result.append(CHAR_MAP[turn["charId"]]["num"])
     result.extend(CHAR_MAP[character_id]["num"] for character_id in player["played"])
@@ -177,6 +184,8 @@ def sanitize(state: dict, player_id: str | None,
              legal_actions: list[dict] | None = None, *, allow_private_logs: bool = True) -> dict:
     viewer_index = next((index for index, player in enumerate(state["players"])
                          if player["id"] == player_id), -1)
+    team_mode = bool((state.get("config") or {}).get("teamMode"))
+    viewer_team = viewer_index % 2 if team_mode and viewer_index >= 0 else -1
     players = []
     turn = state.get("turn")
     setup = bool(turn and turn.get("phase") == "setup")
@@ -192,11 +201,18 @@ def sanitize(state: dict, player_id: str | None,
                     entry["num"] != state["effects"].get("assassinated")):
                 taken_over[entry["playerIdx"]] = entry["charId"]
     for index, player in enumerate(state["players"]):
+        draft_complete = state["phase"] != "draft" or len(player["chars"]) >= (
+            2 if len(state["players"]) <= 3 else 1)
+        teammate = (team_mode and viewer_team >= 0 and index != viewer_index and
+                    index % 2 == viewer_team)
         revealed_id = (player["chars"][0] if index == viewer_index and player["chars"] else
                        turn["charId"] if state["phase"] == "action" and turn and
                        turn["playerIdx"] == index and not setup else
                        player["played"][0] if player["played"] else None)
+        if teammate and draft_complete and player["chars"]:
+            revealed_id = player["chars"][0]
         row = {"id": player["id"], "name": player["name"], "seat": player["seat"],
+               "team": player.get("team", index % 2 if (state.get("config") or {}).get("teamMode") else -1),
                "isBot": player["isBot"], "botType": player["botType"], "gold": player["gold"],
                "city": [_card_public(card) for card in player["city"]],
                "cityCount": len(player["city"]) + sum(card.get("purpleEffect") == "monument" for card in player["city"]), "handCount": len(player["hand"]),
@@ -205,11 +221,11 @@ def sanitize(state: dict, player_id: str | None,
                "threat": _threat_mark(state, index, viewer_index),
                "warrant": _warrant_mark(state, index, viewer_index),
                "hasChosen": bool(player["chars"]),
-               "draftComplete": state["phase"] != "draft" or len(player["chars"]) >= (
-                   2 if len(state["players"]) <= 3 else 1),
+               "draftComplete": draft_complete,
                "takenOverCharId": taken_over.get(index),
                "revealedCharId": revealed_id,
-               "revealedCharNum": CHAR_MAP[revealed_id]["num"] if revealed_id else None}
+               "revealedCharNum": CHAR_MAP[revealed_id]["num"] if revealed_id else None,
+               "revealedToTeam": bool(teammate and draft_complete and player["chars"])}
         if index == viewer_index:
             row["hand"] = [_hand_card_public(card, buildable_uids) for card in player["hand"]]
             row["chars"] = [{**_role(character_id),
@@ -236,6 +252,18 @@ def sanitize(state: dict, player_id: str | None,
             for detail in row["detail"]:
                 if detail.get("label") == "建筑效果与完工奖励": detail["value"] -= hidden
         scores.append(row)
+    team_scores = []
+    team_winner = None
+    if team_mode:
+        team_totals = [0, 0]
+        for row in scores:
+            player_index = row.get("playerIdx", -1)
+            if 0 <= player_index < len(state["players"]):
+                team_totals[player_index % 2] += row.get("total", 0)
+        team_scores = [{"team": team, "total": total} for team, total in enumerate(team_totals)]
+        individual_winner = state.get("winner") if state.get("phase") == "gameover" else None
+        if isinstance(individual_winner, int) and 0 <= individual_winner < len(state["players"]):
+            team_winner = individual_winner % 2
     result = {
         "roomId": state["roomId"], "phase": state["phase"], "round": state["round"],
         "config": state["config"], "you": player_id if viewer_index >= 0 else None,
@@ -259,6 +287,7 @@ def sanitize(state: dict, player_id: str | None,
         "log": battle_log_for_viewer(state, player_id, allow_private_logs=allow_private_logs),
         "notices": [_notice_for_viewer(notice, viewer_index) for notice in state["notices"][-12:]],
         "scores": scores, "winner": state["winner"],
+        "teamScores": team_scores, "teamWinner": team_winner,
         "removed": _removed_view(state),
         "roundConfirm": {"round": state["roundConfirm"]["round"],
                          "confirmed": list(state["roundConfirm"]["confirmed"])}

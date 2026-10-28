@@ -591,6 +591,12 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 #screen-game.draft-phase [data-layout="ring"].tax-safe-layout ~ .me-area{
   position:relative;left:auto;bottom:auto;transform:none;margin:calc(var(--tax-safe-height) + 12px) auto 10px}
 .opp{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fffdf7;box-shadow:var(--shadow);transition:width .55s ease,min-height .55s ease,box-shadow .3s ease}
+#screen-game .opp.team-ally{border-color:#188779;background:linear-gradient(135deg,rgba(222,249,241,.96),rgba(255,253,247,.97) 68%);box-shadow:inset 5px 0 #168878,var(--shadow)}
+#screen-game .opp.team-enemy{border-color:#c45a4d;background:linear-gradient(135deg,rgba(255,233,226,.96),rgba(255,253,247,.97) 68%);box-shadow:inset 5px 0 #c45a4d,var(--shadow)}
+#screen-game .opp.team-ally.active{border-color:#087366;box-shadow:inset 5px 0 #087366,0 0 0 3px rgba(22,136,120,.22),var(--shadow)}
+#screen-game .opp.team-enemy.active{border-color:#a83e34;box-shadow:inset 5px 0 #a83e34,0 0 0 3px rgba(196,90,77,.2),var(--shadow)}
+#screen-game .opp.team-faction-1{border-color:#3b84a1;background:linear-gradient(135deg,rgba(222,242,250,.96),rgba(255,253,247,.97) 68%);box-shadow:inset 5px 0 #3b84a1,var(--shadow)}
+#screen-game .opp.team-faction-2{border-color:#9465a6;background:linear-gradient(135deg,rgba(244,231,250,.96),rgba(255,253,247,.97) 68%);box-shadow:inset 5px 0 #9465a6,var(--shadow)}
 .opponents .opp{position:absolute;left:calc(var(--seat-x) * 1%);top:calc(var(--seat-y) * 1% + var(--seat-shift-y,0px));width:min(272px,24%);transform:translate(calc(-50% + var(--push-x,0px)),calc(-50% + var(--push-y,0px)));margin:0}
 .opponents .opp[data-compact="1"]{padding:9px 10px;font-size:.94em}
 .opponents .opp[data-compact="2"]{padding:8px 9px;font-size:.88em}
@@ -644,6 +650,22 @@ body.building-animation-paused #screen-game .actionbar{pointer-events:none}
 .opp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
 .opp-seat-no{font-size:10px;font-weight:800;color:var(--dim);padding:1px 5px;border:1px solid var(--line);border-radius:8px;flex:0 0 auto}
 .opp-name{font-weight:700;font-size:14px}
+.team-identity-bar{position:relative;z-index:7;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:7px;width:max-content;max-width:calc(100% - 20px);margin:8px auto 5px;padding:6px 10px;border:1px solid #8db8ad;border-radius:12px;background:rgba(247,255,251,.94);box-shadow:0 4px 14px rgba(26,74,63,.12);font-size:12px}
+.team-identity-bar[hidden]{display:none!important}
+.team-key-title{font-weight:900;color:#45635e;white-space:nowrap}
+.team-key-group{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid;border-radius:9px;line-height:1.2}
+.team-key-group.ally{color:#075d53;border-color:#53aa98;background:#dcf5ed}
+.team-key-group.enemy{color:#8e3029;border-color:#da8a79;background:#ffebe4}
+.team-key-group.team-neutral{color:#375061;border-color:#96afbd;background:#eaf2f6}
+.team-key-group>b{white-space:nowrap}
+.team-key-group>span{color:var(--ink);font-weight:650}
+.team-ribbon{display:inline-flex;align-items:center;gap:3px;flex:0 0 auto;padding:3px 7px;border:1px solid;border-radius:99px;font-size:10px;line-height:1.1;font-weight:900;letter-spacing:.01em;white-space:nowrap}
+.team-ribbon[hidden]{display:none!important}
+.team-ribbon.ally{color:#075d53;border-color:#53aa98;background:#dcf5ed}
+.team-ribbon.enemy{color:#8e3029;border-color:#da8a79;background:#ffebe4}
+.team-ribbon.team-neutral{color:#375061;border-color:#96afbd;background:#eaf2f6}
+.my-team-ribbon{margin-right:auto;font-size:11px;padding:4px 9px}
+#screen-game #me-area.team-ally{border-color:#188779;box-shadow:inset 5px 0 #168878,0 8px 22px rgba(26,74,63,.12)}
 .opp-me{color:var(--gold);font-size:12px}
 .tag{font-size:11px;padding:1px 7px;border-radius:10px;background:#f1e5cd;color:#7a5c22;border:1px solid var(--line)}
 .tag.bot{background:#eef3fb;color:#3a5f8a;border-color:#d3e0ee}
@@ -1943,6 +1965,12 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
   #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player{
     min-height:76px!important;height:auto!important;padding:4px!important;border-radius:10px!important;
     gap:3px!important;overflow:hidden!important;background:var(--paper2)}
+  #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.team-ally{border:1px solid #168878!important;border-left:4px solid #168878!important;background:linear-gradient(145deg,#ddf5ec,#f8fffb 78%)!important;box-shadow:0 2px 7px rgba(14,95,79,.14)!important}
+  #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.team-enemy{border:1px solid #c45a4d!important;border-left:4px solid #c45a4d!important;background:linear-gradient(145deg,#ffebe4,#fffaf8 78%)!important;box-shadow:0 2px 7px rgba(145,51,41,.13)!important}
+  #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.team-ally.active{box-shadow:0 0 0 2px rgba(22,136,120,.32)!important}
+  #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.team-enemy.active{box-shadow:0 0 0 2px rgba(196,90,77,.3)!important}
+  #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.team-faction-1{border:1px solid #3b84a1!important;border-left:4px solid #3b84a1!important;background:linear-gradient(145deg,#e0f2f8,#fbfdff 78%)!important}
+  #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.team-faction-2{border:1px solid #9465a6!important;border-left:4px solid #9465a6!important;background:linear-gradient(145deg,#f2e8f6,#fffaff 78%)!important}
   #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.self{background:var(--bg2)}
   #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player.mobile-target{
     border-color:var(--ui-cyan,var(--gold))!important;box-shadow:0 0 0 1px rgba(67,228,255,.34),0 0 10px rgba(67,228,255,.18)}
@@ -1950,6 +1978,19 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
   #screen-game .mobile-player-head{display:flex;align-items:center;gap:3px;height:20px;min-width:0;overflow:hidden}
   #screen-game .mobile-player-name{flex:1 1 20px;min-width:18px;max-width:54px;
     font-size:10.5px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #screen-game .mobile-team-marker{flex:0 0 auto;min-height:17px;padding:3px 5px;border:1px solid;border-radius:6px;font-size:9px;font-weight:950;line-height:1;white-space:nowrap}
+  #screen-game .mobile-team-marker.ally{color:#075d53;border-color:#53aa98;background:#c8eee2}
+  #screen-game .mobile-team-marker.enemy{color:#8e3029;border-color:#da8a79;background:#ffddd3}
+  #screen-game .mobile-team-marker.team-neutral{color:#375061;border-color:#96afbd;background:#e1edf3}
+  #screen-game .mobile-team-marker.team-faction-1{color:#1c5268;border-color:#3b84a1;background:#d6eef6}
+  #screen-game .mobile-team-marker.team-faction-2{color:#633f70;border-color:#9465a6;background:#eddef2}
+  #screen-game .mobile-player.self.team-ally{outline:2px solid rgba(8,115,102,.25);outline-offset:-3px}
+  #screen-game .team-identity-bar{justify-content:flex-start;width:100%;max-width:none;margin:0;padding:6px 7px;border:0;border-bottom:1px solid #aac9c0;border-radius:0;background:#eef8f4;box-shadow:none;gap:5px;font-size:9px}
+  #screen-game .team-key-title{display:none}
+  #screen-game .team-key-group{flex:1 1 44%;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:4px 6px;border-radius:7px}
+  #screen-game .team-key-group>span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px}
+  #screen-game .team-key-group>b{font-size:10px}
+  #screen-game .my-team-ribbon{display:none!important}
   #screen-game .mobile-you-chip{flex:0 0 auto;padding:1px 4px;border-radius:99px;
     background:var(--ui-cyan,var(--gold));color:#03111a;font-size:7px;font-weight:900}
   #screen-game .mobile-role-tag{flex:0 0 auto;max-width:75px;padding:2px 3px;border:1px solid var(--gold-l);
@@ -2120,6 +2161,7 @@ html[data-theme="neon"] #screen-game.draft-phase #draft-pool .char-card.neon-rol
   #screen-game #opponents[data-layout="mobile-grid"]{gap:3px!important;padding:3px!important}
   #screen-game #opponents[data-layout="mobile-grid"] .opp.mobile-player{min-height:73px!important;padding:3px!important}
   #screen-game .mobile-player-name{font-size:10px;max-width:46px}
+  #screen-game .mobile-team-marker{min-height:16px;padding:2px 4px;font-size:8px}
   #screen-game .mobile-role-tag{max-width:66px;font-size:8px}
   #screen-game .mobile-player-stats{font-size:7.5px;gap:2px}
   #screen-game .mobile-city-chip{padding:0 1px;border-left-width:2px}

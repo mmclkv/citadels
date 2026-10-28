@@ -1980,9 +1980,9 @@
   function charStatusHTML(p) {
     let st = 'none';
     if (p.hasChosen && p.draftComplete !== false) {
-      // 选角期间其他玩家的角色始终是暗牌；即便收到上一轮残留的
-      // revealedCharNum，也不能把它渲染成正面。
-      const isHiddenDraftRole = App.state && App.state.phase === 'draft' && p.id !== App.myId;
+      // 选角期间只向本人及队友显示已完成选择的角色。
+      const isHiddenDraftRole = App.state && App.state.phase === 'draft' &&
+        p.id !== App.myId && !p.revealedToTeam;
       st = (p.revealedCharNum != null && !isHiddenDraftRole) ? 'up' : 'down';
     }
     // 检测本帧是否从「盖牌」变为「翻面」，是则播放翻牌动画
@@ -2781,6 +2781,7 @@
     // cannot leave every opponent filtered or the local panel unresolved.
     const viewerId = viewerIdForState(s);
     if (viewerId != null) App.myId = viewerId;
+    renderTeamIdentity(s, viewerId);
     $('#spectator-control').update(s, payload => Net.send(payload));
     const hostingButton = $('#btn-hosting');
     hostingButton.hidden = !!s.spectating || s.phase === 'gameover' || typeof s.hostingEnabled !== 'boolean';
@@ -3020,6 +3021,54 @@
       ).join('');
   }
 
+  function teamIndexFor(state, player) {
+    if (!player) return -1;
+    if (player.team === 0 || player.team === 1) return player.team;
+    const index = state.players.indexOf(player);
+    return index < 0 ? -1 : index % 2;
+  }
+
+  function mobileTeamZOrder(state) {
+    const teams = [0, 1].map(team => state.players
+      .filter(player => teamIndexFor(state, player) === team)
+      .sort((a, b) => a.seat - b.seat));
+    const slots = new Map(), ordered = [];
+    const rows = Math.max(teams[0].length, teams[1].length);
+    for (let row = 0; row < rows; row++) {
+      const teamOrder = row % 2 ? [1, 0] : [0, 1];
+      teamOrder.forEach(team => {
+        const player = teams[team][row];
+        if (!player) return;
+        slots.set(player.id, { row: row + 1, column: team + 1 });
+        ordered.push(player);
+      });
+    }
+    return { ordered, slots };
+  }
+
+  function renderTeamIdentity(state, viewerId) {
+    const enabled = !!(state.config && state.config.teamMode);
+    const bar = $('#team-identity-bar');
+    const ownMarker = $('#my-team-ribbon');
+    const meArea = $('#me-area');
+    const me = state.players.find(player => player.id === viewerId);
+    const ownTeam = enabled && !state.spectating ? teamIndexFor(state, me) : -1;
+    if (bar) { bar.hidden = !enabled; bar.innerHTML = ''; }
+    if (ownMarker) ownMarker.hidden = !enabled || ownTeam < 0;
+    if (meArea) meArea.classList.toggle('team-ally', enabled && ownTeam >= 0);
+    if (!enabled || !bar) return;
+
+    const teams = [0, 1].map(team => state.players.filter(player => teamIndexFor(state, player) === team));
+    const labels = teams.map((players, team) => {
+      const yours = ownTeam >= 0 && team === ownTeam;
+      const neutral = ownTeam < 0;
+      const title = neutral ? '队伍 ' + (team + 1) : yours ? '🛡 我方' : '⚔ 对方';
+      return '<span class="team-key-group ' + (neutral ? 'team-neutral' : yours ? 'ally' : 'enemy') + '">' +
+        '<b>' + title + '</b><span>' + players.map(player => escapeHtml(player.name)).join('、') + '</span></span>';
+    }).join('');
+    bar.innerHTML = '<span class="team-key-title">团队身份</span>' + labels;
+  }
+
   function renderOpponents(s) {
     if (isMobileGameUI()) { renderMobilePlayers(s); return; }
     hideScoreTip(); // 徽章随渲染重建，先收掉可能残留的悬停提示
@@ -3112,6 +3161,14 @@
       const draftActive = !!(s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id);
       const actionActive = !!(s.turn && s.turn.playerIdx === p.seat);
       d.classList.toggle('active', draftActive || actionActive);
+      const teamMode = !!(s.config && s.config.teamMode);
+      const ownTeam = teamMode && !s.spectating ? teamIndexFor(s, s.players.find(player => player.id === viewerId)) : -1;
+      const playerTeam = teamMode ? teamIndexFor(s, p) : -1;
+      const teammate = teamMode && ownTeam >= 0 && playerTeam === ownTeam;
+      d.classList.toggle('team-ally', teammate);
+      d.classList.toggle('team-enemy', teamMode && ownTeam >= 0 && playerTeam !== ownTeam);
+      d.classList.toggle('team-faction-1', teamMode && ownTeam < 0 && playerTeam === 0);
+      d.classList.toggle('team-faction-2', teamMode && ownTeam < 0 && playerTeam === 1);
       // 角色状态 HTML 未变（如每步行动但身份没翻面）时跳过重建，避免霓虹角色立绘闪烁
       const cs = d.querySelector('.opp-char');
       const csHtml = charStatusHTML(p);
@@ -3123,6 +3180,8 @@
       const crownIcon = p.hasCrown ? '<i class="crown-icon" aria-hidden="true" title="当前持有皇冠">♛</i>' : '';
       const head = d.querySelector('.opp-head');
       head.innerHTML = '<span class="opp-seat-no">座位 ' + (p.seat + 1) + '</span>' +
+        (teamMode && ownTeam < 0 ? '<span class="team-ribbon team-neutral">队伍 ' + (playerTeam + 1) + '</span>' :
+          teamMode ? '<span class="team-ribbon ' + (teammate ? 'ally' : 'enemy') + '">' + (teammate ? '🛡 队友' : '⚔ 对手') + '</span>' : '') +
         '<span class="opp-name">' + escapeHtml(p.name) + '</span>' +
         (p.takenOverCharId ? '<span class="tag magic">' +
           escapeHtml((charMeta(p.takenOverCharId) || {}).name || '') + ' · 被接管</span>' : '') + tags +
@@ -3336,12 +3395,15 @@
     if (arena) { arena.dataset.layout = 'mobile-grid'; arena.dataset.players = String(s.players.length); }
     $('#mobile-public-count').textContent = s.players.length + ' 人局';
     const targeting = mobileHasTargetChoice(s);
-    $('#mobile-public-status').textContent = targeting
+    const teamMode = !!(s.config && s.config.teamMode);
+    $('#mobile-public-status').classList.toggle('team-z-order', teamMode);
+    $('#mobile-public-status').textContent = teamMode ? '按 Z 字型行动' : targeting
       ? (districtSelectMode() ? '选择目标玩家和建筑' : '点击目标玩家')
       : '顺时针排列';
     // 两列按顺时针围桌：左上 → 右上 → 右侧向下 → 左侧向上。
-    const ordered = s.players.slice(0, 2);
-    for (let low = 2, high = s.players.length - 1; low <= high; low++, high--) {
+    const teamLayout = teamMode ? mobileTeamZOrder(s) : null;
+    const ordered = teamMode ? teamLayout.ordered : s.players.slice(0, 2);
+    if (!teamMode) for (let low = 2, high = s.players.length - 1; low <= high; low++, high--) {
       ordered.push(s.players[high]);
       if (low !== high) ordered.push(s.players[low]);
     }
@@ -3354,26 +3416,37 @@
       const selectable = playerActions.length || buildingActions.length;
       const active = s.phase === 'draft' && s.draft && s.draft.currentPlayer === p.id ||
         s.turn && s.turn.playerId === p.id;
+      const ownTeam = teamMode && !s.spectating ? teamIndexFor(s, s.players.find(player => player.id === App.myId)) : -1;
+      const playerTeam = teamMode ? teamIndexFor(s, p) : -1;
+      const teammate = teamMode && ownTeam >= 0 && playerTeam === ownTeam;
       const d = el('div', 'opp mobile-player' + (p.id === App.myId ? ' self' : '') +
+        (teamMode ? (ownTeam < 0 ? ' team-faction-' + (playerTeam + 1) : teammate ? ' team-ally' : ' team-enemy') : '') +
         (p.threat ? ' threat' : '') +
         (active ? ' active' : '') + (targeting && selectable ? ' mobile-target' : '') +
         (targeting && !selectable ? ' mobile-unavailable' : ''));
       d.dataset.seat = p.seat;
+      if (teamMode) {
+        const slot = teamLayout.slots.get(p.id);
+        if (slot) { d.style.gridColumn = String(slot.column); d.style.gridRow = String(slot.row); }
+      }
       d.setAttribute('role', 'button'); d.tabIndex = 0;
-      d.setAttribute('aria-label', '查看' + p.name + '的详细信息');
+      d.setAttribute('aria-label', (teamMode && ownTeam >= 0 ? (teammate ? '我方队友，' : '敌方玩家，') : '') + '查看' + p.name + '的详细信息');
       // 选角完成后本人可见自己的角色；其他玩家仍只显示已选择。
       // 本轮已公开的角色保留到轮末确认。
       const takenOver = p.takenOverCharId && charMeta(p.takenOverCharId);
       const role = takenOver
         ? '<span class="mobile-role-tag" style="max-width:none">' + escapeHtml(takenOver.name) + ' · 被接管</span>'
-        : p.revealedCharNum != null && (s.phase !== 'draft' ||
+        : p.revealedCharNum != null && (s.phase !== 'draft' || p.revealedToTeam ||
         p.id === App.myId && p.hasChosen && p.draftComplete !== false)
         ? '<span class="mobile-role-tag"><span class="mobile-role-no">' + p.revealedCharNum + '</span><span>' +
           escapeHtml((charMeta(p.revealedCharId, p.revealedCharNum) || {}).name || '') + '</span></span>'
         : s.phase === 'draft' && p.hasChosen && p.draftComplete !== false
           ? '<span class="mobile-draft-chosen">已选择</span>' : '';
       const head = el('div', 'mobile-player-head');
-      head.innerHTML = '<strong class="mobile-player-name">' + escapeHtml(p.name) + '</strong>' +
+      head.innerHTML = (teamMode ? '<span class="mobile-team-marker ' + (ownTeam < 0 ? 'team-faction-' + (playerTeam + 1) : teammate ? 'ally' : 'enemy') + '" title="' +
+        (ownTeam < 0 ? '队伍 ' + (playerTeam + 1) : teammate ? '队友' : '对手') + '">' +
+        (ownTeam < 0 ? '队伍 ' + (playerTeam + 1) : teammate ? '🛡 我方' : '⚔ 对方') + '</span>' : '') +
+        '<strong class="mobile-player-name">' + escapeHtml(p.name) + '</strong>' +
         (p.id === App.myId ? '<span class="mobile-you-chip">你</span>' : '') +
         (p.hasCrown ? '<i class="crown-icon" aria-label="皇冠">♛</i>' : '') +
         threatMarkHTML(p.threat) + warrantMarkHTML(p.warrant) + role +
@@ -4244,7 +4317,9 @@
     li.innerHTML = '<span class="sd-label">合计</span><span class="sd-val">' + row.total + '</span>';
     ul.appendChild(li);
     $('#score-foot').textContent = s.phase === 'gameover'
-      ? (s.winner === idx ? '本局胜利者' : '游戏已结束') + '（最终得分）'
+      ? (s.config && s.config.teamMode
+        ? (s.teamWinner != null && idx % 2 === s.teamWinner ? '获胜队伍成员' : '游戏已结束')
+        : (s.winner === idx ? '本局胜利者' : '游戏已结束')) + '（最终得分）'
       : '（当前实时计分，最终以结算为准）';
     const pop = $('#score-popup');
     pop.hidden = false;
@@ -4583,6 +4658,11 @@
     const stuckDraft = !multiPickMode && ((cur && cur.hasChosen) || (allChosen && s.phase === 'draft'));
     $('#draft-sub').innerHTML = '进度 ' + Math.min(d.stepIdx + 1, d.totalSteps) + ' / ' + d.totalSteps +
       ' · 当前：' + (cur ? escapeHtml(cur.name) : '-') +
+      (d.pickOrder && d.pickOrder.length ? ' · 本阶段选人顺序：' + d.pickOrder.map((idx, pos) => {
+        const player = s.players[idx];
+        return (pos + 1) + '. ' + (player ? escapeHtml(player.name) : '玩家') +
+          (s.config && s.config.teamMode ? '（队' + ((idx % 2) + 1) + '）' : '');
+      }).join(' → ') : '') +
       ' · 明置移除 ' + d.faceUp.length + ' 张 · 暗置移除 ' + d.faceDownCount + ' 张 · 牌池 ' + d.poolCount + ' 张' +
       (stuckDraft ? ' · <b style="color:#c0392b">选角进度异常</b>' : '');
 
@@ -5338,14 +5418,17 @@
     const rows = s.scores || [];
     let best = -1;
     rows.forEach(r => { if (r.total > best) best = r.total; });
-    $('#over-title').innerHTML = s.winner != null
+    $('#over-title').innerHTML = s.config && s.config.teamMode
+      ? (s.teamWinner != null ? '队伍 ' + (s.teamWinner + 1) + ' 获胜！' : '个人最高分并列，团队未分胜负')
+      : s.winner != null
       ? escapeHtml(s.players[s.winner].name) + ' 获胜！'
       : '游戏结束（平局）';
     const tb = $('#score-table');
     tb.innerHTML = '<tr><th>玩家</th><th>城区</th><th>建筑分</th><th>奖励</th><th>总分</th><th class="score-detail">明细</th></tr>';
     rows.slice().sort((a, b) => b.total - a.total).forEach(r => {
-      const tr = el('tr', (s.winner === r.playerIdx ? 'win' : ''));
-      tr.innerHTML = '<td>' + escapeHtml(r.name) + '</td>' +
+      const teamWin = s.config && s.config.teamMode && s.teamWinner != null && r.playerIdx % 2 === s.teamWinner;
+      const tr = el('tr', (s.config && s.config.teamMode ? teamWin : s.winner === r.playerIdx) ? 'win' : '');
+      tr.innerHTML = '<td>' + (s.config && s.config.teamMode ? '队' + ((r.playerIdx % 2) + 1) + ' · ' : '') + escapeHtml(r.name) + '</td>' +
         '<td>' + r.cityCount + '</td>' +
         '<td>' + r.base + '</td>' +
         '<td>+' + r.bonus + '</td>' +
@@ -5353,6 +5436,11 @@
         '<td class="score-detail">' + r.detail.map(d => escapeHtml(d.label) + ' +' + d.value).join('，') + '</td>';
       tb.appendChild(tr);
     });
+    if (s.config && s.config.teamMode && s.teamScores) {
+      const summary = el('tr', 'team-score-summary');
+      summary.innerHTML = '<td colspan="6">团队总分：' + s.teamScores.map(team => '队' + (team.team + 1) + ' ' + team.total + ' 分').join('　｜　') + '</td>';
+      tb.appendChild(summary);
+    }
     showScreen('screen-over');
   }
 

@@ -341,6 +341,20 @@ html[data-theme="neon"] .opp.active { border-color:var(--ui-magenta); box-shadow
 html[data-theme="neon"] .opp-name { color:var(--ink); }
 html[data-theme="neon"] .opp-seat-no { color:var(--ui-cyan); border-color:rgba(67,228,255,.35); }
 html[data-theme="neon"] .opp-gold { color:var(--gold); }
+html[data-theme="neon"] #screen-game .opp.team-ally { border-color:var(--c-green); background:linear-gradient(135deg,rgba(12,63,51,.8),rgba(7,17,29,.8) 72%); box-shadow:inset 5px 0 var(--c-green),0 0 16px rgba(75,218,154,.08); }
+html[data-theme="neon"] #screen-game .opp.team-enemy { border-color:var(--c-red); background:linear-gradient(135deg,rgba(75,24,34,.76),rgba(7,17,29,.8) 72%); box-shadow:inset 5px 0 var(--c-red),0 0 16px rgba(255,94,103,.08); }
+html[data-theme="neon"] #screen-game .opp.team-faction-1 { border-color:var(--ui-cyan); background:linear-gradient(135deg,rgba(12,54,69,.8),rgba(7,17,29,.8) 72%); box-shadow:inset 5px 0 var(--ui-cyan),0 0 16px rgba(67,228,255,.08); }
+html[data-theme="neon"] #screen-game .opp.team-faction-2 { border-color:var(--ui-magenta); background:linear-gradient(135deg,rgba(61,25,55,.76),rgba(7,17,29,.8) 72%); box-shadow:inset 5px 0 var(--ui-magenta),0 0 16px rgba(255,79,199,.08); }
+html[data-theme="neon"] #screen-game .opp.team-ally.active { border-color:var(--c-green); box-shadow:inset 5px 0 var(--c-green),0 0 0 2px rgba(75,218,154,.2),0 0 20px rgba(75,218,154,.14); }
+html[data-theme="neon"] #screen-game .opp.team-enemy.active { border-color:var(--c-red); box-shadow:inset 5px 0 var(--c-red),0 0 0 2px rgba(255,94,103,.18),0 0 20px rgba(255,94,103,.12); }
+html[data-theme="neon"] .team-identity-bar { color:var(--ink); border-color:rgba(67,228,255,.35); background:rgba(5,15,27,.94); box-shadow:0 4px 18px rgba(0,0,0,.35); }
+html[data-theme="neon"] .team-key-title { color:var(--ui-cyan); }
+html[data-theme="neon"] .team-key-group.ally,html[data-theme="neon"] .team-ribbon.ally,html[data-theme="neon"] .mobile-team-marker.ally { color:#b8ffe1; border-color:rgba(75,218,154,.62); background:rgba(17,83,63,.55); }
+html[data-theme="neon"] .team-key-group.enemy,html[data-theme="neon"] .team-ribbon.enemy,html[data-theme="neon"] .mobile-team-marker.enemy { color:#ffd0d1; border-color:rgba(255,94,103,.62); background:rgba(92,31,39,.55); }
+html[data-theme="neon"] .team-key-group.team-neutral,html[data-theme="neon"] .team-ribbon.team-neutral,html[data-theme="neon"] .mobile-team-marker.team-neutral { color:var(--ink2); border-color:var(--line2); background:rgba(14,35,49,.75); }
+html[data-theme="neon"] .mobile-team-marker.team-faction-1 { color:#d7f7ff; border-color:var(--ui-cyan); background:rgba(12,54,69,.75); }
+html[data-theme="neon"] .mobile-team-marker.team-faction-2 { color:#ffe1fa; border-color:var(--ui-magenta); background:rgba(61,25,55,.75); }
+html[data-theme="neon"] #screen-game #me-area.team-ally { border-color:var(--c-green); box-shadow:inset 5px 0 var(--c-green),0 0 22px rgba(75,218,154,.1); }
 html[data-theme="neon"] .coin-icon {
   background:radial-gradient(circle at 32% 25%,#fff7b5 0 10%,#ffd75a 28%,#f0a52f 66%,#9b5f16 100%);
   border-color:#ffca47; box-shadow:inset 0 0 0 2px rgba(255,246,174,.5),0 0 9px rgba(255,190,54,.52);

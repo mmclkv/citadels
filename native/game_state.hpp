@@ -99,6 +99,7 @@ struct NativeGameState {
   std::vector<NativeCallEntry> call_queue;
   int call_index = 0;
   int end_districts = 8;
+  bool team_mode = false;
   int first_to_finish = -1;
   int pending_queen = -1;
   int builds = 0;
@@ -1024,7 +1025,21 @@ struct NativeGameState {
     int crown = 0;
     for (size_t i = 0; i < players.size(); ++i) if (players[i].has_crown) crown = static_cast<int>(i);
     std::vector<int> order;
-    for (int k = 0; k < n; ++k) order.push_back((crown + k) % n);
+    if (team_mode && (n == 4 || n == 6 || n == 8)) {
+      std::vector<int> teams[2];
+      for (int k = 0; k < n; ++k) {
+        const int seat = (crown + k) % n;
+        teams[seat % 2].push_back(seat);
+      }
+      int team = crown % 2;
+      size_t offsets[2] = {0, 0};
+      while (static_cast<int>(order.size()) < n) {
+        if (offsets[team] < teams[team].size()) order.push_back(teams[team][offsets[team]++]);
+        team = 1 - team;
+      }
+    } else {
+      for (int k = 0; k < n; ++k) order.push_back((crown + k) % n);
+    }
     if (n == 2) {
       if (!pool.empty()) { draft_face_down.push_back(pool.front()); pool.erase(pool.begin()); }
       draft_steps = {{order[0], 1, 0, false}, {order[1], 1, 1, false},

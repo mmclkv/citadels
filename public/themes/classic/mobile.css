@@ -37,6 +37,22 @@ html[data-theme="classic"] :is(.sub,.removed-label,.removed-note,.score-kpi span
   #referenceBody .small,#referenceBody .dim,#referenceBody .color-legend,
   #referenceBody .ref-card p,#referenceBody .ref-card .rc-en){color:var(--muted)}
 html[data-theme="classic"] .player-row{background:#fdf8ef;border-color:var(--line2);box-shadow:0 1px 4px #503c3014}
+html[data-theme="classic"] .team-identity-mobile{background:#e8f1ec;border-color:#aac9c0}
+html[data-theme="classic"] .team-identity-title{color:#45635e}
+html[data-theme="classic"] .section-title .sub.team-z-order{color:#2c5f9c}
+html[data-theme="classic"] .team-identity-group>span{color:#33291f}
+html[data-theme="classic"] .team-identity-group.ally{color:#075d53;border-color:#53aa98;background:#dcf5ed}
+html[data-theme="classic"] .team-identity-group.enemy{color:#8e3029;border-color:#da8a79;background:#ffebe4}
+html[data-theme="classic"] .team-identity-group.team-1{color:#1c5268;border-color:#3b84a1;background:#d6eef6}
+html[data-theme="classic"] .team-identity-group.team-2{color:#633f70;border-color:#9465a6;background:#eddef2}
+html[data-theme="classic"] .player-row.team-ally{border-color:#168878;border-left-color:#168878;background:linear-gradient(145deg,#ddf5ec,#f8fffb 78%);box-shadow:0 2px 7px #0e5f4f24}
+html[data-theme="classic"] .player-row.team-enemy{border-color:#c45a4d;border-left-color:#c45a4d;background:linear-gradient(145deg,#ffebe4,#fffaf8 78%);box-shadow:0 2px 7px #91332922}
+html[data-theme="classic"] .player-row.team-1{border-color:#3b84a1;border-left-color:#3b84a1;background:linear-gradient(145deg,#e0f2f8,#fbfdff 78%)}
+html[data-theme="classic"] .player-row.team-2{border-color:#9465a6;border-left-color:#9465a6;background:linear-gradient(145deg,#f2e8f6,#fffaff 78%)}
+html[data-theme="classic"] .mobile-team-badge.ally{color:#075d53;border-color:#53aa98;background:#c8eee2}
+html[data-theme="classic"] .mobile-team-badge.enemy{color:#8e3029;border-color:#da8a79;background:#ffddd3}
+html[data-theme="classic"] .mobile-team-badge.team-1{color:#1c5268;border-color:#3b84a1;background:#d6eef6}
+html[data-theme="classic"] .mobile-team-badge.team-2{color:#633f70;border-color:#9465a6;background:#eddef2}
 html[data-theme="classic"] .player-row.self{background:linear-gradient(135deg,#f6e7c7,#fdf8ef);border-color:#b69b6c;box-shadow:none}
 html[data-theme="classic"] .player-row.active-turn{border-color:#a97c15;box-shadow:0 0 0 1px #c8952b88,inset 0 0 12px #f0d79a88}
 html[data-theme="classic"] .player-row.target-selectable{border-color:#2c5f9c;box-shadow:0 0 0 1px #2c5f9c66}

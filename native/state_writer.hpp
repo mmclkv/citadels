@@ -107,7 +107,7 @@ inline void write_native_action(std::ostream& out, const NativeSearchAction& act
 inline void write_native_state(std::ostream& out, const NativeGameState& state) {
   out << "{\"phase\":\"" << native_phase_name(state.phase) << "\",\"round\":" << state.round
       << ",\"rngState\":" << state.rng.state() << ",\"firstToFinish\":" << state.first_to_finish
-      << ",\"config\":{\"endDistricts\":" << state.end_districts << '}'
+      << ",\"config\":{\"endDistricts\":" << state.end_districts << ",\"teamMode\":" << (state.team_mode ? "true" : "false") << '}'
       << ",\"pendingQueen\":";
   if (state.pending_queen < 0) out << "null";
   else out << "{\"playerIdx\":" << state.pending_queen << '}';
@@ -119,6 +119,7 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     out << "{\"id\":"; write_json_string(out, player.id);
     out << ",\"name\":"; write_json_string(out, player.name);
     out << ",\"seat\":" << player.seat << ",\"isBot\":" << (player.is_bot ? "true" : "false")
+        << ",\"team\":" << (state.team_mode ? static_cast<int>(i % 2) : -1)
         << ",\"botType\":"; write_json_string(out, player.bot_type);
     out << ",\"botLevel\":"; write_json_string(out, player.bot_level);
     out << ",\"gold\":" << player.gold << ",\"handCount\":" << player.hand.size()
@@ -183,6 +184,9 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     out << ",\"pool\":"; write_json_strings(out, state.draft_pool);
     out << ",\"faceUp\":"; write_json_strings(out, state.draft_face_up);
     out << ",\"faceDown\":"; write_json_strings(out, state.draft_face_down);
+    out << ",\"pickOrder\":[";
+    for (size_t i = 0; i < state.draft_steps.size(); ++i) { if (i) out << ','; out << state.draft_steps[i].player; }
+    out << ']';
     out << ",\"steps\":[";
     for (size_t i = 0; i < state.draft_steps.size(); ++i) {
       if (i) out << ',';
@@ -338,7 +342,24 @@ inline void write_native_state(std::ostream& out, const NativeGameState& state) 
     }
     out << "]}";
   }
-  out << "],\"winner\":";
+  out << "],\"teamScores\":[";
+  if (state.team_mode) {
+    int team_totals[2] = {0, 0};
+    for (size_t i = 0; i < totals.size(); ++i) team_totals[i % 2] += totals[i];
+    out << "{\"team\":0,\"total\":" << team_totals[0] << "},{\"team\":1,\"total\":" << team_totals[1] << '}';
+  }
+  out << "],\"teamWinner\":";
+  if (!state.team_mode || state.phase != NativePhase::GameOver) out << "null";
+  else {
+    if (totals.empty()) out << "null";
+    else {
+      const int best = *std::max_element(totals.begin(), totals.end());
+      const auto winners = std::count(totals.begin(), totals.end(), best);
+      if (winners != 1) out << "null";
+      else out << (std::distance(totals.begin(), std::find(totals.begin(), totals.end(), best)) % 2);
+    }
+  }
+  out << ",\"winner\":";
   if (totals.empty()) out << "null";
   else {
     const int best = *std::max_element(totals.begin(), totals.end());

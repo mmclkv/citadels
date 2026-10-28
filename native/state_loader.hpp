@@ -126,7 +126,10 @@ inline NativeGameState load_native_state(const JsonValue& snapshot) {
   state.turns_completed = int_field(snapshot, "turnsCompleted", 0);
   state.rng = JsRng(static_cast<uint32_t>(int_field(snapshot, "rngState")));
   const auto* config = snapshot.get("config");
-  if (config && config->is_object()) state.end_districts = int_field(*config, "endDistricts", 8);
+  if (config && config->is_object()) {
+    state.end_districts = int_field(*config, "endDistricts", 8);
+    state.team_mode = bool_field(*config, "teamMode");
+  }
   const auto* observations = snapshot.get("observations");
   if (observations && observations->is_array()) {
     state.observations.reserve(observations->as_array().size());

@@ -225,6 +225,7 @@
               <option value="6">6 人</option><option value="7">7 人</option><option value="8">8 人</option>
             </select>
           </label>
+          <label class="field"><span>模式</span><select id="net-team-mode"><option value="off" selected>个人战</option><option value="on">团队战（2v2 / 3v3 / 4v4）</option></select></label>
           <label class="field"><span>断线/离开后电脑托管默认值</span>
             <select id="net-auto-host"><option value="on" selected>开启</option><option value="off">关闭</option></select>
           </label>
@@ -263,6 +264,7 @@
           <label class="field inline"><span>人数</span>
             <select id="r-players"><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option>
               <option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
+          <label class="field inline"><span>模式</span><select id="r-team-mode"><option value="off" selected>个人</option><option value="on">团队</option></select></label>
           <label class="field inline"><span>结束</span>
             <select id="r-end"><option value="8" selected>8 栋</option><option value="7">7 栋</option></select></label>
           <label class="field inline"><span>角色</span>
@@ -524,8 +526,21 @@
         });
       }
       function sendRoomConfig() {
-        Net.send({ t: 'config', config: { playerCount: Number($('#r-players').value), endDistricts: Number($('#r-end').value),
+        Net.send({ t: 'config', config: { playerCount: Number($('#r-players').value), teamMode: $('#r-team-mode').value === 'on', endDistricts: Number($('#r-end').value),
           charSetMode: $('#r-chars').value, customRoleSelections, scenario: $('#r-scenario').value, voice: $('#r-voice').value === 'on' } });
+      }
+      function syncTeamPlayerOptions(prefix) {
+        const team = $('#' + prefix + '-team-mode').value === 'on';
+        const select = $('#' + prefix + '-players');
+        Array.from(select.options).forEach(option => {
+          option.disabled = team && !['4', '6', '8'].includes(option.value);
+        });
+        if (team && !['4', '6', '8'].includes(select.value)) select.value = '4';
+        const endSelect = $('#' + prefix + '-end');
+        if (endSelect) {
+          endSelect.disabled = team;
+          if (team) endSelect.value = '8';
+        }
       }
       async function loadHomeVersion() {
         const label = $('#home-version');
@@ -993,6 +1008,8 @@
         $('#lobby-title').textContent = '房间 ' + st.roomId;
         if (st.config) {
           $('#r-players').value = String(st.config.playerCount || 4);
+          $('#r-team-mode').value = st.config.teamMode ? 'on' : 'off';
+          syncTeamPlayerOptions('r');
           $('#r-end').value = String(st.config.endDistricts || 8);
           $('#r-chars').value = st.config.charSetMode || 'base';
           $('#r-scenario').value = st.config.scenario || '';
@@ -1353,6 +1370,7 @@
           Net.send({
             t: 'createRoom', name: Net.name, config: Object.assign({
               playerCount: Number($('#net-players').value),
+              teamMode: $('#net-team-mode').value === 'on',
               endDistricts: Number($('#net-end').value),
               charSetMode: $('#net-chars').value,
               customRoleSelections,
@@ -1416,7 +1434,7 @@
       renderRolePickers();
       $('#r-chars').onchange = () => { syncScenarioChoice('r', !!(App.lobbyState && App.lobbyState.seats[0] && App.lobbyState.seats[0].id === App.myId)); sendRoomConfig(); };
       $('#r-scenario').onchange = () => { syncScenarioChoice('r', !!(App.lobbyState && App.lobbyState.seats[0] && App.lobbyState.seats[0].id === App.myId)); sendRoomConfig(); };
-      ['r-players', 'r-end', 'r-chars', 'r-voice', 'r-scenario'].forEach(id => {
+      ['r-players', 'r-team-mode', 'r-end', 'r-chars', 'r-voice', 'r-scenario'].forEach(id => {
         if (id === 'r-chars' || id === 'r-scenario') return;
         const node = $('#' + id);
         if (!node) return;
@@ -1424,6 +1442,7 @@
           Net.send({
             t: 'config', config: {
               playerCount: Number($('#r-players').value),
+              teamMode: $('#r-team-mode').value === 'on',
               endDistricts: Number($('#r-end').value),
               charSetMode: $('#r-chars').value,
               customRoleSelections,
@@ -1432,6 +1451,14 @@
             }
           });
         };
+      });
+      ['net', 'r'].forEach(prefix => {
+        const mode = $('#' + prefix + '-team-mode');
+        mode.onchange = () => {
+          syncTeamPlayerOptions(prefix);
+          if (prefix === 'r') sendRoomConfig();
+        };
+        syncTeamPlayerOptions(prefix);
       });
 
       /* ----- 初始状态：镜像主题、显示首页、尝试用本地会话恢复 ----- */
