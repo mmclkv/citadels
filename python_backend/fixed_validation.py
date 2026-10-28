@@ -33,6 +33,7 @@ class FixedValidation:
                     'minPlayers', 'maxPlayers', 'gameEnginePath')}
         for key in ("seed", "targetGames", "endDistricts", "minPlayers", "maxPlayers"):
             if identity[key] is not None: identity[key] = int(identity[key])
+        identity["validationGames"] = self.capacity
         identity.update(self.contract)
         self.identity = identity
         digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
@@ -86,7 +87,8 @@ class FixedValidation:
             raise ValueError('Validation game entered the wrong seed domain')
         rows=result['rows']
         # Even coverage of a whole trajectory; cap storage and validation cost.
-        indices=np.linspace(0,len(rows)-1,min(128,len(rows)),dtype=int)
+        row_limit=min(128,max(1,4096//max(1,self.capacity)))
+        indices=np.linspace(0,len(rows)-1,min(row_limit,len(rows)),dtype=int)
         serial=[{key:np.asarray(rows[int(i)][key]).tolist() for key in
                  ('state','actions','pi','reward','valueMask')} for i in indices]
         self._validate_rows(serial)

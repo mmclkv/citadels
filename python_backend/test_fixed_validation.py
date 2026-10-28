@@ -60,6 +60,14 @@ class FixedValidationTests(unittest.TestCase):
         self.assertIn('early',stats['validationByStage']);self.assertIn('neural',stats['validationByActor'])
         self.assertTrue(np.isfinite(stats['validationBaselineValueLoss']))
 
+    def test_large_game_count_keeps_storage_bounded(self):
+        c,row=fixture()
+        with tempfile.TemporaryDirectory() as d:
+            v=FixedValidation(d,{**c,'validationGames':256})
+            v.add({'validationIndex':0,'sampleSeed':validation_sample_seed(c,0),'completed':True,'rows':[row]*140})
+            self.assertEqual(len(v.rows()),16)
+            self.assertNotEqual(v.path,FixedValidation(d,c).path)
+
     def test_disabled_validation_never_collects(self):
         c,_=fixture()
         with tempfile.TemporaryDirectory() as d:
