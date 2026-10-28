@@ -197,6 +197,17 @@ void mask_cycle_policy(const Node& root, std::vector<float>& policy) {
     if (!root.cycle_pruned[i]) policy[i] = sum > 0 ? policy[i] / sum : 1.0f / remaining;
 }
 
+// A singleton has a certain prior, but no estimated value. Keep its physical
+// node and every observation/action event; only skip the evaluator stop.
+template <typename Node>
+void prepare_single_action_node(Node& node) {
+  node.priors.assign(1, 1.0f);
+  node.child_variants.resize(1);
+  node.child_by_key.resize(1);
+  node.cycle_pruned.resize(1, false);
+  node.expanded = true;
+}
+
 struct Evaluation {
   std::vector<float> priors;
   float value = 0.0f;
@@ -259,6 +270,7 @@ class Mcts {
     float value = 0.0f;
     int visits = 0;
     bool expanded = false;
+    bool evaluated = false;
   };
 
  public:
@@ -300,6 +312,9 @@ class Mcts {
     bool share_information_history = true;
     int time_budget_ms = 0;
     std::chrono::steady_clock::time_point deadline{};
+    // Advance forced/predicted singleton actions within the same simulation.
+    // Still count every applied action toward max_depth and the deadline.
+    bool fast_forward_single_actions = true;
   };
 
   struct Result {
@@ -390,6 +405,10 @@ class Mcts {
           backed_up = true;
           break;
         }
+        if (!node->expanded && config_.fast_forward_single_actions && node->actions.size() == 1) {
+          prepare_single_action_node(*node);
+          ++expansions_;
+        }
         if (!node->expanded) {
           expand(*node, state);
           backup(path, node->value_vector);
@@ -404,6 +423,8 @@ class Mcts {
         if (config_.share_information_history && index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
         if (index >= node->actions.size() ||
             !game_.apply(state, node->player, node->actions[index])) {
+          // A failed application is not a zero-valued singleton leaf.
+          if (!node->evaluated) expand(*node, state);
           backup(path, node->value_vector);
           backed_up = true;
           break;
@@ -446,7 +467,7 @@ class Mcts {
         else {
           // A final move can create a leaf exactly at the depth boundary.
           // Its default zero vector is not a network evaluation.
-          if (!node->expanded) expand(*node, state);
+          if (!node->evaluated) expand(*node, state);
           backup(path, node->value_vector);
         }
       }
@@ -477,7 +498,7 @@ class Mcts {
 
  private:
   void expand(Node& node, const State& state) {
-    if (node.expanded) return;
+    if (node.evaluated) return;
     Evaluation evaluation = evaluator_.evaluate(state, node.player, node.actions);
     node.priors = std::move(evaluation.priors);
     if (node.priors.size() != node.actions.size()) {
@@ -489,8 +510,9 @@ class Mcts {
     node.child_variants.resize(node.actions.size());
     node.child_by_key.resize(node.actions.size());
     node.cycle_pruned.resize(node.actions.size(), false);
+    if (!node.expanded) ++expansions_;
     node.expanded = true;
-    ++expansions_;
+    node.evaluated = true;
   }
 
   void bind_statistics(Node& node, InformationSetKey key) {
@@ -686,13 +708,18 @@ class BatchedMcts {
         bool collected = false;
         bool pending_collision = false;
         bool cycle_cut = false;
+        bool interrupted = false;
         for (int depth = 0; depth < config_.max_depth; ++depth) {
-          if (expired()) break;
+          if (expired()) { interrupted = true; break; }
           if (game_.terminal(state)) {
             terminal.push_back(true); terminal_values.push_back(game_.terminal_value_vector(state, node->player));
             paths.push_back(std::move(path));
             path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
             collected = true; break;
+          }
+          if (!node->expanded && config_.fast_forward_single_actions && node->actions.size() == 1) {
+            prepare_single_action_node(*node);
+            ++expansions_;
           }
           if (!node->expanded) {
             if (pending_evaluations.find(node) != pending_evaluations.end()) {
@@ -720,10 +747,15 @@ class BatchedMcts {
           if (config_.share_information_history && index < node->actions.size()) history.action(game_, state, node->player, node->actions[index], index);
           if (index >= node->actions.size() ||
               !game_.apply(state, node->player, node->actions[index])) {
-            terminal.push_back(true); terminal_values.push_back(node->value_vector);
-            paths.push_back(std::move(path));
-            path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
-            collected = true; break;
+            if (node->evaluated) {
+              terminal.push_back(true); terminal_values.push_back(node->value_vector);
+              paths.push_back(std::move(path));
+              path_evaluation_indices.push_back(std::numeric_limits<size_t>::max());
+              collected = true;
+            }
+            // Otherwise evaluate this forced node through the normal cutoff
+            // batch below, instead of backing up its uninitialized value.
+            break;
           }
           const int player = game_.terminal(state) ? node->player : game_.next_player(state);
           const auto cycle_key = game_.no_progress_key(state, player);
@@ -752,10 +784,13 @@ class BatchedMcts {
           edges.push_back(index);
           path.push_back(node);
         }
+        // Do not fabricate a visit, or launch a fresh leaf evaluation, for
+        // an unfinished forced chain after the time budget has expired.
+        if (interrupted || (!collected && expired())) break;
         if (pending_collision) break;
         if (cycle_cut) { ++pruned_attempts; continue; }
         if (!collected) {
-          if (!game_.terminal(state) && !node->expanded) {
+          if (!game_.terminal(state) && !node->evaluated) {
             if (pending_evaluations.find(node) != pending_evaluations.end()) break;
             const size_t eval_index = states.size();
             pending_evaluations.emplace(node, eval_index);
@@ -819,6 +854,7 @@ class BatchedMcts {
     int visits = 0;
     int pending_visits = 0;
     bool expanded = false;
+    bool evaluated = false;
   };
   void expand(Node& node, const State& state) {
     auto evaluation = evaluator_.evaluate(state, node.player, node.actions);
@@ -836,6 +872,7 @@ class BatchedMcts {
     node.child_by_key.resize(node.actions.size());
     node.cycle_pruned.resize(node.actions.size(), false);
     node.expanded = true;
+    node.evaluated = true;
   }
   void bind_statistics(Node& node, InformationSetKey key) {
     if (!config_.share_information_history) {

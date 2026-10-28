@@ -173,7 +173,13 @@ void test_opponent_fpu() {
 
 void test_pending_collisions() {
   for (int batch : {1, 8, 32, 128}) {
-    ToyGame game(0, 1000);
+    // This test exercises pending decision leaves, rather than forced chains.
+    struct BranchingGame : ToyGame {
+      BranchingGame() : ToyGame(0, 1000) {}
+      std::vector<int> legal_actions(const ToyState& state, int) const override {
+        return terminal(state) ? std::vector<int>{} : std::vector<int>{0, 1};
+      }
+    } game;
     ToyEvaluator evaluator(game);
     Mcts<ToyState, int>::Config config;
     config.simulations = 500;

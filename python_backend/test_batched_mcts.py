@@ -9,6 +9,12 @@ import unittest
 
 class BatchedMctsTests(unittest.TestCase):
     def test_pending_statistics_and_immediate_terminal_backup(self):
+        self._run_regression("batched_mcts_regression")
+
+    def test_forced_actions_continue_to_a_decision_or_boundary(self):
+        self._run_regression("forced_action_regression")
+
+    def _run_regression(self, source):
         compiler = shutil.which("clang++")
         if compiler is None:
             self.skipTest("clang++ is required for the native regression probe")
@@ -18,7 +24,7 @@ class BatchedMctsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="citadels-mcts-regression-") as directory:
             executable = Path(directory) / ("probe.exe" if os.name == "nt" else "probe")
             compiled = subprocess.run(
-                [compiler, str(root / "native" / "batched_mcts_regression.cpp"),
+                [compiler, str(root / "native" / (source + ".cpp")),
                  "-std=c++17", "-O2", "-o", str(executable)],
                 capture_output=True, text=True, env=environment, timeout=120)
             self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)

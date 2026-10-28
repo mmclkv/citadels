@@ -67,7 +67,7 @@ static void test_search(bool batched) {
   require(result.policy.size() == 2 && result.policy[0] == 0 && result.policy[1] == 1,
           "search still prefers the no-progress loop");
   require(result.visits == 499, "cycle detection fabricated a visit/value backup");
-  require(evaluator.calls == 2, "loop created an unbounded chain of leaf evaluations");
+  require(evaluator.calls == 1, "forced loop required a leaf evaluation or created an unbounded chain");
   game.nested_exit = true;
   result = search();
   require(result.visits == 499 && result.policy[0] > 0,
