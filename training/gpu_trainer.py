@@ -161,7 +161,7 @@ def run_binary_protocol(model, device):
         write_binary_frame(output, response)
 
 
-def create_model(architecture, profile, encoding_version=15):
+def create_model(architecture, profile, encoding_version=16):
     if architecture == "entity-v6":
         if EntityTransformerNet is None:
             detail = str(ENTITY_TRANSFORMER_IMPORT_ERROR)
@@ -295,7 +295,7 @@ def main():
                     raise RuntimeError("已要求 CUDA，但 PyTorch 无法访问 CUDA")
                 device = torch.device("cuda" if use_cuda else "cpu")
                 model = create_model(command.get("architecture", "entity-v6"), command["profile"],
-                                     command.get("stateEncodingVersion", 15))
+                                     command.get("stateEncodingVersion", 16))
                 model.load_flat(command["modelPath"])
                 model.to(device)
                 model.eval()

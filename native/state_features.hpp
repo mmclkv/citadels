@@ -9,7 +9,7 @@
 
 namespace citadels::native {
 
-constexpr int kStateEncodingVersion = 15;
+constexpr int kStateEncodingVersion = 16;
 constexpr int kLegacyCityCardFeatureSize = 30;
 constexpr int kCityCardFeatureSize = 54;
 constexpr int kCityCardEmbeddingSize = 8;
@@ -19,11 +19,12 @@ constexpr int kEntityV6PlayerFeatureSize = 56 + kEntityV6CitySlots * kEntityV6Ci
 constexpr int kEntityV6PlayerEmbedFeatureSize = 56 + kEntityV6CitySlots * (7 + kCityCardEmbeddingSize);
 constexpr int kEntityV6BaseFeatureSize = 32 + 8 * kEntityV6PlayerFeatureSize + kCityCardFeatureSize;
 constexpr int kEntityV6PublicContextSize = 496;
-constexpr int kEntityV6StateFeatureSize = kEntityV6BaseFeatureSize + kEntityV6PublicContextSize;
-constexpr int kActionEncodingVersion = 11;
+constexpr int kKnownHandFeatureSize = 8 * kCityCardFeatureSize;
+constexpr int kEntityV6StateFeatureSize = kEntityV6BaseFeatureSize + kEntityV6PublicContextSize + kKnownHandFeatureSize;
+constexpr int kActionEncodingVersion = 12;
 constexpr int kActionFeatureSize = 448;
-inline int state_version_for_action(int version) { return version >= 11 ? 15 : 14; }
-inline int state_feature_size(int version) { return version >= 15 ? kEntityV6StateFeatureSize : 1790; }
+inline int state_version_for_action(int version) { return version >= 12 ? 16 : version >= 11 ? 15 : 14; }
+inline int state_feature_size(int version) { return version >= 16 ? kEntityV6StateFeatureSize : version >= 15 ? 2054 : 1790; }
 inline int action_feature_size(int version) { return version >= 11 ? kActionFeatureSize : 256; }
 constexpr std::array<const char*, 27> kRoleIds = {"assassin", "witch", "thief", "magician", "prophet",
   "king", "emperor", "noble", "bishop", "monk", "merchant", "alchemist", "businessman",
@@ -131,6 +132,30 @@ inline int active_player_index(const NativeGameState& state) {
   if (state.reaction_player >= 0 && state.reaction_player < static_cast<int>(state.players.size())) return state.reaction_player;
   if (state.draft_current_player >= 0 && state.draft_current_player < static_cast<int>(state.players.size())) return state.draft_current_player;
   return -1;
+}
+
+template<class State>
+inline void encode_known_hands(const State& state, int viewer, std::vector<float>& features) {
+  if constexpr (requires { state.known_hand_cards; }) {
+    std::vector<std::string> seen;
+    const int n = static_cast<int>(state.players.size());
+    const auto add = [&](int owner, const auto& card) {
+      if (owner == viewer || std::find(seen.begin(), seen.end(), card.uid) != seen.end()) return;
+      const int identity = district_identity_index(card);
+      if (identity < 0 || identity >= kCityCardFeatureSize) return;
+      seen.push_back(card.uid);
+      const int relative = (owner - viewer + n) % n;
+      features[2054 + relative * kCityCardFeatureSize + identity] += .2f;
+    };
+    for (const auto& known : state.known_hand_cards) {
+      if (known.viewer != viewer || known.owner < 0 || known.owner >= n) continue;
+      for (const auto& card : state.players[known.owner].hand)
+        if (card.uid == known.uid) add(known.owner, card);
+    }
+    if (state.active_player == viewer && state.pending_target >= 0 && state.pending_target < n &&
+        (state.pending_kind == "wizard_card" || state.pending_kind == "wizard_choice"))
+      for (const auto& card : state.players[state.pending_target].hand) add(state.pending_target, card);
+  }
 }
 
 inline std::vector<float> encode_features(const NativeGameState& state,
@@ -428,6 +453,7 @@ inline std::vector<float> encode_features(const NativeGameState& state,
       features[start + 495] = state.turn_phase == "bewitched" ? 1 : 0;
     }
   }
+  if (encoding_version >= 16) encode_known_hands(state, me, features);
   return features;
 }
 

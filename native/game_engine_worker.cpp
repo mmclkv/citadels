@@ -37,9 +37,11 @@ HeuristicSearchConfig heuristic_options(const JsonValue& request) {
     const double milliseconds=field->as_number();
     if(milliseconds>=0 && milliseconds<=std::numeric_limits<int>::max()) {
       auto derived=heuristic_search_for_budget(static_cast<int>(milliseconds));
-      derived.enabled=config.enabled;config=derived;
+      derived.enabled=config.enabled && milliseconds > 0;config=derived;
     }
   }
+  if (const auto* enabled=value->get("enabled"); enabled && enabled->is_bool())
+    config.enabled=enabled->as_bool();
   const auto* advanced=value->get("advanced");
   if(advanced && advanced->is_object()) {
     const auto read=[&](const char* key,int fallback) {
@@ -197,7 +199,7 @@ int main() {
         std::cout << "]}\n" << std::flush;
       } else if (mode == "advance_npcs") {
         const int state_encoding_version = int_field(request, "stateEncodingVersion", kStateEncodingVersion);
-        if (state_encoding_version != 14 && state_encoding_version != 15)
+        if (state_encoding_version != 14 && state_encoding_version != 15 && state_encoding_version != 16)
           throw std::runtime_error("unsupported training state encoding version");
         std::unordered_set<std::string> network_players;
         for (const auto& player : string_array_field(request, "networkPlayerIds"))

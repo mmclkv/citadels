@@ -44,6 +44,8 @@ function formConfig() {
     batchGames: +$('batch-games').value, workers: +$('workers').value,
     miniBatch: +$('mini-batch').value,
     replayBufferGames: +$('replay-buffer-games').value,
+    validationGames: +$('validation-games').value,
+    validationGamesPerBatch: +$('validation-games-per-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
     resumeCheckpoint: resumeCheckpointName(),
     mctsSimulations: Math.max(1, +$('mcts-simulations').value || 500),
@@ -87,6 +89,8 @@ const CONFIG_FIELDS = [
   ['workers', 'workers', 'number'],
   ['miniBatch', 'mini-batch', 'number'],
   ['replayBufferGames', 'replay-buffer-games', 'number'],
+  ['validationGames', 'validation-games', 'number'],
+  ['validationGamesPerBatch', 'validation-games-per-batch', 'number'],
   ['checkpointEvery', 'checkpoint-every', 'number'],
   ['seed', 'seed', 'number'],
   ['mctsSimulations', 'mcts-simulations', 'number'],
@@ -177,10 +181,10 @@ function updateEncodingUI() {
   const state = $('state-encoding').value;
   const action = $('action-encoding');
   Array.from(action.options).forEach(option => {
-    option.disabled = state === '15' ? option.value !== '11' : option.value === '11';
+    option.disabled = state === '16' ? option.value !== '12' : state === '15' ? option.value !== '11' : +option.value >= 11;
   });
-  if (action.selectedOptions[0].disabled) action.value = state === '15' ? '11' : '10';
-  $('encoding-hint').textContent = state === '15' ? '54 种建筑完整编码；需搭配动作 v11。' : '旧建筑编码；可搭配动作 v9 或 v10，新建筑信息不完整。';
+  if (action.selectedOptions[0].disabled) action.value = state === '16' ? '12' : state === '15' ? '11' : '10';
+  $('encoding-hint').textContent = state === '16' ? '已知手牌按持有者编码；旧权重自动迁移，新输入初始化为零。' : state === '15' ? '54 种建筑完整编码；需搭配动作 v11。' : '旧建筑编码；可搭配动作 v9 或 v10，新建筑信息不完整。';
   updateResumePlan();
 }
 
@@ -374,6 +378,26 @@ function render(status) {
   renderCheckpoints(status.checkpoints || []);
   renderLogs(status);
   const history = status.history || [];
+  const validationPoint = point.validationDatasetId ? point : history.slice().reverse().find(item => item.validationDatasetId) || {};
+  const validationHistory = history.filter(item => item.validationDatasetId === validationPoint.validationDatasetId);
+  $('validation-now').textContent = integer(validationPoint.validationGames || 0) + '/' + integer((status.config || {}).validationGames == null ? 32 : status.config.validationGames) + ' 局';
+  drawLines($('validation-chart'), validationHistory, [
+    { key: 'validationValueLoss', color: '#ff4fc7', label: '验证价值 MSE' },
+    { key: 'validationOwnValueLoss', color: '#35dcff', label: '自身估值 MSE' },
+    { key: 'validationBaselineValueLoss', color: '#ffd36a', label: '常数基线' }
+  ]);
+  drawLines($('validation-policy-chart'), validationHistory, [
+    { key: 'validationPolicyLoss', color: '#35dcff', label: '策略交叉熵' },
+    { key: 'validationPolicyKl', color: '#9d7bff', label: '策略 KL' }
+  ]);
+  const detail = [];
+  for (const [title, groups] of [['人数', validationPoint.validationByPlayers], ['阶段', validationPoint.validationByStage], ['玩家类型', validationPoint.validationByActor]]) {
+    for (const [name, value] of Object.entries(groups || {})) {
+      const labels = { early: '前期', middle: '中期', late: '尾盘', neural: '网络', heuristic: '启发式' };
+      detail.push(title + ' ' + (labels[name] || name) + '：价值 MSE ' + num(value.value, 4) + ' / 基线 ' + num(value.baseline, 4) + '（' + integer(value.samples) + ' 样本）');
+    }
+  }
+  $('validation-breakdown').textContent = detail.join('；');
   drawLines($('value-loss-chart'), history, [
     { key: 'valueLoss', color: '#ff4fc7', label: '价值损失' }
   ]);

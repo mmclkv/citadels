@@ -22,7 +22,7 @@ ENTITY_V6_CITY_SLOT_SIZE = 8
 ENTITY_V6_PLAYER_FEATURE_SIZE = 56 + ENTITY_V6_CITY_SLOTS * ENTITY_V6_CITY_SLOT_SIZE
 ENTITY_V6_PLAYER_EMBED_FEATURE_SIZE = 56 + ENTITY_V6_CITY_SLOTS * (7 + CITY_EMBEDDING_DIM)
 ENTITY_V6_BASE_SIZE = 32 + 8 * ENTITY_V6_PLAYER_FEATURE_SIZE + CITY_CARD_FEATURES
-ENTITY_V6_CONTEXT_FEATURES = 496
+ENTITY_V6_CONTEXT_FEATURES = 928
 ENTITY_V6_STATE_SIZE = ENTITY_V6_BASE_SIZE + ENTITY_V6_CONTEXT_FEATURES
 ACTION_SIZE = 448
 INSTANCE_FEATURE_SLICE = slice(182, 244)
@@ -47,16 +47,17 @@ def migrate_model_weights(source, target, source_action_version, target_action_v
     """Copy parameters by meaning; preserve legacy outputs on expanded inputs."""
     source_pair = (source.encoding_version, source_action_version)
     target_pair = (target.encoding_version, target_action_version)
-    supported = {(14, 9), (14, 10), (15, 11)}
+    supported = {(14, 9), (14, 10), (15, 11), (16, 12)}
     if source_pair not in supported or target_pair not in supported:
         raise ValueError("unsupported model encoding pair")
     if source.profile != target.profile or source.architecture != target.architecture:
         raise ValueError("weight migration requires matching architecture/profile")
     if source_pair != target_pair and not (source_pair == (14, 9) and target_pair == (14, 10) or
-                                         source.encoding_version == 14 and target_pair == (15, 11)):
+                                         source.encoding_version == 14 and target_pair == (15, 11) or
+                                         source.encoding_version in (14, 15) and target_pair == (16, 12)):
         raise ValueError("encoding downgrade is not supported")
     old = dict(source.named_parameters())
-    expanded = source.encoding_version == 14 and target.encoding_version == 15
+    expanded = source.encoding_version < target.encoding_version
     special = {"global_embed.weight", "global_embed.bias", "city_embed.weight",
                "self_embed.weight", "action_embed.weight"} if expanded else set()
     with torch.no_grad():
@@ -69,7 +70,7 @@ def migrate_model_weights(source, target, source_action_version, target_action_v
             target.global_embed.weight.zero_()
             target.global_embed.weight[:, :source.global_embed.in_features].copy_(source.global_embed.weight)
             # State header changes from 14 to 15. Offset its constant contribution.
-            target.global_embed.bias.copy_(source.global_embed.bias - source.global_embed.weight[:, 0])
+            target.global_embed.bias.copy_(source.global_embed.bias - (target.encoding_version - source.encoding_version) * source.global_embed.weight[:, 0])
             target.city_embed.weight.zero_()
             target.city_embed.weight[:source.card_features + 1].copy_(source.city_embed.weight)
             target.self_embed.weight.zero_()
@@ -115,19 +116,19 @@ class EntityTransformerBlock(nn.Module):
 
 class EntityTransformerNet(nn.Module):
     def __init__(self, profile="balanced", state_size=None, action_size=None,
-                 architecture="entity-v6", encoding_version=15):
+                 architecture="entity-v6", encoding_version=16):
         super().__init__()
         if architecture != "entity-v6":
             raise ValueError("only entity-v6 is supported")
         self.player_feature_size = ENTITY_V6_PLAYER_FEATURE_SIZE
-        if encoding_version not in (14, 15):
+        if encoding_version not in (14, 15, 16):
             raise ValueError("unsupported entity state encoding version")
         self.encoding_version = encoding_version
-        self.card_features = CITY_CARD_FEATURES if encoding_version == 15 else 30
-        self.context_features = ENTITY_V6_CONTEXT_FEATURES if encoding_version == 15 else 256
+        self.card_features = CITY_CARD_FEATURES if encoding_version >= 15 else 30
+        self.context_features = ENTITY_V6_CONTEXT_FEATURES if encoding_version >= 16 else 496 if encoding_version == 15 else 256
         self.base_size = 32 + 8 * self.player_feature_size + self.card_features
         self.state_size = self.base_size + self.context_features
-        expected_action_size = ACTION_SIZE if encoding_version == 15 else 256
+        expected_action_size = ACTION_SIZE if encoding_version >= 15 else 256
         if action_size is None:
             action_size = expected_action_size
         if state_size is not None and state_size != self.state_size or action_size != expected_action_size:

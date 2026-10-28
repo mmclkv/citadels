@@ -25,8 +25,10 @@ import numpy as np
 from . import cards
 from .native_worker import NativeMctsWorker
 from .game_engine_worker import GameEngineWorker
-from .model_contract import MODEL_CONTRACTS, config_contract, checkpoint_resume_plan
+from .model_contract import MODEL_CONTRACTS, ENCODING_CONTRACTS, config_contract, checkpoint_resume_plan
 from .training_config import sanitize_config
+from .opponent_difficulty import heuristic_levels
+from .fixed_validation import FixedValidation, evaluate_fixed_validation
 from .historical_policy_pool import HistoricalPolicyPool, assign_seat_policies
 from .weakness_search import WeaknessSearch, discovery_due, evaluation_worker_count
 from .batch_composition import balanced_game_compositions, composition_summary
@@ -157,11 +159,10 @@ class RecentReplayBuffer:
         return sampled
 
 
-def _entity_forward_probe_inputs(state_version: int = 15) -> list[tuple[np.ndarray, np.ndarray]]:
+def _entity_forward_probe_inputs(state_version: int = 16) -> list[tuple[np.ndarray, np.ndarray]]:
     """Build deterministic cases covering seat masks, card IDs and action counts."""
-    contract = (MODEL_CONTRACTS["entity-v6"] if state_version == 15 else
-                {"state": 14, "action": 10, "stateSize": 1790, "actionSize": 256})
-    card_count = 54 if state_version == 15 else 30
+    contract = ENCODING_CONTRACTS[(state_version, {14: 10, 15: 11, 16: 12}[state_version])]
+    card_count = 54 if state_version >= 15 else 30
     state_size = contract["stateSize"]
     state = np.zeros(state_size, dtype=np.float32)
     state[0] = contract["state"]
@@ -211,11 +212,11 @@ def _entity_forward_probe_inputs(state_version: int = 15) -> list[tuple[np.ndarr
         actions[row, 183] = float(row == 0)
         actions[row, 188] = row / 20.0
         actions[row, 213] = float(row == 2)
-        if state_version == 15:
+        if state_version >= 15:
             actions[row, 256 + 30 + row] = 1
             actions[row, 310 + 53 - row] = 1
             actions[row, 364 + row] = 1
-    if state_version == 15:
+    if state_version >= 15:
         state[hand_start + 30:hand_start + 54] = .5
         state[1558 + 256:1558 + 496] = .25
     probes = [(state, actions)]
@@ -299,7 +300,7 @@ def _load_trainer():
     return torch, gpu_trainer
 
 
-def _entity_parameter_count(profile: str, state_version: int = 15) -> int:
+def _entity_parameter_count(profile: str, state_version: int = 16) -> int:
     model_dim, _heads, layers, ff_dim, action_hidden = {
         "fast": (128, 4, 2, 256, 128),
         "balanced": (192, 4, 3, 384, 192),
@@ -307,10 +308,10 @@ def _entity_parameter_count(profile: str, state_version: int = 15) -> int:
     }[profile]
     dense = lambda inputs, outputs: inputs * outputs + outputs
     player_input = 56 + 16 * (7 + 8)
-    global_input = 32 + (496 if state_version == 15 else 256)
+    global_input = 32 + (928 if state_version >= 16 else 496 if state_version >= 15 else 256)
     total = dense(global_input, model_dim) + dense(player_input, model_dim)
-    total += (55 if state_version == 15 else 31) * 8 + dense(player_input + (54 if state_version == 15 else 30), model_dim)
-    total += dense(ACTION_SIZE if state_version == 15 else 256, model_dim)
+    total += (55 if state_version >= 15 else 31) * 8 + dense(player_input + (54 if state_version >= 15 else 30), model_dim)
+    total += dense(ACTION_SIZE if state_version >= 15 else 256, model_dim)
     total += layers * (4 * dense(model_dim, model_dim) + dense(model_dim, ff_dim) +
                        dense(ff_dim, model_dim) + 4 * model_dim)
     total += dense(model_dim * 2, action_hidden) + dense(action_hidden, 1) + dense(model_dim, 1)
@@ -397,7 +398,7 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     contract = config_contract(config)
     action_size = contract["actionSize"]
     game_started = time.perf_counter()
-    seed = (int(config["seed"]) + game_number * 0x9E3779B1) & 0xFFFFFFFF
+    seed = int(config.get("_sampleSeed", (int(config["seed"]) + game_number * 0x9E3779B1) & 0xFFFFFFFF))
     rng = np.random.default_rng(seed)
     player_count = int(rng.integers(int(config["minPlayers"]), int(config["maxPlayers"]) + 1))
     discovery = config.get("weaknessRun") or {}
@@ -417,9 +418,10 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
         other_seats = [seat for seat in range(player_count) if seat != learner_seat]
         shuffled = np.random.default_rng(seed ^ 0x68E31DA4).permutation(other_seats)
         network_seats = {learner_seat, *(int(seat) for seat in shuffled[:network_count - 1])}
+    levels = heuristic_levels(config["heuristicDifficulty"], player_count, seed)
     seats = [{"id": f"train-{game_number}-{i}", "name": f"玩家 {i + 1}", "isBot": True,
               "botType": "neural" if i in network_seats else "npc",
-              "botLevel": config["heuristicDifficulty"]} for i in range(player_count)]
+              "botLevel": levels[i]} for i in range(player_count)]
     if stop_event.is_set():
         return None
     worker = _native_worker(config)
@@ -609,14 +611,26 @@ def _initialize_sampler(config: dict, stop_event) -> None:
     Finalize(None, _close_sampler_worker, exitpriority=10)
 
 
+def _sample_task(config, task, stop_event):
+    if isinstance(task, dict) and "validationIndex" in task:
+        validation_config = {**config, "batchComposition": task["composition"],
+                             "_sampleSeed": task["sampleSeed"],
+                             "temperatureStart": 1.0, "temperatureEnd": 1.0}
+        result = _sample_game(validation_config, task["gameNumber"], stop_event)
+        if result is not None:
+            result.update(validationIndex=task["validationIndex"], sampleSeed=task["sampleSeed"])
+        return result
+    number, composition = task
+    return _sample_game({**config, "batchComposition": composition}, int(number), stop_event)
+
+
 def _sample_game_in_worker(task):
     if _SAMPLER_CONFIG is None or _SAMPLER_STOP is None:
         raise RuntimeError("自对弈进程尚未初始化")
     if _SAMPLER_STOP.is_set():
         return None
-    game_number, composition = task if isinstance(task, tuple) else (task, None)
-    config = {**_SAMPLER_CONFIG, "batchComposition": composition}
-    return _sample_game(config, int(game_number), _SAMPLER_STOP)
+    if not isinstance(task, (tuple, dict)): task = (task, None)
+    return _sample_task(_SAMPLER_CONFIG, task, _SAMPLER_STOP)
 
 
 def _evaluate_weakness_game(task):
@@ -818,7 +832,7 @@ class TrainingManager:
             result["profiles"] = {name: _entity_parameter_count(name, config.get("stateEncodingVersion", 15))
                                   for name in ("fast", "balanced", "large")}
             result["encodingProfiles"] = {str(version): {name: _entity_parameter_count(name, version)
-                                          for name in ("fast", "balanced", "large")} for version in (14, 15)}
+                                          for name in ("fast", "balanced", "large")} for version in (14, 15, 16)}
             result["parameterCount"] = int(result.get("parameterCount") or
                                            result["profiles"].get(profile, 0))
             result["checkpoints"] = self._checkpoint_list()
@@ -924,6 +938,7 @@ class TrainingManager:
                 last_weakness_search = games
                 with self._lock:
                     self._status["completedGames"] = games
+                    self._status["history"] = copy.deepcopy(checkpoint.get("history") or [])[-400:]
                 self._log(f"从 checkpoint 续训：{resume_path.name}（{games} 局）")
                 if metadata.get("valueObjective") != VALUE_OBJECTIVE:
                     self._log("旧检查点将按争第一目标续训：90% 夺冠 + 10% 名次；价值头需要继续训练适应新目标")
@@ -1008,6 +1023,9 @@ class TrainingManager:
             self._log(f"Replay buffer：总容量 {replay_buffer.max_games} 局，最近 {replay_buffer.recent_capacity} 局 + "
                       f"长期分层储备 {replay_buffer.archive_capacity} 局；按人数、对手类型和对局均衡回放；"
                       "每批最多按新样本数等量抽取旧样本，无固定字节上限。")
+            validation = FixedValidation(self.data_dir, config)
+            self._log(f"固定整局验证：{validation.game_count}/{validation.capacity} 局；独立种子域，样本不进入训练或回放；"
+                      f"每批补充 {config['validationGamesPerBatch']} 局，采集满后冻结。")
             totals = {"steps": 0, "gameMs": 0.0, "inferenceMs": 0.0,
                       "inferenceSearches": 0, "rounds": 0, "fallbacks": 0,
                       "incompleteGames": 0, "finishedGames": 0,
@@ -1032,23 +1050,28 @@ class TrainingManager:
                 with self._lock:
                     self._status["batchComposition"] = batch_summary
                 self._log(f"开始采样批次：第 {game_numbers[0]}–{game_numbers[-1]} 局（共 {batch_count} 局）…")
+                sampling_tasks = list(zip(game_numbers, compositions)) + validation.tasks(bool(historical_pool.entries))
                 if sampler_pool:
                     self._model.save_flat(config["nativeModelPath"])
                     sampled_games = sampler_pool.imap_unordered(
-                        _sample_game_in_worker, list(zip(game_numbers,compositions)), chunksize=1)
+                        _sample_game_in_worker, sampling_tasks, chunksize=1)
                 else:
                     def serial_samples():
                         self._model.save_flat(config["nativeModelPath"])
-                        for game_number, composition in zip(game_numbers,compositions):
+                        for task in sampling_tasks:
                             if self._stop.is_set():
                                 break
-                            self._log(f"正在采样第 {game_number}/{config['targetGames']} 局…")
-                            yield _sample_game({**config,"batchComposition":composition}, game_number, self._stop)
+                            yield _sample_task(config, task, self._stop)
                     sampled_games = serial_samples()
                 sampler_pids = set()
                 for result in sampled_games:
                     if result is None:
                         break
+                    if "validationIndex" in result:
+                        added = validation.add(result)
+                        self._log(f"独立验证采集：{validation.game_count}/{validation.capacity} 局；"
+                                  + ("已保存，未加入训练。" if added else "未完成或重复，未使用终局标签。"))
+                        continue
                     games += 1
                     sampler_pids.add(int(result["samplerPid"]))
                     rows.extend(result["rows"])
@@ -1135,6 +1158,13 @@ class TrainingManager:
                         self._model, self._optimizer, self._device, data,
                         int(config["trainingEpochs"]), int(config["miniBatch"]))
                     self._model.eval()
+                    validation_metrics = evaluate_fixed_validation(self._model, self._device, validation.rows(), contract,
+                                                                   int(config["miniBatch"]))
+                    batch_metrics.update(validation_metrics, validationGames=validation.game_count,
+                                         validationDatasetId=validation.path.stem)
+                    if validation_metrics:
+                        self._log(f"固定验证 {validation.game_count}/{validation.capacity} 局：价值 MSE={validation_metrics['validationValueLoss']:.4f}，"
+                                  f"常数基线={validation_metrics['validationBaselineValueLoss']:.4f}；无梯度更新。")
                     self._log(f"更新完成：有效策略决策样本 {batch_metrics['policySamples']} 条（含 epoch 重复）；"
                               f"单动作样本 {batch_metrics['forcedActionSamples']} 条仅训练价值头。")
                     batch_metrics["game"] = games

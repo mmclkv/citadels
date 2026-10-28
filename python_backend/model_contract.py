@@ -1,13 +1,14 @@
 """Shared checkpoint and feature-version contract for training and live play."""
 
 MODEL_CONTRACTS = {
-    "entity-v6": {"state": 15, "action": 11, "stateSize": 2054, "actionSize": 448},
+    "entity-v6": {"state": 16, "action": 12, "stateSize": 2486, "actionSize": 448},
 }
 
 ENCODING_CONTRACTS = {
     (14, 9): {"state": 14, "action": 9, "stateSize": 1790, "actionSize": 256},
     (14, 10): {"state": 14, "action": 10, "stateSize": 1790, "actionSize": 256},
-    (15, 11): MODEL_CONTRACTS["entity-v6"],
+    (15, 11): {"state": 15, "action": 11, "stateSize": 2054, "actionSize": 448},
+    (16, 12): MODEL_CONTRACTS["entity-v6"],
 }
 
 
@@ -15,15 +16,15 @@ def encoding_contract(state_version, action_version):
     contract = (ENCODING_CONTRACTS.get((state_version, action_version))
                 if type(state_version) is int and type(action_version) is int else None)
     if contract is None:
-        raise ValueError(f"不支持的状态/动作编码组合：v{state_version}/v{action_version}；支持 v14/v9、v14/v10、v15/v11")
+        raise ValueError(f"不支持的状态/动作编码组合：v{state_version}/v{action_version}；支持 v14/v9、v14/v10、v15/v11、v16/v12")
     return dict(contract)
 
 
 def config_contract(config):
-    return encoding_contract(config.get("stateEncodingVersion", 15), config.get("actionEncodingVersion", 11))
+    return encoding_contract(config.get("stateEncodingVersion", 16), config.get("actionEncodingVersion", 12))
 
 
-def checkpoint_resume_plan(checkpoint, state_version=15, action_version=11, profile=None):
+def checkpoint_resume_plan(checkpoint, state_version=16, action_version=12, profile=None):
     target = encoding_contract(state_version, action_version)
     source = validate_checkpoint_contract(checkpoint, "entity-v6")
     source_profile = (checkpoint.get("model") or {}).get("profile")
@@ -35,6 +36,8 @@ def checkpoint_resume_plan(checkpoint, state_version=15, action_version=11, prof
         mode, message = "direct", "编码相同，直接加载权重；有优化器存档时一并恢复"
     elif source["state"] == 14 and target == ENCODING_CONTRACTS[(14, 10)] and source["action"] == 9:
         mode, message = "action-v9-v10", "自动迁移动作 v9→v10；新增输入权重置零，重置优化器"
+    elif source["state"] in (14, 15) and target["state"] == 16:
+        mode, message = "knowledge-v16", "自动迁移至 v16/v12；复制旧参数，已知手牌的新输入权重置零，重置优化器"
     elif source["state"] == 14 and target["state"] == 15:
         mode, message = "district-v14-v15", "自动迁移至 v15/v11；保留旧建筑与网络参数，新增输入及建筑嵌入置零，重置优化器"
     else:

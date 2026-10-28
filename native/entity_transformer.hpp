@@ -57,7 +57,7 @@ struct EntityTransformerNetImpl : torch::nn::Module {
       : model_dim_(model_dim), heads_(heads), positional_encoding_(positional_encoding),
         card_features_(encoding_version >= 15 ? kCityCardFeatureSize : 30),
         base_size_(32 + 8 * kEntityV6PlayerFeatureSize + card_features_),
-        global_embed(register_module("global_embed", torch::nn::Linear(32 + (encoding_version >= 15 ? kEntityV6PublicContextSize : 256), model_dim))),
+        global_embed(register_module("global_embed", torch::nn::Linear(32 + (encoding_version >= 16 ? kEntityV6PublicContextSize + kKnownHandFeatureSize : encoding_version >= 15 ? kEntityV6PublicContextSize : 256), model_dim))),
         player_embed(register_module("player_embed", torch::nn::Linear(kEntityV6PlayerEmbedFeatureSize, model_dim))),
         self_embed(register_module("self_embed", torch::nn::Linear(kEntityV6PlayerEmbedFeatureSize + card_features_, model_dim))),
         city_embed(register_module("city_embed", torch::nn::Embedding(

@@ -438,7 +438,7 @@ class PythonServer:
                 "encodingVersion": state_version, "actionEncodingVersion": action_version,
                 "profile": model.get("profile"), "networkArchitecture": model.get("architecture"),
                 "stateSize": model.get("stateSize"), "actionSize": model.get("actionSize"),
-                "resumePlans": plans, "encodingCompatible": plans["15/11"]["supported"]}
+                "resumePlans": plans, "encodingCompatible": plans["16/12"]["supported"]}
 
     def _public_rooms(self) -> list[dict]:
         return [public_room(room) for room in self.rooms.rooms.values() if not room.get("closed")]

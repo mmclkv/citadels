@@ -24,7 +24,7 @@ def checkpoint(pair, profile='fast'):
 
 class EncodingMigrationTests(unittest.TestCase):
     def test_every_source_target_pair_and_scale(self):
-        allowed = {((14, 9), (14, 10)), ((14, 9), (15, 11)), ((14, 10), (15, 11))}
+        allowed = {((14, 9), (14, 10)), ((14, 9), (15, 11)), ((14, 10), (15, 11)), ((14, 9), (16, 12)), ((14, 10), (16, 12)), ((15, 11), (16, 12))}
         for source in ENCODING_CONTRACTS:
             for target in ENCODING_CONTRACTS:
                 for profile in ('fast', 'balanced', 'large'):
@@ -37,10 +37,10 @@ class EncodingMigrationTests(unittest.TestCase):
                             checkpoint_resume_plan(checkpoint(source, profile), *target, profile)
         with self.assertRaisesRegex(ValueError, '网络规模不匹配'):
             checkpoint_resume_plan(checkpoint((14, 10)), 15, 11, 'large')
-        for pair in ((14, 11), (15, 9), (15, 10), (16, 12)):
+        for pair in ((14, 11), (15, 9), (15, 10), (16, 11)):
             with self.assertRaises(ValueError):
                 sanitize_config({'stateEncodingVersion': pair[0], 'actionEncodingVersion': pair[1]})
-        self.assertEqual(config_contract(sanitize_config({})), ENCODING_CONTRACTS[(15, 11)])
+        self.assertEqual(config_contract(sanitize_config({})), ENCODING_CONTRACTS[(16, 12)])
 
     def test_migration_preserves_logits_and_value_on_extended_features(self):
         torch.set_num_threads(1)
@@ -99,7 +99,7 @@ class EncodingMigrationTests(unittest.TestCase):
 
     def test_console_inspection_has_all_target_plans(self):
         metadata = PythonServer._checkpoint_metadata('checkpoint-old.json.gz', checkpoint((14, 9)))
-        self.assertEqual(set(metadata['resumePlans']), {'14/9', '14/10', '15/11'})
+        self.assertEqual(set(metadata['resumePlans']), {'14/9', '14/10', '15/11', '16/12'})
         self.assertEqual(metadata['resumePlans']['14/9']['mode'], 'direct')
         self.assertEqual(metadata['resumePlans']['14/10']['mode'], 'action-v9-v10')
         self.assertEqual(metadata['resumePlans']['15/11']['mode'], 'district-v14-v15')

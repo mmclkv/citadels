@@ -309,7 +309,7 @@ int main() {
       const auto profile = string_field(request, "profile", "balanced");
       const auto device = string_field(request, "device", "cuda");
       const int action_encoding_version = int_field(request, "actionEncodingVersion", kActionEncodingVersion);
-      if (action_encoding_version != 9 && action_encoding_version != 10 && action_encoding_version != kActionEncodingVersion)
+      if (action_encoding_version != 9 && action_encoding_version != 10 && action_encoding_version != 11 && action_encoding_version != kActionEncodingVersion)
         throw std::runtime_error("unsupported action encoding version");
       const bool include_training_features = bool_field(request, "includeTrainingFeatures");
       const auto config_key = inference_backend + "|" + architecture + "|" + profile + "|" + device + "|" +
@@ -400,7 +400,7 @@ int main() {
           if (actor < 0 || actor == root || seat_backends.count(actor) || path.empty() ||
               !state.players[actor].is_bot || state.players[actor].bot_type != "neural")
             throw std::runtime_error("Invalid or duplicate opponent policy seat");
-          if ((encoding != 9 && encoding != 10 && encoding != kActionEncodingVersion) ||
+          if ((encoding != 9 && encoding != 10 && encoding != 11 && encoding != kActionEncodingVersion) ||
               state_version_for_action(encoding) != state_version_for_action(action_encoding_version))
             throw std::runtime_error("Opponent policy state encoding mismatch");
           if (opponent_profile != "fast" && opponent_profile != "balanced" && opponent_profile != "large")

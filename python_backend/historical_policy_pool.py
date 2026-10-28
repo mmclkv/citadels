@@ -41,8 +41,10 @@ class HistoricalPolicyPool:
             raise ValueError("编码格式无效")
         metadata = checkpoint.get("model") or {}
         contract = validate_checkpoint_contract(checkpoint, "entity-v6")
+        migration = None
         if contract != self.target_contract:
-            raise ValueError("编码不匹配需先迁移，不能加入当前编码训练的历史池")
+            from .model_contract import checkpoint_resume_plan
+            migration = checkpoint_resume_plan(checkpoint, self.target_contract["state"], self.target_contract["action"], self.profile)
         if metadata.get("profile") != self.profile:
             raise ValueError("网络规模不匹配")
         if metadata.get("valueObjective") != "win-first-v1":
@@ -52,15 +54,31 @@ class HistoricalPolicyPool:
         if specialist and (not isinstance(admission, dict) or admission.get("accepted") is not True):
             raise ValueError("针对性对手未通过入池验证")
         values = np.asarray(metadata.get("flat") or [], dtype="<f4")
-        if (values.ndim != 1 or values.size != self.parameter_count or
+        if (values.ndim != 1 or (migration is None and values.size != self.parameter_count) or
                 metadata.get("parameterCount") != self.parameter_count or
                 not np.isfinite(values).all()):
             raise ValueError("权重数量或数值无效")
         self.revision += 1
         target = self.directory / f"policy-{self.revision}.bin"
-        values.tofile(target)
+        if migration is not None:
+            from training.gpu_trainer import create_model, migrate_model_weights
+            source = create_model("entity-v6", self.profile, contract["state"])
+            destination = create_model("entity-v6", self.profile, self.target_contract["state"])
+            values.tofile(target)
+            try:
+                source.load_flat(str(target))
+                migrate_model_weights(source, destination, contract["action"], self.target_contract["action"])
+                destination.save_flat(str(target))
+                if target.stat().st_size != self.parameter_count * 4:
+                    raise ValueError("Migrated historical parameter count mismatch")
+            except Exception:
+                target.unlink(missing_ok=True)
+                raise
+            self.log(f"历史权重自动迁移：{path.name} → v{self.target_contract['state']}/v{self.target_contract['action']}")
+        else:
+            values.tofile(target)
         return {"checkpoint": path.name, "modelPath": str(target),
-                "modelVersion": self.revision, "actionEncodingVersion": contract["action"],
+                "modelVersion": self.revision, "actionEncodingVersion": self.target_contract["action"],
                 "kind": "weakness-opponent" if specialist else "historical"}
 
     def refresh(self) -> list[dict]:
