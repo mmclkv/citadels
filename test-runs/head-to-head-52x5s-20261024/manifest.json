@@ -1,0 +1,741 @@
+{
+  "workspace": "D:\\Users\\Jiaming Qiu\\citadels",
+  "startedAt": "2026-10-24T04:06:07.055220+00:00",
+  "config": {
+    "budgetMs": 5000,
+    "simulations": 2147483647,
+    "maxDepth": 2000,
+    "initialParticles": 4,
+    "progressiveParticles": true,
+    "shareInformationHistory": true,
+    "learnedBelief": false,
+    "selection": "sample",
+    "cPuct": 1.0,
+    "batch": 32,
+    "device": "cpu",
+    "rootNoise": 0,
+    "maxSteps": 4000,
+    "maxRounds": 100
+  },
+  "workers": 8,
+  "models": {
+    "4095": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-004095-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+      "checkpointSha256": "91c86313bc50dfa1603cf8d09728a4c75860bde4c44915fa51957459ab11a80c",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-52x5s-20261024\\frozen-models\\4095.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    },
+    "7039": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-007039-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+      "checkpointSha256": "c2a661cd37f4dcff46fc66f7e21330d736701bd850d3cf899e9a764308685015",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-52x5s-20261024\\frozen-models\\7039.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    },
+    "9605": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-009605-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+      "checkpointSha256": "ab43d2c235000ff411f83ca703e7770ed19b4fcffd0296aa8b7a68f16c7f5cc9",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-52x5s-20261024\\frozen-models\\9605.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    },
+    "22031": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-022031-pfast-aentity-v6-m500-crandom-s20260913.json.gz",
+      "checkpointSha256": "e4a8235e9cd27a0cae8ced407efde3dfb551780be7652e07c8e287018ee6354a",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-52x5s-20261024\\frozen-models\\22031.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    }
+  },
+  "schedule": [
+    {
+      "case": "b00-r0",
+      "block": 0,
+      "rotation": 0,
+      "seed": 2667729169,
+      "crown": 0,
+      "seats": [
+        "4095",
+        "9605",
+        "7039",
+        "22031"
+      ]
+    },
+    {
+      "case": "b00-r1",
+      "block": 0,
+      "rotation": 1,
+      "seed": 2667729169,
+      "crown": 0,
+      "seats": [
+        "9605",
+        "7039",
+        "22031",
+        "4095"
+      ]
+    },
+    {
+      "case": "b00-r2",
+      "block": 0,
+      "rotation": 2,
+      "seed": 2667729169,
+      "crown": 0,
+      "seats": [
+        "7039",
+        "22031",
+        "4095",
+        "9605"
+      ]
+    },
+    {
+      "case": "b00-r3",
+      "block": 0,
+      "rotation": 3,
+      "seed": 2667729169,
+      "crown": 0,
+      "seats": [
+        "22031",
+        "4095",
+        "9605",
+        "7039"
+      ]
+    },
+    {
+      "case": "b01-r0",
+      "block": 1,
+      "rotation": 0,
+      "seed": 1029430210,
+      "crown": 1,
+      "seats": [
+        "4095",
+        "9605",
+        "22031",
+        "7039"
+      ]
+    },
+    {
+      "case": "b01-r1",
+      "block": 1,
+      "rotation": 1,
+      "seed": 1029430210,
+      "crown": 1,
+      "seats": [
+        "9605",
+        "22031",
+        "7039",
+        "4095"
+      ]
+    },
+    {
+      "case": "b01-r2",
+      "block": 1,
+      "rotation": 2,
+      "seed": 1029430210,
+      "crown": 1,
+      "seats": [
+        "22031",
+        "7039",
+        "4095",
+        "9605"
+      ]
+    },
+    {
+      "case": "b01-r3",
+      "block": 1,
+      "rotation": 3,
+      "seed": 1029430210,
+      "crown": 1,
+      "seats": [
+        "7039",
+        "4095",
+        "9605",
+        "22031"
+      ]
+    },
+    {
+      "case": "b02-r0",
+      "block": 2,
+      "rotation": 0,
+      "seed": 3683861939,
+      "crown": 2,
+      "seats": [
+        "4095",
+        "22031",
+        "9605",
+        "7039"
+      ]
+    },
+    {
+      "case": "b02-r1",
+      "block": 2,
+      "rotation": 1,
+      "seed": 3683861939,
+      "crown": 2,
+      "seats": [
+        "22031",
+        "9605",
+        "7039",
+        "4095"
+      ]
+    },
+    {
+      "case": "b02-r2",
+      "block": 2,
+      "rotation": 2,
+      "seed": 3683861939,
+      "crown": 2,
+      "seats": [
+        "9605",
+        "7039",
+        "4095",
+        "22031"
+      ]
+    },
+    {
+      "case": "b02-r3",
+      "block": 2,
+      "rotation": 3,
+      "seed": 3683861939,
+      "crown": 2,
+      "seats": [
+        "7039",
+        "4095",
+        "22031",
+        "9605"
+      ]
+    },
+    {
+      "case": "b03-r0",
+      "block": 3,
+      "rotation": 0,
+      "seed": 2045300324,
+      "crown": 3,
+      "seats": [
+        "4095",
+        "7039",
+        "9605",
+        "22031"
+      ]
+    },
+    {
+      "case": "b03-r1",
+      "block": 3,
+      "rotation": 1,
+      "seed": 2045300324,
+      "crown": 3,
+      "seats": [
+        "7039",
+        "9605",
+        "22031",
+        "4095"
+      ]
+    },
+    {
+      "case": "b03-r2",
+      "block": 3,
+      "rotation": 2,
+      "seed": 2045300324,
+      "crown": 3,
+      "seats": [
+        "9605",
+        "22031",
+        "4095",
+        "7039"
+      ]
+    },
+    {
+      "case": "b03-r3",
+      "block": 3,
+      "rotation": 3,
+      "seed": 2045300324,
+      "crown": 3,
+      "seats": [
+        "22031",
+        "4095",
+        "7039",
+        "9605"
+      ]
+    },
+    {
+      "case": "b04-r0",
+      "block": 4,
+      "rotation": 0,
+      "seed": 371214549,
+      "crown": 0,
+      "seats": [
+        "4095",
+        "7039",
+        "22031",
+        "9605"
+      ]
+    },
+    {
+      "case": "b04-r1",
+      "block": 4,
+      "rotation": 1,
+      "seed": 371214549,
+      "crown": 0,
+      "seats": [
+        "7039",
+        "22031",
+        "9605",
+        "4095"
+      ]
+    },
+    {
+      "case": "b04-r2",
+      "block": 4,
+      "rotation": 2,
+      "seed": 371214549,
+      "crown": 0,
+      "seats": [
+        "22031",
+        "9605",
+        "4095",
+        "7039"
+      ]
+    },
+    {
+      "case": "b04-r3",
+      "block": 4,
+      "rotation": 3,
+      "seed": 371214549,
+      "crown": 0,
+      "seats": [
+        "9605",
+        "4095",
+        "7039",
+        "22031"
+      ]
+    },
+    {
+      "case": "b05-r0",
+      "block": 5,
+      "rotation": 0,
+      "seed": 3027890822,
+      "crown": 1,
+      "seats": [
+        "4095",
+        "22031",
+        "7039",
+        "9605"
+      ]
+    },
+    {
+      "case": "b05-r1",
+      "block": 5,
+      "rotation": 1,
+      "seed": 3027890822,
+      "crown": 1,
+      "seats": [
+        "22031",
+        "7039",
+        "9605",
+        "4095"
+      ]
+    },
+    {
+      "case": "b05-r2",
+      "block": 5,
+      "rotation": 2,
+      "seed": 3027890822,
+      "crown": 1,
+      "seats": [
+        "7039",
+        "9605",
+        "4095",
+        "22031"
+      ]
+    },
+    {
+      "case": "b05-r3",
+      "block": 5,
+      "rotation": 3,
+      "seed": 3027890822,
+      "crown": 1,
+      "seats": [
+        "9605",
+        "4095",
+        "22031",
+        "7039"
+      ]
+    },
+    {
+      "case": "b06-r0",
+      "block": 6,
+      "rotation": 0,
+      "seed": 1387363191,
+      "crown": 2,
+      "seats": [
+        "4095",
+        "9605",
+        "7039",
+        "22031"
+      ]
+    },
+    {
+      "case": "b06-r1",
+      "block": 6,
+      "rotation": 1,
+      "seed": 1387363191,
+      "crown": 2,
+      "seats": [
+        "9605",
+        "7039",
+        "22031",
+        "4095"
+      ]
+    },
+    {
+      "case": "b06-r2",
+      "block": 6,
+      "rotation": 2,
+      "seed": 1387363191,
+      "crown": 2,
+      "seats": [
+        "7039",
+        "22031",
+        "4095",
+        "9605"
+      ]
+    },
+    {
+      "case": "b06-r3",
+      "block": 6,
+      "rotation": 3,
+      "seed": 1387363191,
+      "crown": 2,
+      "seats": [
+        "22031",
+        "4095",
+        "9605",
+        "7039"
+      ]
+    },
+    {
+      "case": "b07-r0",
+      "block": 7,
+      "rotation": 0,
+      "seed": 4035896616,
+      "crown": 3,
+      "seats": [
+        "4095",
+        "9605",
+        "22031",
+        "7039"
+      ]
+    },
+    {
+      "case": "b07-r1",
+      "block": 7,
+      "rotation": 1,
+      "seed": 4035896616,
+      "crown": 3,
+      "seats": [
+        "9605",
+        "22031",
+        "7039",
+        "4095"
+      ]
+    },
+    {
+      "case": "b07-r2",
+      "block": 7,
+      "rotation": 2,
+      "seed": 4035896616,
+      "crown": 3,
+      "seats": [
+        "22031",
+        "7039",
+        "4095",
+        "9605"
+      ]
+    },
+    {
+      "case": "b07-r3",
+      "block": 7,
+      "rotation": 3,
+      "seed": 4035896616,
+      "crown": 3,
+      "seats": [
+        "7039",
+        "4095",
+        "9605",
+        "22031"
+      ]
+    },
+    {
+      "case": "b08-r0",
+      "block": 8,
+      "rotation": 0,
+      "seed": 2395369369,
+      "crown": 0,
+      "seats": [
+        "4095",
+        "22031",
+        "9605",
+        "7039"
+      ]
+    },
+    {
+      "case": "b08-r1",
+      "block": 8,
+      "rotation": 1,
+      "seed": 2395369369,
+      "crown": 0,
+      "seats": [
+        "22031",
+        "9605",
+        "7039",
+        "4095"
+      ]
+    },
+    {
+      "case": "b08-r2",
+      "block": 8,
+      "rotation": 2,
+      "seed": 2395369369,
+      "crown": 0,
+      "seats": [
+        "9605",
+        "7039",
+        "4095",
+        "22031"
+      ]
+    },
+    {
+      "case": "b08-r3",
+      "block": 8,
+      "rotation": 3,
+      "seed": 2395369369,
+      "crown": 0,
+      "seats": [
+        "7039",
+        "4095",
+        "22031",
+        "9605"
+      ]
+    },
+    {
+      "case": "b09-r0",
+      "block": 9,
+      "rotation": 0,
+      "seed": 790620234,
+      "crown": 1,
+      "seats": [
+        "4095",
+        "7039",
+        "9605",
+        "22031"
+      ]
+    },
+    {
+      "case": "b09-r1",
+      "block": 9,
+      "rotation": 1,
+      "seed": 790620234,
+      "crown": 1,
+      "seats": [
+        "7039",
+        "9605",
+        "22031",
+        "4095"
+      ]
+    },
+    {
+      "case": "b09-r2",
+      "block": 9,
+      "rotation": 2,
+      "seed": 790620234,
+      "crown": 1,
+      "seats": [
+        "9605",
+        "22031",
+        "4095",
+        "7039"
+      ]
+    },
+    {
+      "case": "b09-r3",
+      "block": 9,
+      "rotation": 3,
+      "seed": 790620234,
+      "crown": 1,
+      "seats": [
+        "22031",
+        "4095",
+        "7039",
+        "9605"
+      ]
+    },
+    {
+      "case": "b10-r0",
+      "block": 10,
+      "rotation": 0,
+      "seed": 3445035579,
+      "crown": 2,
+      "seats": [
+        "4095",
+        "7039",
+        "22031",
+        "9605"
+      ]
+    },
+    {
+      "case": "b10-r1",
+      "block": 10,
+      "rotation": 1,
+      "seed": 3445035579,
+      "crown": 2,
+      "seats": [
+        "7039",
+        "22031",
+        "9605",
+        "4095"
+      ]
+    },
+    {
+      "case": "b10-r2",
+      "block": 10,
+      "rotation": 2,
+      "seed": 3445035579,
+      "crown": 2,
+      "seats": [
+        "22031",
+        "9605",
+        "4095",
+        "7039"
+      ]
+    },
+    {
+      "case": "b10-r3",
+      "block": 10,
+      "rotation": 3,
+      "seed": 3445035579,
+      "crown": 2,
+      "seats": [
+        "9605",
+        "4095",
+        "7039",
+        "22031"
+      ]
+    },
+    {
+      "case": "b11-r0",
+      "block": 11,
+      "rotation": 0,
+      "seed": 1806474476,
+      "crown": 3,
+      "seats": [
+        "4095",
+        "22031",
+        "7039",
+        "9605"
+      ]
+    },
+    {
+      "case": "b11-r1",
+      "block": 11,
+      "rotation": 1,
+      "seed": 1806474476,
+      "crown": 3,
+      "seats": [
+        "22031",
+        "7039",
+        "9605",
+        "4095"
+      ]
+    },
+    {
+      "case": "b11-r2",
+      "block": 11,
+      "rotation": 2,
+      "seed": 1806474476,
+      "crown": 3,
+      "seats": [
+        "7039",
+        "9605",
+        "4095",
+        "22031"
+      ]
+    },
+    {
+      "case": "b11-r3",
+      "block": 11,
+      "rotation": 3,
+      "seed": 1806474476,
+      "crown": 3,
+      "seats": [
+        "9605",
+        "4095",
+        "22031",
+        "7039"
+      ]
+    },
+    {
+      "case": "b12-r0",
+      "block": 12,
+      "rotation": 0,
+      "seed": 165938525,
+      "crown": 0,
+      "seats": [
+        "4095",
+        "9605",
+        "7039",
+        "22031"
+      ]
+    },
+    {
+      "case": "b12-r1",
+      "block": 12,
+      "rotation": 1,
+      "seed": 165938525,
+      "crown": 0,
+      "seats": [
+        "9605",
+        "7039",
+        "22031",
+        "4095"
+      ]
+    },
+    {
+      "case": "b12-r2",
+      "block": 12,
+      "rotation": 2,
+      "seed": 165938525,
+      "crown": 0,
+      "seats": [
+        "7039",
+        "22031",
+        "4095",
+        "9605"
+      ]
+    },
+    {
+      "case": "b12-r3",
+      "block": 12,
+      "rotation": 3,
+      "seed": 165938525,
+      "crown": 0,
+      "seats": [
+        "22031",
+        "4095",
+        "9605",
+        "7039"
+      ]
+    }
+  ],
+  "engine": "D:\\Users\\Jiaming Qiu\\citadels\\native\\game_engine-c7652847a6b9.exe",
+  "worker": "D:\\Users\\Jiaming Qiu\\citadels\\native\\mcts_worker_libtorch-a9b69c139fbd.exe",
+  "engineSha256": "631f0c2aa73c12b4015518fc548e2d5f3dbc2b264c7dd3c220deb797c1374a91",
+  "workerSha256": "3cce2a5a605fd42e6bc374f008a0e73cbe15f2bcfe92b02512457f9ef357564b"
+}

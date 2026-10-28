@@ -1,0 +1,118 @@
+{
+  "completedGames": 52,
+  "failedGames": 0,
+  "plannedGames": 52,
+  "config": {
+    "budgetMs": 5000,
+    "simulations": 2147483647,
+    "maxDepth": 2000,
+    "initialParticles": 4,
+    "progressiveParticles": true,
+    "shareInformationHistory": true,
+    "learnedBelief": false,
+    "selection": "sample",
+    "cPuct": 1.0,
+    "batch": 32,
+    "device": "cpu",
+    "rootNoise": 0,
+    "maxSteps": 4000,
+    "maxRounds": 100
+  },
+  "ranking": [
+    {
+      "model": "9605",
+      "games": 52,
+      "rating": 1016.6816318659756,
+      "firsts": 13,
+      "winShare": 13.0,
+      "meanRank": 2.3846154423076924,
+      "seats": {
+        "1": 13,
+        "0": 13,
+        "2": 13,
+        "3": 13
+      },
+      "pairwiseScores": {
+        "4095": 0.5192307692307693,
+        "7039": 0.5192307692307693,
+        "22031": 0.5576923076923077
+      },
+      "rating95ClusterBootstrap": [
+        978.3016214205641,
+        1059.147859977137
+      ]
+    },
+    {
+      "model": "4095",
+      "games": 52,
+      "rating": 1005.0078450966066,
+      "firsts": 13,
+      "winShare": 11.5,
+      "meanRank": 2.4230769134615384,
+      "seats": {
+        "0": 13,
+        "3": 13,
+        "1": 13,
+        "2": 13
+      },
+      "pairwiseScores": {
+        "7039": 0.4423076923076923,
+        "9605": 0.4807692307692308,
+        "22031": 0.6057692307692307
+      },
+      "rating95ClusterBootstrap": [
+        959.2142370352459,
+        1051.676521800576
+      ]
+    },
+    {
+      "model": "7039",
+      "games": 52,
+      "rating": 1005.0078450966066,
+      "firsts": 15,
+      "winShare": 14.5,
+      "meanRank": 2.4423076923076925,
+      "seats": {
+        "3": 13,
+        "2": 13,
+        "0": 13,
+        "1": 13
+      },
+      "pairwiseScores": {
+        "4095": 0.5576923076923077,
+        "9605": 0.4807692307692308,
+        "22031": 0.49038461538461536
+      },
+      "rating95ClusterBootstrap": [
+        956.2610327517364,
+        1054.3499579088873
+      ]
+    },
+    {
+      "model": "22031",
+      "games": 52,
+      "rating": 973.3026779408112,
+      "firsts": 15,
+      "winShare": 13.0,
+      "meanRank": 2.5576921923076923,
+      "seats": {
+        "2": 13,
+        "1": 13,
+        "3": 13,
+        "0": 13
+      },
+      "pairwiseScores": {
+        "4095": 0.3942307692307692,
+        "7039": 0.5096153846153846,
+        "9605": 0.4423076923076923
+      },
+      "rating95ClusterBootstrap": [
+        919.2956142143081,
+        1025.0216691987039
+      ]
+    }
+  ],
+  "ratingAnchor": "Mean rating of these four checkpoints = 1000; not comparable to fixed-NPC ratings",
+  "elapsedSeconds": 9816.09712600708,
+  "final": true
+}

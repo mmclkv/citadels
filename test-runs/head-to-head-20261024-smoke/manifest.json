@@ -1,0 +1,78 @@
+{
+  "workspace": "D:\\Users\\Jiaming Qiu\\citadels",
+  "startedAt": "2026-10-24T04:04:53.166543+00:00",
+  "config": {
+    "budgetMs": 0,
+    "simulations": 128,
+    "maxDepth": 2000,
+    "initialParticles": 4,
+    "progressiveParticles": true,
+    "shareInformationHistory": true,
+    "learnedBelief": false,
+    "selection": "sample",
+    "cPuct": 1.0,
+    "batch": 32,
+    "device": "cpu",
+    "rootNoise": 0,
+    "maxSteps": 4000,
+    "maxRounds": 100
+  },
+  "workers": 1,
+  "models": {
+    "4095": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-004095-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+      "checkpointSha256": "91c86313bc50dfa1603cf8d09728a4c75860bde4c44915fa51957459ab11a80c",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-20261024-smoke\\frozen-models\\4095.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    },
+    "7039": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-007039-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+      "checkpointSha256": "c2a661cd37f4dcff46fc66f7e21330d736701bd850d3cf899e9a764308685015",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-20261024-smoke\\frozen-models\\7039.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    },
+    "9605": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-009605-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+      "checkpointSha256": "ab43d2c235000ff411f83ca703e7770ed19b4fcffd0296aa8b7a68f16c7f5cc9",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-20261024-smoke\\frozen-models\\9605.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    },
+    "22031": {
+      "checkpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-022031-pfast-aentity-v6-m500-crandom-s20260913.json.gz",
+      "checkpointSha256": "e4a8235e9cd27a0cae8ced407efde3dfb551780be7652e07c8e287018ee6354a",
+      "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\head-to-head-20261024-smoke\\frozen-models\\22031.bin",
+      "profile": "fast",
+      "architecture": "entity-v6",
+      "stateEncoding": 15,
+      "actionEncoding": 11
+    }
+  },
+  "schedule": [
+    {
+      "case": "b00-r0",
+      "block": 0,
+      "rotation": 0,
+      "seed": 2667729169,
+      "crown": 0,
+      "seats": [
+        "4095",
+        "9605",
+        "7039",
+        "22031"
+      ]
+    }
+  ],
+  "engine": "D:\\Users\\Jiaming Qiu\\citadels\\native\\game_engine-c7652847a6b9.exe",
+  "worker": "D:\\Users\\Jiaming Qiu\\citadels\\native\\mcts_worker_libtorch-a9b69c139fbd.exe",
+  "engineSha256": "631f0c2aa73c12b4015518fc548e2d5f3dbc2b264c7dd3c220deb797c1374a91",
+  "workerSha256": "3cce2a5a605fd42e6bc374f008a0e73cbe15f2bcfe92b02512457f9ef357564b"
+}

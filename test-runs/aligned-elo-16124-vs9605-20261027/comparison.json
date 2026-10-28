@@ -1,0 +1,55 @@
+{
+  "baseline": "9605",
+  "candidate": "16124",
+  "verifiedUniqueSuccessfulGames": 100,
+  "matchedOpenings": 50,
+  "allSearches500Visits": true,
+  "pairwiseScoreDifference": -0.03333333333333334,
+  "pairwiseScoreDifference95PairedBootstrap": [
+    -0.14972142857142853,
+    0.08200000000000002
+  ],
+  "firstRateDifference": 0.02,
+  "firstRateDifference95PairedBootstrap": [
+    -0.14,
+    0.18
+  ],
+  "byPlayerCount": {
+    "4": {
+      "9605": {
+        "games": 17,
+        "firsts": 3,
+        "meanRank": 2.4705882352941178
+      },
+      "16124": {
+        "games": 17,
+        "firsts": 3,
+        "meanRank": 2.823529411764706
+      }
+    },
+    "6": {
+      "9605": {
+        "games": 17,
+        "firsts": 3,
+        "meanRank": 3.6470588235294117
+      },
+      "16124": {
+        "games": 17,
+        "firsts": 6,
+        "meanRank": 2.8823529411764706
+      }
+    },
+    "8": {
+      "9605": {
+        "games": 16,
+        "firsts": 4,
+        "meanRank": 3.5625
+      },
+      "16124": {
+        "games": 16,
+        "firsts": 2,
+        "meanRank": 4.75
+      }
+    }
+  }
+}
