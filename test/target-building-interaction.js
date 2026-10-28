@@ -7,7 +7,8 @@ const extract = (source, start, end) => source.slice(source.indexOf(start), sour
 const players = [{ id: 'me', city: [{ uid: 'a1', name: '军械库' }, { uid: 'a2', name: '军械库' }] },
   { id: 'other', name: '对手', city: [{ uid: 'c1', name: '教堂' }, { uid: 'c2', name: '要塞', fortress: true }] }];
 const actions = players[0].city.flatMap(source => players[1].city.map(card =>
-  ({ type: 'district_effect', name: 'armory', uid: source.uid, target: 'other', secondaryUid: card.uid })));
+  // Native state_writer.hpp serializes the second card identifier as cardUid.
+  ({ type: 'district_effect', name: 'armory', uid: source.uid, target: 'other', cardUid: card.uid })));
 const state = () => ({ players, phase: 'action', turn: { playerId: 'me', charId: 'warlord' }, available: { actions } });
 
 {
@@ -26,6 +27,9 @@ const state = () => ({ players, phase: 'action', turn: { playerId: 'me', charId:
   assert.equal(context.districtActionFor(players[0], players[0].city[1]), null);
   assert.equal(context.mobileDistrictActionsFor('other')[1], selected);
   assert.equal(context.mobileActionStillAvailable(selected), selected, 'preview preserves the victim as well as source');
+  App.state.available.actions = actions.filter(action => action !== selected);
+  assert.equal(context.mobileActionStillAvailable(selected), null, 'another victim of the same player must not replace a stale target');
+  App.state.available.actions = actions;
   context.pickDistrict('other', 'c2');
   assert.equal(sent.pop(), selected);
   assert.equal(App.sel, null);

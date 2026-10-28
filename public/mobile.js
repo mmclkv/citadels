@@ -385,8 +385,8 @@
     const mode=(value,label)=>({value,label,surface:'button'});
     switch(st.role){
       case 'armory':return legal().filter(a=>a.type==='district_effect'&&a.name==='armory'&&a.uid===st.buildingUid)
-        .map(a=>{const player=s.players.find(p=>p.id===a.target),card=player?.city.find(c=>c.uid===a.secondaryUid);
-          return {value:a.secondaryUid,uid:a.secondaryUid,target:a.target,card,surface:'district',action:a,
+        .map(a=>{const uid=a.cardUid||a.secondaryUid,player=s.players.find(p=>p.id===a.target),card=player?.city.find(c=>c.uid===uid);
+          return {value:uid,uid,target:a.target,card,surface:'district',action:a,
             label:`${player?.name||'玩家'} · ${card?.name||'建筑'}`};}).filter(o=>o.card);
       case 'magician':return step===0?[mode('swap','交换手牌'),mode('redraw','弃牌重抽')]:st.picks[0]?.value==='swap'?people:(myPlayer()?.hand||[]).map(c=>({value:c.uid,label:`${c.name} · ${c.cost} 金`,surface:'hand'}));
       case 'assassin':case 'thief':case 'witch':return roles.filter(x=>st.role==='thief'?x.value!==1:st.role==='witch'?x.value!==1:true);
@@ -459,7 +459,7 @@
   }
   function confirmStage(){const st=M.stage;if(!st)return;const multi=stageMulti(st);if(!st.ready&&!multi)return;
     if(st.role==='armory'){
-      const pick=st.picks[0];const exact=legal().find(a=>a.type==='district_effect'&&a.name==='armory'&&a.uid===st.buildingUid&&a.target===pick?.target&&a.secondaryUid===pick?.uid);
+      const pick=st.picks[0];const exact=legal().find(a=>a.type==='district_effect'&&a.name==='armory'&&a.uid===st.buildingUid&&a.target===pick?.target&&(a.cardUid||a.secondaryUid)===pick?.uid);
       if(!exact){st.ready=false;st.picks=[];message('当前目标已变化，请重新选择建筑');render();return;}
       M.stage=null;action(exact);return;
     }

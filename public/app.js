@@ -1227,7 +1227,8 @@
     const neon = Theme.is && Theme.is('neon');
     return 'card c-' + c.color + (neon ? ' neon-card' : '') + (opts.mini ? ' mini' : '') +
       (opts.clickable ? ' clickable' : '') + (opts.disabled ? ' disabled' : '') +
-      (opts.selected ? ' selected' : '') + (opts.pickable ? ' pickable' : '');
+      (opts.selected ? ' selected' : '') + (opts.pickable ? ' pickable' : '') +
+      (opts.armoryTarget ? ' armory-target' : '');
   }
 
   function cardNode(c, opts) {
@@ -1699,6 +1700,10 @@
     closeCharZoomPreview = hide;
 
     function show(trigger) {
+      // Keep the target cards unobstructed while the player is choosing an
+      // Armory victim. The hover preview can otherwise cover the small card
+      // and intercept its click.
+      if (App.sel && App.sel.kind === 'armory') { hide(); return; }
       cancelHide();
       paint(trigger);
       active = trigger;
@@ -3200,7 +3205,10 @@
         syncCards(city, p.city, c => {
           const act = districtActionFor(p, c);
           // 选择目标时放大对手的建筑牌，方便触屏点击
-          return { mini: !picking, clickable: !!act, pickable: !!act };
+          const armoryTarget = !!(act && App.sel && App.sel.kind === 'armory' &&
+            act.type === 'district_effect' && act.name === 'armory');
+          return { mini: !picking, clickable: !!act,
+            pickable: !!act && !armoryTarget, armoryTarget };
         }, (node, c) => {
           const act = districtActionFor(p, c);
           if (ballroomThanksFor(c, p.id)) bindCardAction(node, () => openBallroom(c, p.id), false);
@@ -3563,7 +3571,8 @@
         App.state.draft.pool.some(c => c.id === action.charId)) return action;
     return availableMobileActions().find(a => a.type === action.type &&
       a.uid === action.uid && a.target === action.target && a.num === action.num &&
-      a.name === action.name && a.charId === action.charId && a.secondaryUid === action.secondaryUid) || null;
+      a.name === action.name && a.charId === action.charId &&
+      (a.cardUid || a.secondaryUid) === (action.cardUid || action.secondaryUid)) || null;
   }
   function refreshMobileDetail(s) {
     const overlay = $('#mobile-detail');
@@ -3665,7 +3674,8 @@
     const city = el('div', 'mobile-detail-city');
     if (!player.city.length) city.appendChild(el('p', 'empty-hint', '尚无建筑'));
     player.city.forEach(card => {
-      const action = districtActions.find(a => (a.type === 'district_effect' ? a.secondaryUid : a.uid) === card.uid);
+      const action = districtActions.find(a =>
+        (a.type === 'district_effect' ? (a.cardUid || a.secondaryUid) : a.uid) === card.uid);
       const node = cardNode(card, { clickable: false });
       node.__noZoom = true;
       const wrapper = el('button', 'mobile-detail-card' + (action ? ' targetable' : ''));
@@ -4431,7 +4441,9 @@
       const eh = city.querySelector('.empty-hint'); if (eh) eh.remove();
       syncCards(city, me.city, c => {
         const act = districtActionFor(me, c);
-        return { clickable: !!act, pickable: !!act,
+        const armoryTarget = !!(act && App.sel && App.sel.kind === 'armory' &&
+          act.type === 'district_effect' && act.name === 'armory');
+        return { clickable: !!act, pickable: !!act && !armoryTarget, armoryTarget,
           selected: !!(App.sel && App.sel.items && App.sel.items.indexOf(c.uid) >= 0) };
       }, (node, c) => {
         const act = districtActionFor(me, c);
@@ -4924,7 +4936,11 @@
       const me = s.players.find(p => p.id === App.myId);
       const building = me && (me.city || []).find(c => c.uid === buildingUid);
       const button = el('button', 'act main', building ? '发动军械库效果（' + building.name + '）' : '发动军械库效果');
-      onTap(button, () => { App.sel = { kind: 'armory', buildingUid }; render(); });
+      onTap(button, () => {
+        if (typeof closeCharZoomPreview === 'function') closeCharZoomPreview();
+        App.sel = { kind: 'armory', buildingUid };
+        render();
+      });
       actionsEl.appendChild(button);
     });
     const effectGroups = ownDistrictEffectGroups(av.actions, s.players.find(p => p.id === App.myId));
@@ -5150,7 +5166,7 @@
     return av.actions.find(a => !a.disabled && a.target === player.id &&
       (a.type === 'choose_district' && a.uid === card.uid ||
        App.sel && App.sel.kind === 'armory' && a.type === 'district_effect' && a.name === 'armory' &&
-       a.uid === App.sel.buildingUid && a.secondaryUid === card.uid)) || null;
+       a.uid === App.sel.buildingUid && (a.cardUid || a.secondaryUid) === card.uid)) || null;
   }
   function isSelectableDistrict(player, card) {
     return !!districtActionFor(player, card);

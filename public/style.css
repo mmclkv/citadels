@@ -251,6 +251,9 @@ html[data-theme="neon"] .desktop-public-effect.warn{border-color:#7a5c1d;backgro
 .card.pickable::after{
   content:'▼';position:absolute;top:-9px;right:3px;color:var(--gold);
   font-size:12px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+.card.armory-target,.card.armory-target:hover{
+  border-color:#7edcff!important;
+  box-shadow:0 0 0 2px rgba(126,220,255,.62),0 4px 14px rgba(64,190,255,.3)!important}
 @keyframes pickPulse{
   0%,100%{transform:translateY(0)}
   50%{transform:translateY(-4px)}}
