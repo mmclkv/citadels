@@ -10,7 +10,7 @@
  *   el.onGameStart = ({ ws, send, myId, roomId, name, state }) => { ... }
  *       对局开始/恢复时（phase !== 'lobby'）调用一次，随后 socket 交给页面。
  *   el.returnToHome()
- *       回到主菜单/离开对局时由页面调用，组件回收 socket、清会话、回首页。
+ *       回到主菜单时由页面调用，组件回收 socket、保留恢复凭据、回首页。
  *   el.returnToLobby(state)
  *       联机房间重开时由页面调用，组件收回 socket 并显示大厅房间。
  *   el.reconnect()
@@ -24,6 +24,8 @@
   'use strict';
 
   const NET_SESSION_KEY = 'citadels.net.session';
+  const NET_PLAYER_SESSIONS_KEY = 'citadels.net.playerSessions';
+  const NET_NAME_KEY = 'citadels.net.name';
   const SCENARIOS = (window.CitCards && window.CitCards.SCENARIOS) || [];
   const SCENARIO_OPTIONS = '<option value="">不使用剧本</option>' +
     SCENARIOS.map(s => '<option value="' + s.id + '">' + s.name + '</option>').join('');
@@ -561,15 +563,55 @@
           return data && data.token && data.roomId ? data : null;
         } catch (e) { return null; }
       }
-      function saveNetSession(token, roomId, name) {
+      function loadPlayerSession(roomId) {
+        try {
+          const server = gameServerBase();
+          const sessions = JSON.parse(window.localStorage.getItem(NET_PLAYER_SESSIONS_KEY) || '{}');
+          const saved = sessions[JSON.stringify([server, roomId])];
+          if (saved && saved.token && saved.server === server && saved.roomId === roomId) return saved;
+        } catch (e) { /* 存储不可用或旧数据损坏 */ }
+        // 迁移尚未记录身份类型的旧玩家会话；服务端仍会验证恢复凭据。
+        const current = loadNetSession();
+        return current && current.roomId === roomId && !current.spectating ? current : null;
+      }
+      function saveNetSession(token, roomId, name, spectating = false) {
         if (!token || !roomId) return;
         try {
-          window.localStorage.setItem(NET_SESSION_KEY,
-            JSON.stringify({ token: token, roomId: roomId, name: name || '', server: gameServerBase() }));
+          const session = { token, roomId, name: name || '', server: gameServerBase(), spectating };
+          if (!spectating) {
+            let sessions = {};
+            try { sessions = JSON.parse(window.localStorage.getItem(NET_PLAYER_SESSIONS_KEY) || '{}') || {}; }
+            catch (e) { /* 忽略损坏的旧凭据 */ }
+            sessions[JSON.stringify([session.server, roomId])] = session;
+            window.localStorage.setItem(NET_PLAYER_SESSIONS_KEY, JSON.stringify(sessions));
+          }
+          window.localStorage.setItem(NET_SESSION_KEY, JSON.stringify(session));
         } catch (e) { /* 隐私模式或存储被禁用 */ }
       }
       function clearNetSession() {
         try { window.localStorage.removeItem(NET_SESSION_KEY); } catch (e) { /* ignore */ }
+      }
+      function forgetPlayerSession(roomId) {
+        try {
+          const sessions = JSON.parse(window.localStorage.getItem(NET_PLAYER_SESSIONS_KEY) || '{}');
+          delete sessions[JSON.stringify([gameServerBase(), roomId])];
+          window.localStorage.setItem(NET_PLAYER_SESSIONS_KEY, JSON.stringify(sessions));
+        } catch (e) { /* 存储不可用或旧数据损坏 */ }
+      }
+      function loadNetName() {
+        try { return (window.localStorage.getItem(NET_NAME_KEY) || '').trim(); }
+        catch (e) { return ''; }
+      }
+      function saveNetName(name) {
+        try {
+          if (name && name.trim()) window.localStorage.setItem(NET_NAME_KEY, name.trim().slice(0, 10));
+          else window.localStorage.removeItem(NET_NAME_KEY);
+        } catch (e) { /* 隐私模式或存储被禁用 */ }
+      }
+      const netNameInput = $('#net-name');
+      if (netNameInput) {
+        netNameInput.value = loadNetName() || netNameInput.value || '玩家';
+        netNameInput.addEventListener('input', () => saveNetName(netNameInput.value));
       }
 
       function gameServerBase() {
@@ -716,6 +758,7 @@
         ws: null, myId: null, roomId: null, name: '', onState: null, afterHello: null,
         reconnectTimer: null, reconnectDelay: 1000, heartbeatTimer: null,
         handedOver: false,   // 已把 socket 交给页面接管
+        recoveringRoomId: null,
         startHeartbeat() {
           clearInterval(this.heartbeatTimer);
           this.heartbeatTimer = setInterval(() => {
@@ -727,7 +770,8 @@
           let endpoint;
           try { endpoint = gameServerBase().replace(/^http/, 'ws'); }
           catch (e) { this.afterHello = null; toast(e.message); return; }
-          if (options.resume !== false && this.ws && this.ws.readyState === 1 && this.ws.url.replace(/\/$/, '') === endpoint) return cb && cb();
+          if (options.resume !== false && !options.forceReconnect && this.ws &&
+              this.ws.readyState === 1 && this.ws.url.replace(/\/$/, '') === endpoint) return cb && cb();
           if (this.ws) {
             this.ws.onclose = null; this.ws.onmessage = null;
             this.stopHeartbeat(); this.ws.close();
@@ -739,7 +783,8 @@
             this.reconnectTimer = null;
             this.reconnectDelay = 1000;
             this.startHeartbeat();
-            const saved = options.resume === false ? null : loadNetSession();
+            const saved = options.resume === false ? null : (options.session ||
+              (this.recoveringRoomId && loadPlayerSession(this.recoveringRoomId)) || loadNetSession());
             this.send({ t: 'hello', name: this.name,
               resumeToken: saved && saved.token, roomId: saved && saved.roomId });
           };
@@ -779,8 +824,17 @@
               break;
             case 'rooms': renderRoomList(m.rooms); break;
             case 'joined':
+              if (this.recoveringRoomId === m.roomId && m.state.spectating) {
+                this.recoveringRoomId = null;
+                this.send({ t: 'leaveRoom' });
+                toast('未能恢复原玩家席位，请确认房间仍是原来的对局；如需旁观，请点击观战');
+                return;
+              }
+              const recoveredPlayer = this.recoveringRoomId === m.roomId;
+              this.recoveringRoomId = null;
               this.myId = m.youId; this.roomId = m.roomId;
-              if (m.resumeToken) saveNetSession(m.resumeToken, m.roomId, this.name);
+              if (m.resumeToken) saveNetSession(m.resumeToken, m.roomId, this.name, !!m.state.spectating);
+              if (m.resumed || recoveredPlayer) toast('已重新连接房间');
               App.myId = m.youId;
               App.botDebugEntries = [];
               if (App.botDebugOpen) renderBotDebug();
@@ -811,7 +865,7 @@
                 handOver(m.state);
               }
               break;
-            case 'error': this.autoStart = false; toast('✗ ' + m.error); break;
+            case 'error': this.autoStart = false; this.recoveringRoomId = null; toast('✗ ' + m.error); break;
           }
         },
         requestAutoStart() {
@@ -834,6 +888,16 @@
             '<div class="ri-info">' + escapeHtml(r.name) + ' · ' + r.playerCount + ' 人 · ' +
             (r.phase === 'lobby' ? '等待中' : '进行中') + '</div></div>';
           d.onclick = () => { $('#net-code').value = r.id; };
+          if (loadPlayerSession(r.id)) {
+            const reconnect = el('button', 'btn tiny primary', '重连');
+            reconnect.type = 'button';
+            reconnect.onclick = e => {
+              e.stopPropagation();
+              $('#net-code').value = r.id;
+              $('#btn-join').click();
+            };
+            d.appendChild(reconnect);
+          }
           if (r.phase !== 'lobby') {
             const watch = el('button', 'btn tiny', '观战');
             watch.type = 'button';
@@ -1003,11 +1067,28 @@
 
       /* ============================== 对局接管 ============================== */
       let started = false;
+      let pendingGameState = null;
+      let gameStartCallback = host.onGameStart;
+      Object.defineProperty(host, 'onGameStart', {
+        configurable: true,
+        get: () => gameStartCallback,
+        set(callback) {
+          gameStartCallback = callback;
+          if (pendingGameState && typeof callback === 'function') handOver(pendingGameState);
+        }
+      });
       function handOver(state) {
         if (started) return;
-        started = true;
         App.state = state;
         if (state && state.you) App.myId = state.you;
+        // 自动恢复可能早于 app.js/mobile.js 加载完成。此时继续由大厅
+        // 接收状态和发送心跳，等页面注册渲染回调后再交出最新状态。
+        if (typeof gameStartCallback !== 'function') {
+          pendingGameState = state;
+          return;
+        }
+        pendingGameState = null;
+        started = true;
         // 交出 socket：停心跳、清重连定时器、卸下自己的消息处理，页面接管 onmessage。
         Net.handedOver = true;
         Net.stopHeartbeat();
@@ -1020,18 +1101,22 @@
           try {
             cb({ ws: ws, send: o => Net.send(o), myId: App.myId, roomId: Net.roomId, name: Net.name,
                  state: state, localServerGame: !!App.localServerGame });
-          } catch (err) { /* 页面接管后的异常不应影响大厅 */ }
+          } catch (err) {
+            console.error('Citadels game handover failed', err);
+            toast('对局界面加载失败，请刷新页面重试');
+          }
         }
       }
 
       function returnToHome() {
         // 让服务器先把我们移出房间，避免页面把界面收起后仍收到对局 state。
+        // 保留本地恢复令牌，玩家可以从主菜单输入原房间号重新认领座位。
         if (Net.ws && Net.ws.readyState === 1 && Net.roomId) Net.send({ t: 'leaveRoom' });
-        clearNetSession();
         Net.roomId = null;
         Net.handedOver = false;
         Net.startGameRequested = false;
         started = false;
+        pendingGameState = null;
         App.state = null; App.myId = null; App.leavingNetGame = false;
         App.localServerGame = false; App.lobbyState = null;
         Net.attach();                                   // 收回 socket 的消息处理
@@ -1050,6 +1135,7 @@
         Net.startGameRequested = false;
         Net.handedOver = false;
         started = false;
+        pendingGameState = null;
         Net.attach();
         if (Net.ws && Net.ws.readyState === 1) Net.startHeartbeat();
         if (state) {
@@ -1120,6 +1206,7 @@
         const target = b.dataset.goto;
         if (target === 'home' && Net.roomId) {
           Net.send({ t: 'leaveRoom' });
+          if (App.lobbyState) forgetPlayerSession(Net.roomId);
           Net.roomId = null;
           clearNetSession();
         }
@@ -1215,7 +1302,19 @@
         if (code.length !== 4) { toast('请输入 4 位房间号'); return; }
         App.localServerGame = false;
         Net.name = ($('#net-name').value || '玩家').trim();
-        Net.connect(() => Net.send({ t: 'joinRoom', roomId: code, name: Net.name }));
+        const saved = loadPlayerSession(code);
+        const resumeToken = saved && saved.token;
+        Net.recoveringRoomId = resumeToken ? code : null;
+        // Force a fresh handshake so the entered room's saved credential is
+        // checked before falling back to an ordinary room-code join.
+        Net.connect(() => {
+          if (resumeToken) {
+            Net.recoveringRoomId = null;
+            toast('未能恢复原玩家席位，请确认房间仍是原来的对局；如需旁观，请点击观战');
+            return;
+          }
+          Net.send({ t: 'joinRoom', roomId: code, name: Net.name });
+        }, resumeToken ? { forceReconnect: true, session: saved } : { resume: false, forceReconnect: true });
         App.mode = 'net';
       };
       $('#btn-refresh').onclick = () => Net.send({ t: 'listRooms' });
@@ -1224,6 +1323,7 @@
         if (code.length !== 4) { toast('请输入 4 位房间号'); return; }
         App.leavingNetGame = false;
         App.localServerGame = false;
+        Net.recoveringRoomId = null;
         Net.name = ($('#net-name').value || '观众').trim();
         Net.connect(() => Net.send({ t:'spectateRoom', roomId:code, name:Net.name }), {resume:false});
         App.mode = 'net';
@@ -1231,6 +1331,8 @@
       $('#btn-leave').onclick = () => {
         App.lobbyState = null;
         Net.send({ t: 'leaveRoom' });
+        forgetPlayerSession(Net.roomId);
+        Net.roomId = null;
         clearNetSession();
         $('#lobby-pre').hidden = false; $('#lobby-room').hidden = true;
         $('#lobby-title').textContent = '联机大厅';

@@ -1134,6 +1134,35 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         await self.app._handle_message(client, {"t": "hello", "resumeToken": seat["resumeToken"], "roomId": room["id"]})
         self.assertFalse(room["state"]["players"][0]["isBot"])
 
+    async def test_join_room_recovers_bot_hosted_player_without_creating_spectator(self):
+        room = self.app.rooms.create_room("Host", {"playerCount": 2})
+        self.app.rooms.join_room(room["id"], "Guest")
+        state = _start_reference_room(self.app.rooms, room["id"], self.app.native_worker_manager.game_worker)
+        seat = room["seats"][0]
+        seat["disconnected"] = True
+        state["players"][0]["isBot"] = True
+        original_hand = copy.deepcopy(state["players"][0]["hand"])
+        guest = Client(None)
+        guest.id, guest.room_id = room["seats"][1]["id"], room["id"]
+        guest.send = mock.AsyncMock()
+        returning = Client(None)
+        returning.send = mock.AsyncMock()
+        self.app.clients.update((guest, returning))
+        with mock.patch.object(self.app, "_schedule_bot"):
+            await self.app._handle_message(returning, {
+                "t": "joinRoom", "roomId": room["id"], "name": "Renamed",
+                "resumeToken": seat["resumeToken"],
+            })
+        joined = next(call.args[0] for call in returning.send.call_args_list if call.args[0]["t"] == "joined")
+        self.assertEqual(returning.id, seat["id"])
+        self.assertEqual(joined["youId"], seat["id"])
+        self.assertTrue(joined["resumed"])
+        self.assertFalse(joined["state"]["spectating"])
+        self.assertFalse(seat["disconnected"])
+        self.assertFalse(state["players"][0]["isBot"])
+        self.assertEqual(state["players"][0]["hand"], original_hand)
+        self.assertEqual(room["spectators"], {})
+
     async def test_cleanup_waits_for_inflight_native_creation(self):
         room = self.app.rooms.create_room("Host", {"playerCount": 2})
         room["emptySince"] = time.monotonic() - 181

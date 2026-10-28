@@ -2026,8 +2026,31 @@ class PythonServer:
             await self._broadcast_state(room)
             return
         if kind in ("joinRoom", "spectateRoom"):
+            room_id = str(message.get("roomId") or "").upper()
+            if kind == "joinRoom":
+                # Joining by room code should reclaim this browser's seat when
+                # it has the matching credential, including after bot takeover.
+                resumed = self.rooms.resume_room(str(message.get("resumeToken") or ""), room_id)
+                if resumed:
+                    room, seat = resumed
+                    seat["disconnected"] = seat["left"] = False
+                    client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
+                    task = room.get("takeoverTasks", {}).pop(seat["id"], None)
+                    if task:
+                        task.cancel()
+                    if room["state"]:
+                        player = next((p for p in room["state"]["players"] if p["id"] == seat["id"]), None)
+                        if player:
+                            player["isBot"] = False
+                    self._update_room_presence(room)
+                    await client.send({"t": "joined", "roomId": room["id"], "youId": client.id,
+                                       "resumeToken": seat["resumeToken"], "resumed": True,
+                                       "state": await self._state_for_client(room, client.id)})
+                    await self._broadcast_state(room)
+                    self._schedule_bot(room)
+                    return
             join = self.rooms.spectate_room if kind == "spectateRoom" else self.rooms.join_room
-            room, seat = join(str(message.get("roomId") or "").upper(),
+            room, seat = join(room_id,
                               str(message.get("name") or client.name or "玩家"))
             client.id, client.name, client.room_id = seat["id"], seat["name"], room["id"]
             seat["disconnected"] = seat["left"] = False
