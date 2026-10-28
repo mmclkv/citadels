@@ -1660,6 +1660,16 @@ class PythonServer:
                     return f"为{names}布置了逮捕令（真逮捕令的目标暂不公开）。"
             return "布置了行政官逮捕令"
         if kind in ("blackmailer_signed", "blackmailer_char"):
+            if kind == "blackmailer_signed" and updated is not None:
+                threat = (updated.get("effects") or {}).get("blackmailer") or {}
+                numbers = threat.get("nums") or []
+                if len(numbers) == 2:
+                    targets = []
+                    for number in numbers:
+                        character = PythonServer._character_for_number(updated, number)
+                        targets.append(f"{number}号·{character.get('name') or '角色'}")
+                    return (f"勒索者把两个威胁标记分别放在{'、'.join(targets)}；"
+                            "真威胁标记对应的角色暂不公开。")
             return "布置了勒索威胁标记"
         if kind in ("wizard_target", "wizard_card", "wizard_take"):
             if kind == "wizard_target":

@@ -608,8 +608,8 @@
 
     { id: 'spy', num: 2, name: '间谍', en: 'Spy', version: 'dark',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
-      desc: '选择一位玩家和一种建筑类型，查看其手牌；每有一张该类型的牌，拿走其一枚金币并从牌堆抽一张牌。',
-      hint: '查看手牌并指定建筑类型' },
+      desc: '选择一位玩家和一种建筑类型；不查看其手牌。每有1张该类型建筑牌，间谍拿走目标1枚金币（最多拿走其现有金币），并从牌堆抽1张建筑牌。',
+      hint: '指定玩家和建筑类型' },
 
     { id: 'blackmailer', num: 2, name: '勒索者', en: 'Blackmailer', version: 'dark',
       income: null, drawBonus: 0, goldBonus: 0, buildLimit: 1,
