@@ -35,3 +35,9 @@ native/*.build.json
 
 # 已完成对局的压缩录像
 replays/
+
+# 本机调试、编译中间文件和评测模型副本
+/tmp/
+/native/*.exe.tmp-*
+/test-runs/**/*.bin
+/test-runs/**/partial-analysis.json
