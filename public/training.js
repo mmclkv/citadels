@@ -48,6 +48,8 @@ function formConfig() {
     validationGamesPerBatch: +$('validation-games-per-batch').value,
     checkpointEvery: +$('checkpoint-every').value, seed: +$('seed').value,
     resumeCheckpoint: resumeCheckpointName(),
+    beliefNetworkEnabled: $('belief-network-enabled').checked,
+    beliefCheckpoint: $('belief-checkpoint').value,
     mctsSimulations: Math.max(1, +$('mcts-simulations').value || 500),
     mctsC_puct: +$('mcts-cpuct').value,
     mctsDirichletAlpha: +$('mcts-dirichlet').value,
@@ -91,6 +93,8 @@ const CONFIG_FIELDS = [
   ['replayBufferGames', 'replay-buffer-games', 'number'],
   ['validationGames', 'validation-games', 'number'],
   ['validationGamesPerBatch', 'validation-games-per-batch', 'number'],
+  ['beliefNetworkEnabled', 'belief-network-enabled', 'checked'],
+  ['beliefCheckpoint', 'belief-checkpoint', 'select'],
   ['checkpointEvery', 'checkpoint-every', 'number'],
   ['seed', 'seed', 'number'],
   ['mctsSimulations', 'mcts-simulations', 'number'],
@@ -213,6 +217,34 @@ function updateResumeOptions(checkpoints) {
   if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
 }
 
+function updateBeliefCheckpointOptions(checkpoints) {
+  const select = $('belief-checkpoint');
+  if (!select) return;
+  const previous = select.value;
+  select.replaceChildren();
+  const addOption = (value, label, disabled = false) => {
+    const option = document.createElement('option');
+    option.value = value; option.textContent = label; option.disabled = disabled;
+    select.appendChild(option);
+  };
+  addOption('', checkpoints.length ? '请选择信念网络权重' : '服务器上暂无信念网络权重', !checkpoints.length);
+  checkpoints.forEach(item => addOption(item.name,
+    item.name + ' · ' + integer(item.games) + ' 局 · ' + num(item.bytes / 1024 / 1024, 1) + ' MB'));
+  if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+  syncBeliefUI();
+}
+
+function syncBeliefUI() {
+  const enabled = $('belief-network-enabled').checked;
+  const select = $('belief-checkpoint');
+  select.disabled = !!(latest && latest.running) || !enabled || !select.options.length ||
+    (select.options.length === 1 && !select.options[0].value);
+  const selected = select.selectedOptions[0];
+  $('belief-checkpoint-hint').textContent = selected && selected.value
+    ? '训练时固定使用：' + selected.value
+    : '先在“信念网络训练”页面训练并保存权重';
+}
+
 // 每帧只同步「选了哪个文件」的展示与按钮可用状态，不动下拉框本身。
 function syncResumeUI() {
   const running = !!(latest && latest.running);
@@ -321,6 +353,7 @@ function setControls(status) {
   $('stop-training').disabled = !running || status.stopping;
   document.querySelectorAll('#train-form input,#train-form select').forEach(el => { el.disabled = running; });
   document.querySelectorAll('#mcts-form input').forEach(el => { el.disabled = running; });
+  syncBeliefUI();
   syncCheckpointLoadButton();
   updateEncodingUI();
 }
@@ -762,7 +795,11 @@ function drawSeatGroups(canvas, groups) {
 }
 
 async function refresh() {
-  try { render(await api('./api/training/status')); }
+  try {
+    const status = await api('./api/training/status');
+    updateBeliefCheckpointOptions(status.beliefCheckpoints || []);
+    render(status);
+  }
   catch (error) { $('control-message').textContent = error.message; $('status-badge').textContent = '服务离线'; $('status-badge').className = 'status error'; }
 }
 
@@ -779,6 +816,10 @@ $('start-training').onclick = async () => {
   }
   if (resumeCheckpointName() && resumeCheckpointCompatible === false) {
     $('control-message').textContent = $('checkpoint-migration-message').textContent;
+    return;
+  }
+  if ($('belief-network-enabled').checked && !$('belief-checkpoint').value) {
+    $('control-message').textContent = '已启用信念网络，请先选择一个信念网络权重';
     return;
   }
   $('control-message').textContent = '正在启动…';
@@ -846,6 +887,8 @@ function updateCompositionUI() {
   ['curriculum-start-players', 'curriculum-end-players', 'curriculum-step-games'].forEach(id => { $(id).disabled = mode !== 'curriculum'; });
 }
 $('self-play-mode').onchange = updateCompositionUI;
+$('belief-network-enabled').onchange = syncBeliefUI;
+$('belief-checkpoint').onchange = syncBeliefUI;
 ['mcts-simulations', 'mcts-cpuct', 'mcts-dirichlet', 'mcts-diri-eps', 'mcts-max-depth', 'mcts-batch-size'].forEach(id => {
   $(id).oninput = estimateMCTS;
 });

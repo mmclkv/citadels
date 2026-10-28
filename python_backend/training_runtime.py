@@ -41,6 +41,8 @@ _SAMPLER_CONFIG = None
 _SAMPLER_STOP = None
 _SAMPLER_NATIVE_WORKER = None
 _SAMPLER_GAME_WORKER = None
+_SAMPLER_BELIEF_POLICY = None
+_SAMPLER_BELIEF_CHECKPOINT = ""
 _SERVER_NATIVE_WORKER = None
 _SERVER_GAME_WORKER = None
 REPLAY_MAX_GAMES = 128
@@ -396,6 +398,7 @@ def _game_worker(config: dict):
 
 def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
     contract = config_contract(config)
+    belief_policy = _sampler_belief_policy(config)
     action_size = contract["actionSize"]
     game_started = time.perf_counter()
     seed = int(config.get("_sampleSeed", (int(config["seed"]) + game_number * 0x9E3779B1) & 0xFFFFFFFF))
@@ -438,11 +441,14 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                   "startingHand": 4, "startingGold": 2, "seats": seats,
                   "catalog": cards._catalog}, game_id)
     network_ids = {seats[index]["id"] for index in network_seats}
+    belief_state_id = (game_id, seed)
     rows = []
     steps = rounds = 0
     inference_ms = 0.0
     inference_searches = 0
     try:
+        if belief_policy is not None:
+            belief_policy.update({**state, "roomId": belief_state_id[0], "createdAt": belief_state_id[1]})
         while steps < int(config["maxSteps"]):
             if stop_event.is_set():
                 game_worker.close_game(game_id)
@@ -467,6 +473,9 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                                  "pi": np.zeros(0, dtype=np.float32),
                                  "reward": None, "valueMask": None})
                 advanced_state = advanced.get("state") or {}
+                if belief_policy is not None and advanced_state:
+                    belief_policy.update({**advanced_state, "roomId": belief_state_id[0],
+                                          "createdAt": belief_state_id[1]})
                 if (int(advanced.get("steps", 0)) == 0 and not advanced.get("gameOver") and
                         int(advanced_state.get("round", 1)) <= int(config["maxRounds"])):
                     raise RuntimeError("游戏主进程没有推进 NPC 回合")
@@ -490,9 +499,26 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
             actions = decision.get("actions") or []
             if not actions:
                 raise RuntimeError(f"游戏主进程返回空合法动作：phase={state.get('phase')} player={actor_id}")
-            particle_result = worker.determinize(
-                state=state, player_id=actor_id, count=1 if policy_only else config["mctsParticles"],
-                seed=int(rng.integers(1, 2**32)), belief=config.get("mctsBelief", True))
+            learned_scorer = None
+            learned_mixture = 0.0
+            root_log_weights = None
+            use_learned_belief = belief_policy is not None and not policy_only
+            if use_learned_belief:
+                belief_state = {**state, "roomId": belief_state_id[0], "createdAt": belief_state_id[1]}
+                frozen = belief_policy.candidate_scorer(belief_state, actor_id, enabled=True)
+                if frozen is not None:
+                    learned_scorer, learned_mixture = frozen
+            particle_seed = int(rng.integers(1, 2**32))
+            if learned_scorer is not None:
+                particle_result = belief_policy.sample(worker, belief_state, actor_id,
+                    1 if policy_only else config["mctsParticles"], particle_seed, enabled=True)
+                if not particle_result.get("modelApplied"):
+                    raise RuntimeError("信念网络分层采样失败：" + str(belief_policy.error))
+                root_log_weights = particle_result.pop("logWeights")
+            else:
+                particle_result = worker.determinize(
+                    state=state, player_id=actor_id, count=1 if policy_only else config["mctsParticles"],
+                    seed=particle_seed, belief=config.get("mctsBelief", True))
             particles = particle_result["particles"]
             particle_weights = particle_result["weights"]
             if not particles or len(particles) != len(particle_weights):
@@ -510,8 +536,12 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                 batch_size=config.get("mctsBatchSize", 32),
                 action_encoding_version=actor_policy["actionEncodingVersion"],
                 include_training_features=collect, policy_only=policy_only,
-                progressive_particles=not policy_only and config.get("mctsProgressiveParticles", True),
-                root_belief=config.get("mctsBelief", True),
+                progressive_particles=(not policy_only and
+                                       (config.get("mctsProgressiveParticles", True) or learned_scorer is not None)),
+                root_belief=(config.get("mctsBelief", True) if learned_scorer is None else False),
+                root_log_weights=root_log_weights,
+                root_prior_mixture=learned_mixture,
+                root_candidate_scorer=learned_scorer,
                 # Weakness screening uses searched opponents, so do not model
                 # those seats as direct-policy actors. Ordinary training freezes
                 # each non-learner's exact model for the entire game.
@@ -523,6 +553,10 @@ def _sample_game(config: dict, game_number: int, stop_event: threading.Event):
                      "profile": config["profile"]}
                     for index, opponent in sorted(seat_policies.items()) if index != learner_seat
                 ] if not discovery and not policy_only else []))
+            if learned_scorer is not None and search_result.get("particleSamplingError"):
+                raise RuntimeError("信念网络隐藏世界评分失败：" + str(search_result["particleSamplingError"]))
+            if use_learned_belief and belief_policy.error:
+                raise RuntimeError("信念网络隐藏世界生成失败：" + belief_policy.error)
             policy = np.asarray(search_result["policy"], dtype=np.float32)
             inference_ms += float(search_result.get("inferenceMs") or
                                   (time.perf_counter() - search_started) * 1000)
@@ -606,9 +640,34 @@ def _initialize_sampler(config: dict, stop_event) -> None:
     global _SAMPLER_CONFIG, _SAMPLER_STOP
     _SAMPLER_CONFIG = config
     _SAMPLER_STOP = stop_event
+    _sampler_belief_policy(config)
     # Pool workers skip ordinary atexit; finalize native children on graceful exit.
     from multiprocessing.util import Finalize
     Finalize(None, _close_sampler_worker, exitpriority=10)
+
+
+def _sampler_belief_policy(config: dict):
+    """Load a fixed belief checkpoint once per self-play sampler process."""
+    global _SAMPLER_BELIEF_POLICY, _SAMPLER_BELIEF_CHECKPOINT
+    if not config.get("beliefNetworkEnabled"):
+        _SAMPLER_BELIEF_POLICY = None
+        _SAMPLER_BELIEF_CHECKPOINT = ""
+        return None
+    name = config.get("beliefCheckpoint") or ""
+    if not name:
+        raise RuntimeError("已启用信念网络，但没有选择信念网络权重")
+    if _SAMPLER_BELIEF_POLICY is None or _SAMPLER_BELIEF_CHECKPOINT != name:
+        from .belief import BeliefPolicy
+        checkpoint_dir = Path(config.get("trainingDataDir") or ROOT / "training-data") / "belief" / "checkpoints"
+        path = (checkpoint_dir / name).resolve()
+        if path.parent != checkpoint_dir.resolve() or not path.is_file():
+            raise RuntimeError("找不到所选信念网络权重：" + name)
+        policy = BeliefPolicy(path)
+        if policy.model is None:
+            raise RuntimeError("无法加载信念网络权重：" + (policy.error or name))
+        _SAMPLER_BELIEF_POLICY = policy
+        _SAMPLER_BELIEF_CHECKPOINT = name
+    return _SAMPLER_BELIEF_POLICY
 
 
 def _sample_task(config, task, stop_event):
@@ -836,6 +895,7 @@ class TrainingManager:
             result["parameterCount"] = int(result.get("parameterCount") or
                                            result["profiles"].get(profile, 0))
             result["checkpoints"] = self._checkpoint_list()
+            result["beliefCheckpoints"] = self._belief_checkpoint_list()
             return result
 
     def _checkpoint_list(self) -> list[dict]:
@@ -846,11 +906,39 @@ class TrainingManager:
         except OSError:
             return []
 
+    def _belief_checkpoint_list(self) -> list[dict]:
+        try:
+            directory = self.data_dir / "belief" / "checkpoints"
+            files = sorted(directory.glob("belief-*.npz"), key=lambda p: p.name, reverse=True)[:100]
+            result = []
+            for path in files:
+                match = re.fullmatch(r"belief-(\d+)-[\w-]+\.npz", path.name)
+                if match and path.is_file():
+                    result.append({"name": path.name, "games": int(match.group(1)),
+                                   "bytes": path.stat().st_size})
+            return result
+        except OSError:
+            return []
+
     def start(self, raw_config: dict) -> dict:
         config = sanitize_config(raw_config)
+        config["trainingDataDir"] = str(self.data_dir.resolve())
         with self._lock:
             if self._thread and self._thread.is_alive():
                 raise ValueError("训练任务已经在运行")
+            if config["beliefNetworkEnabled"]:
+                if not config["beliefCheckpoint"]:
+                    raise ValueError("已启用信念网络，请先选择一个信念网络权重")
+                checkpoint_dir = (self.data_dir / "belief" / "checkpoints").resolve()
+                belief_path = (checkpoint_dir / config["beliefCheckpoint"]).resolve()
+                if belief_path.parent != checkpoint_dir or not belief_path.is_file():
+                    raise ValueError("找不到所选信念网络权重：" + config["beliefCheckpoint"])
+                try:
+                    from training.belief_network import load_checkpoint
+                    checked_model, _, _ = load_checkpoint(belief_path, "cpu")
+                    del checked_model
+                except Exception as error:
+                    raise ValueError("无法加载所选信念网络权重：" + str(error)) from error
             if config["resumeCheckpoint"]:
                 _, checkpoint = _read_training_checkpoint(self.data_dir, config["resumeCheckpoint"])
                 plan = checkpoint_resume_plan(checkpoint, config["stateEncodingVersion"],
@@ -1011,6 +1099,8 @@ class TrainingManager:
                 sampler_pool = process_context.Pool(
                     processes=sampler_count, initializer=_initialize_sampler,
                     initargs=(config, self._worker_stop))
+            else:
+                _initialize_sampler(config, self._worker_stop)
             self._log(f"训练启动：profile={config['profile']}，架构={architecture}，设备={self._device}；" +
                       f"采样进程={sampler_count}；" +
                       f"C++ ISMCTS={config['mctsSimulations']} simulations，深度={config['mctsMaxDepth']}，" +
@@ -1018,6 +1108,11 @@ class TrainingManager:
                       f"训练温度={config['temperatureStart']}→{config['temperatureEnd']}，" +
                       f"c_puct={config['mctsC_puct']}，Dirichlet α={config['mctsDirichletAlpha']} " +
                       f"ε={config['mctsDirichletEpsilon']}；LibTorch 前向推理")
+            if config["beliefNetworkEnabled"]:
+                self._log(f"隐藏世界生成：启用学习信念网络 {config['beliefCheckpoint']}；"
+                          "MCTS 根候选与搜索中补充的隐藏世界均由该模型加权，模型不支持的私人响应阶段使用原生采样。")
+            else:
+                self._log("隐藏世界生成：学习信念网络关闭，使用原生确定化采样。")
             self._log("每局仅轮换训练席位使用完整 MCTS；其余当前/历史网络对手直接推理，"
                       "不生成策略教师样本；战力指标统计训练席位。")
             self._log(f"Replay buffer：总容量 {replay_buffer.max_games} 局，最近 {replay_buffer.recent_capacity} 局 + "

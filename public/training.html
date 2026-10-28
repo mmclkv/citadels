@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>本地神经网络训练 · 富饶之城</title>
-  <link rel="stylesheet" href="./training.css?v=13">
+  <link rel="stylesheet" href="./training.css?v=14">
 </head>
 <body>
   <header class="train-header">
@@ -42,6 +42,8 @@
         <label><span>每批补充验证局数</span><input id="validation-games-per-batch" type="number" min="1" max="8" value="2"></label>
         <label><span>随机种子</span><input id="seed" type="number" value="20260913"></label>
         <label><span>继续已有训练</span><select id="resume-checkpoint"></select><small id="resume-checkpoint-file-name">可选择服务器存档，或导入本机权重</small></label>
+        <label class="checkbox"><span>自弈启用分层信念网络</span><input id="belief-network-enabled" type="checkbox"><small>先按角色假设的概率生成候选，再在每种角色假设下采样手牌；私人响应阶段仍使用原生采样</small></label>
+        <label><span>信念网络权重</span><select id="belief-checkpoint" disabled><option value="">正在读取服务器信念权重…</option></select><small id="belief-checkpoint-hint">先在“信念网络训练”页面训练并保存权重</small></label>
         <!-- 仅显式选择“从本机上传权重文件”时使用；服务器存档直接从上方列表选择。 -->
         <input type="file" id="resume-checkpoint-file" accept=".json.gz,.gz,.pt,.pth,.bin" hidden>
         <input type="hidden" id="resume-checkpoint-name" value="">
@@ -131,6 +133,6 @@
       <article class="panel info-panel logs"><h2>事件与错误</h2><pre id="training-log">尚未开始训练</pre></article>
     </section>
   </main>
-  <script src="./training.js?v=36"></script>
+  <script src="./training.js?v=37"></script>
 </body>
 </html>

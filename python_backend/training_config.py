@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from pathlib import Path
 from .model_contract import config_contract
 
@@ -50,6 +51,9 @@ def sanitize_config(raw: dict | None = None) -> dict:
     default_workers = max(1, cpu_count - 2)
     seed = math.floor(_number(raw.get("seed")) or 20260913)
     resume = Path(str(raw.get("resumeCheckpoint") or "").replace("\\", "/")).name
+    belief_checkpoint = Path(str(raw.get("beliefCheckpoint") or "").replace("\\", "/")).name
+    if belief_checkpoint and not re.fullmatch(r"belief-\d+-[\w-]+\.npz", belief_checkpoint):
+        raise ValueError("信念网络权重文件名无效")
     def finite_clamp(key, low, high, fallback):
         if key not in raw:
             return fallback
@@ -94,6 +98,8 @@ def sanitize_config(raw: dict | None = None) -> dict:
         "temperatureStart": _clamp_or(raw.get("temperatureStart"), 0.2, math.inf, 1.1),
         "temperatureEnd": _clamp_or(raw.get("temperatureEnd"), 0.15, math.inf, 0.65),
         "resumeCheckpoint": resume,
+        "beliefNetworkEnabled": raw.get("beliefNetworkEnabled") is True,
+        "beliefCheckpoint": belief_checkpoint,
         "mctsSimulations": _clamp_or(raw.get("mctsSimulations"), 1, math.inf, 500),
         "mctsC_puct": _clamp_or(raw.get("mctsC_puct"), 0, math.inf, 1.0),
         "mctsDirichletAlpha": finite_clamp("mctsDirichletAlpha", 0, 1, 0.3),

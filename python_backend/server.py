@@ -2778,7 +2778,9 @@ class PythonServer:
                     "engine": "python", "listening": self.listening, "port": self.port}))
                 return
             if route == "/api/training/status":
-                await _http_response(writer, 200, _json_bytes(self.training.status()))
+                status = self.training.status()
+                status["beliefCheckpoints"] = await asyncio.to_thread(self.belief_training.checkpoints)
+                await _http_response(writer, 200, _json_bytes(status))
                 return
             if route == "/api/training/checkpoint":
                 name = parse_qs(urlsplit(target).query).get("name", [""])[0]
