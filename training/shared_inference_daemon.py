@@ -42,6 +42,8 @@ def main():
     parser.add_argument("--name", required=True)
     parser.add_argument("--profile", default="balanced")
     parser.add_argument("--architecture", default="entity-v6")
+    parser.add_argument("--state-encoding-version", type=int, choices=(14, 15, 16), default=15,
+                        help="Flat-model state layout; legacy callers default to v15")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--model", required=True)
     parser.add_argument("--slots", type=int, default=8)
@@ -58,7 +60,7 @@ def main():
     if args.device == "cuda" and not use_cuda:
         raise RuntimeError("已要求 CUDA，但 PyTorch 无法访问 CUDA")
     device = torch.device("cuda" if use_cuda else "cpu")
-    model = create_model(args.architecture, args.profile)
+    model = create_model(args.architecture, args.profile, args.state_encoding_version)
     model.load_flat(args.model)
     model.to(device)
     model.eval()
