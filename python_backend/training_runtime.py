@@ -1226,6 +1226,9 @@ class TrainingManager:
         architecture = config["networkArchitecture"]
         tag = (f"p{config['profile']}-a{architecture}-m{int(config['mctsSimulations'])}"
                f"-c{config['charSet']}-s{config['seed']}")
+        contract = config_contract(config)
+        if contract["state"] >= 16:
+            tag += f"-sv{contract['state']}-av{contract['action']}"
         name = f"checkpoint-{game_number:06d}-{tag}.json.gz"
         temp = tempfile.NamedTemporaryFile(prefix="citadels-model-", suffix=".bin", delete=False)
         temp_path = Path(temp.name)
