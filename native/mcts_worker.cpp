@@ -370,6 +370,7 @@ int main() {
       config.time_budget_ms = std::max(0, int_field(request, "timeBudgetMs", 0));
       if (config.time_budget_ms > 0) config.deadline = request_started + std::chrono::milliseconds(config.time_budget_ms);
       config.share_information_history = bool_field(request, "shareInformationHistory", true);
+      config.fast_forward_single_actions = bool_field(request, "fastForwardSingleActions", true);
       config.c_puct = static_cast<float>(number_field(request, "cPuct", 1.0));
       config.dirichlet_alpha = static_cast<float>(number_field(request, "dirichletAlpha", 0.3));
       config.dirichlet_epsilon = static_cast<float>(number_field(request, "dirichletEpsilon", 0.0));
@@ -621,6 +622,7 @@ int main() {
                 << ",\"policyOnly\":" << (bool_field(request, "policyOnly") ? "true" : "false")
                 << ",\"fallback\":" << (actions_match ? "false" : "true")
                 << ",\"shareInformationHistory\":" << (config.share_information_history ? "true" : "false")
+                << ",\"fastForwardSingleActions\":" << (config.fast_forward_single_actions ? "true" : "false")
                 << ",\"particlesUsed\":" << particles_used
                 << ",\"progressiveParticles\":" << (progressive_enabled ? "true" : "false")
                 << ",\"particleProposals\":" << progressive.proposals
