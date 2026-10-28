@@ -81,6 +81,21 @@ def read_game(path):
     return metadata, samples
 
 
+def compatible_game_paths(dataset, capacity):
+    """Select replay games encoded with the active belief observation contract.
+
+    Replay directories can survive an encoder upgrade. Old examples remain
+    useful for their original model, but their different target semantics make
+    them unsafe to mix into the active replay window.
+    """
+    compatible, incompatible = [], []
+    for path in sorted(dataset.glob('game-*.npz')):
+        with np.load(path, allow_pickle=False) as archive:
+            metadata = json.loads(str(archive['metadata']))
+        (compatible if metadata.get('contract') == contract() else incompatible).append(path)
+    return compatible[-capacity:], incompatible
+
+
 def retain_game(dataset, path, capacity, rng):
     """Half recent games, half reservoir of games leaving the recent window."""
     index_file = dataset/'replay-index.json'
@@ -210,6 +225,7 @@ class BeliefTrainingManager:
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.thread = None
+        self._reported_incompatible_games = set()
         self._status = dict(running=False, state='idle', runId='', completedGames=0, totalGames=0, targetGames=0,
             samples=0, error='', logs=[], metrics=None, checkpoint='', config=None, history=[])
 
@@ -236,8 +252,11 @@ class BeliefTrainingManager:
             try:
                 with np.load(path, allow_pickle=False) as data:
                     meta = json.loads(str(data['metadata']))
+                if meta.get('architecture') != 'belief-v2-hierarchical':
+                    continue
                 result.append(dict(name=path.name, games=meta.get('games', 0), dimension=meta.get('dimension'),
-                                   historyLength=meta.get('historyLength'), metrics=meta.get('metrics'), bytes=path.stat().st_size))
+                                   historyLength=meta.get('historyLength'), architecture=meta['architecture'],
+                                   metrics=meta.get('metrics'), bytes=path.stat().st_size))
             except (OSError, ValueError, KeyError):
                 continue
         return result
@@ -292,7 +311,7 @@ class BeliefTrainingManager:
             split_file = self.root/'splits.json'
             splits = json.loads(split_file.read_text(encoding='utf-8')) if split_file.exists() else {}
             run_id = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')+'-'+secrets.token_hex(3)
-            self.log('独立信念网络：实体 Transformer + 历史 GRU + 受约束角色/手牌解码；策略网络冻结')
+            self.log('分层信念网络 v2：先估计受约束的角色先验，再估计角色条件手牌后验；策略网络冻结')
             self.log('训练标签来自引擎真实状态；输入仅含观察者可见信息。整局划分训练/验证。')
             policy_paths = []
             if config['opponents'] != 'heuristic':
@@ -387,7 +406,13 @@ class BeliefTrainingManager:
         import torch
         rng = random.Random(config['seed']+self.status()['totalGames'])
         train, validation = [], []
-        for path in sorted((self.root/'games').glob('game-*.npz'))[-config['replayGames']:]:
+        replay_paths, incompatible_paths = compatible_game_paths(
+            self.root/'games', config['replayGames'])
+        new_incompatible = {path.name for path in incompatible_paths} - self._reported_incompatible_games
+        if new_incompatible:
+            self._reported_incompatible_games.update(new_incompatible)
+            self.log(f'回放池中有 {len(incompatible_paths)} 局使用旧信念编码，已跳过；旧文件保留。')
+        for path in replay_paths:
             meta, samples = read_game(path)
             (validation if meta['validation'] else train).extend(samples)
         if not train:

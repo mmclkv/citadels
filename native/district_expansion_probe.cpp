@@ -152,6 +152,35 @@ int main(int argc,char** argv) {
       s.players[0].hand={card("mon","monument",4)}; check(!s.start_build("mon"));
     }
     {
+      // Prophet learns the identity of each returned card. Those cards must
+      // remain pinned in the recipient's hand across state serialization and
+      // determinization, then be forgotten once they leave that hand.
+      auto s=base(); s.players[0].role_id="prophet";
+      s.players[0].hand={card("prophet-own")};
+      s.players[1].hand={card("known-one"),card("unknown-one")};
+      s.players[2].hand={card("known-two")};
+      check(s.prophet_collect());
+      while (s.pending_kind=="prophet_give") {
+        const int target=s.pending_target;
+        const std::string returned=s.players[0].hand.front().uid;
+        check(s.prophet_give(returned));
+        check(std::any_of(s.known_hand_cards.begin(),s.known_hand_cards.end(),[&](const auto& k) {
+          return k.viewer==0 && k.owner==target && k.uid==returned;
+        }));
+      }
+      s=roundtrip(s); check(s.known_hand_cards.size()==2);
+      for (uint32_t seed=1;seed<20;++seed) {
+        const auto d=determinize_native_state(s,0,seed,true);
+        for (const auto& known : s.known_hand_cards)
+          check(std::any_of(d.players[known.owner].hand.begin(),d.players[known.owner].hand.end(),
+            [&](const auto& c) { return c.uid==known.uid; }));
+      }
+      const auto known=s.known_hand_cards.front();
+      auto& hand=s.players[known.owner].hand;
+      hand.erase(std::remove_if(hand.begin(),hand.end(),[&](const auto& c) { return c.uid==known.uid; }),hand.end());
+      s.prune_known_hand_cards(); check(s.known_hand_cards.size()==1);
+    }
+    {
       auto s=base(); city(s,0,card("mine","goldMine",6)); s.resources_taken=false; s.players[0].gold=0;
       check(s.take_gold()); check(s.players[0].gold==4);
       s=base(); city(s,0,card("library","keepBoth")); city(s,0,card("obs","draw3keep1",4)); s.resources_taken=false;

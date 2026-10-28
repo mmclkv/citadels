@@ -1,4 +1,4 @@
-"""Independent history-conditioned joint role/hand-count belief model."""
+"""Hierarchical history-conditioned role-prior and conditional-hand belief model."""
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -22,7 +22,11 @@ class BeliefNetwork(nn.Module):
         self.role_embed = nn.Embedding(R, dimension)
         self.card_embed = nn.Embedding(C, dimension)
         self.count_embed = nn.Embedding(M+1, dimension)
-        self.decoder = nn.GRUCell(dimension, dimension)
+        # Factor the hidden state as P(roles | observation) P(hands | roles, observation).
+        # Separate recurrent paths make the conditional hand model explicit and
+        # let inference resample role strata independently from hand hypotheses.
+        self.role_decoder = nn.GRUCell(dimension, dimension)
+        self.hand_decoder = nn.GRUCell(dimension, dimension)
         self.role_head = nn.Linear(dimension, R)
         self.count_head = nn.Linear(dimension, M+1)
 
@@ -55,7 +59,7 @@ class BeliefNetwork(nn.Module):
         previous_player, previous_role = -1, -1
         for slot, player in enumerate(observation['rolePlayers']):
             player = int(player)
-            h = self.decoder(self.seat.weight[player], h)
+            h = self.role_decoder(self.seat.weight[player], h)
             valid = allowed.copy()
             if player == previous_player:
                 valid[:previous_role+1] = False
@@ -73,14 +77,19 @@ class BeliefNetwork(nn.Module):
                 raise ValueError('Hidden role target violates public constraints')
             role_terms.append(logits.log_softmax(-1)[chosen]);roles.append(chosen)
             allowed[chosen] = False
-            h = self.decoder(self.role_embed.weight[chosen], h)
+            h = self.role_decoder(self.role_embed.weight[chosen], h)
             previous_player, previous_role = player, chosen
+        # The hand posterior is conditioned on the complete role assignment,
+        # rather than inheriting role-decoder state implicitly.
+        h = self.encode(observation, history) if context is None else context
+        for chosen in roles:
+            h = self.hand_decoder(self.role_embed.weight[int(chosen)], h)
         for zone, player in enumerate(observation['handPlayers']):
-            h = self.decoder(self.seat.weight[int(player)], h)
+            h = self.hand_decoder(self.seat.weight[int(player)], h)
             slots = int(observation['handSizes'][zone])
             hand = []
             for card in range(C):
-                h = self.decoder(self.card_embed.weight[card], h)
+                h = self.hand_decoder(self.card_embed.weight[card], h)
                 lower = max(0, slots-int(remaining[card+1:].sum()))
                 upper = min(M, int(remaining[card]), slots)
                 if lower > upper:
@@ -92,7 +101,7 @@ class BeliefNetwork(nn.Module):
                     raise ValueError('Hidden card target violates public constraints')
                 hand_terms.append(logits.log_softmax(-1)[chosen]);hand.append(chosen)
                 slots -= chosen;remaining[card] -= chosen
-                h = self.decoder(self.count_embed.weight[chosen], h)
+                h = self.hand_decoder(self.count_embed.weight[chosen], h)
             if slots:
                 raise ValueError('Hidden hand size mismatch')
             hands.append(hand)
@@ -104,8 +113,8 @@ class BeliefNetwork(nn.Module):
                     handDecisions=len(hand_terms), roles=np.array(roles),
                     hands=np.array(hands, dtype=np.int64).reshape(-1, C))
 
-    def score_candidates(self, observation, history, targets):
-        """Shared encoder and batched recurrent decoder for live particles."""
+    def score_candidate_components(self, observation, history, targets):
+        """Return log P(roles|observation) and log P(hands|roles,observation)."""
         device = next(self.parameters()).device
         size = len(targets)
         h = self.encode(observation, history)[None].expand(size, -1)
@@ -113,13 +122,14 @@ class BeliefNetwork(nn.Module):
         hand_targets = torch.as_tensor(np.stack([t['hands'] for t in targets]), device=device)
         allowed = torch.as_tensor(observation['roleAllowed'], device=device)[None].expand(size, -1).clone()
         remaining = torch.as_tensor(observation['remaining'], device=device)[None].expand(size, -1).clone()
-        logp = torch.zeros(size, device=device)
+        role_logp = torch.zeros(size, device=device)
+        hand_logp = torch.zeros(size, device=device)
         ids = torch.arange(size, device=device)
         previous_player = -1
         previous_role = torch.zeros(size, device=device, dtype=torch.long)
         for slot, player in enumerate(observation['rolePlayers']):
             player = int(player)
-            h = self.decoder(self.seat.weight[player].expand(size, -1), h)
+            h = self.role_decoder(self.seat.weight[player].expand(size, -1), h)
             valid = allowed.clone()
             if player == previous_player:
                 valid &= torch.arange(R, device=device)[None] > previous_role[:, None]
@@ -129,25 +139,32 @@ class BeliefNetwork(nn.Module):
                 valid &= greater >= later
             logits = self.role_head(h).masked_fill(~valid, -torch.inf)
             chosen = role_targets[:, slot]
-            logp += logits.log_softmax(-1)[ids, chosen]
+            role_logp += logits.log_softmax(-1)[ids, chosen]
             allowed[ids, chosen] = False
-            h = self.decoder(self.role_embed(chosen), h)
+            h = self.role_decoder(self.role_embed(chosen), h)
             previous_player, previous_role = player, chosen
+        h = self.encode(observation, history)[None].expand(size, -1)
+        for slot in range(role_targets.shape[1]):
+            h = self.hand_decoder(self.role_embed(role_targets[:, slot]), h)
         for zone, player in enumerate(observation['handPlayers']):
-            h = self.decoder(self.seat.weight[int(player)].expand(size, -1), h)
+            h = self.hand_decoder(self.seat.weight[int(player)].expand(size, -1), h)
             slots = torch.full((size,), int(observation['handSizes'][zone]), device=device)
             for card in range(C):
-                h = self.decoder(self.card_embed.weight[card].expand(size, -1), h)
+                h = self.hand_decoder(self.card_embed.weight[card].expand(size, -1), h)
                 lower = (slots-remaining[:, card+1:].sum(-1)).clamp_min(0)
                 upper = torch.minimum(remaining[:, card], slots).clamp_max(M)
                 values = torch.arange(M+1, device=device)[None]
                 valid = (values >= lower[:, None]) & (values <= upper[:, None])
                 logits = self.count_head(h).masked_fill(~valid, -torch.inf)
                 chosen = hand_targets[:, zone, card]
-                logp += logits.log_softmax(-1)[ids, chosen]
+                hand_logp += logits.log_softmax(-1)[ids, chosen]
                 remaining[:, card] -= chosen;slots -= chosen
-                h = self.decoder(self.count_embed(chosen), h)
-        return logp
+                h = self.hand_decoder(self.count_embed(chosen), h)
+        return role_logp, hand_logp
+
+    def score_candidates(self, observation, history, targets):
+        role, hand = self.score_candidate_components(observation, history, targets)
+        return role + hand
 
 
 def save_checkpoint(path, model, metadata, optimizer=None):
@@ -160,7 +177,7 @@ def save_checkpoint(path, model, metadata, optimizer=None):
             for key, value in optimizer.state.get(parameter, {}).items():
                 if isinstance(value, torch.Tensor):
                     values['optimizer:'+name+':'+key] = value.detach().cpu().numpy()
-    values['metadata'] = np.array(json.dumps(dict(metadata, architecture='belief-v1',
+    values['metadata'] = np.array(json.dumps(dict(metadata, architecture='belief-v2-hierarchical',
         dimension=model.dimension, contract=contract())))
     temporary = path.with_suffix('.tmp')
     with temporary.open('wb') as handle:
@@ -171,7 +188,7 @@ def save_checkpoint(path, model, metadata, optimizer=None):
 def load_checkpoint(path, device='cpu'):
     with np.load(path, allow_pickle=False) as data:
         metadata = json.loads(str(data['metadata']))
-        if metadata.get('architecture') != 'belief-v1' or metadata.get('contract') != contract():
+        if metadata.get('architecture') != 'belief-v2-hierarchical' or metadata.get('contract') != contract():
             raise ValueError('信念权重的架构、角色或建筑编码不匹配')
         dimension = metadata.get('dimension')
         if dimension not in (64, 128, 192):

@@ -11,7 +11,8 @@ import numpy as np
 from python_backend import cards
 from python_backend.belief_encoding import (observe, labels, BeliefHistory, C, M, contract,
     prior_hand_log_probability, card_counts)
-from python_backend.belief_training import normalize_config, save_game, read_game, BeliefTrainingManager
+from python_backend.belief_training import (normalize_config, save_game, read_game,
+    compatible_game_paths, BeliefTrainingManager)
 
 
 def fixture():
@@ -52,6 +53,20 @@ class BeliefObservationTests(unittest.TestCase):
         seen=observe(state,'p0')
         self.assertNotIn(1,seen['handPlayers'])
         self.assertIn(1,observe(state,'p2')['handPlayers'])
+
+    def test_prophet_returned_cards_are_known_and_removed_from_hidden_labels(self):
+        state=fixture();owner=state['players'][1]
+        known=owner['hand'][0]
+        state['privateKnowledge']=[dict(viewer=0,owner=1,uid=known['uid'])]
+        observation=observe(state,'p0')
+        relative=1
+        self.assertEqual(observation['players'][relative,8+C+cards.DISTRICTS.index(
+            next(card for card in cards.DISTRICTS if card['en']==known['en']))],1/5)
+        self.assertEqual(observation['handSizes'][observation['handPlayers'].tolist().index(relative)],3)
+        remaining=labels(state,'p0',observation)['hands'][observation['handPlayers'].tolist().index(relative)]
+        self.assertEqual(int(remaining.sum()),3)
+        card_index=next(i for i,card in enumerate(cards.DISTRICTS) if card['en']==known['en'])
+        self.assertEqual(remaining[card_index],sum(card['en']==known['en'] for card in owner['hand'])-1)
 
     def test_witch_execution_is_not_role_ownership_even_at_round_end(self):
         state=fixture()
@@ -102,6 +117,23 @@ class BeliefObservationTests(unittest.TestCase):
             self.assertTrue({f'game-{i:03d}.npz' for i in range(36,40)}<=files)
             self.assertTrue(any(int(name[5:8])<32 for name in files))
 
+    def test_replay_selection_skips_old_encoding_and_preserves_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            current=folder/'game-current.npz'
+            save_game(current,[],dict(samples=0,validation=False))
+            old=folder/'game-old.npz'
+            old_contract=dict(contract());old_contract['version']-=1
+            with old.open('wb') as handle:
+                np.savez_compressed(handle,metadata=np.array(json.dumps(
+                    dict(samples=0,validation=False,contract=old_contract))))
+            selected,incompatible=compatible_game_paths(folder,64)
+            self.assertEqual(selected,[current])
+            self.assertEqual(incompatible,[old])
+            self.assertTrue(old.is_file())
+            with self.assertRaisesRegex(ValueError,'编码不匹配'):
+                read_game(old)
+
 
 class BeliefNetworkTests(unittest.TestCase):
     @classmethod
@@ -125,6 +157,8 @@ class BeliefNetworkTests(unittest.TestCase):
             single=model.joint(observation,events,target)['logProbability']
             batch=model.score_candidates(observation,events,[target,target])
             torch.testing.assert_close(batch,single.expand(2),atol=2e-4,rtol=2e-4)
+            role_part,hand_part=model.score_candidate_components(observation,events,[target])
+            torch.testing.assert_close(role_part+hand_part,single.reshape(1),atol=2e-4,rtol=2e-4)
             draw=model.joint(observation,events)
             self.assertEqual(len(set(draw['roles'].tolist())),len(draw['roles']))
             np.testing.assert_array_equal(draw['hands'].sum(1),observation['handSizes'])
@@ -161,14 +195,44 @@ class BeliefNetworkTests(unittest.TestCase):
             path=Path(directory)/'belief-test.npz'
             save_checkpoint(path,BeliefNetwork(64),dict(games=1,historyLength=32,candidateCount=4,priorMixture=.2))
             policy=BeliefPolicy(path)
+            self.assertEqual(policy.status()['encodingVersion'],contract()['version'])
             samples=policy.sample(SimpleNamespace(determinize=determinize),state,'p0',2,42)
             self.assertEqual(len(samples['particles']),2)
+            self.assertTrue(samples['modelApplied'])
+            self.assertEqual(len(samples['logWeights']),2)
             self.assertFalse(policy.error,policy.error)
             self.assertIsNotNone(policy.last)
+            self.assertEqual(policy.last['roleHypotheses'],1)
             self.assertFalse(calls[-1]['belief'])
             state['turn']['pending']={'kind':'lighthouse'}
             policy.sample(SimpleNamespace(determinize=determinize),state,'p0',2,42)
             self.assertTrue(calls[-1]['belief'])
+
+    def test_initial_particles_are_resampled_by_role_stratum(self):
+        from training.belief_network import BeliefNetwork
+        from python_backend.belief import BeliefPolicy
+        from types import SimpleNamespace
+        import itertools
+        state=fixture();observation=observe(state,'p0')
+        base=[role['id'] for role in cards.CHARACTERS if role['version']=='base']
+        worlds=[]
+        for permutation in itertools.islice(itertools.permutations(base[1:5],3),4):
+            world=copy.deepcopy(state)
+            for seat,role in zip((1,2,3),permutation):world['players'][seat]['chars']=[role]
+            worlds.append(world)
+        calls=[]
+        def determinize(**kwargs):
+            calls.append(kwargs)
+            return dict(particles=[copy.deepcopy(worlds[i%len(worlds)]) for i in range(kwargs['count'])],
+                        weights=[1.]*kwargs['count'])
+        policy=BeliefPolicy();policy.model=BeliefNetwork(64).eval()
+        policy.metadata={'historyLength':32,'candidateCount':4,'priorMixture':.2}
+        sampled=policy.sample(SimpleNamespace(determinize=determinize),state,'p0',2,19)
+        self.assertTrue(sampled['modelApplied'],policy.error)
+        self.assertEqual(policy.last['roleHypotheses'],4)
+        self.assertEqual(calls[0]['count'],4)
+        self.assertEqual(len(sampled['logWeights']),2)
+        self.assertTrue(np.isfinite(sampled['logWeights']).all())
 
 
 @unittest.skipUnless(os.environ.get('CITADELS_BELIEF_GAME_ENGINE'), 'native game engine required')

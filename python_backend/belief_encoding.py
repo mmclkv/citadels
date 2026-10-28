@@ -5,7 +5,7 @@ from collections import deque
 import numpy as np
 from .cards import DISTRICTS, CHARACTERS
 
-VERSION = 1
+VERSION = 2
 CARD_IDS = tuple(c['en'] for c in DISTRICTS)
 ROLE_IDS = tuple(c['id'] for c in CHARACTERS)
 CARD_INDEX = {name: i for i, name in enumerate(CARD_IDS)}
@@ -71,8 +71,18 @@ def visible_hand(state, index, viewer):
             and pending.get('targetIdx') == index)
 
 
+def known_hand_cards(state, index, viewer):
+    """Cards whose identities this viewer has privately seen in another hand."""
+    if index == viewer:
+        return []
+    player = state['players'][index]
+    known_uids = {item.get('uid') for item in state.get('privateKnowledge', [])
+                  if item.get('viewer') == viewer and item.get('owner') == index}
+    return [card for card in player.get('hand', []) if card.get('uid') in known_uids]
+
+
 def observe(state, viewer_id):
-    """Explicit allow-list; never reads opponent card identities or hidden roles."""
+    """Explicit allow-list; reads only opponent cards privately known to viewer."""
     players = state['players']
     viewer = next(i for i, p in enumerate(players) if p['id'] == viewer_id)
     n = len(players)
@@ -104,8 +114,11 @@ def observe(state, viewer_id):
             row[8+C:8+C*2] = hand / 5
             remaining -= hand
         else:
+            known_hand = card_counts(known_hand_cards(state, index, viewer))
+            row[8+C:8+C*2] = known_hand / 5
+            remaining -= known_hand
             hand_players.append(relative)
-            hand_sizes.append(len(p.get('hand', [])))
+            hand_sizes.append(max(0, len(p.get('hand', [])) - int(known_hand.sum())))
         for role in known:
             row[8+C*2+ROLE_INDEX[role]] = 1
             allowed[ROLE_INDEX[role]] = False
@@ -159,8 +172,12 @@ def labels(state, viewer_id, observation):
         known = known_roles(state, index, viewer)
         roles.extend(sorted(ROLE_INDEX[role_id(r)] for r in state['players'][index].get('chars', [])
                             if role_id(r) not in known))
-    hands = [card_counts(state['players'][(viewer+int(r)) % n]['hand'])
-             for r in observation['handPlayers']]
+    hands = []
+    for relative in observation['handPlayers']:
+        owner = (viewer+int(relative)) % n
+        actual = card_counts(state['players'][owner]['hand'])
+        known = card_counts(known_hand_cards(state, owner, viewer))
+        hands.append(actual-known)
     return dict(roles=np.array(roles, dtype=np.int64), hands=np.array(hands, dtype=np.int64).reshape(-1, C))
 
 

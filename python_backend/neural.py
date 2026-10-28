@@ -161,15 +161,12 @@ class NeuralPolicy:
                 self.belief_policy.error = str(error)
         sample_seed = rng.randrange(0, 2**32)
         if scorer is not None:
-            sampled = self.worker.determinize(state=state, player_id=player_id,
-                count=particle_count, seed=sample_seed, belief=False)
-            try:
-                log_weights = scorer(sampled["particles"])
-            except Exception as error:
-                self.belief_policy.error = str(error)
+            sampled = self.belief_policy.sample(self.worker, state, player_id,
+                particle_count, sample_seed, enabled=belief)
+            if sampled.get("modelApplied"):
+                log_weights = sampled.pop("logWeights")
+            else:
                 scorer = None; mixture = 0.
-                sampled = self.worker.determinize(state=state, player_id=player_id,
-                    count=particle_count, seed=sample_seed, belief=belief)
         else:
             # Progressive learned sampling uses the scorer above; unsupported
             # private phases keep the same native proposal for every batch.
@@ -217,6 +214,8 @@ class NeuralPolicy:
             "particleSamplingMs": initial_sampling_ms + result.get("particleSamplingMs", 0),
             "particleSamplingError": result.get("particleSamplingError", ""),
             "totalMs": (time.perf_counter()-started)*1000})
+        if getattr(self, "belief_policy", None) is not None and self.belief_policy.last is not None:
+            mcts_stats["beliefSampling"] = dict(self.belief_policy.last)
         self._last_mcts = mcts_stats
         if diagnostics is not None:
             diagnostics.update({"method": "native-mcts", "profile": self.profile,
