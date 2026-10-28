@@ -31,4 +31,6 @@ class KnownEncodingTests(unittest.TestCase):
             logits,values=new(torch.tensor(ns)[None],torch.tensor(na)[None])
             (logits.square().mean()+values.square().mean()).backward()
             self.assertGreater(new.global_embed.weight.grad[:,528:].abs().sum().item(),0)
+            self.assertGreater(new.player_embed.weight.grad[:,18].abs().sum().item(),0)
+            self.assertGreater(new.self_embed.weight.grad[:,18].abs().sum().item(),0)
         self.assertEqual(sum(p.numel() for p in new.parameters()),_entity_parameter_count('fast',16))
