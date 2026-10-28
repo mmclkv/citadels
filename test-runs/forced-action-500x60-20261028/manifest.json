@@ -1,0 +1,34 @@
+{
+  "sourceCheckpoint": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\checkpoint-020092-pfast-aentity-v6-m500-crandom-s114514.json.gz",
+  "sourceSha256": "961ba10178c4d3e24b9bd49b5bae351572f3313ac33a44d9ce2b48583e92e85f",
+  "reference": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\teacher-gain-60-20261028\\manifest.json",
+  "config": {
+    "engine": "D:\\Users\\Jiaming Qiu\\citadels\\native\\game_engine-14f5b7d5e5c5.exe",
+    "worker": "D:\\Users\\Jiaming Qiu\\citadels\\native\\mcts_worker_libtorch-747048223b69.exe",
+    "flat": "D:\\Users\\Jiaming Qiu\\citadels\\test-runs\\forced-action-500x60-20261028\\model.bin",
+    "belief": "D:\\Users\\Jiaming Qiu\\citadels\\training-data\\belief\\checkpoints\\belief-00009500-20261019143224-1e3cad.npz",
+    "profile": "fast",
+    "simulations": 500,
+    "depth": 700
+  },
+  "blocks": 30,
+  "games": 60,
+  "workers": 8,
+  "particles": 8,
+  "batch": 32,
+  "progressiveParticles": true,
+  "shareInformationHistory": true,
+  "selection": "sample",
+  "rootNoise": 0,
+  "stateVersion": 16,
+  "actionVersion": 12,
+  "opponents": "static hard; heuristic MCTS explicitly disabled",
+  "control": "same binary, same weights; fastForwardSingleActions false versus true",
+  "searchOpponentApproximation": "Other searched neural seat remains an optimizing agent in each search",
+  "sha256": {
+    "engine": "9065a20110f6b145b47046566b3439e86fd12aff9c18ad22cdbbf6e39c057b8c",
+    "worker": "8f9745705208ea20176730c75e3e09bae1e63aac6a4ecd0acabd0494bd79a32a",
+    "flat": "ca5999d7bfab5ffeabb40d9307cbb1c5e24d8699863b3acdaefb9a2fbdbd38cf",
+    "belief": "5da1d46fcd7c657d47ef0a63e3233d014f218b6fa3cab56c1cb144da2bebb196"
+  }
+}

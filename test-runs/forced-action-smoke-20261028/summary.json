@@ -1,0 +1,42 @@
+{
+  "successfulGames": 2,
+  "failedGames": 0,
+  "completeOpeningBlocks": 1,
+  "results": {
+    "baseline": {
+      "games": 2,
+      "firsts": 0,
+      "winShare": 0,
+      "meanRank": 3.49999975,
+      "pairwiseScore": 0.25
+    },
+    "fast_forward": {
+      "games": 2,
+      "firsts": 1,
+      "winShare": 1.0,
+      "meanRank": 1.9999997500000002,
+      "pairwiseScore": 0.75
+    }
+  },
+  "paired": {},
+  "instrumentation": {
+    "baseline": {
+      "searches": 96,
+      "totalVisits": 3072,
+      "meanSearchSeconds": 0.02519791666782112,
+      "meanTotalSeconds": 0.07843749999786571,
+      "meanPhysicalExpansions": 32.583333333333336,
+      "meanWorlds": 5.28125
+    },
+    "fast_forward": {
+      "searches": 81,
+      "totalVisits": 2592,
+      "meanSearchSeconds": 0.0441604938291956,
+      "meanTotalSeconds": 0.104555555553187,
+      "meanPhysicalExpansions": 108.76543209876543,
+      "meanWorlds": 4.987654320987654
+    }
+  },
+  "plannedGames": 2,
+  "seconds": 12.234000000054948
+}

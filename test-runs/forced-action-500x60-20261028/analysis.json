@@ -1,0 +1,233 @@
+{
+  "successfulGames": 60,
+  "failedGames": 0,
+  "completeOpeningBlocks": 30,
+  "results": {
+    "baseline": {
+      "games": 60,
+      "firsts": 9,
+      "winShare": 8.333333333333334,
+      "meanRank": 4.483333408333333,
+      "pairwiseScore": 0.4083333333333333
+    },
+    "fast_forward": {
+      "games": 60,
+      "firsts": 10,
+      "winShare": 9.5,
+      "meanRank": 4.066666708333333,
+      "pairwiseScore": 0.5916666666666667
+    }
+  },
+  "paired": {
+    "winShareDifference": {
+      "estimate": 0.019444444444444445,
+      "95ClusterBootstrap": [
+        -0.1,
+        0.14722222222222223
+      ]
+    },
+    "pairwiseScore": {
+      "estimate": 0.5916666666666667,
+      "95ClusterBootstrap": [
+        0.48333333333333334,
+        0.7
+      ]
+    }
+  },
+  "instrumentation": {
+    "baseline": {
+      "searches": 3175,
+      "totalVisits": 1587500,
+      "meanSearchSeconds": 2.060087244094892,
+      "meanTotalSeconds": 2.2051291338580947,
+      "meanPhysicalExpansions": 493.2425196850394,
+      "meanWorlds": 65.54582677165354
+    },
+    "fast_forward": {
+      "searches": 3134,
+      "totalVisits": 1567000,
+      "meanSearchSeconds": 2.830737077218142,
+      "meanTotalSeconds": 2.977167198468572,
+      "meanPhysicalExpansions": 2637.7329291640076,
+      "meanWorlds": 65.52807913209955
+    }
+  },
+  "status": "complete",
+  "attemptRecords": 60,
+  "hashesVerified": true,
+  "searchBudgetsVerified": true,
+  "pairedDealsVerified": true,
+  "byPlayers": {
+    "4": {
+      "successfulGames": 20,
+      "failedGames": 0,
+      "completeOpeningBlocks": 10,
+      "results": {
+        "baseline": {
+          "games": 20,
+          "firsts": 4,
+          "winShare": 4.0,
+          "meanRank": 2.69999995,
+          "pairwiseScore": 0.525
+        },
+        "fast_forward": {
+          "games": 20,
+          "firsts": 3,
+          "winShare": 3.0,
+          "meanRank": 2.9999998750000003,
+          "pairwiseScore": 0.475
+        }
+      },
+      "paired": {
+        "winShareDifference": {
+          "estimate": -0.05,
+          "95ClusterBootstrap": [
+            -0.25,
+            0.15
+          ]
+        },
+        "pairwiseScore": {
+          "estimate": 0.475,
+          "95ClusterBootstrap": [
+            0.3,
+            0.65
+          ]
+        }
+      },
+      "instrumentation": {
+        "baseline": {
+          "searches": 997,
+          "totalVisits": 498500,
+          "meanSearchSeconds": 1.6023410230687256,
+          "meanTotalSeconds": 1.7080200601796738,
+          "meanPhysicalExpansions": 492.00702106318954,
+          "meanWorlds": 65.51955867602808
+        },
+        "fast_forward": {
+          "searches": 994,
+          "totalVisits": 497000,
+          "meanSearchSeconds": 1.7812032193163085,
+          "meanTotalSeconds": 1.8846448692155842,
+          "meanPhysicalExpansions": 1505.195171026157,
+          "meanWorlds": 65.5553319919517
+        }
+      }
+    },
+    "6": {
+      "successfulGames": 20,
+      "failedGames": 0,
+      "completeOpeningBlocks": 10,
+      "results": {
+        "baseline": {
+          "games": 20,
+          "firsts": 5,
+          "winShare": 4.333333333333333,
+          "meanRank": 4.25,
+          "pairwiseScore": 0.35
+        },
+        "fast_forward": {
+          "games": 20,
+          "firsts": 3,
+          "winShare": 2.5,
+          "meanRank": 3.9,
+          "pairwiseScore": 0.65
+        }
+      },
+      "paired": {
+        "winShareDifference": {
+          "estimate": -0.09166666666666666,
+          "95ClusterBootstrap": [
+            -0.25833333333333336,
+            0.08333333333333334
+          ]
+        },
+        "pairwiseScore": {
+          "estimate": 0.65,
+          "95ClusterBootstrap": [
+            0.45,
+            0.85
+          ]
+        }
+      },
+      "instrumentation": {
+        "baseline": {
+          "searches": 1143,
+          "totalVisits": 571500,
+          "meanSearchSeconds": 1.9709011373587388,
+          "meanTotalSeconds": 2.1086920384956853,
+          "meanPhysicalExpansions": 491.19247594050745,
+          "meanWorlds": 65.67191601049869
+        },
+        "fast_forward": {
+          "searches": 1082,
+          "totalVisits": 541000,
+          "meanSearchSeconds": 2.8577051756023635,
+          "meanTotalSeconds": 3.0035582255090496,
+          "meanPhysicalExpansions": 2646.4269870609983,
+          "meanWorlds": 65.57116451016635
+        }
+      }
+    },
+    "8": {
+      "successfulGames": 20,
+      "failedGames": 0,
+      "completeOpeningBlocks": 10,
+      "results": {
+        "baseline": {
+          "games": 20,
+          "firsts": 0,
+          "winShare": 0,
+          "meanRank": 6.500000275,
+          "pairwiseScore": 0.35
+        },
+        "fast_forward": {
+          "games": 20,
+          "firsts": 4,
+          "winShare": 4.0,
+          "meanRank": 5.30000025,
+          "pairwiseScore": 0.65
+        }
+      },
+      "paired": {
+        "winShareDifference": {
+          "estimate": 0.2,
+          "95ClusterBootstrap": [
+            0.0,
+            0.4
+          ]
+        },
+        "pairwiseScore": {
+          "estimate": 0.65,
+          "95ClusterBootstrap": [
+            0.475,
+            0.85
+          ]
+        }
+      },
+      "instrumentation": {
+        "baseline": {
+          "searches": 1035,
+          "totalVisits": 517500,
+          "meanSearchSeconds": 2.5995198067639853,
+          "meanTotalSeconds": 2.7904869565214954,
+          "meanPhysicalExpansions": 496.6966183574879,
+          "meanWorlds": 65.43188405797102
+        },
+        "fast_forward": {
+          "searches": 1058,
+          "totalVisits": 529000,
+          "meanSearchSeconds": 3.7892032136101035,
+          "meanTotalSeconds": 3.9766115311903807,
+          "meanPhysicalExpansions": 3692.8705103969755,
+          "meanWorlds": 65.45841209829868
+        }
+      }
+    }
+  },
+  "sameTable": {
+    "wins": 34,
+    "ties": 3,
+    "losses": 23
+  },
+  "otherPlayersWinShare": 42.166666666666664
+}

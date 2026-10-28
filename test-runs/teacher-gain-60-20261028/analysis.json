@@ -1,0 +1,353 @@
+{
+  "status": "complete",
+  "successfulGames": 60,
+  "failedCases": 0,
+  "attemptRecords": 61,
+  "uniqueCases": 60,
+  "completeOpeningBlocks": 20,
+  "allSearchBudgetsVerified": true,
+  "checkpointAndBinaryHashesVerified": true,
+  "results": {
+    "direct": {
+      "games": 60,
+      "firsts": 4,
+      "winShare": 3.5,
+      "meanRank": 4.2666666,
+      "pairwise": {
+        "mcts500": 0.43333333333333335,
+        "mcts2000": 0.5083333333333333
+      }
+    },
+    "mcts500": {
+      "games": 60,
+      "firsts": 6,
+      "winShare": 4.833333333333333,
+      "meanRank": 3.9,
+      "pairwise": {
+        "direct": 0.5666666666666667,
+        "mcts2000": 0.5416666666666666
+      }
+    },
+    "mcts2000": {
+      "games": 60,
+      "firsts": 10,
+      "winShare": 8.833333333333334,
+      "meanRank": 4.116666641666667,
+      "pairwise": {
+        "direct": 0.49166666666666664,
+        "mcts500": 0.4583333333333333
+      }
+    }
+  },
+  "byPlayers": {
+    "4": {
+      "direct": {
+        "games": 21,
+        "firsts": 3,
+        "winShare": 2.5,
+        "meanRank": 2.857142857142857,
+        "pairwise": {
+          "mcts500": 0.5238095238095238,
+          "mcts2000": 0.4523809523809524
+        }
+      },
+      "mcts500": {
+        "games": 21,
+        "firsts": 4,
+        "winShare": 3.3333333333333335,
+        "meanRank": 2.714285785714286,
+        "pairwise": {
+          "direct": 0.47619047619047616,
+          "mcts2000": 0.38095238095238093
+        }
+      },
+      "mcts2000": {
+        "games": 21,
+        "firsts": 7,
+        "winShare": 5.833333333333333,
+        "meanRank": 2.285714285714286,
+        "pairwise": {
+          "direct": 0.5476190476190477,
+          "mcts500": 0.6190476190476191
+        }
+      }
+    },
+    "6": {
+      "direct": {
+        "games": 21,
+        "firsts": 0,
+        "winShare": 0,
+        "meanRank": 4.285714285714286,
+        "pairwise": {
+          "mcts500": 0.35714285714285715,
+          "mcts2000": 0.6428571428571429
+        }
+      },
+      "mcts500": {
+        "games": 21,
+        "firsts": 2,
+        "winShare": 1.5,
+        "meanRank": 3.6666666666666665,
+        "pairwise": {
+          "direct": 0.6428571428571429,
+          "mcts2000": 0.6904761904761905
+        }
+      },
+      "mcts2000": {
+        "games": 21,
+        "firsts": 1,
+        "winShare": 1.0,
+        "meanRank": 4.714285714285714,
+        "pairwise": {
+          "direct": 0.35714285714285715,
+          "mcts500": 0.30952380952380953
+        }
+      }
+    },
+    "8": {
+      "direct": {
+        "games": 18,
+        "firsts": 1,
+        "winShare": 1.0,
+        "meanRank": 5.888888666666666,
+        "pairwise": {
+          "mcts500": 0.4166666666666667,
+          "mcts2000": 0.4166666666666667
+        }
+      },
+      "mcts500": {
+        "games": 18,
+        "firsts": 0,
+        "winShare": 0,
+        "meanRank": 5.555555472222222,
+        "pairwise": {
+          "direct": 0.5833333333333334,
+          "mcts2000": 0.5555555555555556
+        }
+      },
+      "mcts2000": {
+        "games": 18,
+        "firsts": 2,
+        "winShare": 2.0,
+        "meanRank": 5.555555472222222,
+        "pairwise": {
+          "direct": 0.5833333333333334,
+          "mcts500": 0.4444444444444444
+        }
+      }
+    }
+  },
+  "paired": {
+    "mcts500-direct": {
+      "winShareDifference": 0.02222222222222222,
+      "winShareDifference95CI": [
+        -0.049999999999999996,
+        0.08888888888888889
+      ],
+      "pairwiseScore": 0.5666666666666667,
+      "pairwiseScore95CI": [
+        0.4583333333333332,
+        0.675
+      ]
+    },
+    "mcts2000-direct": {
+      "winShareDifference": 0.08888888888888888,
+      "winShareDifference95CI": [
+        -0.011111111111111113,
+        0.2
+      ],
+      "pairwiseScore": 0.4916666666666666,
+      "pairwiseScore95CI": [
+        0.375,
+        0.6083333333333332
+      ]
+    },
+    "mcts2000-mcts500": {
+      "winShareDifference": 0.06666666666666668,
+      "winShareDifference95CI": [
+        -0.05,
+        0.19999999999999998
+      ],
+      "pairwiseScore": 0.45833333333333337,
+      "pairwiseScore95CI": [
+        0.33333333333333326,
+        0.5916666666666667
+      ]
+    }
+  },
+  "instrumentation": {
+    "mcts500": {
+      "searches": 3187,
+      "totalVisits": 1593500,
+      "meanUniqueWorlds": 65.46564166928145,
+      "meanExpansions": 492.2560401631628,
+      "changedBestFraction": 0.21681832444304988
+    },
+    "mcts2000": {
+      "searches": 3145,
+      "totalVisits": 6290000,
+      "meanUniqueWorlds": 253.32337042925278,
+      "meanExpansions": 1972.552305246423,
+      "changedBestFraction": 0.27058823529411763
+    }
+  },
+  "npcWinShare": 42.83333333333333,
+  "depthProbe": [
+    {
+      "players": 4,
+      "stage": "early",
+      "round": 1,
+      "simulations": 500,
+      "leaves": 500,
+      "meanDepth": 3.514,
+      "forcedLeafFraction": 0.644,
+      "opponentLeafFraction": 0.584,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 6,
+      "particles": 68
+    },
+    {
+      "players": 4,
+      "stage": "early",
+      "round": 1,
+      "simulations": 2000,
+      "leaves": 2000,
+      "meanDepth": 3.9215,
+      "forcedLeafFraction": 0.7595,
+      "opponentLeafFraction": 0.7445,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 9,
+      "particles": 256
+    },
+    {
+      "players": 4,
+      "stage": "middle",
+      "round": 3,
+      "simulations": 500,
+      "leaves": 500,
+      "meanDepth": 4.346,
+      "forcedLeafFraction": 0.96,
+      "opponentLeafFraction": 0.936,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 12,
+      "particles": 68
+    },
+    {
+      "players": 4,
+      "stage": "middle",
+      "round": 3,
+      "simulations": 2000,
+      "leaves": 2000,
+      "meanDepth": 4.826,
+      "forcedLeafFraction": 0.9595,
+      "opponentLeafFraction": 0.9495,
+      "meanRoundAdvance": 0.0075,
+      "maxDepth": 14,
+      "particles": 256
+    },
+    {
+      "players": 4,
+      "stage": "late",
+      "round": 6,
+      "simulations": 500,
+      "leaves": 500,
+      "meanDepth": 3.708,
+      "forcedLeafFraction": 0.998,
+      "opponentLeafFraction": 0.988,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 9,
+      "particles": 68
+    },
+    {
+      "players": 4,
+      "stage": "late",
+      "round": 6,
+      "simulations": 2000,
+      "leaves": 2000,
+      "meanDepth": 4.4065,
+      "forcedLeafFraction": 0.9995,
+      "opponentLeafFraction": 0.9965,
+      "meanRoundAdvance": 0.0005,
+      "maxDepth": 15,
+      "particles": 256
+    },
+    {
+      "players": 8,
+      "stage": "early",
+      "round": 1,
+      "simulations": 500,
+      "leaves": 500,
+      "meanDepth": 4.956,
+      "forcedLeafFraction": 0.612,
+      "opponentLeafFraction": 0.202,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 7,
+      "particles": 68
+    },
+    {
+      "players": 8,
+      "stage": "early",
+      "round": 1,
+      "simulations": 2000,
+      "leaves": 2000,
+      "meanDepth": 5.584,
+      "forcedLeafFraction": 0.74,
+      "opponentLeafFraction": 0.5445,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 8,
+      "particles": 256
+    },
+    {
+      "players": 8,
+      "stage": "middle",
+      "round": 2,
+      "simulations": 500,
+      "leaves": 500,
+      "meanDepth": 3.564,
+      "forcedLeafFraction": 0.87,
+      "opponentLeafFraction": 0.222,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 7,
+      "particles": 68
+    },
+    {
+      "players": 8,
+      "stage": "middle",
+      "round": 2,
+      "simulations": 2000,
+      "leaves": 2000,
+      "meanDepth": 4.265,
+      "forcedLeafFraction": 0.9675,
+      "opponentLeafFraction": 0.7995,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 10,
+      "particles": 256
+    },
+    {
+      "players": 8,
+      "stage": "late",
+      "round": 6,
+      "simulations": 500,
+      "leaves": 500,
+      "meanDepth": 3.63,
+      "forcedLeafFraction": 0.934,
+      "opponentLeafFraction": 0.844,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 6,
+      "particles": 68
+    },
+    {
+      "players": 8,
+      "stage": "late",
+      "round": 6,
+      "simulations": 2000,
+      "leaves": 2000,
+      "meanDepth": 3.9195,
+      "forcedLeafFraction": 0.921,
+      "opponentLeafFraction": 0.849,
+      "meanRoundAdvance": 0.0,
+      "maxDepth": 10,
+      "particles": 256
+    }
+  ]
+}
