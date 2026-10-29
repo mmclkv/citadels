@@ -24,13 +24,14 @@
   function variants(folder, key) {
     const currentRules = (folder === 'roles' && key === 'magistrate') ||
       (folder === 'districts' && key === 'keep');
+    const refreshedArtwork = folder === 'roles' && key === 'assassin';
     const updatedRules = folder === 'districts' &&
       ['ghost_town', 'laboratory', 'observatory', 'library', 'great_wall', 'quarry'].includes(key);
     // 墓地卡图曾把建造费用 5 错印成能力支付费用 1，多张角色卡已更新；
     // 魔术师恢复为原卡图；
     // 单独版本化，让已安装 PWA 绕过旧图片的 HTTP / Service Worker 缓存。
     const versioned = (folder === 'districts' && key === 'graveyard') ||
-      (folder === 'roles' && (key === 'blackmailer' || key === 'magician' || key === 'wizard' || key === 'bishop' || key === 'spy' || key === 'businessman' || key === 'diplomat' || key === 'king' || key === 'alchemist' || key === 'architect' || key === 'thief'));
+      (folder === 'roles' && (key === 'assassin' || key === 'blackmailer' || key === 'magician' || key === 'wizard' || key === 'bishop' || key === 'spy' || key === 'businessman' || key === 'diplomat' || key === 'king' || key === 'alchemist' || key === 'architect' || key === 'thief'));
     const version = folder === 'roles' && key === 'magician'
       ? '?v=3'
       : (folder === 'roles' && key === 'bishop'
@@ -47,7 +48,7 @@
     return {
       thumb: base + folder + '/thumb/' + key + '.webp' + (currentRules ? '?v=rules-20261012' : updatedRules ? '?v=rules-20261010' : version),
       // Full-resolution artwork was recompressed; version the URL so browser/PWA caches refresh it.
-      full: base + folder + '/full/' + key + '.webp' + (currentRules ? '?v=rules-20261012' : updatedRules ? '?v=rules-20261010' : '?v=optimized-1')
+      full: base + folder + '/full/' + key + '.webp' + (currentRules ? '?v=rules-20261012' : updatedRules ? '?v=rules-20261010' : refreshedArtwork ? '?v=assassin-20261029' : '?v=optimized-1')
     };
   }
 
